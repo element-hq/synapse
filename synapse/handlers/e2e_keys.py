@@ -39,6 +39,8 @@ from synapse.replication.http.devices import ReplicationUploadKeysForUserRestSer
 from synapse.types import (
     JsonDict,
     JsonMapping,
+    ScheduledTask,
+    TaskStatus,
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
@@ -70,6 +72,7 @@ class E2eKeysHandler:
         self.is_mine = hs.is_mine
         self.clock = hs.get_clock()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self._task_scheduler = hs.get_task_scheduler()
 
         federation_registry = hs.get_federation_registry()
 
@@ -114,6 +117,10 @@ class E2eKeysHandler:
         )
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
+        )
+
+        self._task_scheduler.register_action(
+            self._delete_old_one_time_keys_task, "delete_old_otks"
         )
 
     @trace
@@ -291,13 +298,20 @@ class E2eKeysHandler:
 
             # Only try and fetch keys for destinations that are not marked as
             # down.
-            filtered_destinations = await filter_destinations_by_retry_limiter(
-                remote_queries_not_in_cache.keys(),
-                self.clock,
-                self.store,
-                # Let's give an arbitrary grace period for those hosts that are
-                # only recently down
-                retry_due_within_ms=60 * 1000,
+            unfiltered_destinations = remote_queries_not_in_cache.keys()
+            filtered_destinations = set(
+                await filter_destinations_by_retry_limiter(
+                    unfiltered_destinations,
+                    self.clock,
+                    self.store,
+                    # Let's give an arbitrary grace period for those hosts that are
+                    # only recently down
+                    retry_due_within_ms=60 * 1000,
+                )
+            )
+            failures.update(
+                (dest, _NOT_READY_FOR_RETRY_FAILURE)
+                for dest in (unfiltered_destinations - filtered_destinations)
             )
 
             await concurrently_execute(
@@ -608,7 +622,7 @@ class E2eKeysHandler:
         3. Attempt to fetch fallback keys from the database.
 
         Args:
-            local_query: An iterable of tuples of (user ID, device ID, algorithm).
+            local_query: An iterable of tuples of (user ID, device ID, algorithm, number of keys).
             always_include_fallback_keys: True to always include fallback keys.
 
         Returns:
@@ -1567,6 +1581,45 @@ class E2eKeysHandler:
                     return True
         return False
 
+    async def _delete_old_one_time_keys_task(
+        self, task: ScheduledTask
+    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        """Scheduler task to delete old one time keys.
+
+        Until Synapse 1.119, Synapse used to issue one-time-keys in a random order, leading to the possibility
+        that it could still have old OTKs that the client has dropped. This task is scheduled exactly once
+        by a database schema delta file, and it clears out old one-time-keys that look like they came from libolm.
+        """
+        last_user = task.result.get("from_user", "") if task.result else ""
+        while True:
+            # We process users in batches of 100
+            users, rowcount = await self.store.delete_old_otks_for_next_user_batch(
+                last_user, 100
+            )
+            if len(users) == 0:
+                # We're done!
+                return TaskStatus.COMPLETE, None, None
+
+            logger.debug(
+                "Deleted %i old one-time-keys for users '%s'..'%s'",
+                rowcount,
+                users[0],
+                users[-1],
+            )
+            last_user = users[-1]
+
+            # Store our progress
+            await self._task_scheduler.update_task(
+                task.id, result={"from_user": last_user}
+            )
+
+            # Sleep a little before doing the next user.
+            #
+            # matrix.org has about 15M users in the e2e_one_time_keys_json table
+            # (comprising 20M devices). We want this to take about a week, so we need
+            # to do about one batch of 100 users every 4 seconds.
+            await self.clock.sleep(4)
+
 
 def _check_cross_signing_key(
     key: JsonDict, user_id: str, key_type: str, signing_key: Optional[VerifyKey] = None
@@ -1641,6 +1694,9 @@ def _check_device_signature(
         raise SynapseError(400, "Invalid signature", Codes.INVALID_SIGNATURE)
 
 
+_NOT_READY_FOR_RETRY_FAILURE = {"status": 503, "message": "Not ready for retry"}
+
+
 def _exception_to_failure(e: Exception) -> JsonDict:
     if isinstance(e, SynapseError):
         return {"status": e.code, "errcode": e.errcode, "message": str(e)}
@@ -1649,7 +1705,7 @@ def _exception_to_failure(e: Exception) -> JsonDict:
         return {"status": e.code, "message": str(e)}
 
     if isinstance(e, NotRetryingDestination):
-        return {"status": 503, "message": "Not ready for retry"}
+        return _NOT_READY_FOR_RETRY_FAILURE
 
     # include ConnectionRefused and other errors
     #

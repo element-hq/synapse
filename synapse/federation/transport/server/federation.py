@@ -509,6 +509,9 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         event = content["event"]
         invite_room_state = content.get("invite_room_state", [])
 
+        if not isinstance(invite_room_state, list):
+            invite_room_state = []
+
         # Synapse expects invite_room_state to be in unsigned, as it is in v1
         # API
 
@@ -859,7 +862,6 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         request: SynapseRequest,
         media_id: str,
     ) -> None:
-
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")
@@ -912,6 +914,4 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
-    FederationMediaDownloadServlet,
-    FederationMediaThumbnailServlet,
 )

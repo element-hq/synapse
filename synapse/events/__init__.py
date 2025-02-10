@@ -42,7 +42,7 @@ import attr
 from typing_extensions import Literal
 from unpaddedbase64 import encode_base64
 
-from synapse.api.constants import RelationTypes
+from synapse.api.constants import EventTypes, RelationTypes
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, StrCollection
@@ -325,12 +325,17 @@ class EventBase(metaclass=abc.ABCMeta):
     def __repr__(self) -> str:
         rejection = f"REJECTED={self.rejected_reason}, " if self.rejected_reason else ""
 
+        conditional_membership_string = ""
+        if self.get("type") == EventTypes.Member:
+            conditional_membership_string = f"membership={self.membership}, "
+
         return (
             f"<{self.__class__.__name__} "
             f"{rejection}"
             f"event_id={self.event_id}, "
             f"type={self.get('type')}, "
             f"state_key={self.get('state_key')}, "
+            f"{conditional_membership_string}"
             f"outlier={self.internal_metadata.is_outlier()}"
             ">"
         )
@@ -554,3 +559,22 @@ def relation_from_event(event: EventBase) -> Optional[_EventRelation]:
             aggregation_key = None
 
     return _EventRelation(parent_id, rel_type, aggregation_key)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class StrippedStateEvent:
+    """
+    A stripped down state event. Usually used for remote invite/knocks so the user can
+    make an informed decision on whether they want to join.
+
+    Attributes:
+        type: Event `type`
+        state_key: Event `state_key`
+        sender: Event `sender`
+        content: Event `content`
+    """
+
+    type: str
+    state_key: str
+    sender: str
+    content: Dict[str, Any]

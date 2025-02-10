@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # Runs linting scripts over the local Synapse checkout
-# black - opinionated code formatter
 # ruff - lints and finds mistakes
+# mypy - typechecks python code
+# cargo clippy - lints rust code
 
 set -e
 
@@ -101,18 +102,15 @@ echo
 # Print out the commands being run
 set -x
 
-# Ensure the sort order of imports.
-isort "${files[@]}"
-
-# Ensure Python code conforms to an opinionated style.
-python3 -m black "${files[@]}"
-
 # Ensure the sample configuration file conforms to style checks.
 ./scripts-dev/config-lint.sh
 
 # Catch any common programming mistakes in Python code.
 # --quiet suppresses the update check.
 ruff check --quiet --fix "${files[@]}"
+
+# Reformat Python code.
+ruff format --quiet "${files[@]}"
 
 # Catch any common programming mistakes in Rust code.
 #

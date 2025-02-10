@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Mapping, NoReturn, Optional, Tuple, cast
 import psycopg2.extensions
 
 from synapse.storage.engines._base import (
+    AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
     BaseDatabaseEngine,
     IncorrectDatabaseSetup,
     IsolationLevel,
@@ -98,8 +99,8 @@ class PostgresEngine(
         allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
 
         # Are we on a supported PostgreSQL version?
-        if not allow_outdated_version and self._version < 110000:
-            raise RuntimeError("Synapse requires PostgreSQL 11 or above.")
+        if not allow_outdated_version and self._version < 130000:
+            raise RuntimeError("Synapse requires PostgreSQL 13 or above.")
 
         with db_conn.cursor() as txn:
             txn.execute("SHOW SERVER_ENCODING")
@@ -256,4 +257,10 @@ class PostgresEngine(
         executing the script in its own transaction. The script transaction is
         left open and it is the responsibility of the caller to commit it.
         """
+        # Replace auto increment placeholder with the appropriate directive
+        script = script.replace(
+            AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
+            "BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY",
+        )
+
         cursor.execute(f"COMMIT; BEGIN TRANSACTION; {script}")

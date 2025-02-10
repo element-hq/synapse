@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Contains *incomplete* type hints for txredisapi.
-"""
+"""Contains *incomplete* type hints for txredisapi."""
+
 from typing import Any, List, Optional, Type, Union
 
 from twisted.internet import protocol

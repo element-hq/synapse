@@ -20,6 +20,7 @@
 #
 
 """Contains functions for performing actions on rooms."""
+
 import itertools
 import logging
 import math
@@ -900,11 +901,9 @@ class RoomCreationHandler:
         )
 
         # Check whether this visibility value is blocked by a third party module
-        allowed_by_third_party_rules = (
-            await (
-                self._third_party_event_rules.check_visibility_can_be_modified(
-                    room_id, visibility
-                )
+        allowed_by_third_party_rules = await (
+            self._third_party_event_rules.check_visibility_can_be_modified(
+                room_id, visibility
             )
         )
         if not allowed_by_third_party_rules:
@@ -1188,6 +1187,8 @@ class RoomCreationHandler:
             )
             events_to_send.append((power_event, power_context))
         else:
+            # Please update the docs for `default_power_level_content_override` when
+            # updating the `events` dict below
             power_level_content: JsonDict = {
                 "users": {creator_id: 100},
                 "users_default": 0,
@@ -1748,11 +1749,11 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
                 from_key=from_key,
                 to_key=to_key,
                 limit=limit or 10,
-                order="ASC",
+                direction=Direction.FORWARDS,
             )
 
             events = list(room_events)
-            events.extend(e for evs, _ in room_to_events.values() for e in evs)
+            events.extend(e for evs, _, _ in room_to_events.values() for e in evs)
 
             # We know stream_ordering must be not None here, as its been
             # persisted, but mypy doesn't know that

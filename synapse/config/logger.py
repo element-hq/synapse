@@ -157,12 +157,9 @@ class LoggingConfig(Config):
         self, config_dir_path: str, server_name: str, **kwargs: Any
     ) -> str:
         log_config = os.path.join(config_dir_path, server_name + ".log.config")
-        return (
-            """\
+        return """\
         log_config: "%(log_config)s"
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:
         if args.no_redirect_stdio is not None:
@@ -363,5 +360,6 @@ def setup_logging(
         "Licensed under the AGPL 3.0 license. Website: https://github.com/element-hq/synapse"
     )
     logging.info("Server hostname: %s", config.server.server_name)
+    logging.info("Public Base URL: %s", config.server.public_baseurl)
     logging.info("Instance name: %s", hs.get_instance_name())
     logging.info("Twisted reactor: %s", type(reactor).__name__)

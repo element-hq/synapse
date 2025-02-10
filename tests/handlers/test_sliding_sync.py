@@ -18,34 +18,37 @@
 #
 #
 import logging
-from copy import deepcopy
-from typing import Optional
+from typing import AbstractSet, Dict, Mapping, Optional, Set, Tuple
 from unittest.mock import patch
 
+import attr
 from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import (
-    AccountDataTypes,
-    EventContentFields,
     EventTypes,
     JoinRules,
     Membership,
-    RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.events import make_event_from_dict
-from synapse.events.snapshot import EventContext
-from synapse.handlers.sliding_sync import RoomSyncConfig, StateValues
+from synapse.handlers.sliding_sync import (
+    MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
+    RoomsForUserType,
+    RoomSyncConfig,
+    StateValues,
+    _required_state_changes,
+)
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, UserID
-from synapse.types.handlers import SlidingSyncConfig
+from synapse.types import JsonDict, StateMap, StreamToken, UserID
+from synapse.types.handlers.sliding_sync import SlidingSyncConfig
+from synapse.types.state import StateFilter
 from synapse.util import Clock
 
+from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.unittest import HomeserverTestCase, TestCase
 
@@ -562,28 +565,16 @@ class RoomSyncConfigTestCase(TestCase):
         """
         Combine A into B and B into A to make sure we get the same result.
         """
-        # Since we're mutating these in place, make a copy for each of our trials
-        room_sync_config_a = deepcopy(a)
-        room_sync_config_b = deepcopy(b)
+        combined_config = a.combine_room_sync_config(b)
+        self._assert_room_config_equal(combined_config, expected, "B into A")
 
-        # Combine B into A
-        room_sync_config_a.combine_room_sync_config(room_sync_config_b)
-
-        self._assert_room_config_equal(room_sync_config_a, expected, "B into A")
-
-        # Since we're mutating these in place, make a copy for each of our trials
-        room_sync_config_a = deepcopy(a)
-        room_sync_config_b = deepcopy(b)
-
-        # Combine A into B
-        room_sync_config_b.combine_room_sync_config(room_sync_config_a)
-
-        self._assert_room_config_equal(room_sync_config_b, expected, "A into B")
+        combined_config = a.combine_room_sync_config(b)
+        self._assert_room_config_equal(combined_config, expected, "A into B")
 
 
-class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
+class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
     """
-    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it returns
+    Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it returns
     the correct list of rooms IDs.
     """
 
@@ -615,8 +606,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         now_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, _, _ = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=now_token,
                 to_token=now_token,
@@ -642,8 +633,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_token,
                 to_token=after_room_token,
@@ -657,9 +648,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id].event_id,
             join_response["event_id"],
         )
+        self.assertEqual(room_id_results[room_id].membership, Membership.JOIN)
         # We should be considered `newly_joined` because we joined during the token
         # range
-        self.assertEqual(room_id_results[room_id].newly_joined, True)
+        self.assertTrue(room_id in newly_joined)
+        self.assertTrue(room_id not in newly_left)
 
     def test_get_already_joined_room(self) -> None:
         """
@@ -675,8 +668,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room_token,
                 to_token=after_room_token,
@@ -690,8 +683,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id].event_id,
             join_response["event_id"],
         )
+        self.assertEqual(room_id_results[room_id].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
-        self.assertEqual(room_id_results[room_id].newly_joined, False)
+        self.assertTrue(room_id not in newly_joined)
+        self.assertTrue(room_id not in newly_left)
 
     def test_get_invited_banned_knocked_room(self) -> None:
         """
@@ -747,8 +742,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_token,
                 to_token=after_room_token,
@@ -770,19 +765,25 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[invited_room_id].event_id,
             invite_response["event_id"],
         )
+        self.assertEqual(room_id_results[invited_room_id].membership, Membership.INVITE)
+        self.assertTrue(invited_room_id not in newly_joined)
+        self.assertTrue(invited_room_id not in newly_left)
+
         self.assertEqual(
             room_id_results[ban_room_id].event_id,
             ban_response["event_id"],
         )
+        self.assertEqual(room_id_results[ban_room_id].membership, Membership.BAN)
+        self.assertTrue(ban_room_id not in newly_joined)
+        self.assertTrue(ban_room_id not in newly_left)
+
         self.assertEqual(
             room_id_results[knock_room_id].event_id,
             knock_room_membership_state_event.event_id,
         )
-        # We should *NOT* be `newly_joined` because we were not joined at the the time
-        # of the `to_token`.
-        self.assertEqual(room_id_results[invited_room_id].newly_joined, False)
-        self.assertEqual(room_id_results[ban_room_id].newly_joined, False)
-        self.assertEqual(room_id_results[knock_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[knock_room_id].membership, Membership.KNOCK)
+        self.assertTrue(knock_room_id not in newly_joined)
+        self.assertTrue(knock_room_id not in newly_left)
 
     def test_get_kicked_room(self) -> None:
         """
@@ -813,8 +814,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_kick_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
@@ -828,9 +829,12 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[kick_room_id].event_id,
             kick_response["event_id"],
         )
+        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
+        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
         # We should *NOT* be `newly_joined` because we were not joined at the the time
         # of the `to_token`.
-        self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
+        self.assertTrue(kick_room_id not in newly_joined)
+        self.assertTrue(kick_room_id not in newly_left)
 
     def test_forgotten_rooms(self) -> None:
         """
@@ -903,8 +907,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_forgets,
                 to_token=before_room_forgets,
@@ -914,52 +918,58 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # We shouldn't see the room because it was forgotten
         self.assertEqual(room_id_results.keys(), set())
 
-    def test_only_newly_left_rooms_show_up(self) -> None:
+    def test_newly_left_rooms(self) -> None:
         """
-        Test that newly_left rooms still show up in the sync response but rooms that
-        were left before the `from_token` don't show up. See condition "2)" comments in
-        the `get_sync_room_ids_for_user` method.
+        Test that newly_left are marked properly
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
         # Leave before we calculate the `from_token`
         room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
         # Leave during the from_token/to_token range (newly_left)
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        _leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room2_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room2_token,
             )
         )
 
-        # Only the newly_left room should show up
-        self.assertEqual(room_id_results.keys(), {room_id2})
-        # It should be pointing to the latest membership event in the from/to range but
-        # the `event_id` is `None` because we left the room causing the server to leave
-        # the room because no other local users are in it (quirk of the
-        # `current_state_delta_stream` table that we source things from)
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_response1["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` or `newly_left` because that happened before
+        # the from/to range
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
+
         self.assertEqual(
             room_id_results[room_id2].event_id,
-            None,  # _leave_response2["event_id"],
+            leave_response2["event_id"],
         )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
         # We should *NOT* be `newly_joined` because we are instead `newly_left`
-        self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertTrue(room_id2 not in newly_joined)
+        self.assertTrue(room_id2 in newly_left)
 
     def test_no_joins_after_to_token(self) -> None:
         """
         Rooms we join after the `to_token` should *not* show up. See condition "1b)"
-        comments in the `get_sync_room_ids_for_user()` method.
+        comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -977,8 +987,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -991,14 +1001,16 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_join_during_range_and_left_room_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were joined during the
         from_token/to_token. See condition "1a)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1015,8 +1027,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Leave the room after we already have our tokens
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1038,14 +1050,16 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_join_before_range_and_left_room_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were joined before the `from_token`
         so it should show up. See condition "1a)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1060,8 +1074,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Leave the room after we already have our tokens
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1082,14 +1096,16 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_kicked_before_range_and_left_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were kicked before the `from_token`
         so it should show up. See condition "1a)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1122,8 +1138,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         join_response2 = self.helper.join(kick_room_id, user1_id, tok=user1_tok)
         leave_response = self.helper.leave(kick_room_id, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
@@ -1146,14 +1162,17 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
+        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
         # We should *NOT* be `newly_joined` because we were kicked
-        self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
+        self.assertTrue(kick_room_id not in newly_joined)
+        self.assertTrue(kick_room_id not in newly_left)
 
     def test_newly_left_during_range_and_join_leave_after_to_token(self) -> None:
         """
         Newly left room should show up. But we're also testing that joining and leaving
         after the `to_token` doesn't mess with the results. See condition "2)" and "1a)"
-        comments in the `get_sync_room_ids_for_user()` method.
+        comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1175,8 +1194,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response2 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1199,14 +1218,17 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
-        # We should *NOT* be `newly_joined` because we left during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we are actually `newly_left` during
+        # the token range
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 in newly_left)
 
     def test_newly_left_during_range_and_join_after_to_token(self) -> None:
         """
         Newly left room should show up. But we're also testing that joining after the
         `to_token` doesn't mess with the results. See condition "2)" and "1b)" comments
-        in the `get_sync_room_ids_for_user()` method.
+        in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1227,8 +1249,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Join the room after we already have our tokens
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1250,16 +1272,19 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
-        # We should *NOT* be `newly_joined` because we left during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we are actually `newly_left` during
+        # the token range
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 in newly_left)
 
     def test_no_from_token(self) -> None:
         """
-        Test that if we don't provide a `from_token`, we get all the rooms that we we're
-        joined up to the `to_token`.
+        Test that if we don't provide a `from_token`, we get all the rooms that we had
+        membership in up to the `to_token`.
 
-        Providing `from_token` only really has the effect that it adds `newly_left`
-        rooms to the response.
+        Providing `from_token` only really has the effect that it marks rooms as
+        `newly_left` in the response.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1276,15 +1301,15 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Join and leave the room2 before the `to_token`
         self.helper.join(room_id2, user1_id, tok=user1_tok)
-        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
         # Join the room2 after we already have our tokens
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=None,
                 to_token=after_room1_token,
@@ -1292,15 +1317,31 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Only rooms we were joined to before the `to_token` should show up
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+
+        # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
-        # We should *NOT* be `newly_joined` because there is no `from_token` to
-        # define a "live" range to compare against
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We should *NOT* be `newly_joined`/`newly_left` because there is no
+        # `from_token` to define a "live" range to compare against
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
+
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            leave_response2["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because there is no
+        # `from_token` to define a "live" range to compare against
+        self.assertTrue(room_id2 not in newly_joined)
+        self.assertTrue(room_id2 not in newly_left)
 
     def test_from_token_ahead_of_to_token(self) -> None:
         """
@@ -1319,28 +1360,28 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         room_id4 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
 
-        # Join room1 before `before_room_token`
-        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # Join room1 before `to_token`
+        join_room1_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        # Join and leave the room2 before `before_room_token`
-        self.helper.join(room_id2, user1_id, tok=user1_tok)
-        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        # Join and leave the room2 before `to_token`
+        _join_room2_response1 = self.helper.join(room_id2, user1_id, tok=user1_tok)
+        leave_room2_response1 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         # Note: These are purposely swapped. The `from_token` should come after
         # the `to_token` in this test
         to_token = self.event_sources.get_current_token()
 
-        # Join room2 after `before_room_token`
-        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        # Join room2 after `to_token`
+        _join_room2_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         # --------
 
-        # Join room3 after `before_room_token`
-        self.helper.join(room_id3, user1_id, tok=user1_tok)
+        # Join room3 after `to_token`
+        _join_room3_response1 = self.helper.join(room_id3, user1_id, tok=user1_tok)
 
-        # Join and leave the room4 after `before_room_token`
-        self.helper.join(room_id4, user1_id, tok=user1_tok)
-        self.helper.leave(room_id4, user1_id, tok=user1_tok)
+        # Join and leave the room4 after `to_token`
+        _join_room4_response1 = self.helper.join(room_id4, user1_id, tok=user1_tok)
+        _leave_room4_response1 = self.helper.leave(room_id4, user1_id, tok=user1_tok)
 
         # Note: These are purposely swapped. The `from_token` should come after the
         # `to_token` in this test
@@ -1349,32 +1390,60 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Join the room4 after we already have our tokens
         self.helper.join(room_id4, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=from_token,
                 to_token=to_token,
             )
         )
 
-        # Only rooms we were joined to before the `to_token` should show up
-        #
-        # There won't be any newly_left rooms because the `from_token` is ahead of the
-        # `to_token` and that range will give no membership changes to check.
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        # In the "current" state snapshot, we're joined to all of the rooms but in the
+        # from/to token range...
+        self.assertIncludes(
+            room_id_results.keys(),
+            {
+                # Included because we were joined before both tokens
+                room_id1,
+                # Included because we had membership before the to_token
+                room_id2,
+                # Excluded because we joined after the `to_token`
+                # room_id3,
+                # Excluded because we joined after the `to_token`
+                # room_id4,
+            },
+            exact=True,
+        )
+
+        # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
             room_id_results[room_id1].event_id,
-            join_response1["event_id"],
+            join_room1_response1["event_id"],
         )
-        # We should *NOT* be `newly_joined` because we joined `room1` before either of the tokens
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined `room1`
+        # before either of the tokens
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
+
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            leave_room2_response1["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
+        # `room1` before either of the tokens
+        self.assertTrue(room_id2 not in newly_joined)
+        self.assertTrue(room_id2 not in newly_left)
 
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
-        Old left room shouldn't show up. But we're also testing that joining and leaving
-        after the `to_token` doesn't mess with the results. See condition "1a)" comments
-        in the `get_sync_room_ids_for_user()` method.
+        Test old left rooms. But we're also testing that joining and leaving after the
+        `to_token` doesn't mess with the results. See condition "1a)" comments in the
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1386,7 +1455,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         # Join and leave the room before the from/to range
         self.helper.join(room_id1, user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1394,22 +1463,31 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
 
-        # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
+        # `room1` before either of the tokens
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_leave_before_range_and_join_after_to_token(self) -> None:
         """
-        Old left room shouldn't show up. But we're also testing that joining after the
-        `to_token` doesn't mess with the results. See condition "1b)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        Test old left room. But we're also testing that joining after the `to_token`
+        doesn't mess with the results. See condition "1b)" comments in the
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1421,32 +1499,40 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         # Join and leave the room before the from/to range
         self.helper.join(room_id1, user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
         # Join the room after we already have our tokens
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
 
-        # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
+        # `room1` before either of the tokens
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_join_leave_multiple_times_during_range_and_after_to_token(
         self,
     ) -> None:
         """
         Join and leave multiple times shouldn't affect rooms from showing up. It just
-        matters that we were joined or newly_left in the from/to range. But we're also
-        testing that joining and leaving after the `to_token` doesn't mess with the
-        results.
+        matters that we had membership in the from/to range. But we're also testing that
+        joining and leaving after the `to_token` doesn't mess with the results.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1458,7 +1544,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # We create the room with user2 so the room isn't left with no members when we
         # leave and can still re-join.
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
-        # Join, leave, join back to the room before the from/to range
+        # Join, leave, join back to the room during the from/to range
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
@@ -1470,8 +1556,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         join_response3 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1496,15 +1582,19 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        # We should *NOT* be `newly_left` because we joined during the token range and
+        # was still joined at the end of the range
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_join_leave_multiple_times_before_range_and_after_to_token(
         self,
     ) -> None:
         """
         Join and leave multiple times before the from/to range shouldn't affect rooms
-        from showing up. It just matters that we were joined or newly_left in the
+        from showing up. It just matters that we had membership in the
         from/to range. But we're also testing that joining and leaving after the
         `to_token` doesn't mess with the results.
         """
@@ -1528,8 +1618,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         join_response3 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1554,8 +1644,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_invite_before_range_and_join_leave_after_to_token(
         self,
@@ -1563,7 +1655,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         """
         Make it look like we joined after the token range but we were invited before the
         from/to range so the room should still show up. See condition "1a)" comments in
-        the `get_sync_room_ids_for_user()` method.
+        the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1585,8 +1677,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         join_respsonse = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1608,9 +1700,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.INVITE)
         # We should *NOT* be `newly_joined` because we were only invited before the
         # token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_join_and_display_name_changes_in_token_range(
         self,
@@ -1657,8 +1751,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1684,8 +1778,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_display_name_changes_in_token_range(
         self,
@@ -1720,8 +1816,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_change1_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_change1_token,
@@ -1744,8 +1840,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_display_name_changes_before_and_after_token_range(
         self,
@@ -1790,8 +1888,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1817,8 +1915,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_display_name_changes_leave_after_token_range(
         self,
@@ -1828,7 +1928,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         if there are multiple `join` membership events in a row indicating
         `displayname`/`avatar_url` updates and we leave after the `to_token`.
 
-        See condition "1a)" comments in the `get_sync_room_ids_for_user()` method.
+        See condition "1a)" comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1870,8 +1970,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Leave after the token
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1897,8 +1997,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_display_name_changes_join_after_token_range(
         self,
@@ -1908,7 +2010,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         indicating `displayname`/`avatar_url` updates doesn't affect the results (we
         joined after the token range so it shouldn't show up)
 
-        See condition "1b)" comments in the `get_sync_room_ids_for_user()` method.
+        See condition "1b)" comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1936,8 +2038,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1972,8 +2074,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_more_changes_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_more_changes_token,
@@ -1987,9 +2089,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response2["event_id"],
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be considered `newly_joined` because there is some non-join event in
         # between our latest join event.
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_newly_joined_only_joins_during_token_range(
         self,
@@ -2035,8 +2139,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_room1_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -2062,8 +2166,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we first joined during the token range
-        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
     def test_multiple_rooms_are_not_confused(
         self,
@@ -2086,16 +2192,18 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Invited and left the room before the token
         self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_room1_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
         # Invited to room2
-        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+        invite_room2_response = self.helper.invite(
+            room_id2, src=user2_id, targ=user1_id, tok=user2_tok
+        )
 
         before_room3_token = self.event_sources.get_current_token()
 
         # Invited and left room3 during the from/to range
         room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         self.helper.invite(room_id3, src=user2_id, targ=user1_id, tok=user2_tok)
-        self.helper.leave(room_id3, user1_id, tok=user1_tok)
+        leave_room3_response = self.helper.leave(room_id3, user1_id, tok=user1_tok)
 
         after_room3_token = self.event_sources.get_current_token()
 
@@ -2107,8 +2215,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Leave room3
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room3_token,
                 to_token=after_room3_token,
@@ -2118,19 +2226,158 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.assertEqual(
             room_id_results.keys(),
             {
-                # `room_id1` shouldn't show up because we left before the from/to range
-                #
-                # Room should show up because we were invited before the from/to range
+                # Left before the from/to range
+                room_id1,
+                # Invited before the from/to range
                 room_id2,
-                # Room should show up because it was newly_left during the from/to range
+                # `newly_left` during the from/to range
                 room_id3,
             },
         )
 
+        # Room1
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_room1_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we were invited and left
+        # before the token range
+        self.assertTrue(room_id1 not in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
-class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            invite_room2_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.INVITE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we were invited before
+        # the token range
+        self.assertTrue(room_id2 not in newly_joined)
+        self.assertTrue(room_id2 not in newly_left)
+
+        # Room3
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id3].event_id,
+            leave_room3_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id3].membership, Membership.LEAVE)
+        # We should be `newly_left` because we were invited and left during
+        # the token range
+        self.assertTrue(room_id3 not in newly_joined)
+        self.assertTrue(room_id3 in newly_left)
+
+    def test_state_reset(self) -> None:
+        """
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # The room where the state reset will happen
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Join another room so we don't hit the short-circuit and return early if they
+        # have no room membership
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Send another state event to make a position for the state reset to happen at
+        dummy_state_response = self.helper.send_state(
+            room_id1,
+            event_type="foobarbaz",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        dummy_state_pos = self.get_success(
+            self.store.get_position_for_event(dummy_state_response["event_id"])
+        )
+
+        # Mock a state reset removing the membership for user1 in the current state
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="state reset user in current_state_events",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="local_current_membership",
+                keyvalues={
+                    "room_id": room_id1,
+                    "user_id": user1_id,
+                },
+                desc="state reset user in local_current_membership",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="current_state_delta_stream",
+                values={
+                    "stream_id": dummy_state_pos.stream,
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "event_id": None,
+                    "prev_event_id": join_response1["event_id"],
+                    "instance_name": dummy_state_pos.instance_name,
+                },
+                desc="state reset user in current_state_delta_stream",
+            )
+        )
+
+        # Manually bust the cache since we we're just manually messing with the database
+        # and not causing an actual state reset.
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, dummy_state_pos.stream
+        )
+
+        after_reset_token = self.event_sources.get_current_token()
+
+        # The function under test
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
+                UserID.from_string(user1_id),
+                from_token=before_reset_token,
+                to_token=after_reset_token,
+            )
+        )
+
+        # Room1 should show up because it was `newly_left` via state reset during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        # It should be pointing to no event because we were removed from the room
+        # without a corresponding leave event
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            None,
+        )
+        # State reset caused us to leave the room and there is no corresponding leave event
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertTrue(room_id1 not in newly_joined)
+        # We should be `newly_left` because we were removed via state reset during the from/to range
+        self.assertTrue(room_id1 in newly_left)
+
+
+class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCase):
     """
-    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it works with
+    Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it works with
     sharded event stream_writers enabled
     """
 
@@ -2189,7 +2436,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
 
         We then send some events to advance the stream positions of worker1 and worker3
         but worker2 is lagging behind because it's stuck. We are specifically testing
-        that `get_sync_room_ids_for_user(from_token=xxx, to_token=xxx)` should work
+        that `get_room_membership_for_user_at_to_token(from_token=xxx, to_token=xxx)` should work
         correctly in these adverse conditions.
         """
         user1_id = self.register_user("user1", "pass")
@@ -2228,7 +2475,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # Leave room2
-        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        leave_room2_response = self.helper.leave(room_id2, user1_id, tok=user1_tok)
         join_response3 = self.helper.join(room_id3, user1_id, tok=user1_tok)
         # Leave room3
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
@@ -2265,7 +2512,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         # For room_id1/worker1: leave and join the room to advance the stream position
         # and generate membership changes.
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        join_room1_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
         # For room_id2/worker2: which is currently stuck, join the room.
         join_on_worker2_response = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # For room_id3/worker3: leave and join the room to advance the stream position
@@ -2318,8 +2565,8 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         self.get_success(actx.__aexit__(None, None, None))
 
         # The function under test
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+        room_id_results, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_stuck_activity_token,
                 to_token=stuck_activity_token,
@@ -2330,23 +2577,54 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
             room_id_results.keys(),
             {
                 room_id1,
-                # room_id2 shouldn't show up because we left before the from/to range
-                # and the join event during the range happened while worker2 was stuck.
-                # This means that from the perspective of the master, where the
-                # `stuck_activity_token` is generated, the stream position for worker2
-                # wasn't advanced to the join yet. Looking at the `instance_map`, the
-                # join technically comes after `stuck_activity_token``.
-                #
-                # room_id2,
+                room_id2,
                 room_id3,
             },
         )
 
+        # Room1
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            join_room1_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We should be `newly_joined` because we joined during the token range
+        self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
 
-class FilterRoomsTestCase(HomeserverTestCase):
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            leave_room2_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        # room_id2 should *NOT* be considered `newly_left` because we left before the
+        # from/to range and the join event during the range happened while worker2 was
+        # stuck. This means that from the perspective of the master, where the
+        # `stuck_activity_token` is generated, the stream position for worker2 wasn't
+        # advanced to the join yet. Looking at the `instance_map`, the join technically
+        # comes after `stuck_activity_token`.
+        self.assertTrue(room_id2 not in newly_joined)
+        self.assertTrue(room_id2 not in newly_left)
+
+        # Room3
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id3].event_id,
+            join_on_worker3_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id3].membership, Membership.JOIN)
+        # We should be `newly_joined` because we joined during the token range
+        self.assertTrue(room_id3 in newly_joined)
+        self.assertTrue(room_id3 not in newly_left)
+
+
+class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
     """
-    Tests Sliding Sync handler `filter_rooms()` to make sure it includes/excludes rooms
-    correctly.
+    Tests Sliding Sync handler `filter_rooms_relevant_for_sync()` to make sure it returns
+    the correct list of rooms IDs.
     """
 
     servlets = [
@@ -2366,498 +2644,344 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+        self.storage_controllers = hs.get_storage_controllers()
 
-    def _create_dm_room(
+    def _get_sync_room_ids_for_user(
         self,
-        inviter_user_id: str,
-        inviter_tok: str,
-        invitee_user_id: str,
-        invitee_tok: str,
-    ) -> str:
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[Dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
         """
-        Helper to create a DM room as the "inviter" and invite the "invitee" user to the room. The
-        "invitee" user also will join the room. The `m.direct` account data will be set
-        for both users.
+        Get the rooms the user should be syncing with
         """
-
-        # Create a room and send an invite the other user
-        room_id = self.helper.create_room_as(
-            inviter_user_id,
-            is_public=False,
-            tok=inviter_tok,
-        )
-        self.helper.invite(
-            room_id,
-            src=inviter_user_id,
-            targ=invitee_user_id,
-            tok=inviter_tok,
-            extra_data={"is_direct": True},
-        )
-        # Person that was invited joins the room
-        self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
-
-        # Mimic the client setting the room as a direct message in the global account
-        # data
-        self.get_success(
-            self.store.add_account_data_for_user(
-                invitee_user_id,
-                AccountDataTypes.DIRECT,
-                {inviter_user_id: [room_id]},
+        room_membership_for_user_map, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
             )
         )
-        self.get_success(
-            self.store.add_account_data_for_user(
-                inviter_user_id,
-                AccountDataTypes.DIRECT,
-                {invitee_user_id: [room_id]},
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.room_lists.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+                newly_left_room_ids=newly_left,
             )
         )
 
-        return room_id
+        return filtered_sync_room_map, newly_joined, newly_left
 
-    def test_filter_dm_rooms(self) -> None:
+    def test_no_rooms(self) -> None:
         """
-        Test `filter.is_dm` for DM rooms
+        Test when the user has never joined any rooms before
+        """
+        user1_id = self.register_user("user1", "pass")
+        # user1_tok = self.login(user1_id, "pass")
+
+        now_token = self.event_sources.get_current_token()
+
+        room_id_results, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=now_token,
+            to_token=now_token,
+        )
+
+        self.assertEqual(room_id_results.keys(), set())
+
+    def test_basic_rooms(self) -> None:
+        """
+        Test that rooms that the user is joined to, invited to, banned from, and knocked
+        on show up.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
-        # Create a normal room
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        before_room_token = self.event_sources.get_current_token()
 
-        # Create a DM room
-        dm_room_id = self._create_dm_room(
-            inviter_user_id=user1_id,
-            inviter_tok=user1_tok,
-            invitee_user_id=user2_id,
-            invitee_tok=user2_tok,
+        join_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response = self.helper.join(join_room_id, user1_id, tok=user1_tok)
+
+        # Setup the invited room (user2 invites user1 to the room)
+        invited_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        invite_response = self.helper.invite(
+            invited_room_id, targ=user1_id, tok=user2_tok
         )
 
-        after_rooms_token = self.event_sources.get_current_token()
-
-        # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        # Setup the ban room (user2 bans user1 from the room)
+        ban_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(ban_room_id, user1_id, tok=user1_tok)
+        ban_response = self.helper.ban(
+            ban_room_id, src=user2_id, targ=user1_id, tok=user2_tok
         )
 
-        # Try with `is_dm=True`
-        truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_dm=True,
-                ),
-                after_rooms_token,
-            )
+        # Setup the knock room (user1 knocks on the room)
+        knock_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, room_version=RoomVersions.V7.identifier
         )
-
-        self.assertEqual(truthy_filtered_room_map.keys(), {dm_room_id})
-
-        # Try with `is_dm=False`
-        falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_dm=False,
-                ),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
-
-    def test_filter_encrypted_rooms(self) -> None:
-        """
-        Test `filter.is_encrypted` for encrypted rooms
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
-        # Create a normal room
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-
-        # Create an encrypted room
-        encrypted_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         self.helper.send_state(
-            encrypted_room_id,
-            EventTypes.RoomEncryption,
-            {"algorithm": "m.megolm.v1.aes-sha2"},
-            tok=user1_tok,
+            knock_room_id,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=user2_tok,
         )
-
-        after_rooms_token = self.event_sources.get_current_token()
-
-        # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
+        # User1 knocks on the room
+        knock_channel = self.make_request(
+            "POST",
+            "/_matrix/client/r0/knock/%s" % (knock_room_id,),
+            b"{}",
+            user1_tok,
+        )
+        self.assertEqual(knock_channel.code, 200, knock_channel.result)
+        knock_room_membership_state_event = self.get_success(
+            self.storage_controllers.state.get_current_state_event(
+                knock_room_id, EventTypes.Member, user1_id
             )
         )
+        assert knock_room_membership_state_event is not None
 
-        # Try with `is_encrypted=True`
-        truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_encrypted=True,
-                ),
-                after_rooms_token,
-            )
+        after_room_token = self.event_sources.get_current_token()
+
+        room_id_results, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_room_token,
+            to_token=after_room_token,
         )
 
-        self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
-
-        # Try with `is_encrypted=False`
-        falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_encrypted=False,
-                ),
-                after_rooms_token,
-            )
+        # Ensure that the invited, ban, and knock rooms show up
+        self.assertEqual(
+            room_id_results.keys(),
+            {
+                join_room_id,
+                invited_room_id,
+                ban_room_id,
+                knock_room_id,
+            },
         )
+        # It should be pointing to the the respective membership event (latest
+        # membership event in the from/to range)
+        self.assertEqual(
+            room_id_results[join_room_id].event_id,
+            join_response["event_id"],
+        )
+        self.assertEqual(room_id_results[join_room_id].membership, Membership.JOIN)
+        self.assertTrue(join_room_id in newly_joined)
+        self.assertTrue(join_room_id not in newly_left)
 
-        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+        self.assertEqual(
+            room_id_results[invited_room_id].event_id,
+            invite_response["event_id"],
+        )
+        self.assertEqual(room_id_results[invited_room_id].membership, Membership.INVITE)
+        self.assertTrue(invited_room_id not in newly_joined)
+        self.assertTrue(invited_room_id not in newly_left)
 
-    def test_filter_invite_rooms(self) -> None:
+        self.assertEqual(
+            room_id_results[ban_room_id].event_id,
+            ban_response["event_id"],
+        )
+        self.assertEqual(room_id_results[ban_room_id].membership, Membership.BAN)
+        self.assertTrue(ban_room_id not in newly_joined)
+        self.assertTrue(ban_room_id not in newly_left)
+
+        self.assertEqual(
+            room_id_results[knock_room_id].event_id,
+            knock_room_membership_state_event.event_id,
+        )
+        self.assertEqual(room_id_results[knock_room_id].membership, Membership.KNOCK)
+        self.assertTrue(knock_room_id not in newly_joined)
+        self.assertTrue(knock_room_id not in newly_left)
+
+    def test_only_newly_left_rooms_show_up(self) -> None:
         """
-        Test `filter.is_invite` for rooms that the user has been invited to
+        Test that `newly_left` rooms still show up in the sync response but rooms that
+        were left before the `from_token` don't show up. See condition "2)" comments in
+        the `get_room_membership_for_user_at_to_token()` method.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Leave before we calculate the `from_token`
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Leave during the from_token/to_token range (newly_left)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        _leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+
+        after_room2_token = self.event_sources.get_current_token()
+
+        room_id_results, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=after_room1_token,
+            to_token=after_room2_token,
+        )
+
+        # Only the `newly_left` room should show up
+        self.assertEqual(room_id_results.keys(), {room_id2})
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            _leave_response2["event_id"],
+        )
+        # We should *NOT* be `newly_joined` because we are instead `newly_left`
+        self.assertTrue(room_id2 not in newly_joined)
+        self.assertTrue(room_id2 in newly_left)
+
+    def test_get_kicked_room(self) -> None:
+        """
+        Test that a room that the user was kicked from still shows up. When the user
+        comes back to their client, they should see that they were kicked.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
-        # Create a normal room
-        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id, user1_id, tok=user1_tok)
-
-        # Create a room that user1 is invited to
-        invite_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.invite(invite_room_id, src=user2_id, targ=user1_id, tok=user2_tok)
-
-        after_rooms_token = self.event_sources.get_current_token()
-
-        # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        # Setup the kick room (user2 kicks user1 from the room)
+        kick_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(kick_room_id, user1_id, tok=user1_tok)
+        # Kick user1 from the room
+        kick_response = self.helper.change_membership(
+            room=kick_room_id,
+            src=user2_id,
+            targ=user1_id,
+            tok=user2_tok,
+            membership=Membership.LEAVE,
+            extra_data={
+                "reason": "Bad manners",
+            },
         )
 
-        # Try with `is_invite=True`
-        truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_invite=True,
-                ),
-                after_rooms_token,
-            )
+        after_kick_token = self.event_sources.get_current_token()
+
+        room_id_results, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=after_kick_token,
+            to_token=after_kick_token,
         )
 
-        self.assertEqual(truthy_filtered_room_map.keys(), {invite_room_id})
-
-        # Try with `is_invite=False`
-        falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_invite=False,
-                ),
-                after_rooms_token,
-            )
+        # The kicked room should show up
+        self.assertEqual(room_id_results.keys(), {kick_room_id})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[kick_room_id].event_id,
+            kick_response["event_id"],
         )
+        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
+        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
+        # We should *NOT* be `newly_joined` because we were not joined at the the time
+        # of the `to_token`.
+        self.assertTrue(kick_room_id not in newly_joined)
+        self.assertTrue(kick_room_id not in newly_left)
 
-        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
-
-    def test_filter_room_types(self) -> None:
+    def test_state_reset(self) -> None:
         """
-        Test `filter.room_types` for different room types
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
 
-        # Create a normal room (no room type)
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # The room where the state reset will happen
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        # Create a space room
-        space_room_id = self.helper.create_room_as(
-            user1_id,
-            tok=user1_tok,
-            extra_content={
-                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
-            },
+        # Join another room so we don't hit the short-circuit and return early if they
+        # have no room membership
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Send another state event to make a position for the state reset to happen at
+        dummy_state_response = self.helper.send_state(
+            room_id1,
+            event_type="foobarbaz",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        dummy_state_pos = self.get_success(
+            self.store.get_position_for_event(dummy_state_response["event_id"])
         )
 
-        # Create an arbitrarily typed room
-        foo_room_id = self.helper.create_room_as(
-            user1_id,
-            tok=user1_tok,
-            extra_content={
-                "creation_content": {
-                    EventContentFields.ROOM_TYPE: "org.matrix.foobarbaz"
-                }
-            },
-        )
-
-        after_rooms_token = self.event_sources.get_current_token()
-
-        # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
-        )
-
-        # Try finding only normal rooms
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {room_id})
-
-        # Try finding only spaces
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {space_room_id})
-
-        # Try finding normal rooms and spaces
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    room_types=[None, RoomTypes.SPACE]
-                ),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {room_id, space_room_id})
-
-        # Try finding an arbitrary room type
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    room_types=["org.matrix.foobarbaz"]
-                ),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {foo_room_id})
-
-    def test_filter_not_room_types(self) -> None:
-        """
-        Test `filter.not_room_types` for different room types
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
-        # Create a normal room (no room type)
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-
-        # Create a space room
-        space_room_id = self.helper.create_room_as(
-            user1_id,
-            tok=user1_tok,
-            extra_content={
-                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
-            },
-        )
-
-        # Create an arbitrarily typed room
-        foo_room_id = self.helper.create_room_as(
-            user1_id,
-            tok=user1_tok,
-            extra_content={
-                "creation_content": {
-                    EventContentFields.ROOM_TYPE: "org.matrix.foobarbaz"
-                }
-            },
-        )
-
-        after_rooms_token = self.event_sources.get_current_token()
-
-        # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
-        )
-
-        # Try finding *NOT* normal rooms
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(not_room_types=[None]),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {space_room_id, foo_room_id})
-
-        # Try finding *NOT* spaces
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    not_room_types=[RoomTypes.SPACE]
-                ),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {room_id, foo_room_id})
-
-        # Try finding *NOT* normal rooms or spaces
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    not_room_types=[None, RoomTypes.SPACE]
-                ),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {foo_room_id})
-
-        # Test how it behaves when we have both `room_types` and `not_room_types`.
-        # `not_room_types` should win.
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    room_types=[None], not_room_types=[None]
-                ),
-                after_rooms_token,
-            )
-        )
-
-        # Nothing matches because nothing is both a normal room and not a normal room
-        self.assertEqual(filtered_room_map.keys(), set())
-
-        # Test how it behaves when we have both `room_types` and `not_room_types`.
-        # `not_room_types` should win.
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    room_types=[None, RoomTypes.SPACE], not_room_types=[None]
-                ),
-                after_rooms_token,
-            )
-        )
-
-        self.assertEqual(filtered_room_map.keys(), {space_room_id})
-
-    def test_filter_room_types_with_invite_remote_room(self) -> None:
-        """Test that we can apply a room type filter, even if we have an invite
-        for a remote room.
-
-        This is a regression test.
-        """
-
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
-        # Create a fake remote invite and persist it.
-        invite_room_id = "!some:room"
-        invite_event = make_event_from_dict(
-            {
-                "room_id": invite_room_id,
-                "sender": "@user:test.serv",
-                "state_key": user1_id,
-                "depth": 1,
-                "origin_server_ts": 1,
-                "type": EventTypes.Member,
-                "content": {"membership": Membership.INVITE},
-                "auth_events": [],
-                "prev_events": [],
-            },
-            room_version=RoomVersions.V10,
-        )
-        invite_event.internal_metadata.outlier = True
-        invite_event.internal_metadata.out_of_band_membership = True
-
+        # Mock a state reset removing the membership for user1 in the current state
         self.get_success(
-            self.store.maybe_store_room_on_outlier_membership(
-                room_id=invite_room_id, room_version=invite_event.room_version
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="state reset user in current_state_events",
             )
         )
-        context = EventContext.for_outlier(self.hs.get_storage_controllers())
-        persist_controller = self.hs.get_storage_controllers().persistence
-        assert persist_controller is not None
-        self.get_success(persist_controller.persist_event(invite_event, context))
-
-        # Create a normal room (no room type)
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-
-        after_rooms_token = self.event_sources.get_current_token()
-
-        # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="local_current_membership",
+                keyvalues={
+                    "room_id": room_id1,
+                    "user_id": user1_id,
+                },
+                desc="state reset user in local_current_membership",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="current_state_delta_stream",
+                values={
+                    "stream_id": dummy_state_pos.stream,
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "event_id": None,
+                    "prev_event_id": join_response1["event_id"],
+                    "instance_name": dummy_state_pos.instance_name,
+                },
+                desc="state reset user in current_state_delta_stream",
             )
         )
 
-        filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id),
-                sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    room_types=[None, RoomTypes.SPACE],
-                ),
-                after_rooms_token,
-            )
+        # Manually bust the cache since we we're just manually messing with the database
+        # and not causing an actual state reset.
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, dummy_state_pos.stream
         )
 
-        self.assertEqual(filtered_room_map.keys(), {room_id, invite_room_id})
+        after_reset_token = self.event_sources.get_current_token()
+
+        # The function under test
+        room_id_results, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_reset_token,
+            to_token=after_reset_token,
+        )
+
+        # Room1 should show up because it was `newly_left` via state reset during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        # It should be pointing to no event because we were removed from the room
+        # without a corresponding leave event
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            None,
+        )
+        # State reset caused us to leave the room and there is no corresponding leave event
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertTrue(room_id1 not in newly_joined)
+        # We should be `newly_left` because we were removed via state reset during the from/to range
+        self.assertTrue(room_id1 in newly_left)
 
 
 class SortRoomsTestCase(HomeserverTestCase):
@@ -2884,6 +3008,32 @@ class SortRoomsTestCase(HomeserverTestCase):
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[Dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map, newly_joined, newly_left = self.get_success(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.room_lists.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+                newly_left_room_ids=newly_left,
+            )
+        )
+
+        return filtered_sync_room_map, newly_joined, newly_left
+
     def test_sort_activity_basic(self) -> None:
         """
         Rooms with newer activity are sorted first.
@@ -2903,17 +3053,15 @@ class SortRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
         sorted_sync_rooms = self.get_success(
-            self.sliding_sync_handler.sort_rooms(
+            self.sliding_sync_handler.room_lists.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
             )
@@ -2986,17 +3134,15 @@ class SortRoomsTestCase(HomeserverTestCase):
         self.helper.send(room_id3, "activity in room3", tok=user2_tok)
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=before_rooms_token,
-                to_token=after_rooms_token,
-            )
+        sync_room_map, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_rooms_token,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
         sorted_sync_rooms = self.get_success(
-            self.sliding_sync_handler.sort_rooms(
+            self.sliding_sync_handler.room_lists.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
             )
@@ -3052,17 +3198,15 @@ class SortRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map, newly_joined, newly_left = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
         sorted_sync_rooms = self.get_success(
-            self.sliding_sync_handler.sort_rooms(
+            self.sliding_sync_handler.room_lists.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
             )
@@ -3073,4 +3217,1072 @@ class SortRoomsTestCase(HomeserverTestCase):
             # room1 sorts before room2 because it has the latest event (the reaction).
             # We only care about the *latest* event in the room.
             [room_id1, room_id2],
+        )
+
+
+@attr.s(slots=True, auto_attribs=True, frozen=True)
+class RequiredStateChangesTestParameters:
+    previous_required_state_map: Dict[str, Set[str]]
+    request_required_state_map: Dict[str, Set[str]]
+    state_deltas: StateMap[str]
+    expected_with_state_deltas: Tuple[
+        Optional[Mapping[str, AbstractSet[str]]], StateFilter
+    ]
+    expected_without_state_deltas: Tuple[
+        Optional[Mapping[str, AbstractSet[str]]], StateFilter
+    ]
+
+
+class RequiredStateChangesTestCase(unittest.TestCase):
+    """Test cases for `_required_state_changes`"""
+
+    @parameterized.expand(
+        [
+            (
+                "simple_no_change",
+                """Test no change to required state""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key"}},
+                    request_required_state_map={"type1": {"state_key"}},
+                    state_deltas={("type1", "state_key"): "$event_id"},
+                    # No changes
+                    expected_with_state_deltas=(None, StateFilter.none()),
+                    expected_without_state_deltas=(None, StateFilter.none()),
+                ),
+            ),
+            (
+                "simple_add_type",
+                """Test adding a type to the config""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key"}},
+                    request_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        # We should see the new type added
+                        StateFilter.from_types([("type2", "state_key")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        StateFilter.from_types([("type2", "state_key")]),
+                    ),
+                ),
+            ),
+            (
+                "simple_add_type_from_nothing",
+                """Test adding a type to the config when previously requesting nothing""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        # We should see the new types added
+                        StateFilter.from_types(
+                            [("type1", "state_key"), ("type2", "state_key")]
+                        ),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        StateFilter.from_types(
+                            [("type1", "state_key"), ("type2", "state_key")]
+                        ),
+                    ),
+                ),
+            ),
+            (
+                "simple_add_state_key",
+                """Test adding a state key to the config""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1"}},
+                    request_required_state_map={"type": {"state_key1", "state_key2"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a key so we should persist the changed required state
+                        # config.
+                        {"type": {"state_key1", "state_key2"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types([("type", "state_key2")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type": {"state_key1", "state_key2"}},
+                        StateFilter.from_types([("type", "state_key2")]),
+                    ),
+                ),
+            ),
+            (
+                "simple_retain_previous_state_keys",
+                """Test adding a state key to the config and retaining a previously sent state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1"}},
+                    request_required_state_map={"type": {"state_key2", "state_key3"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a key so we should persist the changed required state
+                        # config.
+                        #
+                        # Retain `state_key1` from the `previous_required_state_map`
+                        {"type": {"state_key1", "state_key2", "state_key3"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types(
+                            [("type", "state_key2"), ("type", "state_key3")]
+                        ),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type": {"state_key1", "state_key2", "state_key3"}},
+                        StateFilter.from_types(
+                            [("type", "state_key2"), ("type", "state_key3")]
+                        ),
+                    ),
+                ),
+            ),
+            (
+                "simple_remove_type",
+                """
+                Test removing a type from the config when there are a matching state
+                delta does cause the persisted required state config to change
+
+                Test removing a type from the config when there are no matching state
+                deltas does *not* cause the persisted required state config to change
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    request_required_state_map={"type1": {"state_key"}},
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type2` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type2`, we see that we haven't sent it before
+                        # and send the new state. (we should still keep track that we've
+                        # sent `type1` before).
+                        {"type1": {"state_key"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type2` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type2` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "simple_remove_type_to_nothing",
+                """
+                Test removing a type from the config and no longer requesting any state
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    request_required_state_map={},
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type2` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type2`, we see that we haven't sent it before
+                        # and send the new state. (we should still keep track that we've
+                        # sent `type1` before).
+                        {"type1": {"state_key"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type2` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type2` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "simple_remove_state_key",
+                """
+                Test removing a state_key from the config
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1", "state_key2"}},
+                    request_required_state_map={"type": {"state_key1"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `(type, state_key2)` since there's been a change
+                        # to that state (persist the change to required state).
+                        # That way next time, they request `(type, state_key2)`, we see
+                        # that we haven't sent it before and send the new state. (we
+                        # should still keep track that we've sent `(type, state_key1)`
+                        # before).
+                        {"type": {"state_key1"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `(type, state_key2)` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `(type, state_key1)` and `(type,
+                        # state_key2)` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcards_add",
+                """
+                Test adding a wildcard type causes the persisted required state config
+                to change and we request everything.
+
+                If a event type wildcard has been added or removed we don't try and do
+                anything fancy, and instead always update the effective room required
+                state config to match the request.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key2"}},
+                    request_required_state_map={
+                        "type1": {"state_key2"},
+                        StateValues.WILDCARD: {"state_key"},
+                    },
+                    state_deltas={
+                        ("other_type", "state_key"): "$event_id",
+                    },
+                    # We've added a wildcard, so we persist the change and request everything
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key2"}, StateValues.WILDCARD: {"state_key"}},
+                        StateFilter.all(),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key2"}, StateValues.WILDCARD: {"state_key"}},
+                        StateFilter.all(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcards_remove",
+                """
+                Test removing a wildcard type causes the persisted required state config
+                to change and request nothing.
+
+                If a event type wildcard has been added or removed we don't try and do
+                anything fancy, and instead always update the effective room required
+                state config to match the request.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key2"},
+                        StateValues.WILDCARD: {"state_key"},
+                    },
+                    request_required_state_map={"type1": {"state_key2"}},
+                    state_deltas={
+                        ("other_type", "state_key"): "$event_id",
+                    },
+                    # We've removed a type wildcard, so we persist the change but don't request anything
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key2"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key2"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcards_add",
+                """Test adding a wildcard state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key"}},
+                    request_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {StateValues.WILDCARD},
+                    },
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    # We've added a wildcard state_key, so we persist the change and
+                    # request all of the state for that type
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type2", None)]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type2", None)]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcards_remove",
+                """Test removing a wildcard state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {StateValues.WILDCARD},
+                    },
+                    request_required_state_map={"type1": {"state_key"}},
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    # We've removed a state_key wildcard, so we persist the change and
+                    # request nothing
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    # We've removed a state_key wildcard but there have been no matching
+                    # state changes, so no changes needed, just persist the
+                    # `request_required_state_map` as-is.
+                    expected_without_state_deltas=(
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_remove_some",
+                """
+                Test that removing state keys work when only some of the state keys have
+                changed
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={"type1": {"state_key1"}},
+                    state_deltas={("type1", "state_key3"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've removed some state keys from the type, but only state_key3 was
+                        # changed so only that one should be removed.
+                        {"type1": {"state_key1", "state_key2"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # No changes needed, just persist the
+                        # `request_required_state_map` as-is
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_me_add",
+                """
+                Test adding state keys work when using "$ME"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={"type1": {StateValues.ME}},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {StateValues.ME}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {StateValues.ME}},
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_me_remove",
+                """
+                Test removing state keys work when using "$ME"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {StateValues.ME}},
+                    request_required_state_map={},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type1` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type1`, we see that we haven't sent it before
+                        # and send the new state. (if we were tracking that we sent any
+                        # other state, we should still keep track that).
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type1` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type1` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_user_id_add",
+                """
+                Test adding state keys work when using your own user ID
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={"type1": {"@user:test"}},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {"@user:test"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"@user:test"}},
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_me_remove",
+                """
+                Test removing state keys work when using your own user ID
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"@user:test"}},
+                    request_required_state_map={},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type1` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type1`, we see that we haven't sent it before
+                        # and send the new state. (if we were tracking that we sent any
+                        # other state, we should still keep track that).
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type1` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type1` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_add",
+                """
+                Test adding state keys work when using "$LAZY"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_remove",
+                """
+                Test removing state keys work when using "$LAZY"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    request_required_state_map={},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `EventTypes.Member` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `EventTypes.Member` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_keep_previous_memberships_and_no_new_memberships",
+                """
+                This test mimics a request with lazy-loading room members enabled where
+                we have previously sent down user2 and user3's membership events and now
+                we're sending down another response without any timeline events.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user3:test",
+                            }
+                        },
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # We're not requesting any specific `EventTypes.Member` now but
+                        # since that state hasn't changed, nothing should change (we
+                        # should still keep track that we've sent specific
+                        # `EventTypes.Member` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_keep_previous_memberships_with_new_memberships",
+                """
+                This test mimics a request with lazy-loading room members enabled where
+                we have previously sent down user2 and user3's membership events and now
+                we're sending down another response with a new event from user4.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={
+                        EventTypes.Member: {StateValues.LAZY, "@user4:test"}
+                    },
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_expand_lazy_keep_previous_memberships",
+                """
+                Test expanding the `required_state` to lazy-loading room members.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {"@user2:test", "@user3:test"}
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Since `StateValues.LAZY` was added, we should persist the
+                        # changed required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user3:test",
+                            }
+                        },
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # Since `StateValues.LAZY` was added, we should persist the
+                        # changed required state config.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                            }
+                        },
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_retract_lazy_keep_previous_memberships_no_new_memberships",
+                """
+                Test retracting the `required_state` to no longer lazy-loading room members.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `EventTypes.Member` since there's been a change to that
+                        # state, (persist the change to required state). That way next
+                        # time, they request `EventTypes.Member`, we see that we haven't
+                        # sent it before and send the new state. (if we were tracking
+                        # that we sent any other state, we should still keep track
+                        # that).
+                        #
+                        # This acts the same as the `simple_remove_type` test. It's
+                        # possible that we could remember the specific `state_keys` that
+                        # we have sent down before but this currently just acts the same
+                        # as if a whole `type` was removed. Perhaps it's good that we
+                        # "garbage collect" and forget what we've sent before for a
+                        # given `type`  when the client stops caring about a certain
+                        # `type`.
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `EventTypes.Member` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `EventTypes.Member` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_retract_lazy_keep_previous_memberships_with_new_memberships",
+                """
+                Test retracting the `required_state` to no longer lazy-loading room members.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {"@user4:test"}},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        {
+                            EventTypes.Member: {
+                                "@user2:test",
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcard_with_state_key_wildcard_to_explicit_state_keys",
+                """
+                Test switching from a wildcard ("*", "*") to explicit state keys
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD}
+                    },
+                    request_required_state_map={
+                        StateValues.WILDCARD: {"state_key1", "state_key2", "state_key3"}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If we were previously fetching everything ("*", "*"), always update the effective
+                    # room required state config to match the request. And since we we're previously
+                    # already fetching everything, we don't have to fetch anything now that they've
+                    # narrowed.
+                    expected_with_state_deltas=(
+                        {
+                            StateValues.WILDCARD: {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            StateValues.WILDCARD: {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcard_with_explicit_state_keys_to_wildcard_state_key",
+                """
+                Test switching from explicit to wildcard state keys ("*", "*")
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        StateValues.WILDCARD: {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # We've added a wildcard, so we persist the change and request everything
+                    expected_with_state_deltas=(
+                        {StateValues.WILDCARD: {StateValues.WILDCARD}},
+                        StateFilter.all(),
+                    ),
+                    expected_without_state_deltas=(
+                        {StateValues.WILDCARD: {StateValues.WILDCARD}},
+                        StateFilter.all(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcard_to_explicit_state_keys",
+                """Test switching from a wildcard to explicit state keys with a concrete type""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {StateValues.WILDCARD}},
+                    request_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If a state_key wildcard has been added or removed, we always
+                    # update the effective room required state config to match the
+                    # request. And since we we're previously already fetching
+                    # everything, we don't have to fetch anything now that they've
+                    # narrowed.
+                    expected_with_state_deltas=(
+                        {
+                            "type1": {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            "type1": {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "explicit_state_keys_to_wildcard_state_key",
+                """Test switching from a wildcard to explicit state keys with a concrete type""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={"type1": {StateValues.WILDCARD}},
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If a state_key wildcard has been added or removed, we always
+                    # update the effective room required state config to match the
+                    # request. And we need to request all of the state for that type
+                    # because we previously, only sent down a few keys.
+                    expected_with_state_deltas=(
+                        {"type1": {StateValues.WILDCARD, "state_key2", "state_key3"}},
+                        StateFilter.from_types([("type1", None)]),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            "type1": {
+                                StateValues.WILDCARD,
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.from_types([("type1", None)]),
+                    ),
+                ),
+            ),
+        ]
+    )
+    def test_xxx(
+        self,
+        _test_label: str,
+        _test_description: str,
+        test_parameters: RequiredStateChangesTestParameters,
+    ) -> None:
+        # Without `state_deltas`
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=test_parameters.previous_required_state_map,
+            request_required_state_map=test_parameters.request_required_state_map,
+            state_deltas={},
+        )
+
+        self.assertEqual(
+            changed_required_state_map,
+            test_parameters.expected_without_state_deltas[0],
+            "changed_required_state_map does not match (without state_deltas)",
+        )
+        self.assertEqual(
+            added_state_filter,
+            test_parameters.expected_without_state_deltas[1],
+            "added_state_filter does not match (without state_deltas)",
+        )
+
+        # With `state_deltas`
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=test_parameters.previous_required_state_map,
+            request_required_state_map=test_parameters.request_required_state_map,
+            state_deltas=test_parameters.state_deltas,
+        )
+
+        self.assertEqual(
+            changed_required_state_map,
+            test_parameters.expected_with_state_deltas[0],
+            "changed_required_state_map does not match (with state_deltas)",
+        )
+        self.assertEqual(
+            added_state_filter,
+            test_parameters.expected_with_state_deltas[1],
+            "added_state_filter does not match (with state_deltas)",
+        )
+
+    @parameterized.expand(
+        [
+            # Test with a normal arbitrary type (no special meaning)
+            ("arbitrary_type", "type", set()),
+            # Test with membership
+            ("membership", EventTypes.Member, set()),
+            # Test with lazy-loading room members
+            ("lazy_loading_membership", EventTypes.Member, {StateValues.LAZY}),
+        ]
+    )
+    def test_limit_retained_previous_state_keys(
+        self,
+        _test_label: str,
+        event_type: str,
+        extra_state_keys: Set[str],
+    ) -> None:
+        """
+        Test that we limit the number of state_keys that we remember but always include
+        the state_keys that we've just requested.
+        """
+        previous_required_state_map = {
+            event_type: {
+                # Prefix the state_keys we've "prev_"iously sent so they are easier to
+                # identify in our assertions.
+                f"prev_state_key{i}"
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - 30)
+            }
+            | extra_state_keys
+        }
+        request_required_state_map = {
+            event_type: {f"state_key{i}" for i in range(50)} | extra_state_keys
+        }
+
+        # (function under test)
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=previous_required_state_map,
+            request_required_state_map=request_required_state_map,
+            state_deltas={},
+        )
+        assert changed_required_state_map is not None
+
+        # We should only remember up to the maximum number of state keys
+        self.assertGreaterEqual(
+            len(changed_required_state_map[event_type]),
+            # Most of the time this will be `MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER` but
+            # because we are just naively selecting enough previous state_keys to fill
+            # the limit, there might be some overlap in what's added back which means we
+            # might have slightly less than the limit.
+            #
+            # `extra_state_keys` overlaps in the previous and requested
+            # `required_state_map` so we might see this this scenario.
+            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - len(extra_state_keys),
+        )
+
+        # Should include all of the requested state
+        self.assertIncludes(
+            changed_required_state_map[event_type],
+            request_required_state_map[event_type],
+        )
+        # And the rest is filled with the previous state keys
+        #
+        # We can't assert the exact state_keys since we don't know the order so we just
+        # check that they all start with "prev_" and that we have the correct amount.
+        remaining_state_keys = (
+            changed_required_state_map[event_type]
+            - request_required_state_map[event_type]
+        )
+        self.assertGreater(
+            len(remaining_state_keys),
+            0,
+        )
+        assert all(
+            state_key.startswith("prev_") for state_key in remaining_state_keys
+        ), "Remaining state_keys should be the previous state_keys"
+
+    def test_request_more_state_keys_than_remember_limit(self) -> None:
+        """
+        Test requesting more state_keys than fit in our limit to remember from previous
+        requests.
+        """
+        previous_required_state_map = {
+            "type": {
+                # Prefix the state_keys we've "prev_"iously sent so they are easier to
+                # identify in our assertions.
+                f"prev_state_key{i}"
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - 30)
+            }
+        }
+        request_required_state_map = {
+            "type": {
+                f"state_key{i}"
+                # Requesting more than the MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER + 20)
+            }
+        }
+        # Ensure that we are requesting more than the limit
+        self.assertGreater(
+            len(request_required_state_map["type"]),
+            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
+        )
+
+        # (function under test)
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=previous_required_state_map,
+            request_required_state_map=request_required_state_map,
+            state_deltas={},
+        )
+        assert changed_required_state_map is not None
+
+        # Should include all of the requested state
+        self.assertIncludes(
+            changed_required_state_map["type"],
+            request_required_state_map["type"],
+            exact=True,
         )

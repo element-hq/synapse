@@ -149,6 +149,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         content: JsonMapping,
         *,
         related_events: Optional[JsonDict] = None,
+        msc4210: bool = False,
     ) -> PushRuleEvaluator:
         event = FrozenEvent(
             {
@@ -174,6 +175,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
             msc3931_enabled=True,
+            msc4210_enabled=msc4210,
         )
 
     def test_display_name(self) -> None:
@@ -452,6 +454,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             {"value": False},
             "incorrect values should not match",
         )
+        value: Any
         for value in ("foobaz", 1, 1.1, None, [], {}):
             self._assert_not_matches(
                 condition,
@@ -492,6 +495,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             {"value": None},
             "exact value should match",
         )
+        value: Any
         for value in ("foobaz", True, False, 1, 1.1, [], {}):
             self._assert_not_matches(
                 condition,

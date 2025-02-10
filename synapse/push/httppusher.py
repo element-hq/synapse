@@ -127,6 +127,11 @@ class HttpPusher(Pusher):
         if self.data is None:
             raise PusherConfigException("'data' key can not be null for HTTP pusher")
 
+        # Check if badge counts should be disabled for this push gateway
+        self.disable_badge_count = self.hs.config.experimental.msc4076_enabled and bool(
+            self.data.get("org.matrix.msc4076.disable_badge_count", False)
+        )
+
         self.name = "%s/%s/%s" % (
             pusher_config.user_name,
             pusher_config.app_id,
@@ -461,9 +466,10 @@ class HttpPusher(Pusher):
             content: JsonDict = {
                 "event_id": event.event_id,
                 "room_id": event.room_id,
-                "counts": {"unread": badge},
                 "prio": priority,
             }
+            if not self.disable_badge_count:
+                content["counts"] = {"unread": badge}
             # event_id_only doesn't include the tweaks, so override them.
             tweaks = {}
         else:
@@ -478,11 +484,11 @@ class HttpPusher(Pusher):
                 "type": event.type,
                 "sender": event.user_id,
                 "prio": priority,
-                "counts": {
-                    "unread": badge,
-                    # 'missed_calls': 2
-                },
             }
+            if not self.disable_badge_count:
+                content["counts"] = {
+                    "unread": badge,
+                }
             if event.type == "m.room.member" and event.is_state():
                 content["membership"] = event.content["membership"]
                 content["user_is_target"] = event.state_key == self.user_id

@@ -880,6 +880,9 @@ class FederationHandler:
         if stripped_room_state is None:
             raise KeyError("Missing 'knock_room_state' field in send_knock response")
 
+        if not isinstance(stripped_room_state, list):
+            raise TypeError("'knock_room_state' has wrong type")
+
         event.unsigned["knock_room_state"] = stripped_room_state
 
         context = EventContext.for_outlier(self._storage_controllers)
@@ -1001,11 +1004,11 @@ class FederationHandler:
                     )
 
                 if include_auth_user_id:
-                    event_content[EventContentFields.AUTHORISING_USER] = (
-                        await self._event_auth_handler.get_user_which_could_invite(
-                            room_id,
-                            state_ids,
-                        )
+                    event_content[
+                        EventContentFields.AUTHORISING_USER
+                    ] = await self._event_auth_handler.get_user_which_could_invite(
+                        room_id,
+                        state_ids,
                     )
 
         builder = self.event_builder_factory.for_room_version(

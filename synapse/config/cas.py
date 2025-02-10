@@ -20,7 +20,7 @@
 #
 #
 
-from typing import Any, List
+from typing import Any, List, Optional
 
 from synapse.config.sso import SsoAttributeRequirement
 from synapse.types import JsonDict
@@ -46,7 +46,9 @@ class CasConfig(Config):
 
             # TODO Update this to a _synapse URL.
             public_baseurl = self.root.server.public_baseurl
-            self.cas_service_url = public_baseurl + "_matrix/client/r0/login/cas/ticket"
+            self.cas_service_url: Optional[str] = (
+                public_baseurl + "_matrix/client/r0/login/cas/ticket"
+            )
 
             self.cas_protocol_version = cas_config.get("protocol_version")
             if (

@@ -40,6 +40,7 @@ from synapse.storage.engines import create_engine
 
 class ReviewConfig(RootConfig):
     "A config class that just pulls out the database config"
+
     config_classes = [DatabaseConfig]
 
 
@@ -160,7 +161,11 @@ def main() -> None:
 
     with make_conn(database_config, engine, "review_recent_signups") as db_conn:
         # This generates a type of Cursor, not LoggingTransaction.
-        user_infos = get_recent_users(db_conn.cursor(), since_ms, exclude_users_with_appservice)  # type: ignore[arg-type]
+        user_infos = get_recent_users(
+            db_conn.cursor(),
+            since_ms,  # type: ignore[arg-type]
+            exclude_users_with_appservice,
+        )
 
     for user_info in user_infos:
         if exclude_users_with_email and user_info.emails:

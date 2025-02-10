@@ -21,12 +21,13 @@
 import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
-from synapse.api.errors import Codes, StoreError, SynapseError
+from synapse.api.errors import Codes, LimitExceededError, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
@@ -52,9 +53,9 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import trace_with_opname
+from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict, Requester, StreamToken
+from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
@@ -126,6 +127,13 @@ class SyncRestServlet(RestServlet):
             cache_name="sync_valid_filter",
         )
 
+        # Ratelimiter for presence updates, keyed by requester.
+        self._presence_per_user_limiter = Ratelimiter(
+            store=self.store,
+            clock=self.clock,
+            cfg=hs.config.ratelimiting.rc_presence_per_user,
+        )
+
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
         assert request.args is not None
@@ -151,6 +159,14 @@ class SyncRestServlet(RestServlet):
         )
         filter_id = parse_string(request, "filter")
         full_state = parse_boolean(request, "full_state", default=False)
+
+        use_state_after = False
+        if await self.store.is_feature_enabled(
+            user.to_string(), ExperimentalFeature.MSC4222
+        ):
+            use_state_after = parse_boolean(
+                request, "org.matrix.msc4222.use_state_after", default=False
+            )
 
         logger.debug(
             "/sync: user=%r, timeout=%r, since=%r, "
@@ -184,6 +200,7 @@ class SyncRestServlet(RestServlet):
             full_state,
             device_id,
             last_ignore_accdata_streampos,
+            use_state_after,
         )
 
         if filter_id is None:
@@ -220,6 +237,7 @@ class SyncRestServlet(RestServlet):
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
+            use_state_after=use_state_after,
         )
 
         since_token = None
@@ -229,7 +247,14 @@ class SyncRestServlet(RestServlet):
         # send any outstanding server notices to the user.
         await self._server_notices_sender.on_user_syncing(user.to_string())
 
-        affect_presence = set_presence != PresenceState.OFFLINE
+        # ignore the presence update if the ratelimit is exceeded but do not pause the request
+        try:
+            await self._presence_per_user_limiter.ratelimit(requester, pause=0.0)
+        except LimitExceededError:
+            affect_presence = False
+            logger.debug("User set_presence ratelimit exceeded; ignoring it.")
+        else:
+            affect_presence = set_presence != PresenceState.OFFLINE
 
         context = await self.presence_handler.user_syncing(
             user.to_string(),
@@ -258,7 +283,7 @@ class SyncRestServlet(RestServlet):
         # We know that the the requester has an access token since appservices
         # cannot use sync.
         response_content = await self.encode_response(
-            time_now, sync_result, requester, filter_collection
+            time_now, sync_config, sync_result, requester, filter_collection
         )
 
         logger.debug("Event formatting complete")
@@ -268,6 +293,7 @@ class SyncRestServlet(RestServlet):
     async def encode_response(
         self,
         time_now: int,
+        sync_config: SyncConfig,
         sync_result: SyncResult,
         requester: Requester,
         filter: FilterCollection,
@@ -292,7 +318,7 @@ class SyncRestServlet(RestServlet):
         )
 
         joined = await self.encode_joined(
-            sync_result.joined, time_now, serialize_options
+            sync_config, sync_result.joined, time_now, serialize_options
         )
 
         invited = await self.encode_invited(
@@ -304,7 +330,7 @@ class SyncRestServlet(RestServlet):
         )
 
         archived = await self.encode_archived(
-            sync_result.archived, time_now, serialize_options
+            sync_config, sync_result.archived, time_now, serialize_options
         )
 
         logger.debug("building sync response dict")
@@ -372,6 +398,7 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_joined")
     async def encode_joined(
         self,
+        sync_config: SyncConfig,
         rooms: List[JoinedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
@@ -380,6 +407,7 @@ class SyncRestServlet(RestServlet):
         Encode the joined rooms in a sync result
 
         Args:
+            sync_config
             rooms: list of sync results for rooms this user is joined to
             time_now: current time - used as a baseline for age calculations
             serialize_options: Event serializer options
@@ -389,7 +417,11 @@ class SyncRestServlet(RestServlet):
         joined = {}
         for room in rooms:
             joined[room.room_id] = await self.encode_room(
-                room, time_now, joined=True, serialize_options=serialize_options
+                sync_config,
+                room,
+                time_now,
+                joined=True,
+                serialize_options=serialize_options,
             )
 
         return joined
@@ -419,7 +451,12 @@ class SyncRestServlet(RestServlet):
             )
             unsigned = dict(invite.get("unsigned", {}))
             invite["unsigned"] = unsigned
-            invited_state = list(unsigned.pop("invite_room_state", []))
+
+            invited_state = unsigned.pop("invite_room_state", [])
+            if not isinstance(invited_state, list):
+                invited_state = []
+
+            invited_state = list(invited_state)
             invited_state.append(invite)
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
@@ -459,7 +496,10 @@ class SyncRestServlet(RestServlet):
             # Extract the stripped room state from the unsigned dict
             # This is for clients to get a little bit of information about
             # the room they've knocked on, without revealing any sensitive information
-            knocked_state = list(unsigned.pop("knock_room_state", []))
+            knocked_state = unsigned.pop("knock_room_state", [])
+            if not isinstance(knocked_state, list):
+                knocked_state = []
+            knocked_state = list(knocked_state)
 
             # Append the actual knock membership event itself as well. This provides
             # the client with:
@@ -477,6 +517,7 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_archived")
     async def encode_archived(
         self,
+        sync_config: SyncConfig,
         rooms: List[ArchivedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
@@ -485,6 +526,7 @@ class SyncRestServlet(RestServlet):
         Encode the archived rooms in a sync result
 
         Args:
+            sync_config
             rooms: list of sync results for rooms this user is joined to
             time_now: current time - used as a baseline for age calculations
             serialize_options: Event serializer options
@@ -494,13 +536,18 @@ class SyncRestServlet(RestServlet):
         joined = {}
         for room in rooms:
             joined[room.room_id] = await self.encode_room(
-                room, time_now, joined=False, serialize_options=serialize_options
+                sync_config,
+                room,
+                time_now,
+                joined=False,
+                serialize_options=serialize_options,
             )
 
         return joined
 
     async def encode_room(
         self,
+        sync_config: SyncConfig,
         room: Union[JoinedSyncResult, ArchivedSyncResult],
         time_now: int,
         joined: bool,
@@ -508,6 +555,7 @@ class SyncRestServlet(RestServlet):
     ) -> JsonDict:
         """
         Args:
+            sync_config
             room: sync result for a single room
             time_now: current time - used as a baseline for age calculations
             token_id: ID of the user's auth token - used for namespacing
@@ -548,13 +596,20 @@ class SyncRestServlet(RestServlet):
 
         account_data = room.account_data
 
+        # We either include a `state` or `state_after` field depending on
+        # whether the client has opted in to the newer `state_after` behavior.
+        if sync_config.use_state_after:
+            state_key_name = "org.matrix.msc4222.state_after"
+        else:
+            state_key_name = "state"
+
         result: JsonDict = {
             "timeline": {
                 "events": serialized_timeline,
                 "prev_batch": await room.timeline.prev_batch.to_string(self.store),
                 "limited": room.timeline.limited,
             },
-            "state": {"events": serialized_state},
+            state_key_name: {"events": serialized_state},
             "account_data": {"events": account_data},
         }
 
@@ -688,6 +743,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
             filter_collection=self.only_member_events_filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
+            use_state_after=False,  # We don't return any rooms so this flag is a no-op
         )
 
         since_token = None
@@ -881,7 +937,6 @@ class SlidingSyncRestServlet(RestServlet):
         )
 
         user = requester.user
-        device_id = requester.device_id
 
         timeout = parse_integer(request, "timeout", default=0)
         # Position in the stream
@@ -889,22 +944,50 @@ class SlidingSyncRestServlet(RestServlet):
 
         from_token = None
         if from_token_string is not None:
-            from_token = await StreamToken.from_string(self.store, from_token_string)
+            from_token = await SlidingSyncStreamToken.from_string(
+                self.store, from_token_string
+            )
 
         # TODO: We currently don't know whether we're going to use sticky params or
         # maybe some filters like sync v2  where they are built up once and referenced
         # by filter ID. For now, we will just prototype with always passing everything
         # in.
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
-        logger.info("Sliding sync request: %r", body)
+
+        # Tag and log useful data to differentiate requests.
+        set_tag(
+            "sliding_sync.sync_type", "initial" if from_token is None else "incremental"
+        )
+        set_tag("sliding_sync.conn_id", body.conn_id or "")
+        log_kv(
+            {
+                "sliding_sync.lists": {
+                    list_name: {
+                        "ranges": list_config.ranges,
+                        "timeline_limit": list_config.timeline_limit,
+                    }
+                    for list_name, list_config in (body.lists or {}).items()
+                },
+                "sliding_sync.room_subscriptions": list(
+                    (body.room_subscriptions or {}).keys()
+                ),
+                # We also include the number of room subscriptions because logs are
+                # limited to 1024 characters and the large room ID list above can be cut
+                # off.
+                "sliding_sync.num_room_subscriptions": len(
+                    (body.room_subscriptions or {}).keys()
+                ),
+            }
+        )
 
         sync_config = SlidingSyncConfig(
             user=user,
-            device_id=device_id,
+            requester=requester,
             # FIXME: Currently, we're just manually copying the fields from the
-            # `SlidingSyncBody` into the config. How can we gurantee into the future
+            # `SlidingSyncBody` into the config. How can we guarantee into the future
             # that we don't forget any? I would like something more structured like
             # `copy_attributes(from=body, to=config)`
+            conn_id=body.conn_id,
             lists=body.lists,
             room_subscriptions=body.room_subscriptions,
             extensions=body.extensions,
@@ -927,7 +1010,6 @@ class SlidingSyncRestServlet(RestServlet):
 
         return 200, response_content
 
-    # TODO: Is there a better way to encode things?
     async def encode_response(
         self,
         requester: Requester,
@@ -949,7 +1031,7 @@ class SlidingSyncRestServlet(RestServlet):
         return response
 
     def encode_lists(
-        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
+        self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
         def encode_operation(
             operation: SlidingSyncResult.SlidingWindowList.Operation,
@@ -984,12 +1066,18 @@ class SlidingSyncRestServlet(RestServlet):
         serialized_rooms: Dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
-                "bump_stamp": room_result.bump_stamp,
-                "joined_count": room_result.joined_count,
-                "invited_count": room_result.invited_count,
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
             }
+
+            if room_result.bump_stamp is not None:
+                serialized_rooms[room_id]["bump_stamp"] = room_result.bump_stamp
+
+            if room_result.joined_count is not None:
+                serialized_rooms[room_id]["joined_count"] = room_result.joined_count
+
+            if room_result.invited_count is not None:
+                serialized_rooms[room_id]["invited_count"] = room_result.invited_count
 
             if room_result.name:
                 serialized_rooms[room_id]["name"] = room_result.name
@@ -997,16 +1085,37 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.avatar:
                 serialized_rooms[room_id]["avatar"] = room_result.avatar
 
-            if room_result.heroes:
-                serialized_rooms[room_id]["heroes"] = room_result.heroes
+            if room_result.heroes is not None and len(room_result.heroes) > 0:
+                serialized_heroes = []
+                for hero in room_result.heroes:
+                    serialized_hero = {
+                        "user_id": hero.user_id,
+                    }
+                    if hero.display_name is not None:
+                        # Not a typo, just how "displayname" is spelled in the spec
+                        serialized_hero["displayname"] = hero.display_name
+
+                    if hero.avatar_url is not None:
+                        serialized_hero["avatar_url"] = hero.avatar_url
+
+                    serialized_heroes.append(serialized_hero)
+                serialized_rooms[room_id]["heroes"] = serialized_heroes
 
             # We should only include the `initial` key if it's `True` to save bandwidth.
-            # The absense of this flag means `False`.
+            # The absence of this flag means `False`.
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
+            if room_result.unstable_expanded_timeline:
+                serialized_rooms[room_id]["unstable_expanded_timeline"] = (
+                    room_result.unstable_expanded_timeline
+                )
+
             # This will be omitted for invite/knock rooms with `stripped_state`
-            if room_result.required_state is not None:
+            if (
+                room_result.required_state is not None
+                and len(room_result.required_state) > 0
+            ):
                 serialized_required_state = (
                     await self.event_serializer.serialize_events(
                         room_result.required_state,
@@ -1017,7 +1126,10 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["required_state"] = serialized_required_state
 
             # This will be omitted for invite/knock rooms with `stripped_state`
-            if room_result.timeline_events is not None:
+            if (
+                room_result.timeline_events is not None
+                and len(room_result.timeline_events) > 0
+            ):
                 serialized_timeline = await self.event_serializer.serialize_events(
                     room_result.timeline_events,
                     time_now,
@@ -1032,9 +1144,9 @@ class SlidingSyncRestServlet(RestServlet):
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.prev_batch is not None:
-                serialized_rooms[room_id]["prev_batch"] = (
-                    await room_result.prev_batch.to_string(self.store)
-                )
+                serialized_rooms[room_id][
+                    "prev_batch"
+                ] = await room_result.prev_batch.to_string(self.store)
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.num_live is not None:
@@ -1045,7 +1157,10 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["is_dm"] = room_result.is_dm
 
             # Stripped state only applies to invite/knock rooms
-            if room_result.stripped_state is not None:
+            if (
+                room_result.stripped_state is not None
+                and len(room_result.stripped_state) > 0
+            ):
                 # TODO: `knocked_state` but that isn't specced yet.
                 #
                 # TODO: Instead of adding `knocked_state`, it would be good to rename
@@ -1059,15 +1174,69 @@ class SlidingSyncRestServlet(RestServlet):
     async def encode_extensions(
         self, requester: Requester, extensions: SlidingSyncResult.Extensions
     ) -> JsonDict:
-        result = {}
+        serialized_extensions: JsonDict = {}
 
         if extensions.to_device is not None:
-            result["to_device"] = {
+            serialized_extensions["to_device"] = {
                 "next_batch": extensions.to_device.next_batch,
                 "events": extensions.to_device.events,
             }
 
-        return result
+        if extensions.e2ee is not None:
+            serialized_extensions["e2ee"] = {
+                # We always include this because
+                # https://github.com/vector-im/element-android/issues/3725. The spec
+                # isn't terribly clear on when this can be omitted and how a client
+                # would tell the difference between "no keys present" and "nothing
+                # changed" in terms of whole field absent / individual key type entry
+                # absent Corresponding synapse issue:
+                # https://github.com/matrix-org/synapse/issues/10456
+                "device_one_time_keys_count": extensions.e2ee.device_one_time_keys_count,
+                # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
+                # states that this field should always be included, as long as the
+                # server supports the feature.
+                "device_unused_fallback_key_types": extensions.e2ee.device_unused_fallback_key_types,
+            }
+
+            if extensions.e2ee.device_list_updates is not None:
+                serialized_extensions["e2ee"]["device_lists"] = {}
+
+                serialized_extensions["e2ee"]["device_lists"]["changed"] = list(
+                    extensions.e2ee.device_list_updates.changed
+                )
+                serialized_extensions["e2ee"]["device_lists"]["left"] = list(
+                    extensions.e2ee.device_list_updates.left
+                )
+
+        if extensions.account_data is not None:
+            serialized_extensions["account_data"] = {
+                # Same as the the top-level `account_data.events` field in Sync v2.
+                "global": [
+                    {"type": account_data_type, "content": content}
+                    for account_data_type, content in extensions.account_data.global_account_data_map.items()
+                ],
+                # Same as the joined room's account_data field in Sync v2, e.g the path
+                # `rooms.join["!foo:bar"].account_data.events`.
+                "rooms": {
+                    room_id: [
+                        {"type": account_data_type, "content": content}
+                        for account_data_type, content in event_map.items()
+                    ]
+                    for room_id, event_map in extensions.account_data.account_data_by_room_map.items()
+                },
+            }
+
+        if extensions.receipts is not None:
+            serialized_extensions["receipts"] = {
+                "rooms": extensions.receipts.room_id_to_receipt_map,
+            }
+
+        if extensions.typing is not None:
+            serialized_extensions["typing"] = {
+                "rooms": extensions.typing.room_id_to_typing_map,
+            }
+
+        return serialized_extensions
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
