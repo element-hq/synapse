@@ -1889,7 +1889,7 @@ rc_presence:
     burst_count: 0.5
 ```
 ---
-### `rc_delayed_event`
+### `rc_delayed_event_mgmt`
 
 Ratelimiting settings for delayed event management.
 
@@ -1907,7 +1907,7 @@ without the risk of being ratelimited.
 
 Example configuration:
 ```yaml
-rc_delayed_event:
+rc_delayed_event_mgmt:
   per_second: 2
   burst_count: 20
 ```

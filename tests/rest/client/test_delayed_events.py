@@ -110,7 +110,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
     @unittest.override_config(
-        {"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}}
+        {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
     def test_get_delayed_events_ratelimit(self) -> None:
         args = ("GET", PATH_PREFIX)
@@ -228,7 +228,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
 
     @unittest.override_config(
-        {"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}}
+        {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
     def test_cancel_delayed_event_ratelimit(self) -> None:
         delay_ids = []
@@ -409,7 +409,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
     @unittest.override_config(
-        {"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}}
+        {"rc_delayed_event_mgmt": {"per_second": 0.5, "burst_count": 1}}
     )
     def test_restart_delayed_event_ratelimit(self) -> None:
         delay_ids = []

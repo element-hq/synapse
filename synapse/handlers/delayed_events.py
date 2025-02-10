@@ -65,10 +65,10 @@ class DelayedEventsHandler:
 
         # Ratelimiter for management of existing delayed events,
         # keyed by the sending user ID & device ID.
-        self._delayed_event_ratelimiter = Ratelimiter(
+        self._delayed_event_mgmt_ratelimiter = Ratelimiter(
             store=self._store,
             clock=self._clock,
-            cfg=self._config.ratelimiting.rc_delayed_event,
+            cfg=self._config.ratelimiting.rc_delayed_event_mgmt,
         )
 
         self._next_delayed_event_call: Optional[IDelayedCall] = None
@@ -298,7 +298,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._delayed_event_ratelimiter.ratelimit(
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
             requester,
             (requester.user.to_string(), requester.device_id),
         )
@@ -324,7 +324,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._delayed_event_ratelimiter.ratelimit(
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
             requester,
             (requester.user.to_string(), requester.device_id),
         )
@@ -436,7 +436,7 @@ class DelayedEventsHandler:
 
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
-        await self._delayed_event_ratelimiter.ratelimit(
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
             requester,
             (requester.user.to_string(), requester.device_id),
         )
