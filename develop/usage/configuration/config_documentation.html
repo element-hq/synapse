@@ -2909,7 +2909,8 @@ The default is 'uid'.</li>
 <li><code>attribute_requirements</code>: It is possible to configure Synapse to only allow logins if SAML attributes
 match particular values. The requirements can be listed under
 <code>attribute_requirements</code> as shown in the example. All of the listed attributes must
-match for the login to be permitted.</li>
+match for the login to be permitted. Values can be specified in a <code>one_of</code> list to allow
+multiple values for an attribute.</li>
 <li><code>idp_entityid</code>: If the metadata XML contains multiple IdP entities then the <code>idp_entityid</code>
 option must be set to the entity to redirect users to.
 Most deployments only have a single IdP entity and so should omit this option.</li>
@@ -2987,7 +2988,9 @@ the IdP to use an ACS location of
     - attribute: userGroup
       value: &quot;staff&quot;
     - attribute: department
-      value: &quot;sales&quot;
+      one_of:
+        - &quot;sales&quot;
+        - &quot;admins&quot;
 
   idp_entityid: 'https://our_idp/entityid'
 </code></pre>
