@@ -23,6 +23,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
 import attr
+from immutabledict import immutabledict
 
 from synapse.api.constants import Direction, EventTypes, JoinRules, Membership
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -463,7 +464,18 @@ class RoomStateRestServlet(RestServlet):
         if not room:
             raise NotFoundError("Room not found")
 
-        event_ids = await self._storage_controllers.state.get_current_state_ids(room_id)
+        state_filter = None
+        type = parse_string(request, "type")
+
+        if type:
+            state_filter = StateFilter(
+                types=immutabledict({type: None}),
+                include_others=False,
+            )
+
+        event_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id, state_filter
+        )
         events = await self.store.get_events(event_ids.values())
         now = self.clock.time_msec()
         room_state = await self._event_serializer.serialize_events(events.values(), now)

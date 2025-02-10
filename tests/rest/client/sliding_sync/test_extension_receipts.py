@@ -13,6 +13,8 @@
 #
 import logging
 
+from parameterized import parameterized_class
+
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
@@ -28,6 +30,20 @@ from tests.server import TimedOutException
 logger = logging.getLogger(__name__)
 
 
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
 class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
     """Tests for the receipts sliding sync extension"""
 
@@ -41,6 +57,8 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
+
+        super().prepare(reactor, clock, hs)
 
     def test_no_data_initial_sync(self) -> None:
         """
@@ -779,6 +797,138 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         receipt = response_body["extensions"]["receipts"]["rooms"][room_id2]
         self.assertIncludes(
             receipt["content"][room2_event_id][ReceiptTypes.READ].keys(),
+            {user2_id},
+            exact=True,
+        )
+
+    def test_return_own_read_receipts(self) -> None:
+        """Test that we always send the user's own read receipts in initial
+        rooms, even if the receipts don't match events in the timeline..
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Send a message and read receipts into room1
+        event_response = self.helper.send(room_id1, body="new event", tok=user2_tok)
+        room1_event_id = event_response["event_id"]
+
+        self.helper.send_read_receipt(room_id1, room1_event_id, tok=user1_tok)
+        self.helper.send_read_receipt(room_id1, room1_event_id, tok=user2_tok)
+
+        # Now send a message so the above message is not in the timeline.
+        self.helper.send(room_id1, body="new event", tok=user2_tok)
+
+        # Make a SS request for only the latest message.
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # We should get our own receipt in room1, even though its not in the
+        # timeline limit.
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+
+        # We should only see our read receipt, not the other user's.
+        receipt = response_body["extensions"]["receipts"]["rooms"][room_id1]
+        self.assertIncludes(
+            receipt["content"][room1_event_id][ReceiptTypes.READ].keys(),
+            {user1_id},
+            exact=True,
+        )
+
+    def test_read_receipts_expanded_timeline(self) -> None:
+        """Test that we get read receipts when we expand the timeline limit (`unstable_expanded_timeline`)."""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Send a message and read receipt into room1
+        event_response = self.helper.send(room_id1, body="new event", tok=user2_tok)
+        room1_event_id = event_response["event_id"]
+
+        self.helper.send_read_receipt(room_id1, room1_event_id, tok=user2_tok)
+
+        # Now send a message so the above message is not in the timeline.
+        self.helper.send(room_id1, body="new event", tok=user2_tok)
+
+        # Make a SS request for only the latest message.
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We shouldn't see user2 read receipt, as its not in the timeline
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+        # Now do another request with a room subscription with an increased timeline limit
+        sync_body["room_subscriptions"] = {
+            room_id1: {
+                "required_state": [],
+                "timeline_limit": 2,
+            }
+        }
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # Assert that we did actually get an expanded timeline
+        room_response = response_body["rooms"][room_id1]
+        self.assertNotIn("initial", room_response)
+        self.assertEqual(room_response["unstable_expanded_timeline"], True)
+
+        # We should now see user2 read receipt, as its in the expanded timeline
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+
+        # We should only see our read receipt, not the other user's.
+        receipt = response_body["extensions"]["receipts"]["rooms"][room_id1]
+        self.assertIncludes(
+            receipt["content"][room1_event_id][ReceiptTypes.READ].keys(),
             {user2_id},
             exact=True,
         )

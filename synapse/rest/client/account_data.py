@@ -108,9 +108,9 @@ class AccountDataServlet(RestServlet):
 
         # Push rules are stored in a separate table and must be queried separately.
         if account_data_type == AccountDataTypes.PUSH_RULES:
-            account_data: Optional[JsonMapping] = (
-                await self._push_rules_handler.push_rules_for_user(requester.user)
-            )
+            account_data: Optional[
+                JsonMapping
+            ] = await self._push_rules_handler.push_rules_for_user(requester.user)
         else:
             account_data = await self.store.get_global_account_data_by_type_for_user(
                 user_id, account_data_type

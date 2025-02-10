@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -215,9 +215,6 @@ class HttpListenerConfig:
     additional_resources: Dict[str, dict] = attr.Factory(dict)
     tag: Optional[str] = None
     request_id_header: Optional[str] = None
-    # If true, the listener will return CORS response headers compatible with MSC3886:
-    # https://github.com/matrix-org/matrix-spec-proposals/pull/3886
-    experimental_cors_msc3886: bool = False
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -335,8 +332,14 @@ class ServerConfig(Config):
             logger.info("Using default public_baseurl %s", public_baseurl)
         else:
             self.serve_client_wellknown = True
+            # Ensure that public_baseurl ends with a trailing slash
             if public_baseurl[-1] != "/":
                 public_baseurl += "/"
+
+        # Scrutinize user-provided config
+        if not isinstance(public_baseurl, str):
+            raise ConfigError("Must be a string", ("public_baseurl",))
+
         self.public_baseurl = public_baseurl
 
         # check that public_baseurl is valid
@@ -780,6 +783,17 @@ class ServerConfig(Config):
         else:
             self.delete_stale_devices_after = None
 
+        # The maximum allowed delay duration for delayed events (MSC4140).
+        max_event_delay_duration = config.get("max_event_delay_duration")
+        if max_event_delay_duration is not None:
+            self.max_event_delay_ms: Optional[int] = self.parse_duration(
+                max_event_delay_duration
+            )
+            if self.max_event_delay_ms <= 0:
+                raise ConfigError("max_event_delay_duration must be a positive value")
+        else:
+            self.max_event_delay_ms = None
+
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 
@@ -828,13 +842,10 @@ class ServerConfig(Config):
             ).lstrip()
 
         if not unsecure_listeners:
-            unsecure_http_bindings = (
-                """- port: %(unsecure_port)s
+            unsecure_http_bindings = """- port: %(unsecure_port)s
             tls: false
             type: http
-            x_forwarded: true"""
-                % locals()
-            )
+            x_forwarded: true""" % locals()
 
             if not open_private_ports:
                 unsecure_http_bindings += (
@@ -853,16 +864,13 @@ class ServerConfig(Config):
         if not secure_listeners:
             secure_http_bindings = ""
 
-        return (
-            """\
+        return """\
         server_name: "%(server_name)s"
         pid_file: %(pid_file)s
         listeners:
           %(secure_http_bindings)s
           %(unsecure_http_bindings)s
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:
         if args.manhole is not None:
@@ -999,7 +1007,6 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
             additional_resources=listener.get("additional_resources", {}),
             tag=listener.get("tag"),
             request_id_header=listener.get("request_id_header"),
-            experimental_cors_msc3886=listener.get("experimental_cors_msc3886", False),
         )
 
     if socket_path:

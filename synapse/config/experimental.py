@@ -20,14 +20,15 @@
 #
 
 import enum
-from typing import TYPE_CHECKING, Any, Optional
+from functools import cache
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 import attr
 import attr.validators
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
-from synapse.config._base import Config, RootConfig
+from synapse.config._base import Config, RootConfig, read_file
 from synapse.types import JsonDict
 
 # Determine whether authlib is installed.
@@ -41,6 +42,12 @@ except ImportError:
 if TYPE_CHECKING:
     # Only import this if we're type checking, as it might not be installed at runtime.
     from authlib.jose.rfc7517 import JsonWebKey
+
+
+@cache
+def read_secret_from_file_once(file_path: Any, config_path: Iterable[str]) -> str:
+    """Returns the memoized secret read from file."""
+    return read_file(file_path, config_path).strip()
 
 
 class ClientAuthMethod(enum.Enum):
@@ -61,6 +68,40 @@ def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
     from authlib.jose.rfc7517 import JsonWebKey
 
     return JsonWebKey.import_key(jwks)
+
+
+def _check_client_secret(
+    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+) -> None:
+    if instance._client_secret and instance._client_secret_path:
+        raise ConfigError(
+            (
+                "You have configured both "
+                "`experimental_features.msc3861.client_secret` and "
+                "`experimental_features.msc3861.client_secret_path`. "
+                "These are mutually incompatible."
+            ),
+            ("experimental", "msc3861", "client_secret"),
+        )
+    # Check client secret can be retrieved
+    instance.client_secret()
+
+
+def _check_admin_token(
+    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+) -> None:
+    if instance._admin_token and instance._admin_token_path:
+        raise ConfigError(
+            (
+                "You have configured both "
+                "`experimental_features.msc3861.admin_token` and "
+                "`experimental_features.msc3861.admin_token_path`. "
+                "These are mutually incompatible."
+            ),
+            ("experimental", "msc3861", "admin_token"),
+        )
+    # Check client secret can be retrieved
+    instance.admin_token()
 
 
 @attr.s(slots=True, frozen=True)
@@ -97,13 +138,28 @@ class MSC3861:
     )
     """The auth method used when calling the introspection endpoint."""
 
-    client_secret: Optional[str] = attr.ib(
+    _client_secret: Optional[str] = attr.ib(
         default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_client_secret,
+        ],
     )
     """
     The client secret to use when calling the introspection endpoint,
     when using any of the client_secret_* client auth methods.
+    """
+
+    _client_secret_path: Optional[str] = attr.ib(
+        default=None,
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_client_secret,
+        ],
+    )
+    """
+    Alternative to `client_secret`: allows the secret to be specified in an
+    external file.
     """
 
     jwk: Optional["JsonWebKey"] = attr.ib(default=None, converter=_parse_jwks)
@@ -133,7 +189,7 @@ class MSC3861:
                 ClientAuthMethod.CLIENT_SECRET_BASIC,
                 ClientAuthMethod.CLIENT_SECRET_JWT,
             )
-            and self.client_secret is None
+            and self.client_secret() is None
         ):
             raise ConfigError(
                 f"A client secret must be provided when using the {value} client auth method",
@@ -152,14 +208,47 @@ class MSC3861:
     )
     """The URL of the My Account page on the OIDC Provider as per MSC2965."""
 
-    admin_token: Optional[str] = attr.ib(
+    _admin_token: Optional[str] = attr.ib(
         default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_admin_token,
+        ],
     )
     """
     A token that should be considered as an admin token.
     This is used by the OIDC provider, to make admin calls to Synapse.
     """
+
+    _admin_token_path: Optional[str] = attr.ib(
+        default=None,
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_admin_token,
+        ],
+    )
+    """
+    Alternative to `admin_token`: allows the secret to be specified in an
+    external file.
+    """
+
+    def client_secret(self) -> Optional[str]:
+        """Returns the secret given via `client_secret` or `client_secret_path`."""
+        if self._client_secret_path:
+            return read_secret_from_file_once(
+                self._client_secret_path,
+                ("experimental_features", "msc3861", "client_secret_path"),
+            )
+        return self._client_secret
+
+    def admin_token(self) -> Optional[str]:
+        """Returns the admin token given via `admin_token` or `admin_token_path`."""
+        if self._admin_token_path:
+            return read_secret_from_file_once(
+                self._admin_token_path,
+                ("experimental_features", "msc3861", "admin_token_path"),
+            )
+        return self._admin_token
 
     def check_config_conflicts(self, root: RootConfig) -> None:
         """Checks for any configuration conflicts with other parts of Synapse.
@@ -338,8 +427,10 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
-        # MSC3575 (Sliding Sync API endpoints)
-        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", False)
+        # MSC3575 (Sliding Sync) alternate endpoints, c.f. MSC4186.
+        #
+        # This is enabled by default as a replacement for the sliding sync proxy.
+        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", True)
 
         # MSC3773: Thread notifications
         self.msc3773_enabled: bool = experimental.get("msc3773_enabled", False)
@@ -362,11 +453,6 @@ class ExperimentalConfig(Config):
 
         # MSC3874: Filtering /messages with rel_types / not_rel_types.
         self.msc3874_enabled: bool = experimental.get("msc3874_enabled", False)
-
-        # MSC3886: Simple client rendezvous capability
-        self.msc3886_endpoint: Optional[str] = experimental.get(
-            "msc3886_endpoint", None
-        )
 
         # MSC3890: Remotely silence local notifications
         # Note: This option requires "experimental_features.msc3391_enabled" to be
@@ -439,12 +525,14 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
-        self.msc3823_account_suspension = experimental.get(
-            "msc3823_account_suspension", False
-        )
+        # MSC4133: Custom profile fields
+        self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
-        # MSC4151: Report room API (Client-Server API)
-        self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
+        # MSC4210: Remove legacy mentions
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
 
-        # MSC4156: Migrate server_name to via
-        self.msc4156_enabled: bool = experimental.get("msc4156_enabled", False)
+        # MSC4222: Adding `state_after` to sync v2
+        self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
+
+        # MSC4076: Add `disable_badge_count`` to pusher configuration
+        self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)

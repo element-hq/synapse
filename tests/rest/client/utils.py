@@ -330,22 +330,24 @@ class RestHelper:
             data,
         )
 
-        assert (
-            channel.code == expect_code
-        ), "Expected: %d, got: %d, PUT %s -> resp: %r" % (
-            expect_code,
-            channel.code,
-            path,
-            channel.result["body"],
+        assert channel.code == expect_code, (
+            "Expected: %d, got: %d, PUT %s -> resp: %r"
+            % (
+                expect_code,
+                channel.code,
+                path,
+                channel.result["body"],
+            )
         )
 
         if expect_errcode:
-            assert (
-                str(channel.json_body["errcode"]) == expect_errcode
-            ), "Expected: %r, got: %r, resp: %r" % (
-                expect_errcode,
-                channel.json_body["errcode"],
-                channel.result["body"],
+            assert str(channel.json_body["errcode"]) == expect_errcode, (
+                "Expected: %r, got: %r, resp: %r"
+                % (
+                    expect_errcode,
+                    channel.json_body["errcode"],
+                    channel.result["body"],
+                )
             )
 
         if expect_additional_fields is not None:
@@ -354,13 +356,14 @@ class RestHelper:
                     expect_key,
                     channel.json_body,
                 )
-                assert (
-                    channel.json_body[expect_key] == expect_value
-                ), "Expected: %s at %s, got: %s, resp: %s" % (
-                    expect_value,
-                    expect_key,
-                    channel.json_body[expect_key],
-                    channel.json_body,
+                assert channel.json_body[expect_key] == expect_value, (
+                    "Expected: %s at %s, got: %s, resp: %s"
+                    % (
+                        expect_value,
+                        expect_key,
+                        channel.json_body[expect_key],
+                        channel.json_body,
+                    )
                 )
 
         self.auth_user_id = temp_id
@@ -545,7 +548,7 @@ class RestHelper:
         room_id: str,
         event_type: str,
         body: Dict[str, Any],
-        tok: Optional[str],
+        tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
     ) -> JsonDict:
@@ -886,7 +889,7 @@ class RestHelper:
             "GET",
             uri,
         )
-        assert channel.code == 302
+        assert channel.code == 302, f"Expected 302 for {uri}, got {channel.code}"
 
         # hit the redirect url again with the right Host header, which should now issue
         # a cookie and redirect to the SSO provider.
@@ -898,17 +901,18 @@ class RestHelper:
 
         location = get_location(channel)
         parts = urllib.parse.urlsplit(location)
+        next_uri = urllib.parse.urlunsplit(("", "") + parts[2:])
         channel = make_request(
             self.reactor,
             self.site,
             "GET",
-            urllib.parse.urlunsplit(("", "") + parts[2:]),
+            next_uri,
             custom_headers=[
                 ("Host", parts[1]),
             ],
         )
 
-        assert channel.code == 302
+        assert channel.code == 302, f"Expected 302 for {next_uri}, got {channel.code}"
         channel.extract_cookies(cookies)
         return get_location(channel)
 

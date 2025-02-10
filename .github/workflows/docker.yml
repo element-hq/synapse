@@ -14,7 +14,7 @@ permissions:
   id-token: write # needed for signing the images with GitHub OIDC Token
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Set up QEMU
         id: qemu
@@ -30,7 +30,7 @@ jobs:
         run: docker buildx inspect
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.6.0
+        uses: sigstore/cosign-installer@v3.7.0
 
       - name: Checkout repository
         uses: actions/checkout@v4

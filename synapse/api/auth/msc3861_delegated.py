@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -119,9 +119,11 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
-        self._admin_token = self._config.admin_token
+        self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
 
-        self._issuer_metadata = RetryOnExceptionCachedCall(self._load_metadata)
+        self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
+            self._load_metadata
+        )
 
         if isinstance(auth_method, PrivateKeyJWTWithKid):
             # Use the JWK as the client secret when using the private_key_jwt method
@@ -131,9 +133,10 @@ class MSC3861DelegatedAuth(BaseAuth):
             )
         else:
             # Else use the client secret
-            assert self._config.client_secret, "No client_secret provided"
+            client_secret = self._config.client_secret()
+            assert client_secret, "No client_secret provided"
             self._client_auth = ClientAuth(
-                self._config.client_id, self._config.client_secret, auth_method
+                self._config.client_id, client_secret, auth_method
             )
 
     async def _load_metadata(self) -> OpenIDProviderMetadata:
@@ -145,6 +148,39 @@ class MSC3861DelegatedAuth(BaseAuth):
         # metadata.validate_introspection_endpoint()
         return metadata
 
+    async def issuer(self) -> str:
+        """
+        Get the configured issuer
+
+        This will use the issuer value set in the metadata,
+        falling back to the one set in the config if not set in the metadata
+        """
+        metadata = await self._issuer_metadata.get()
+        return metadata.issuer or self._config.issuer
+
+    async def account_management_url(self) -> Optional[str]:
+        """
+        Get the configured account management URL
+
+        This will discover the account management URL from the issuer if it's not set in the config
+        """
+        if self._config.account_management_url is not None:
+            return self._config.account_management_url
+
+        try:
+            metadata = await self._issuer_metadata.get()
+            return metadata.get("account_management_uri", None)
+        # We don't want to raise here if we can't load the metadata
+        except Exception:
+            logger.warning("Failed to load metadata:", exc_info=True)
+            return None
+
+    async def auth_metadata(self) -> Dict[str, Any]:
+        """
+        Returns the auth metadata dict
+        """
+        return await self._issuer_metadata.get()
+
     async def _introspection_endpoint(self) -> str:
         """
         Returns the introspection endpoint of the issuer
@@ -154,7 +190,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         if self._config.introspection_endpoint is not None:
             return self._config.introspection_endpoint
 
-        metadata = await self._load_metadata()
+        metadata = await self._issuer_metadata.get()
         return metadata.get("introspection_endpoint")
 
     async def _introspect_token(self, token: str) -> IntrospectionToken:
@@ -248,7 +284,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             requester = await self.get_user_by_access_token(access_token, allow_expired)
 
         # Do not record requests from MAS using the virtual `__oidc_admin` user.
-        if access_token != self._admin_token:
+        if access_token != self._admin_token():
             await self._record_request(request, requester)
 
         if not allow_guest and requester.is_guest:
@@ -289,7 +325,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         token: str,
         allow_expired: bool = False,
     ) -> Requester:
-        if self._admin_token is not None and token == self._admin_token:
+        admin_token = self._admin_token()
+        if admin_token is not None and token == admin_token:
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
@@ -309,7 +346,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.exception("Failed to introspect token")
             raise SynapseError(503, "Unable to introspect the access token")
 
-        logger.info(f"Introspection result: {introspection_result!r}")
+        logger.debug("Introspection result: %r", introspection_result)
 
         # TODO: introspection verification should be more extensive, especially:
         #   - verify the audience

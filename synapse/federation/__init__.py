@@ -19,5 +19,4 @@
 #
 #
 
-""" This package includes all the federation specific logic.
-"""
+"""This package includes all the federation specific logic."""

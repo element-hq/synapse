@@ -145,7 +145,9 @@ class MapUsernameTestCase(unittest.TestCase):
         (MultiWriterStreamToken,),
         (RoomStreamToken,),
     ],
-    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_{params_dict['token_type'].__name__}",
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{params_dict['token_type'].__name__}",
 )
 class MultiWriterTokenTestCase(unittest.HomeserverTestCase):
     """Tests for the different types of multi writer tokens."""

@@ -20,29 +20,15 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import (
-        Extra,
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        conint,
-        constr,
-        validator,
-    )
-else:
-    from pydantic import (
-        Extra,
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        conint,
-        constr,
-        validator,
-    )
-
+from synapse._pydantic_compat import (
+    Extra,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    conint,
+    constr,
+    validator,
+)
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 
@@ -268,7 +254,9 @@ class SlidingSyncBody(RequestBodyModel):
         if TYPE_CHECKING:
             ranges: Optional[List[Tuple[int, int]]] = None
         else:
-            ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]] = None  # type: ignore[valid-type]
+            ranges: Optional[
+                List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
+            ] = None  # type: ignore[valid-type]
         slow_get_all_rooms: Optional[StrictBool] = False
         filters: Optional[Filters] = None
 
@@ -382,13 +370,15 @@ class SlidingSyncBody(RequestBodyModel):
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
 
-    conn_id: Optional[str]
+    conn_id: Optional[StrictStr]
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:
         lists: Optional[Dict[str, SlidingSyncList]] = None
     else:
-        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = None  # type: ignore[valid-type]
+        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = (
+            None  # type: ignore[valid-type]
+        )
     room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
     extensions: Optional[Extensions] = None
 

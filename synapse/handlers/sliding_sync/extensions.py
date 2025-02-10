@@ -12,27 +12,47 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import itertools
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence, Set
+from typing import (
+    TYPE_CHECKING,
+    AbstractSet,
+    ChainMap,
+    Dict,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    cast,
+)
 
 from typing_extensions import assert_never
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, EduTypes
 from synapse.handlers.receipts import ReceiptEventSource
-from synapse.handlers.sliding_sync.types import (
-    HaveSentRoomFlag,
-    MutablePerConnectionState,
-    PerConnectionState,
-)
 from synapse.logging.opentracing import trace
+from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
     DeviceListUpdates,
     JsonMapping,
     MultiWriterStreamToken,
     SlidingSyncStreamToken,
+    StrCollection,
     StreamToken,
 )
-from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    OperationType,
+    PerConnectionState,
+    SlidingSyncConfig,
+    SlidingSyncResult,
+)
+from synapse.util.async_helpers import (
+    concurrently_execute,
+    gather_optional_coroutines,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -55,9 +75,9 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
     ) -> SlidingSyncResult.Extensions:
@@ -80,27 +100,29 @@ class SlidingSyncExtensionHandler:
         if sync_config.extensions is None:
             return SlidingSyncResult.Extensions()
 
-        to_device_response = None
+        to_device_coro = None
         if sync_config.extensions.to_device is not None:
-            to_device_response = await self.get_to_device_extension_response(
+            to_device_coro = self.get_to_device_extension_response(
                 sync_config=sync_config,
                 to_device_request=sync_config.extensions.to_device,
                 to_token=to_token,
             )
 
-        e2ee_response = None
+        e2ee_coro = None
         if sync_config.extensions.e2ee is not None:
-            e2ee_response = await self.get_e2ee_extension_response(
+            e2ee_coro = self.get_e2ee_extension_response(
                 sync_config=sync_config,
                 e2ee_request=sync_config.extensions.e2ee,
                 to_token=to_token,
                 from_token=from_token,
             )
 
-        account_data_response = None
+        account_data_coro = None
         if sync_config.extensions.account_data is not None:
-            account_data_response = await self.get_account_data_extension_response(
+            account_data_coro = self.get_account_data_extension_response(
                 sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 account_data_request=sync_config.extensions.account_data,
@@ -108,9 +130,9 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
-        receipts_response = None
+        receipts_coro = None
         if sync_config.extensions.receipts is not None:
-            receipts_response = await self.get_receipts_extension_response(
+            receipts_coro = self.get_receipts_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
@@ -122,9 +144,9 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
-        typing_response = None
+        typing_coro = None
         if sync_config.extensions.typing is not None:
-            typing_response = await self.get_typing_extension_response(
+            typing_coro = self.get_typing_extension_response(
                 sync_config=sync_config,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
@@ -133,6 +155,20 @@ class SlidingSyncExtensionHandler:
                 to_token=to_token,
                 from_token=from_token,
             )
+
+        (
+            to_device_response,
+            e2ee_response,
+            account_data_response,
+            receipts_response,
+            typing_response,
+        ) = await gather_optional_coroutines(
+            to_device_coro,
+            e2ee_coro,
+            account_data_coro,
+            receipts_coro,
+            typing_coro,
+        )
 
         return SlidingSyncResult.Extensions(
             to_device=to_device_response,
@@ -144,10 +180,10 @@ class SlidingSyncExtensionHandler:
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: Optional[List[str]],
-        requested_room_ids: Optional[List[str]],
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
+        requested_lists: Optional[StrCollection],
+        requested_room_ids: Optional[StrCollection],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: AbstractSet[str],
     ) -> Set[str]:
         """
         Handle the reserved `lists`/`rooms` keys for extensions. Extensions should only
@@ -343,7 +379,9 @@ class SlidingSyncExtensionHandler:
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
         to_token: StreamToken,
@@ -375,29 +413,39 @@ class SlidingSyncExtensionHandler:
                 )
             )
 
+            # TODO: This should take into account the `from_token` and `to_token`
             have_push_rules_changed = await self.store.have_push_rules_changed_for_user(
                 user_id, from_token.stream_token.push_rules_key
             )
             if have_push_rules_changed:
-                global_account_data_map = dict(global_account_data_map)
                 # TODO: This should take into account the `from_token` and `to_token`
-                global_account_data_map[AccountDataTypes.PUSH_RULES] = (
-                    await self.push_rules_handler.push_rules_for_user(sync_config.user)
-                )
+                global_account_data_map[
+                    AccountDataTypes.PUSH_RULES
+                ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
         else:
             # TODO: This should take into account the `to_token`
-            all_global_account_data = await self.store.get_global_account_data_for_user(
-                user_id
+            immutable_global_account_data_map = (
+                await self.store.get_global_account_data_for_user(user_id)
             )
 
-            global_account_data_map = dict(all_global_account_data)
-            # TODO: This should take into account the  `to_token`
-            global_account_data_map[AccountDataTypes.PUSH_RULES] = (
-                await self.push_rules_handler.push_rules_for_user(sync_config.user)
+            # Use a `ChainMap` to avoid copying the immutable data from the cache
+            global_account_data_map = ChainMap(
+                {
+                    # TODO: This should take into account the `to_token`
+                    AccountDataTypes.PUSH_RULES: await self.push_rules_handler.push_rules_for_user(
+                        sync_config.user
+                    )
+                },
+                # Cast is safe because `ChainMap` only mutates the top-most map,
+                # see https://github.com/python/typeshed/issues/8430
+                cast(
+                    MutableMapping[str, JsonMapping], immutable_global_account_data_map
+                ),
             )
 
         # Fetch room account data
-        account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {}
+        #
+        account_data_by_room_map: MutableMapping[str, Mapping[str, JsonMapping]] = {}
         relevant_room_ids = self.find_relevant_room_ids_for_extension(
             requested_lists=account_data_request.lists,
             requested_room_ids=account_data_request.rooms,
@@ -405,25 +453,154 @@ class SlidingSyncExtensionHandler:
             actual_room_ids=actual_room_ids,
         )
         if len(relevant_room_ids) > 0:
+            # We need to handle the different cases depending on if we have sent
+            # down account data previously or not, so we split the relevant
+            # rooms up into different collections based on status.
+            live_rooms = set()
+            previously_rooms: Dict[str, int] = {}
+            initial_rooms = set()
+
+            for room_id in relevant_room_ids:
+                if not from_token:
+                    initial_rooms.add(room_id)
+                    continue
+
+                room_status = previous_connection_state.account_data.have_sent_room(
+                    room_id
+                )
+                if room_status.status == HaveSentRoomFlag.LIVE:
+                    live_rooms.add(room_id)
+                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                    assert room_status.last_token is not None
+                    previously_rooms[room_id] = room_status.last_token
+                elif room_status.status == HaveSentRoomFlag.NEVER:
+                    initial_rooms.add(room_id)
+                else:
+                    assert_never(room_status.status)
+
+            # We fetch all room account data since the from_token. This is so
+            # that we can record which rooms have updates that haven't been sent
+            # down.
+            #
+            # Mapping from room_id to mapping of `type` to `content` of room account
+            # data events.
+            all_updates_since_the_from_token: Mapping[
+                str, Mapping[str, JsonMapping]
+            ] = {}
             if from_token is not None:
                 # TODO: This should take into account the `from_token` and `to_token`
-                account_data_by_room_map = (
+                all_updates_since_the_from_token = (
                     await self.store.get_updated_room_account_data_for_user(
                         user_id, from_token.stream_token.account_data_key
                     )
                 )
-            else:
-                # TODO: This should take into account the `to_token`
-                account_data_by_room_map = (
-                    await self.store.get_room_account_data_for_user(user_id)
+
+                # Add room tags
+                #
+                # TODO: This should take into account the `from_token` and `to_token`
+                tags_by_room = await self.store.get_updated_tags(
+                    user_id, from_token.stream_token.account_data_key
+                )
+                for room_id, tags in tags_by_room.items():
+                    all_updates_since_the_from_token.setdefault(room_id, {})[
+                        AccountDataTypes.TAG
+                    ] = {"tags": tags}
+
+            # For live rooms we just get the updates from `all_updates_since_the_from_token`
+            if live_rooms:
+                for room_id in all_updates_since_the_from_token.keys() & live_rooms:
+                    account_data_by_room_map[room_id] = (
+                        all_updates_since_the_from_token[room_id]
+                    )
+
+            # For previously and initial rooms we query each room individually.
+            if previously_rooms or initial_rooms:
+
+                async def handle_previously(room_id: str) -> None:
+                    # Either get updates or all account data in the room
+                    # depending on if the room state is PREVIOUSLY or NEVER.
+                    previous_token = previously_rooms.get(room_id)
+                    if previous_token is not None:
+                        room_account_data = await (
+                            self.store.get_updated_room_account_data_for_user_for_room(
+                                user_id=user_id,
+                                room_id=room_id,
+                                from_stream_id=previous_token,
+                                to_stream_id=to_token.account_data_key,
+                            )
+                        )
+
+                        # Add room tags
+                        changed = await self.store.has_tags_changed_for_room(
+                            user_id=user_id,
+                            room_id=room_id,
+                            from_stream_id=previous_token,
+                            to_stream_id=to_token.account_data_key,
+                        )
+                        if changed:
+                            # XXX: Ideally, this should take into account the `to_token`
+                            # and return the set of tags at that time but we don't track
+                            # changes to tags so we just have to return all tags for the
+                            # room.
+                            immutable_tag_map = await self.store.get_tags_for_room(
+                                user_id, room_id
+                            )
+                            room_account_data[AccountDataTypes.TAG] = {
+                                "tags": immutable_tag_map
+                            }
+
+                        # Only add an entry if there were any updates.
+                        if room_account_data:
+                            account_data_by_room_map[room_id] = room_account_data
+                    else:
+                        # TODO: This should take into account the `to_token`
+                        immutable_room_account_data = (
+                            await self.store.get_account_data_for_room(user_id, room_id)
+                        )
+
+                        # Add room tags
+                        #
+                        # XXX: Ideally, this should take into account the `to_token`
+                        # and return the set of tags at that time but we don't track
+                        # changes to tags so we just have to return all tags for the
+                        # room.
+                        immutable_tag_map = await self.store.get_tags_for_room(
+                            user_id, room_id
+                        )
+
+                        account_data_by_room_map[room_id] = ChainMap(
+                            {AccountDataTypes.TAG: {"tags": immutable_tag_map}}
+                            if immutable_tag_map
+                            else {},
+                            # Cast is safe because `ChainMap` only mutates the top-most map,
+                            # see https://github.com/python/typeshed/issues/8430
+                            cast(
+                                MutableMapping[str, JsonMapping],
+                                immutable_room_account_data,
+                            ),
+                        )
+
+                # We handle these rooms concurrently to speed it up.
+                await concurrently_execute(
+                    handle_previously,
+                    previously_rooms.keys() | initial_rooms,
+                    limit=20,
                 )
 
-        # Filter down to the relevant rooms
-        account_data_by_room_map = {
-            room_id: account_data_map
-            for room_id, account_data_map in account_data_by_room_map.items()
-            if room_id in relevant_room_ids
-        }
+            # Now record which rooms are now up to data, and which rooms have
+            # pending updates to send.
+            new_connection_state.account_data.record_sent_rooms(previously_rooms.keys())
+            new_connection_state.account_data.record_sent_rooms(initial_rooms)
+            missing_updates = (
+                all_updates_since_the_from_token.keys() - relevant_room_ids
+            )
+            if missing_updates:
+                # If we have missing updates then we must have had a from_token.
+                assert from_token is not None
+
+                new_connection_state.account_data.record_unsent_rooms(
+                    missing_updates, from_token.stream_token.account_data_key
+                )
 
         return SlidingSyncResult.Extensions.AccountDataExtension(
             global_account_data_map=global_account_data_map,
@@ -436,9 +613,9 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
@@ -484,15 +661,21 @@ class SlidingSyncExtensionHandler:
                     initial_rooms.add(room_id)
                     continue
 
-                # If we're sending down the room from scratch again for some reason, we
-                # should always resend the receipts as well (regardless of if
-                # we've sent them down before). This is to mimic the behaviour
-                # of what happens on initial sync, where you get a chunk of
-                # timeline with all of the corresponding receipts for the events in the timeline.
+                # If we're sending down the room from scratch again for some
+                # reason, we should always resend the receipts as well
+                # (regardless of if we've sent them down before). This is to
+                # mimic the behaviour of what happens on initial sync, where you
+                # get a chunk of timeline with all of the corresponding receipts
+                # for the events in the timeline.
+                #
+                # We also resend down receipts when we "expand" the timeline,
+                # (see the "XXX: Odd behavior" in
+                # `synapse.handlers.sliding_sync`).
                 room_result = actual_room_response_map.get(room_id)
-                if room_result is not None and room_result.initial:
-                    initial_rooms.add(room_id)
-                    continue
+                if room_result is not None:
+                    if room_result.initial or room_result.unstable_expanded_timeline:
+                        initial_rooms.add(room_id)
+                        continue
 
                 room_status = previous_connection_state.receipts.have_sent_room(room_id)
                 if room_status.status == HaveSentRoomFlag.LIVE:
@@ -523,7 +706,10 @@ class SlidingSyncExtensionHandler:
             # For rooms we've previously sent down, but aren't up to date, we
             # need to use the from token from the room status.
             if previously_rooms:
-                for room_id, receipt_token in previously_rooms.items():
+                # Fetch any missing rooms concurrently.
+
+                async def handle_previously_room(room_id: str) -> None:
+                    receipt_token = previously_rooms[room_id]
                     # TODO: Limit the number of receipts we're about to send down
                     # for the room, if its too many we should TODO
                     previously_receipts = (
@@ -535,21 +721,53 @@ class SlidingSyncExtensionHandler:
                     )
                     fetched_receipts.extend(previously_receipts)
 
-            # For rooms we haven't previously sent down, we could send all receipts
-            # from that room but we only want to include receipts for events
-            # in the timeline to avoid bloating and blowing up the sync response
-            # as the number of users in the room increases. (this behavior is part of the spec)
-            initial_rooms_and_event_ids = [
-                (room_id, event.event_id)
-                for room_id in initial_rooms
-                if room_id in actual_room_response_map
-                for event in actual_room_response_map[room_id].timeline_events
-            ]
-            if initial_rooms_and_event_ids:
+                await concurrently_execute(
+                    handle_previously_room, previously_rooms.keys(), 20
+                )
+
+            if initial_rooms:
+                # We also always send down receipts for the current user.
+                user_receipts = (
+                    await self.store.get_linearized_receipts_for_user_in_rooms(
+                        user_id=sync_config.user.to_string(),
+                        room_ids=initial_rooms,
+                        to_key=to_token.receipt_key,
+                    )
+                )
+
+                # For rooms we haven't previously sent down, we could send all receipts
+                # from that room but we only want to include receipts for events
+                # in the timeline to avoid bloating and blowing up the sync response
+                # as the number of users in the room increases. (this behavior is part of the spec)
+                initial_rooms_and_event_ids = [
+                    (room_id, event.event_id)
+                    for room_id in initial_rooms
+                    if room_id in actual_room_response_map
+                    for event in actual_room_response_map[room_id].timeline_events
+                ]
                 initial_receipts = await self.store.get_linearized_receipts_for_events(
                     room_and_event_ids=initial_rooms_and_event_ids,
                 )
-                fetched_receipts.extend(initial_receipts)
+
+                # Combine the receipts for a room and add them to
+                # `fetched_receipts`
+                for room_id in initial_receipts.keys() | user_receipts.keys():
+                    receipt_content = ReceiptInRoom.merge_to_content(
+                        list(
+                            itertools.chain(
+                                initial_receipts.get(room_id, []),
+                                user_receipts.get(room_id, []),
+                            )
+                        )
+                    )
+
+                    fetched_receipts.append(
+                        {
+                            "room_id": room_id,
+                            "type": EduTypes.RECEIPT,
+                            "content": receipt_content,
+                        }
+                    )
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
                 fetched_receipts, sync_config.user.to_string()
@@ -563,9 +781,10 @@ class SlidingSyncExtensionHandler:
 
                 room_id_to_receipt_map[room_id] = {"type": type, "content": content}
 
-        # Now we update the per-connection state to track which receipts we have
-        # and haven't sent down.
-        new_connection_state.receipts.record_sent_rooms(relevant_room_ids)
+            # Update the per-connection state to track which rooms we have sent
+            # all the receipts for.
+            new_connection_state.receipts.record_sent_rooms(previously_rooms.keys())
+            new_connection_state.receipts.record_sent_rooms(initial_rooms)
 
         if from_token:
             # Now find the set of rooms that may have receipts that we're not sending
@@ -598,9 +817,9 @@ class SlidingSyncExtensionHandler:
     async def get_typing_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         typing_request: SlidingSyncConfig.Extensions.TypingExtension,
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],

@@ -76,8 +76,9 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 async def user_may_invite(inviter: str, invitee: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
-Called when processing an invitation. Both inviter and invitee are
-represented by their Matrix user ID (e.g. `@alice:example.com`).
+Called when processing an invitation, both when one is created locally or when
+receiving an invite over federation. Both inviter and invitee are represented by
+their Matrix user ID (e.g. `@alice:example.com`).
 
 
 The callback must return one of:
@@ -112,7 +113,9 @@ async def user_may_send_3pid_invite(
 ```
 
 Called when processing an invitation using a third-party identifier (also called a 3PID,
-e.g. an email address or a phone number). 
+e.g. an email address or a phone number). It is only called when a 3PID invite is created
+locally - not when one is received in a room over federation. If the 3PID is already associated
+with a Matrix ID, the spam check will go through the `user_may_invite` callback instead.
 
 The inviter is represented by their Matrix user ID (e.g. `@alice:example.com`), and the
 invitee is represented by its medium (e.g. "email") and its address
@@ -242,7 +245,7 @@ this callback.
 _First introduced in Synapse v1.37.0_
 
 ```python
-async def check_username_for_spam(user_profile: synapse.module_api.UserProfile) -> bool
+async def check_username_for_spam(user_profile: synapse.module_api.UserProfile, requester_id: str) -> bool
 ```
 
 Called when computing search results in the user directory. The module must return a
@@ -260,6 +263,8 @@ The profile is represented as a dictionary with the following keys:
 
 The module is given a copy of the original dictionary, so modifying it from within the
 module cannot modify a user's profile when included in user directory search results.
+
+The requester_id parameter is the ID of the user that called the user directory API.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `False`, Synapse falls through to the next one. The value of the first

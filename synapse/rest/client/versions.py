@@ -4,7 +4,7 @@
 # Copyright 2019 The Matrix.org Foundation C.I.C.
 # Copyright 2017 Vector Creations Ltd
 # Copyright 2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -149,9 +149,6 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc3881": msc3881_enabled,
                     # Adds support for filtering /messages by event relation.
                     "org.matrix.msc3874": self.config.experimental.msc3874_enabled,
-                    # Adds support for simple HTTP rendezvous as per MSC3886
-                    "org.matrix.msc3886": self.config.experimental.msc3886_endpoint
-                    is not None,
                     # Adds support for relation-based redactions as per MSC3912.
                     "org.matrix.msc3912": self.config.experimental.msc3912_enabled,
                     # Whether recursively provide relations is supported.
@@ -171,10 +168,12 @@ class VersionsRestServlet(RestServlet):
                             is not None
                         )
                     ),
-                    # MSC4151: Report room API (Client-Server API)
-                    "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
+                    # MSC4140: Delayed events
+                    "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
+                    # Arbitrary key-value profile fields.
+                    "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
                 },
             },
         )

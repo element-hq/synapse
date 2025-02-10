@@ -196,7 +196,9 @@ class MessageHandler:
             AuthError (403) if the user doesn't have permission to view
             members of this room.
         """
-        state_filter = state_filter or StateFilter.all()
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         user_id = requester.user.to_string()
 
         if at_token:
@@ -1225,10 +1227,9 @@ class EventCreationHandler:
             )
 
         if prev_event_ids is not None:
-            assert (
-                len(prev_event_ids) <= 10
-            ), "Attempting to create an event with %i prev_events" % (
-                len(prev_event_ids),
+            assert len(prev_event_ids) <= 10, (
+                "Attempting to create an event with %i prev_events"
+                % (len(prev_event_ids),)
             )
         else:
             prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)

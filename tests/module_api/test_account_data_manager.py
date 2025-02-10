@@ -164,6 +164,8 @@ class ModuleApiTestCase(HomeserverTestCase):
             # noinspection PyTypeChecker
             self.get_success_or_raise(
                 self._module_api.account_data_manager.put_global(
-                    self.user_id, "test.data", 42  # type: ignore[arg-type]
+                    self.user_id,
+                    "test.data",
+                    42,  # type: ignore[arg-type]
                 )
             )

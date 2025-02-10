@@ -88,6 +88,7 @@ from synapse.storage.databases.main.relations import RelationsWorkerStore
 from synapse.storage.databases.main.room import RoomBackgroundUpdateStore
 from synapse.storage.databases.main.roommember import RoomMemberBackgroundUpdateStore
 from synapse.storage.databases.main.search import SearchBackgroundUpdateStore
+from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.state import MainStateBackgroundUpdateStore
 from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.databases.main.user_directory import (
@@ -129,6 +130,11 @@ BOOLEAN_COLUMNS = {
     "remote_media_cache": ["authenticated"],
     "room_stats_state": ["is_federatable"],
     "rooms": ["is_public", "has_auth_chain_index"],
+    "sliding_sync_joined_rooms": ["is_encrypted"],
+    "sliding_sync_membership_snapshots": [
+        "has_known_state",
+        "is_encrypted",
+    ],
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],
     "users_who_share_rooms": ["share_private"],
@@ -250,6 +256,7 @@ class Store(
     ReceiptsBackgroundUpdateStore,
     RelationsWorkerStore,
     EventFederationWorkerStore,
+    SlidingSyncStore,
 ):
     def execute(self, f: Callable[..., R], *args: Any, **kwargs: Any) -> Awaitable[R]:
         return self.db_pool.runInteraction(f.__name__, f, *args, **kwargs)
@@ -712,9 +719,7 @@ class Porter:
                 return
 
             # Check if all background updates are done, abort if not.
-            updates_complete = (
-                await self.sqlite_store.db_pool.updates.has_completed_background_updates()
-            )
+            updates_complete = await self.sqlite_store.db_pool.updates.has_completed_background_updates()
             if not updates_complete:
                 end_error = (
                     "Pending background updates exist in the SQLite3 database."
@@ -1090,10 +1095,10 @@ class Porter:
         return done, remaining + done
 
     async def _setup_state_group_id_seq(self) -> None:
-        curr_id: Optional[int] = (
-            await self.sqlite_store.db_pool.simple_select_one_onecol(
-                table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
-            )
+        curr_id: Optional[
+            int
+        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
+            table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
         )
 
         if not curr_id:
@@ -1181,13 +1186,13 @@ class Porter:
         )
 
     async def _setup_auth_chain_sequence(self) -> None:
-        curr_chain_id: Optional[int] = (
-            await self.sqlite_store.db_pool.simple_select_one_onecol(
-                table="event_auth_chains",
-                keyvalues={},
-                retcol="MAX(chain_id)",
-                allow_none=True,
-            )
+        curr_chain_id: Optional[
+            int
+        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
+            table="event_auth_chains",
+            keyvalues={},
+            retcol="MAX(chain_id)",
+            allow_none=True,
         )
 
         def r(txn: LoggingTransaction) -> None:

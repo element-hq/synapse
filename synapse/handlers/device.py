@@ -48,6 +48,7 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.storage.databases.main.client_ips import DeviceLastConnectionInfo
+from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import (
     DeviceListUpdates,
@@ -222,7 +223,6 @@ class DeviceWorkerHandler:
         return changed
 
     @trace
-    @measure_func("device.get_user_ids_changed")
     @cancellable
     async def get_user_ids_changed(
         self, user_id: str, from_token: StreamToken
@@ -290,9 +290,11 @@ class DeviceWorkerHandler:
                 memberships_to_fetch.add(delta.prev_event_id)
 
         # Fetch all the memberships for the membership events
-        event_id_to_memberships = await self.store.get_membership_from_event_ids(
-            memberships_to_fetch
-        )
+        event_id_to_memberships: Mapping[str, Optional[EventIdMembership]] = {}
+        if memberships_to_fetch:
+            event_id_to_memberships = await self.store.get_membership_from_event_ids(
+                memberships_to_fetch
+            )
 
         joined_invited_knocked = (
             Membership.JOIN,
@@ -349,7 +351,6 @@ class DeviceWorkerHandler:
 
         return device_list_updates
 
-    @measure_func("_generate_sync_entry_for_device_list")
     async def generate_sync_entry_for_device_list(
         self,
         user_id: str,
@@ -727,6 +728,40 @@ class DeviceHandler(DeviceWorkerHandler):
         await self.hs.get_pusherpool().remove_pushers_by_devices(user_id, device_ids)
 
         await self.notify_device_update(user_id, device_ids)
+
+    async def upsert_device(
+        self, user_id: str, device_id: str, display_name: Optional[str] = None
+    ) -> bool:
+        """Create or update a device
+
+        Args:
+            user_id: The user to update devices of.
+            device_id: The device to update.
+            display_name: The new display name for this device.
+
+        Returns:
+            True if the device was created, False if it was updated.
+
+        """
+
+        # Reject a new displayname which is too long.
+        self._check_device_name_length(display_name)
+
+        created = await self.store.store_device(
+            user_id,
+            device_id,
+            initial_device_display_name=display_name,
+        )
+
+        if not created:
+            await self.store.update_device(
+                user_id,
+                device_id,
+                new_display_name=display_name,
+            )
+
+        await self.notify_device_update(user_id, [device_id])
+        return created
 
     async def update_device(self, user_id: str, device_id: str, content: dict) -> None:
         """Update the given device

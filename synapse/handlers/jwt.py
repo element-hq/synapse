@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Tuple
 
 from authlib.jose import JsonWebToken, JWTClaims
 from authlib.jose.errors import BadSignatureError, InvalidClaimError, JoseError
@@ -36,11 +36,12 @@ class JwtHandler:
 
         self.jwt_secret = hs.config.jwt.jwt_secret
         self.jwt_subject_claim = hs.config.jwt.jwt_subject_claim
+        self.jwt_display_name_claim = hs.config.jwt.jwt_display_name_claim
         self.jwt_algorithm = hs.config.jwt.jwt_algorithm
         self.jwt_issuer = hs.config.jwt.jwt_issuer
         self.jwt_audiences = hs.config.jwt.jwt_audiences
 
-    def validate_login(self, login_submission: JsonDict) -> str:
+    def validate_login(self, login_submission: JsonDict) -> Tuple[str, Optional[str]]:
         """
         Authenticates the user for the /login API
 
@@ -49,7 +50,8 @@ class JwtHandler:
                 (including 'type' and other relevant fields)
 
         Returns:
-            The user ID that is logging in.
+            A tuple of (user_id, display_name) of the user that is logging in.
+            If the JWT does not contain a display name, the second element of the tuple will be None.
 
         Raises:
             LoginError if there was an authentication problem.
@@ -109,4 +111,10 @@ class JwtHandler:
         if user is None:
             raise LoginError(403, "Invalid JWT", errcode=Codes.FORBIDDEN)
 
-        return UserID(user, self.hs.hostname).to_string()
+        default_display_name = None
+        if self.jwt_display_name_claim:
+            display_name_claim = claims.get(self.jwt_display_name_claim)
+            if display_name_claim is not None:
+                default_display_name = display_name_claim
+
+        return UserID(user, self.hs.hostname).to_string(), default_display_name

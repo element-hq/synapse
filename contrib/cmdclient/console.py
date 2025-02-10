@@ -21,7 +21,8 @@
 #
 #
 
-""" Starts a synapse client console. """
+"""Starts a synapse client console."""
+
 import argparse
 import binascii
 import cmd
@@ -244,7 +245,7 @@ class SynapseCmd(cmd.Cmd):
 
         if "flows" not in json_res:
             print("Failed to find any login flows.")
-            defer.returnValue(False)
+            return False
 
         flow = json_res["flows"][0]  # assume first is the one we want.
         if "type" not in flow or "m.login.password" != flow["type"] or "stages" in flow:
@@ -253,8 +254,8 @@ class SynapseCmd(cmd.Cmd):
                 "Unable to login via the command line client. Please visit "
                 "%s to login." % fallback_url
             )
-            defer.returnValue(False)
-        defer.returnValue(True)
+            return False
+        return True
 
     def do_emailrequest(self, line):
         """Requests the association of a third party identifier

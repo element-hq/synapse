@@ -40,7 +40,6 @@ from tests.test_utils import SMALL_PNG
 
 
 class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
@@ -150,7 +149,6 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
 
 class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
         self.test_dir = tempfile.mkdtemp(prefix="synapse-tests-")
