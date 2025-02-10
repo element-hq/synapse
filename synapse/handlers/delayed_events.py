@@ -238,7 +238,7 @@ class DelayedEventsHandler:
             SynapseError: if the delayed event fails validation checks.
         """
         # Use standard request limiter for scheduling new delayed events.
-        # TODO: Instead apply rateliming based on the scheduled send time.
+        # TODO: Instead apply ratelimiting based on the scheduled send time.
         # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
 
