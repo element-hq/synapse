@@ -183,6 +183,18 @@ def _load_appservice(
             "The `org.matrix.msc3202` option should be true or false if specified."
         )
 
+    # Opt-in flag for the MSC4190 behaviours.
+    # When enabled, the following C-S API endpoints change for appservices:
+    # - POST /register does not return an access token
+    # - PUT /devices/{device_id} creates a new device if one does not exist
+    # - DELETE /devices/{device_id} no longer requires UIA
+    # - POST /delete_devices/{device_id} no longer requires UIA
+    msc4190_enabled = as_info.get("io.element.msc4190", False)
+    if not isinstance(msc4190_enabled, bool):
+        raise ValueError(
+            "The `io.element.msc4190` option should be true or false if specified."
+        )
+
     return ApplicationService(
         token=as_info["as_token"],
         url=as_info["url"],
@@ -195,4 +207,5 @@ def _load_appservice(
         ip_range_whitelist=ip_range_whitelist,
         supports_ephemeral=supports_ephemeral,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
+        msc4190_device_management=msc4190_enabled,
     )

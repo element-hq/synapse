@@ -2035,6 +2035,52 @@ class RoomTestCase(unittest.HomeserverTestCase):
         # the create_room already does the right thing, so no need to verify that we got
         # the state events it created.
 
+    def test_room_state_param(self) -> None:
+        """Test that filtering by state event type works when requesting state"""
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.room.member",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        # only one member has joined so there should be one membership event
+        self.assertEqual(1, len(state))
+        event = state[0]
+        self.assertEqual(event["type"], "m.room.member")
+        self.assertEqual(event["state_key"], self.admin_user)
+
+    def test_room_state_param_empty(self) -> None:
+        """Test that passing an empty string as state filter param returns no state events"""
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        self.assertEqual(5, len(state))
+
+    def test_room_state_param_not_in_room(self) -> None:
+        """
+        Test that passing a state filter param for a state event not in the room
+        returns no state events
+        """
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.room.custom",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        self.assertEqual(0, len(state))
+
     def _set_canonical_alias(
         self, room_id: str, test_alias: str, admin_user_tok: str
     ) -> None:
@@ -3050,7 +3096,7 @@ PURGE_TABLES = [
     "pusher_throttle",
     "room_account_data",
     "room_tags",
-    # "state_groups",  # Current impl leaves orphaned state groups around.
+    "state_groups",
     "state_groups_state",
     "federation_inbound_events_staging",
 ]

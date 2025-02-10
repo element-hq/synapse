@@ -107,6 +107,8 @@ from synapse.rest.admin.users import (
     UserAdminServlet,
     UserByExternalId,
     UserByThreePid,
+    UserInvitesCount,
+    UserJoinedRoomCount,
     UserMembershipRestServlet,
     UserRegisterServlet,
     UserReplaceMasterCrossSigningKeyRestServlet,
@@ -323,6 +325,8 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserByThreePid(hs).register(http_server)
     RedactUser(hs).register(http_server)
     RedactUserStatus(hs).register(http_server)
+    UserInvitesCount(hs).register(http_server)
+    UserJoinedRoomCount(hs).register(http_server)
 
     DeviceRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)
@@ -332,8 +336,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     BackgroundUpdateRestServlet(hs).register(http_server)
     BackgroundUpdateStartJobRestServlet(hs).register(http_server)
     ExperimentalFeaturesRestServlet(hs).register(http_server)
-    if hs.config.experimental.msc3823_account_suspension:
-        SuspendAccountRestServlet(hs).register(http_server)
+    SuspendAccountRestServlet(hs).register(http_server)
 
 
 def register_servlets_for_client_rest_resource(

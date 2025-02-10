@@ -407,8 +407,8 @@ class StateValues:
     # Include all state events of the given type
     WILDCARD: Final = "*"
     # Lazy-load room membership events (include room membership events for any event
-    # `sender` in the timeline). We only give special meaning to this value when it's a
-    # `state_key`.
+    # `sender` or membership change target in the timeline). We only give special
+    # meaning to this value when it's a `state_key`.
     LAZY: Final = "$LAZY"
     # Subsitute with the requester's user ID. Typically used by clients to get
     # the user's membership.
@@ -641,9 +641,10 @@ class RoomSyncConfig:
             if user_id == StateValues.ME:
                 continue
             # We're lazy-loading membership so we can just return the state we have.
-            # Lazy-loading means we include membership for any event `sender` in the
-            # timeline but since we had to auth those timeline events, we will have the
-            # membership state for them (including from remote senders).
+            # Lazy-loading means we include membership for any event `sender` or
+            # membership change target in the timeline but since we had to auth those
+            # timeline events, we will have the membership state for them (including
+            # from remote senders).
             elif user_id == StateValues.LAZY:
                 continue
             elif user_id == StateValues.WILDCARD:

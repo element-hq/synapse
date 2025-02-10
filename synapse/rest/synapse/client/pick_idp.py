@@ -21,6 +21,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.http.server import (
     DirectServeHtmlResource,
     finish_request,
@@ -49,6 +50,8 @@ class PickIdpResource(DirectServeHtmlResource):
             hs.config.sso.sso_login_idp_picker_template
         )
         self._server_name = hs.hostname
+        self._public_baseurl = hs.config.server.public_baseurl
+        self._login_sso_redirect_url_builder = LoginSSORedirectURIBuilder(hs.config)
 
     async def _async_render_GET(self, request: SynapseRequest) -> None:
         client_redirect_url = parse_string(
@@ -56,25 +59,23 @@ class PickIdpResource(DirectServeHtmlResource):
         )
         idp = parse_string(request, "idp", required=False)
 
-        # if we need to pick an IdP, do so
+        # If we need to pick an IdP, do so
         if not idp:
             return await self._serve_id_picker(request, client_redirect_url)
 
-        # otherwise, redirect to the IdP's redirect URI
-        providers = self._sso_handler.get_identity_providers()
-        auth_provider = providers.get(idp)
-        if not auth_provider:
-            logger.info("Unknown idp %r", idp)
-            self._sso_handler.render_error(
-                request, "unknown_idp", "Unknown identity provider ID"
+        # Otherwise, redirect to the login SSO redirect endpoint for the given IdP
+        # (which will in turn take us to the the IdP's redirect URI).
+        #
+        # We could go directly to the IdP's redirect URI, but this way we ensure that
+        # the user goes through the same logic as normal flow. Additionally, if a proxy
+        # needs to intercept the request, it only needs to intercept the one endpoint.
+        sso_login_redirect_url = (
+            self._login_sso_redirect_url_builder.build_login_sso_redirect_uri(
+                idp_id=idp, client_redirect_url=client_redirect_url
             )
-            return
-
-        sso_url = await auth_provider.handle_redirect_request(
-            request, client_redirect_url.encode("utf8")
         )
-        logger.info("Redirecting to %s", sso_url)
-        request.redirect(sso_url)
+        logger.info("Redirecting to %s", sso_login_redirect_url)
+        request.redirect(sso_login_redirect_url)
         finish_request(request)
 
     async def _serve_id_picker(
