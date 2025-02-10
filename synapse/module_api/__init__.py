@@ -1846,6 +1846,9 @@ class ModuleApi:
             deactivation=deactivation,
         )
 
+    def get_current_time(self) -> int:
+        """Returns the current server time in milliseconds."""
+        return self._clock.time_msec()
 
 class PublicRoomListManager:
     """Contains methods for adding to, removing from and querying whether a room
