@@ -1,1 +1,1 @@
-Do not log exceptions when clients provide empty `since` token to `/sync` API.
+Do not log at the exception-level when clients provide empty `since` token to `/sync` API.
