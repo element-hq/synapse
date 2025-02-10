@@ -854,7 +854,7 @@ class MatrixFederationAgentTests(TestCase):
     def test_proxy_with_no_scheme(self) -> None:
         http_proxy_agent = ProxyAgent(self.reactor, use_proxy=True)
         proxy_ep = checked_cast(HostnameEndpoint, http_proxy_agent.http_proxy_endpoint)
-        self.assertEqual(proxy_ep._hostStr, "proxy.com")
+        self.assertEqual(proxy_ep._hostText, "proxy.com")
         self.assertEqual(proxy_ep._port, 8888)
 
     @patch.dict(os.environ, {"http_proxy": "socks://proxy.com:8888"})
@@ -866,14 +866,14 @@ class MatrixFederationAgentTests(TestCase):
     def test_proxy_with_http_scheme(self) -> None:
         http_proxy_agent = ProxyAgent(self.reactor, use_proxy=True)
         proxy_ep = checked_cast(HostnameEndpoint, http_proxy_agent.http_proxy_endpoint)
-        self.assertEqual(proxy_ep._hostStr, "proxy.com")
+        self.assertEqual(proxy_ep._hostText, "proxy.com")
         self.assertEqual(proxy_ep._port, 8888)
 
     @patch.dict(os.environ, {"http_proxy": "https://proxy.com:8888"})
     def test_proxy_with_https_scheme(self) -> None:
         https_proxy_agent = ProxyAgent(self.reactor, use_proxy=True)
         proxy_ep = checked_cast(_WrapperEndpoint, https_proxy_agent.http_proxy_endpoint)
-        self.assertEqual(proxy_ep._wrappedEndpoint._hostStr, "proxy.com")
+        self.assertEqual(proxy_ep._wrappedEndpoint._hostText, "proxy.com")
         self.assertEqual(proxy_ep._wrappedEndpoint._port, 8888)
 
 

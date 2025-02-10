@@ -20,7 +20,11 @@
 #
 
 from synapse.api.errors import SynapseError
-from synapse.util.stringutils import assert_valid_client_secret, base62_encode
+from synapse.util.stringutils import (
+    assert_valid_client_secret,
+    base62_encode,
+    is_namedspaced_grammar,
+)
 
 from .. import unittest
 
@@ -58,3 +62,25 @@ class StringUtilsTestCase(unittest.TestCase):
         self.assertEqual("10", base62_encode(62))
         self.assertEqual("1c", base62_encode(100))
         self.assertEqual("001c", base62_encode(100, minwidth=4))
+
+    def test_namespaced_identifier(self) -> None:
+        self.assertTrue(is_namedspaced_grammar("test"))
+        self.assertTrue(is_namedspaced_grammar("m.test"))
+        self.assertTrue(is_namedspaced_grammar("org.matrix.test"))
+        self.assertTrue(is_namedspaced_grammar("org.matrix.msc1234"))
+        self.assertTrue(is_namedspaced_grammar("test"))
+        self.assertTrue(is_namedspaced_grammar("t-e_s.t"))
+
+        # Must start with letter.
+        self.assertFalse(is_namedspaced_grammar("1test"))
+        self.assertFalse(is_namedspaced_grammar("-test"))
+        self.assertFalse(is_namedspaced_grammar("_test"))
+        self.assertFalse(is_namedspaced_grammar(".test"))
+
+        # Must contain only a-z, 0-9, -, _, ..
+        self.assertFalse(is_namedspaced_grammar("test/"))
+        self.assertFalse(is_namedspaced_grammar('test"'))
+        self.assertFalse(is_namedspaced_grammar("testö"))
+
+        # Must be < 255 characters.
+        self.assertFalse(is_namedspaced_grammar("t" * 256))

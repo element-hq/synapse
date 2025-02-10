@@ -742,7 +742,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(33, channel.resource_usage.db_txn_count)
+        self.assertEqual(35, channel.resource_usage.db_txn_count)
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -755,7 +755,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(35, channel.resource_usage.db_txn_count)
+        self.assertEqual(37, channel.resource_usage.db_txn_count)
 
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
@@ -1337,17 +1337,13 @@ class RoomJoinTestCase(RoomBase):
             "POST", f"/join/{self.room1}", access_token=self.tok2
         )
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
         channel = self.make_request(
             "POST", f"/rooms/{self.room1}/join", access_token=self.tok2
         )
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_knock_on_room(self) -> None:
         # set the user as suspended
@@ -1361,9 +1357,7 @@ class RoomJoinTestCase(RoomBase):
             shorthand=False,
         )
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_invite_to_room(self) -> None:
         # set the user as suspended
@@ -1376,9 +1370,7 @@ class RoomJoinTestCase(RoomBase):
             access_token=self.tok1,
             content={"user_id": self.user2},
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
 
 class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
@@ -4011,9 +4003,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             access_token=self.tok1,
             content={"body": "hello", "msgtype": "m.text"},
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_change_profile_data(self) -> None:
         # set the user as suspended
@@ -4026,9 +4016,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"avatar_url": "mxc://matrix.org/wefh34uihSDRGhw34"},
             shorthand=False,
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
         channel2 = self.make_request(
             "PUT",
@@ -4037,9 +4025,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"displayname": "something offensive"},
             shorthand=False,
         )
-        self.assertEqual(
-            channel2.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel2.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_redact_messages_other_than_their_own(self) -> None:
         # first user sends message
@@ -4073,9 +4059,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"reason": "bogus"},
             shorthand=False,
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
         # but can redact their own
         channel = self.make_request(

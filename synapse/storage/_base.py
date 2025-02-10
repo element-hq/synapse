@@ -86,7 +86,9 @@ class SQLBaseStore(metaclass=ABCMeta):
         """
 
     def _invalidate_state_caches(
-        self, room_id: str, members_changed: Collection[str]
+        self,
+        room_id: str,
+        members_changed: Collection[str],
     ) -> None:
         """Invalidates caches that are based on the current state, but does
         not stream invalidations down replication.
