@@ -667,7 +667,6 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
         # Check that it looks like a Synapse token first. We do this so that
         # we don't log at the exception-level for obviously incorrect tokens.
         if not string or string[0] not in ("s", "t", "m"):
-            logger.warning("Invalid token %r", string)
             raise SynapseError(400, f"Invalid room stream token {string:!r}")
 
         try:
