@@ -33,12 +33,12 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Protocol,
     Set,
 )
 from urllib.parse import urlencode
 
 import attr
-from typing_extensions import Protocol
 
 from twisted.web.iweb import IRequest
 from twisted.web.server import Request
