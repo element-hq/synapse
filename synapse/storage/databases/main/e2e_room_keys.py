@@ -510,19 +510,16 @@ class EndToEndRoomKeyStore(EndToEndRoomKeyBackgroundStore):
                     # it isn't there.
                     raise StoreError(404, "No backup with that version exists")
 
-            row = cast(
-                Tuple[int, str, str, Optional[int]],
-                self.db_pool.simple_select_one_txn(
-                    txn,
-                    table="e2e_room_keys_versions",
-                    keyvalues={
-                        "user_id": user_id,
-                        "version": this_version,
-                        "deleted": 0,
-                    },
-                    retcols=("version", "algorithm", "auth_data", "etag"),
-                    allow_none=False,
-                ),
+            row = self.db_pool.simple_select_one_txn(
+                txn,
+                table="e2e_room_keys_versions",
+                keyvalues={
+                    "user_id": user_id,
+                    "version": this_version,
+                    "deleted": 0,
+                },
+                retcols=("version", "algorithm", "auth_data", "etag"),
+                allow_none=False,
             )
             return {
                 "auth_data": db_to_json(row[2]),
