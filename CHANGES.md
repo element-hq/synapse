@@ -1,3 +1,19 @@
+# Synapse 1.124.0 (2025-02-11)
+
+No significant changes since 1.124.0rc3.
+
+
+
+
+# Synapse 1.124.0rc3 (2025-02-07)
+
+### Bugfixes
+
+- Fix regression in performance of sending events due to superfluous reads and locks. Introduced in v1.124.0rc1. ([\#18141](https://github.com/element-hq/synapse/issues/18141))
+
+
+
+
 # Synapse 1.124.0rc2 (2025-02-05)
 
 ### Bugfixes
