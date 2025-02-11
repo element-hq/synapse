@@ -1877,7 +1877,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.123.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.124.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -5460,6 +5460,22 @@ from a single server. Defaults to 3.</li>
   sleep_delay: 400
   reject_limit: 40
   concurrent: 5
+</code></pre>
+<hr />
+<h3 id="rc_presence"><a class="header" href="#rc_presence"><code>rc_presence</code></a></h3>
+<p>This option sets ratelimiting for presence.</p>
+<p>The <code>rc_presence.per_user</code> option sets rate limits on how often a specific
+users' presence updates are evaluated. Ratelimited presence updates sent via sync are
+ignored, and no error is returned to the client.
+This option also sets the rate limit for the
+<a href="https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3presenceuseridstatus"><code>PUT /_matrix/client/v3/presence/{userId}/status</code></a>
+endpoint.</p>
+<p><code>per_user</code> defaults to <code>per_second: 0.1</code>, <code>burst_count: 1</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_presence:
+  per_user:
+    per_second: 0.05
+    burst_count: 0.5
 </code></pre>
 <hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
