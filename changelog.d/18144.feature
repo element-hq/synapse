@@ -1,1 +1,1 @@
-Introduced the get_current_time method in ModuleApi to provide the current server time in milliseconds, as wrapper around self.module_api._clock.time_msec() to avoid accessing private variables
+Add `get_current_time()` method to the [module API](https://matrix-org.github.io/synapse/latest/modules/writing_a_module.html) for sound time comparisons with Synapse.
