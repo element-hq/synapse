@@ -1850,6 +1850,7 @@ class ModuleApi:
         """Returns the current server time in milliseconds."""
         return self._clock.time_msec()
 
+
 class PublicRoomListManager:
     """Contains methods for adding to, removing from and querying whether a room
     is in the public room list.
