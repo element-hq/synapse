@@ -79,6 +79,7 @@ logger = logging.getLogger(__name__)
 
 _MEMBERSHIP_PROFILE_UPDATE_NAME = "room_membership_profile_update"
 _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
+_POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
 
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
@@ -1620,7 +1621,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         ) -> None:
             sql = """
                 UPDATE room_memberships
-                SET participant = True
+                SET participant = true
                 WHERE (user_id, room_id) IN (
                     SELECT user_id, room_id
                     FROM room_memberships
@@ -1740,7 +1741,8 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
                 ) AS subquery
                 WHERE room_memberships.user_id = subquery.state_key
                     AND room_memberships.room_id = subquery.room_id
-                    AND room_memberships.event_stream_ordering <= ?;
+                    AND room_memberships.event_stream_ordering <= ?
+                    AND room_memberships.event_stream_ordering >= 0;
             """
 
             txn.execute(sql, (stream_token,))
@@ -1754,23 +1756,22 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             await self.db_pool.updates._end_background_update(
                 "populate_participant_bg_update"
             )
-            return 1000
+            return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
 
-        logger.info(f"stream token is {stream_token}")
         await self.db_pool.runInteraction(
             "_background_populate_participant_txn",
             _background_populate_participant_txn,
             stream_token,
         )
 
-        progress["last_stream_token"] = stream_token - 1000
+        progress["last_stream_token"] = stream_token - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
         await self.db_pool.runInteraction(
             "populate_participant_bg_update",
             self.db_pool.updates._background_update_progress_txn,
             "populate_participant_bg_update",
             progress,
         )
-        return 1000
+        return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
 
     async def _background_add_membership_profile(
         self, progress: JsonDict, batch_size: int
