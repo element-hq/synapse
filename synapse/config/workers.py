@@ -218,7 +218,9 @@ class WorkerConfig(Config):
 
     section = "worker"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         self.worker_app = config.get("worker_app")
 
         # Canonicalise worker_app so that master always has None
@@ -243,6 +245,11 @@ class WorkerConfig(Config):
 
         # The shared secret used for authentication when connecting to the main synapse.
         self.worker_replication_secret = config.get("worker_replication_secret", None)
+        if self.worker_replication_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("worker_replication_secret",),
+            )
 
         self.worker_name = config.get("worker_name", self.worker_app)
         self.instance_name = self.worker_name or MAIN_PROCESS_INSTANCE_NAME
