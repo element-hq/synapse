@@ -4,3 +4,4 @@ Possible use cases:
 - Filter or group user search results
 - Exclude MxIDs from the user search results
 - Include MxIDs in the user search results even if they do not match the search criteria (e.g. a helper Bot)
+Contributed by @awesome-michael.
