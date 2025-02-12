@@ -675,6 +675,86 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return {row[0] for row in rows}
 
+    async def get_referenced_state_group_edges(
+        self, state_groups: Iterable[int]
+    ) -> Set[int]:
+        """Check if the state groups are referenced by other state groups.
+
+        Args:
+            state_groups
+
+        Returns:
+            The subset of state groups that are referenced.
+        """
+        rows = cast(
+            List[Tuple[int]],
+            await self.db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="state_group",
+                iterable=state_groups,
+                keyvalues={},
+                retcols=("DISTINCT state_group",),
+                desc="get_referenced_state_group_edges",
+            ),
+        )
+
+        prev_rows = cast(
+            List[Tuple[int]],
+            await self.db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="prev_state_group",
+                iterable=state_groups,
+                keyvalues={},
+                retcols=("DISTINCT prev_state_group",),
+                desc="get_referenced_state_group_edges_prev",
+            ),
+        )
+
+        state_groups = {row[0] for row in rows}
+        prev_groups = {row[0] for row in prev_rows}
+        state_groups |= prev_groups
+
+        return state_groups
+
+    async def get_state_groups(
+        self,
+        initial_state_group: int,
+        limit: int,
+    ) -> Set[int]:
+        """Get a list of stored state groups
+
+        Args:
+            initial_state_group: get state groups starting with this one.
+            limit: the maximum number of state groups to return.
+
+        Returns:
+            The set of stored state groups following the initial_state_group.
+        """
+        return await self.db_pool.runInteraction(
+            "get_state_groups",
+            self._get_state_groups_txn,
+            initial_state_group,
+            limit,
+        )
+
+    def _get_state_groups_txn(
+        self,
+        txn: LoggingTransaction,
+        initial_state_group: int,
+        limit: int,
+    ) -> Set[int]:
+        sql = f"""
+        SELECT id from state_groups
+        WHERE id > {initial_state_group}
+        LIMIT {limit}
+        """
+
+        txn.execute(sql)
+
+        rows = txn.fetchall()
+
+        return {row[0] for row in rows}
+
     async def update_state_for_partial_state_event(
         self,
         event: EventBase,
