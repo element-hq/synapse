@@ -27,6 +27,7 @@ from parameterized import parameterized
 
 from synapse.config import ConfigError
 from synapse.config._base import RootConfig
+from synapse.config.appservice import _load_appservice
 from synapse.config.homeserver import HomeServerConfig
 
 from tests.config.utils import ConfigFileTestCase
@@ -189,3 +190,39 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             config = HomeServerConfig.load_config("", ["-c", self.config_file])
 
             self.assertEqual(get_secret(config), b"53C237")
+
+    def test_secret_files_appservice(self) -> None:
+        with tempfile.NamedTemporaryFile(buffering=0) as token_file:
+            token_file.write(b"53C237")
+
+            as_info = {
+                "id": "fake-as-id",
+                "url": "example.org",
+                "as_token_path": token_file.name,
+                "hs_token_path": token_file.name,
+                "sender_localpart": "not-real-part",
+                "namespaces": {},
+            }
+
+            appservice = _load_appservice(
+                hostname="example.org",
+                as_info=as_info,
+                config_filename="mock-config-file.name",
+            )
+
+            self.assertEqual(appservice.token, "53C237")
+            self.assertEqual(appservice.hs_token, "53C237")
+
+            with self.assertRaises(ConfigError):
+                _load_appservice(
+                    hostname="example.org",
+                    as_info={**as_info, "as_token_path": "/does/not/exist"},
+                    config_filename="mock-config-file.name",
+                )
+
+            with self.assertRaises(ConfigError):
+                _load_appservice(
+                    hostname="example.org",
+                    as_info={**as_info, "hs_token_path": "/does/not/exist"},
+                    config_filename="mock-config-file.name",
+                )
