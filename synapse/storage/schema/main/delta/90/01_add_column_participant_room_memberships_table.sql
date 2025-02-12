@@ -17,4 +17,4 @@ ALTER TABLE room_memberships ADD COLUMN participant BOOLEAN DEFAULT FALSE;
 
 -- Add a background update to populate `participant` column
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8901, 'populate_participant_bg_update', '{}');
+  (9001, 'populate_participant_bg_update', '{}');
