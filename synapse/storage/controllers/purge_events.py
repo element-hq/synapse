@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 class PurgeEventsStorageController:
     """High level interface for purging rooms and event history."""
 
+    CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS = 60 * 1000
+
     def __init__(self, hs: "HomeServer", stores: Databases):
         self.stores = stores
 
@@ -47,7 +49,7 @@ class PurgeEventsStorageController:
         self._last_checked_state_group = 0
         if hs.config.worker.run_background_tasks:
             self._clear_unreferenced_state_loop_call = hs.get_clock().looping_call(
-                self._clear_unreferenced_state_groups_loop, 60 * 1000
+                self._clear_unreferenced_state_groups_loop, self.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS
             )
 
     async def purge_room(self, room_id: str) -> None:
@@ -228,16 +230,14 @@ class PurgeEventsStorageController:
         if len(next_set) == 0:
             return
 
-        # TODO: add tests for this!
-
         referenced = await self.stores.main.get_referenced_state_groups(next_set)
         next_set -= referenced
 
         if len(next_set) == 0:
             return
 
-        referenced = await self.stores.main.get_referenced_state_group_edges(next_set)
-        next_set -= referenced
+        referenced = await self.stores.state.get_next_state_groups(next_set)
+        next_set -= set(referenced.values())
 
         if len(next_set) == 0:
             return
@@ -259,6 +259,8 @@ class PurgeEventsStorageController:
             return
 
         # TODO: state_groups_pending_deletion table is never cleaned up after deletion!
+        # TODO: should we be cleaning up any state_group_edges that are dangling after
+        # the deletion as well?
 
         # Mark the state groups for deletion by the deletion background task.
         await self.stores.state_deletion.mark_state_groups_as_pending_deletion(

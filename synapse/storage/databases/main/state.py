@@ -675,47 +675,6 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return {row[0] for row in rows}
 
-    async def get_referenced_state_group_edges(
-        self, state_groups: Iterable[int]
-    ) -> Set[int]:
-        """Check if the state groups are referenced by other state groups.
-
-        Args:
-            state_groups
-
-        Returns:
-            The subset of state groups that are referenced.
-        """
-        rows = cast(
-            List[Tuple[int]],
-            await self.db_pool.simple_select_many_batch(
-                table="state_group_edges",
-                column="state_group",
-                iterable=state_groups,
-                keyvalues={},
-                retcols=("DISTINCT state_group",),
-                desc="get_referenced_state_group_edges",
-            ),
-        )
-
-        prev_rows = cast(
-            List[Tuple[int]],
-            await self.db_pool.simple_select_many_batch(
-                table="state_group_edges",
-                column="prev_state_group",
-                iterable=state_groups,
-                keyvalues={},
-                retcols=("DISTINCT prev_state_group",),
-                desc="get_referenced_state_group_edges_prev",
-            ),
-        )
-
-        state_groups = {row[0] for row in rows}
-        prev_groups = {row[0] for row in prev_rows}
-        state_groups |= prev_groups
-
-        return state_groups
-
     async def get_state_groups(
         self,
         initial_state_group: int,
