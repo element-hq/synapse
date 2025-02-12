@@ -49,7 +49,8 @@ class PurgeEventsStorageController:
         self._last_checked_state_group = 0
         if hs.config.worker.run_background_tasks:
             self._clear_unreferenced_state_loop_call = hs.get_clock().looping_call(
-                self._clear_unreferenced_state_groups_loop, self.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS
+                self._clear_unreferenced_state_groups_loop,
+                self.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS,
             )
 
     async def purge_room(self, room_id: str) -> None:
@@ -236,8 +237,8 @@ class PurgeEventsStorageController:
         if len(next_set) == 0:
             return
 
-        referenced = await self.stores.state.get_next_state_groups(next_set)
-        next_set -= set(referenced.values())
+        next_state_groups = await self.stores.state.get_next_state_groups(next_set)
+        next_set -= set(next_state_groups.values())
 
         if len(next_set) == 0:
             return

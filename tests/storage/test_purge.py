@@ -272,8 +272,7 @@ class PurgeTests(HomeserverTestCase):
         self.assertEqual(len(state_groups), 1)
 
     def test_clear_unreferenced_state_groups(self) -> None:
-        """Test that any unreferenced state groups are automatically cleaned up.
-        """
+        """Test that any unreferenced state groups are automatically cleaned up."""
 
         self.helper.send(self.room_id, body="test1")
         state1 = self.helper.send_state(
@@ -312,7 +311,9 @@ class PurgeTests(HomeserverTestCase):
 
         # Advance so that the background job to clear unreferenced state groups runs
         self.reactor.advance(
-            1 + self._storage_controllers.purge_events.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS / 1000
+            1
+            + self._storage_controllers.purge_events.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS
+            / 1000
         )
 
         # Advance so that the background jobs to delete the state groups runs
