@@ -644,7 +644,10 @@ class EventCreationHandler:
         """
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
-        if event_dict["type"] == EventTypes.Message:
+        if (
+            event_dict["type"] == EventTypes.Message
+            or event_dict["type"] == EventTypes.Encrypted
+        ):
             requester_suspended = await self.store.get_user_suspended_status(
                 requester.user.to_string()
             )
