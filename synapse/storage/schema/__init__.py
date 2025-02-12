@@ -158,7 +158,7 @@ Changes in SCHEMA_VERSION = 88
 
 Changes in SCHEMA_VERSION = 89
     - Add `state_groups_pending_deletion` and `state_groups_persisting` tables.
-    
+
 Changes in SCHEMA_VERSION = 90
     - Add a column `participant` to `room_memberships` table
 """

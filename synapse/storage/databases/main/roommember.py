@@ -1764,7 +1764,9 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             stream_token,
         )
 
-        progress["last_stream_token"] = stream_token - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
+        progress["last_stream_token"] = (
+            stream_token - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
+        )
         await self.db_pool.runInteraction(
             "populate_participant_bg_update",
             self.db_pool.updates._background_update_progress_txn,
