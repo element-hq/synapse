@@ -22,10 +22,19 @@
 import logging
 from functools import wraps
 from types import TracebackType
-from typing import Awaitable, Callable, Dict, Generator, Optional, Type, TypeVar
+from typing import (
+    Awaitable,
+    Callable,
+    Dict,
+    Generator,
+    Optional,
+    Protocol,
+    Type,
+    TypeVar,
+)
 
 from prometheus_client import CollectorRegistry, Counter, Metric
-from typing_extensions import Concatenate, ParamSpec, Protocol
+from typing_extensions import Concatenate, ParamSpec
 
 from synapse.logging.context import (
     ContextResourceUsage,

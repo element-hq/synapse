@@ -795,7 +795,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         req = SynapseRequest(channel, self.site)  # type: ignore[arg-type]
         req.client.host = MAS_IPV4_ADDR
         req.requestHeaders.addRawHeader(
-            "Authorization", f"Bearer {self.auth._admin_token}"
+            "Authorization", f"Bearer {self.auth._admin_token()}"
         )
         req.requestHeaders.addRawHeader("User-Agent", MAS_USER_AGENT)
         req.content = BytesIO(b"")
