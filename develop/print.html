@@ -3975,6 +3975,38 @@ lowercase and may contain an explicit port.</p>
 <pre><code class="language-yaml">pid_file: DATADIR/homeserver.pid
 </code></pre>
 <hr />
+<h3 id="daemonize"><a class="header" href="#daemonize"><code>daemonize</code></a></h3>
+<p>Specifies whether Synapse should be started as a daemon process. If Synapse is being
+managed by <a href="usage/configuration/../../systemd-with-workers/">systemd</a>, this option must be omitted or set to
+<code>false</code>.</p>
+<p>This can also be set by the <code>--daemonize</code> (<code>-D</code>) argument when starting Synapse.</p>
+<p>See <code>worker_daemonize</code> for more information on daemonizing workers.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">daemonize: true
+</code></pre>
+<hr />
+<h3 id="print_pidfile"><a class="header" href="#print_pidfile"><code>print_pidfile</code></a></h3>
+<p>Print the path to the pidfile just before daemonizing. Defaults to false.</p>
+<p>This can also be set by the <code>--print-pidfile</code> argument when starting Synapse.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">print_pidfile: true
+</code></pre>
+<hr />
+<h3 id="user_agent_suffix"><a class="header" href="#user_agent_suffix"><code>user_agent_suffix</code></a></h3>
+<p>A suffix that is appended to the Synapse user-agent (ex. <code>Synapse/v1.123.0</code>). Defaults
+to None</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">user_agent_suffix: &quot; (I'm a teapot; Linux x86_64)&quot;
+</code></pre>
+<hr />
+<h3 id="use_frozen_dicts"><a class="header" href="#use_frozen_dicts"><code>use_frozen_dicts</code></a></h3>
+<p>Determines whether we should freeze the internal dict object in <code>FrozenEvent</code>. Freezing
+prevents bugs where we accidentally share e.g. signature dicts. However, freezing a
+dict is expensive. Defaults to false.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">use_frozen_dicts: true
+</code></pre>
+<hr />
 <h3 id="web_client_location"><a class="header" href="#web_client_location"><code>web_client_location</code></a></h3>
 <p>The absolute URL to the web client which <code>/</code> will redirect to. Defaults to none.</p>
 <p>Example configuration:</p>
@@ -4354,6 +4386,13 @@ for <a href="usage/configuration/../../workers.html">workers</a> and containers 
     type: http
     resources:
       - names: [client, federation]
+</code></pre>
+<hr />
+<h3 id="manhole"><a class="header" href="#manhole"><code>manhole</code></a></h3>
+<p>Turn on the Twisted telnet manhole service on the given port. Defaults to none.</p>
+<p>This can also be set by the <code>--manhole</code> argument when starting Synapse.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">manhole: 1234
 </code></pre>
 <hr />
 <h3 id="manhole_settings"><a class="header" href="#manhole_settings"><code>manhole_settings</code></a></h3>
