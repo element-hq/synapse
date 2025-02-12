@@ -1,0 +1,1 @@
+Fix a bug when updating a user 3pid with invalid returns 500 server error change to 400 with a message.
