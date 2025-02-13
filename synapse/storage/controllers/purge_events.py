@@ -253,14 +253,6 @@ class PurgeEventsStorageController:
         if len(to_delete) == 0:
             return
 
-        pending_deletions = await self.stores.state_deletion.get_pending_deletions(
-            to_delete
-        )
-        to_delete -= pending_deletions.keys()
-
-        if len(to_delete) == 0:
-            return
-
         # Mark the state groups for deletion by the deletion background task.
         await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
             to_delete
