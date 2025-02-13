@@ -162,6 +162,53 @@ Example configuration:
 pid_file: DATADIR/homeserver.pid
 ```
 ---
+### `daemonize`
+
+Specifies whether Synapse should be started as a daemon process. If Synapse is being
+managed by [systemd](../../systemd-with-workers/), this option must be omitted or set to
+`false`.
+
+This can also be set by the `--daemonize` (`-D`) argument when starting Synapse.
+
+See `worker_daemonize` for more information on daemonizing workers.
+
+Example configuration:
+```yaml
+daemonize: true
+```
+---
+### `print_pidfile`
+
+Print the path to the pidfile just before daemonizing. Defaults to false.
+
+This can also be set by the `--print-pidfile` argument when starting Synapse.
+
+Example configuration:
+```yaml
+print_pidfile: true
+```
+---
+### `user_agent_suffix`
+
+A suffix that is appended to the Synapse user-agent (ex. `Synapse/v1.123.0`). Defaults
+to None
+
+Example configuration:
+```yaml
+user_agent_suffix: " (I'm a teapot; Linux x86_64)"
+```
+---
+### `use_frozen_dicts`
+
+Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing
+prevents bugs where we accidentally share e.g. signature dicts. However, freezing a
+dict is expensive. Defaults to false.
+
+Example configuration:
+```yaml
+use_frozen_dicts: true
+```
+---
 ### `web_client_location`
 
 The absolute URL to the web client which `/` will redirect to. Defaults to none.
@@ -595,6 +642,17 @@ listeners:
       - names: [client, federation]
 ```
 
+---
+### `manhole`
+
+Turn on the Twisted telnet manhole service on the given port. Defaults to none.
+
+This can also be set by the `--manhole` argument when starting Synapse.
+
+Example configuration:
+```yaml
+manhole: 1234
+```
 ---
 ### `manhole_settings`
 
@@ -3337,8 +3395,9 @@ This setting has the following sub-options:
    The default is 'uid'.
 * `attribute_requirements`: It is possible to configure Synapse to only allow logins if SAML attributes
     match particular values. The requirements can be listed under
-   `attribute_requirements` as shown in the example. All of the listed attributes must
-    match for the login to be permitted.
+    `attribute_requirements` as shown in the example. All of the listed attributes must
+    match for the login to be permitted. Values can be specified in a `one_of` list to allow
+    multiple values for an attribute.
 * `idp_entityid`: If the metadata XML contains multiple IdP entities then the `idp_entityid`
    option must be set to the entity to redirect users to.
    Most deployments only have a single IdP entity and so should omit this option.
@@ -3419,7 +3478,9 @@ saml2_config:
     - attribute: userGroup
       value: "staff"
     - attribute: department
-      value: "sales"
+      one_of:
+        - "sales"
+        - "admins"
 
   idp_entityid: 'https://our_idp/entityid'
 ```
