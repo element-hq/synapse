@@ -226,7 +226,7 @@ class PurgeEventsStorageController:
         if len(next_set) < search_limit:
             self._last_checked_state_group = 0
         else:
-            self._last_checked_state_group = list(next_set)[-1]
+            self._last_checked_state_group = max(next_set)
 
         if len(next_set) == 0:
             return
