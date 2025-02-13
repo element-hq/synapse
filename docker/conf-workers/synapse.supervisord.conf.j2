@@ -1,7 +1,6 @@
 {% if use_forking_launcher %}
 [program:synapse_fork]
-environment=HTTP_PROXY=%(ENV_SYNAPSE_HTTP_PROXY)s
-environment=HTTPS_PROXY=%(ENV_SYNAPSE_HTTPS_PROXY)s
+environment=http_proxy=%(ENV_SYNAPSE_HTTP_PROXY)s,https_proxy=%(ENV_SYNAPSE_HTTPS_PROXY)s,no_proxy=%(ENV_SYNAPSE_NO_PROXY)s
 command=/usr/local/bin/python -m synapse.app.complement_fork_starter
   {{ main_config_path }}
   synapse.app.homeserver
@@ -22,8 +21,7 @@ exitcodes=0
 
 {% else %}
 [program:synapse_main]
-environment=HTTP_PROXY=%(ENV_SYNAPSE_HTTP_PROXY)s
-environment=HTTPS_PROXY=%(ENV_SYNAPSE_HTTPS_PROXY)s
+environment=http_proxy=%(ENV_SYNAPSE_HTTP_PROXY)s,https_proxy=%(ENV_SYNAPSE_HTTPS_PROXY)s,no_proxy=%(ENV_SYNAPSE_NO_PROXY)s
 command=/usr/local/bin/prefix-log /usr/local/bin/python -m synapse.app.homeserver
   --config-path="{{ main_config_path }}"
   --config-path=/conf/workers/shared.yaml
@@ -40,8 +38,7 @@ exitcodes=0
 
   {% for worker in workers %}
 [program:synapse_{{ worker.name }}]
-environment=HTTP_PROXY=%(ENV_SYNAPSE_HTTP_PROXY)s
-environment=HTTPS_PROXY=%(ENV_SYNAPSE_HTTPS_PROXY)s
+environment=http_proxy=%(ENV_SYNAPSE_HTTP_PROXY)s,https_proxy=%(ENV_SYNAPSE_HTTPS_PROXY)s,no_proxy=%(ENV_SYNAPSE_NO_PROXY)s
 command=/usr/local/bin/prefix-log /usr/local/bin/python -m {{ worker.app }}
   --config-path="{{ main_config_path }}"
   --config-path=/conf/workers/shared.yaml

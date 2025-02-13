@@ -151,7 +151,7 @@ class ProxyAgent(_AgentBase):
             https_proxy = proxies["https"].encode() if "https" in proxies else None
             no_proxy = proxies["no"] if "no" in proxies else None
             logger.info(
-                "Using proxy settings: http=%s, https=%s, no_proxy=%s",
+                "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
                 http_proxy,
                 https_proxy,
                 no_proxy,
