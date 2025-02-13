@@ -135,3 +135,11 @@ but it does not serve TLS by default.
 You can configure `SYNAPSE_TLS_CERT` and `SYNAPSE_TLS_KEY` to point to a
 TLS certificate and key (respectively), both in PEM (textual) format.
 In this case, Nginx will additionally serve using HTTPS on port 8448.
+
+
+### Proxying outbound requests
+
+In order to proxy outbound requests from Synapse, you can configure `SYNAPSE_HTTP_PROXY`
+and `SYNAPSE_HTTPS_PROXY` which will passed through as `HTTP_PROXY`/`HTTPS_PROXY` on the
+Synapse processes. See the [forward proxy docs](../docs/setup/forward_proxy.md) for more
+details.
