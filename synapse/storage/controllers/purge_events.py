@@ -238,7 +238,7 @@ class PurgeEventsStorageController:
             return
 
         next_state_groups = await self.stores.state.get_next_state_groups(next_set)
-        next_set -= set(next_state_groups.values())
+        next_set.difference_update(next_state_groups.values())
 
         if len(next_set) == 0:
             return
