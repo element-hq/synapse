@@ -231,6 +231,7 @@ class PurgeEventsStorageController:
         if len(next_set) == 0:
             return
 
+        # Discard any state groups referenced directly by an event...
         referenced = await self.stores.main.get_referenced_state_groups(next_set)
         next_set -= referenced
 
