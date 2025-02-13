@@ -334,7 +334,7 @@ class StateDeletionDataStore:
         )
 
     def _mark_state_groups_as_pending_deletion_txn(
-        self, 
+        self,
         txn: LoggingTransaction,
         state_groups: Collection[int],
     ) -> None:
@@ -346,7 +346,13 @@ class StateDeletionDataStore:
         """
 
         now = self._clock.time_msec()
-        rows = [(state_group,now,) for state_group in state_groups]
+        rows = [
+            (
+                state_group,
+                now,
+            )
+            for state_group in state_groups
+        ]
         if isinstance(txn.database_engine, PostgresEngine):
             txn.execute_values(sql % ("?",), rows, fetch=False)
         else:
