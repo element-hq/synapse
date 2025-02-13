@@ -1,1 +1,0 @@
-Increase the length of the generated `nonce` parameter when perfoming OIDC logins to comply with the TI-Messenger spec.
