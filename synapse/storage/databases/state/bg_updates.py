@@ -19,8 +19,20 @@
 #
 #
 
+import itertools
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Collection,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
@@ -580,51 +592,188 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             (last_checked_state_group, final_batch)
         """
 
-        # Look for state groups that can be cleaned up.
-        next_set = await self.hs.get_datastores().main.get_state_groups(
-            last_checked_state_group + 1, batch_size
-        )
+        def cleanup_txn(
+            txn: LoggingTransaction, last_checked_state_group: int, batch_size: int
+        ) -> Tuple[int, bool]:
+            # Look for state groups that can be cleaned up.
+            txn.execute(f"""
+            SELECT id FROM state_groups
+            WHERE id > {last_checked_state_group}
+            ORDER BY id
+            LIMIT {batch_size}
+            """)
 
-        final_batch = False
-        if len(next_set) < batch_size:
-            final_batch = True
-        else:
-            last_checked_state_group = max(next_set)
+            rows = txn.fetchall()
+            next_set = {row[0] for row in rows}
 
-        if len(next_set) == 0:
+            final_batch = False
+            if len(next_set) < batch_size:
+                final_batch = True
+            else:
+                last_checked_state_group = max(next_set)
+
+            if len(next_set) == 0:
+                return last_checked_state_group, final_batch
+
+            # Discard any state groups referenced directly by an event...
+            rows = cast(
+                List[Tuple[int]],
+                self.db_pool.simple_select_many_txn(
+                    txn,
+                    table="event_to_state_groups",
+                    column="state_group",
+                    iterable=next_set,
+                    keyvalues={},
+                    retcols=("DISTINCT state_group",),
+                ),
+            )
+
+            referenced = {row[0] for row in rows}
+            next_set -= referenced
+
+            if len(next_set) == 0:
+                return last_checked_state_group, final_batch
+
+            # ... and discard any that are referenced by other state groups.
+            rows = cast(
+                List[Tuple[int, int]],
+                self.db_pool.simple_select_many_txn(
+                    txn,
+                    table="state_group_edges",
+                    column="prev_state_group",
+                    iterable=next_set,
+                    keyvalues={},
+                    retcols=("state_group", "prev_state_group"),
+                ),
+            )
+
+            next_state_groups = dict(rows)
+            next_set.difference_update(next_state_groups.values())
+
+            if len(next_set) == 0:
+                return last_checked_state_group, final_batch
+
+            # Find all state groups that can be deleted if the original set is deleted.
+            # This set includes the original set, as well as any state groups that would
+            # become unreferenced upon deleting the original set.
+            to_delete = self._find_unreferenced_groups(txn, next_set)
+
+            if len(to_delete) == 0:
+                return last_checked_state_group, final_batch
+
+            # Mark the state groups for deletion by the deletion background task.
+            sql = """
+            INSERT INTO state_groups_pending_deletion (state_group, insertion_ts)
+            VALUES %s
+            ON CONFLICT (state_group)
+            DO NOTHING
+            """
+
+            now = self._clock.time_msec()
+            rows = [
+                (
+                    state_group,
+                    now,
+                )
+                for state_group in to_delete
+            ]
+            if isinstance(txn.database_engine, PostgresEngine):
+                txn.execute_values(sql % ("?",), rows, fetch=False)
+            else:
+                txn.execute_batch(sql % ("(?, ?)",), rows)
+
             return last_checked_state_group, final_batch
 
-        # Discard any state groups referenced directly by an event...
-        referenced = await self.hs.get_datastores().main.get_referenced_state_groups(
-            next_set
-        )
-        next_set -= referenced
-
-        if len(next_set) == 0:
-            return last_checked_state_group, final_batch
-
-        # ... and discard any that are referenced by other state groups.
-        next_state_groups = await self.hs.get_datastores().state.get_next_state_groups(
-            next_set
-        )
-        next_set.difference_update(next_state_groups.values())
-
-        if len(next_set) == 0:
-            return last_checked_state_group, final_batch
-
-        # Find all state groups that can be deleted if the original set is deleted.
-        # This set includes the original set, as well as any state groups that would
-        # become unreferenced upon deleting the original set.
-        to_delete = await self.hs.get_storage_controllers().purge_events._find_unreferenced_groups(
-            next_set
+        return await self.db_pool.runInteraction(
+            "mark_unreferenced_state_groups_for_deletion",
+            cleanup_txn,
+            last_checked_state_group,
+            batch_size,
         )
 
-        if len(to_delete) == 0:
-            return last_checked_state_group, final_batch
+    def _find_unreferenced_groups(
+        self, txn: LoggingTransaction, state_groups: Collection[int]
+    ) -> Set[int]:
+        """Used when purging history to figure out which state groups can be
+        deleted.
 
-        # Mark the state groups for deletion by the deletion background task.
-        await self.hs.get_datastores().state_deletion.mark_state_groups_as_pending_deletion(
-            to_delete
-        )
+        Args:
+            state_groups: Set of state groups referenced by events
+                that are going to be deleted.
 
-        return last_checked_state_group, final_batch
+        Returns:
+            The set of state groups that can be deleted.
+        """
+        # Set of events that we have found to be referenced by events
+        referenced_groups = set()
+
+        # Set of state groups we've already seen
+        state_groups_seen = set(state_groups)
+
+        # Set of state groups to handle next.
+        next_to_search = set(state_groups)
+        while next_to_search:
+            # We bound size of groups we're looking up at once, to stop the
+            # SQL query getting too big
+            if len(next_to_search) < 100:
+                current_search = next_to_search
+                next_to_search = set()
+            else:
+                current_search = set(itertools.islice(next_to_search, 100))
+                next_to_search -= current_search
+
+            rows = self.db_pool.simple_select_many_txn(
+                txn,
+                table="event_to_state_groups",
+                column="state_group",
+                iterable=current_search,
+                keyvalues={},
+                retcols=("DISTINCT state_group",),
+            )
+
+            referenced = {row[0] for row in rows}
+            referenced_groups |= referenced
+
+            # We don't continue iterating up the state group graphs for state
+            # groups that are referenced.
+            current_search -= referenced
+
+            rows = self.db_pool.simple_select_many_txn(
+                txn,
+                table="state_group_edges",
+                column="state_group",
+                iterable=current_search,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+            )
+
+            edges = dict(rows)
+
+            prevs = set(edges.values())
+            # We don't bother re-handling groups we've already seen
+            prevs -= state_groups_seen
+            next_to_search |= prevs
+            state_groups_seen |= prevs
+
+            # We also check to see if anything referencing the state groups are
+            # also unreferenced. This helps ensure that we delete unreferenced
+            # state groups, if we don't then we will de-delta them when we
+            # delete the other state groups leading to increased DB usage.
+            rows = self.db_pool.simple_select_many_txn(
+                txn,
+                table="state_group_edges",
+                column="prev_state_group",
+                iterable=current_search,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+            )
+
+            next_edges = dict(rows)
+            nexts = set(next_edges.keys())
+            nexts -= state_groups_seen
+            next_to_search |= nexts
+            state_groups_seen |= nexts
+
+        to_delete = state_groups_seen - referenced_groups
+
+        return to_delete

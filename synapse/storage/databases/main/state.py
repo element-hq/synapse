@@ -675,46 +675,6 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return {row[0] for row in rows}
 
-    async def get_state_groups(
-        self,
-        initial_state_group: int,
-        limit: int,
-    ) -> Set[int]:
-        """Get a list of stored state groups
-
-        Args:
-            initial_state_group: get state groups starting with this one.
-            limit: the maximum number of state groups to return.
-
-        Returns:
-            The set of stored state groups following the initial_state_group.
-        """
-        return await self.db_pool.runInteraction(
-            "get_state_groups",
-            self._get_state_groups_txn,
-            initial_state_group,
-            limit,
-        )
-
-    def _get_state_groups_txn(
-        self,
-        txn: LoggingTransaction,
-        initial_state_group: int,
-        limit: int,
-    ) -> Set[int]:
-        sql = f"""
-        SELECT id FROM state_groups
-        WHERE id >= {initial_state_group}
-        ORDER BY id
-        LIMIT {limit}
-        """
-
-        txn.execute(sql)
-
-        rows = txn.fetchall()
-
-        return {row[0] for row in rows}
-
     async def update_state_for_partial_state_event(
         self,
         event: EventBase,
