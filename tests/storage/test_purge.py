@@ -282,9 +282,7 @@ class PurgeTests(HomeserverTestCase):
         # Create enough state events to require multiple batches of
         # delete_unreferenced_state_groups_bg_update to be run.
         for i in range(200):
-            self.helper.send_state(
-                self.room_id, "org.matrix.test", body={"number": i}
-            )
+            self.helper.send_state(self.room_id, "org.matrix.test", body={"number": i})
         state2 = self.helper.send_state(
             self.room_id, "org.matrix.test", body={"number": 3}
         )
