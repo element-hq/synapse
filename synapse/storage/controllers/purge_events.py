@@ -36,21 +36,12 @@ logger = logging.getLogger(__name__)
 class PurgeEventsStorageController:
     """High level interface for purging rooms and event history."""
 
-    CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS = 60 * 1000
-
     def __init__(self, hs: "HomeServer", stores: Databases):
         self.stores = stores
 
         if hs.config.worker.run_background_tasks:
             self._delete_state_loop_call = hs.get_clock().looping_call(
                 self._delete_state_groups_loop, 60 * 1000
-            )
-
-        self._last_checked_state_group = 0
-        if hs.config.worker.run_background_tasks:
-            self._clear_unreferenced_state_loop_call = hs.get_clock().looping_call(
-                self._clear_unreferenced_state_groups_loop,
-                self.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS,
             )
 
     async def purge_room(self, room_id: str) -> None:
@@ -211,49 +202,4 @@ class PurgeEventsStorageController:
         return await self.stores.state.purge_unreferenced_state_groups(
             room_id,
             groups_to_sequences,
-        )
-
-    @wrap_as_background_process("_clear_unreferenced_state_groups_loop")
-    async def _clear_unreferenced_state_groups_loop(self) -> None:
-        """Background task that deletes any state groups that may be pending
-        deletion."""
-
-        # Look for state groups that can be cleaned up.
-        search_limit = 100
-        next_set = await self.stores.main.get_state_groups(
-            self._last_checked_state_group + 1, search_limit
-        )
-        if len(next_set) < search_limit:
-            self._last_checked_state_group = 0
-        else:
-            self._last_checked_state_group = max(next_set)
-
-        if len(next_set) == 0:
-            return
-
-        # Discard any state groups referenced directly by an event...
-        referenced = await self.stores.main.get_referenced_state_groups(next_set)
-        next_set -= referenced
-
-        if len(next_set) == 0:
-            return
-
-        # ... and discard any that are referenced by other state groups.
-        next_state_groups = await self.stores.state.get_next_state_groups(next_set)
-        next_set.difference_update(next_state_groups.values())
-
-        if len(next_set) == 0:
-            return
-
-        # Find all state groups that can be deleted if the original set is deleted.
-        # This set includes the original set, as well as any state groups that would
-        # become unreferenced upon deleting the original set.
-        to_delete = await self._find_unreferenced_groups(next_set)
-
-        if len(to_delete) == 0:
-            return
-
-        # Mark the state groups for deletion by the deletion background task.
-        await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
-            to_delete
         )

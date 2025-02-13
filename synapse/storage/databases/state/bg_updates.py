@@ -32,6 +32,7 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import MutableStateMap, StateMap
 from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util.caches import intern_string
 
 if TYPE_CHECKING:
@@ -348,6 +349,10 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             table="local_current_membership",
             columns=["event_stream_ordering"],
         )
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE,
+            self._background_delete_unrefereneced_state_groups,
+        )
 
     async def _background_deduplicate_state(
         self, progress: dict, batch_size: int
@@ -524,3 +529,102 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
         )
 
         return 1
+
+    async def _background_delete_unrefereneced_state_groups(
+        self, progress: dict, batch_size: int
+    ) -> int:
+        """This background update will slowly delete any unreferenced state groups"""
+
+        last_checked_state_group = progress.get("last_checked_state_group")
+
+        if last_checked_state_group is None:
+            # This is the first run.
+            last_checked_state_group = 0
+
+        (
+            last_checked_state_group,
+            final_batch,
+        ) = await self._delete_unreferenced_state_groups_batch(
+            last_checked_state_group, batch_size
+        )
+
+        if not final_batch:
+            # There are more state groups to check.
+            progress = {
+                "last_checked_state_group": last_checked_state_group,
+            }
+            await self.db_pool.updates._background_update_progress(
+                _BackgroundUpdates.DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE,
+                progress,
+            )
+        else:
+            # This background process is finished.
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE
+            )
+
+        return batch_size
+
+    async def _delete_unreferenced_state_groups_batch(
+        self, last_checked_state_group: int, batch_size: int
+    ) -> tuple[int, bool]:
+        """Looks for unreferenced state groups starting from the last state group
+        checked, and any state groups which would become unreferenced if a state group
+        was deleted, and marks them for deletion.
+
+        Args:
+            last_checked_state_group: The last state group that was checked.
+            batch_size: How many state groups to process in this iteration.
+
+        Returns:
+            (last_checked_state_group, final_batch)
+        """
+
+        # Look for state groups that can be cleaned up.
+        next_set = await self.hs.get_datastores().main.get_state_groups(
+            last_checked_state_group + 1, batch_size
+        )
+
+        final_batch = False
+        if len(next_set) < batch_size:
+            final_batch = True
+        else:
+            last_checked_state_group = max(next_set)
+
+        if len(next_set) == 0:
+            return last_checked_state_group, final_batch
+
+        # Discard any state groups referenced directly by an event...
+        referenced = await self.hs.get_datastores().main.get_referenced_state_groups(
+            next_set
+        )
+        next_set -= referenced
+
+        if len(next_set) == 0:
+            return last_checked_state_group, final_batch
+
+        # ... and discard any that are referenced by other state groups.
+        next_state_groups = await self.hs.get_datastores().state.get_next_state_groups(
+            next_set
+        )
+        next_set.difference_update(next_state_groups.values())
+
+        if len(next_set) == 0:
+            return last_checked_state_group, final_batch
+
+        # Find all state groups that can be deleted if the original set is deleted.
+        # This set includes the original set, as well as any state groups that would
+        # become unreferenced upon deleting the original set.
+        to_delete = await self.hs.get_storage_controllers().purge_events._find_unreferenced_groups(
+            next_set
+        )
+
+        if len(to_delete) == 0:
+            return last_checked_state_group, final_batch
+
+        # Mark the state groups for deletion by the deletion background task.
+        await self.hs.get_datastores().state_deletion.mark_state_groups_as_pending_deletion(
+            to_delete
+        )
+
+        return last_checked_state_group, final_batch

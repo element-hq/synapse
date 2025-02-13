@@ -704,7 +704,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Set[int]:
         sql = f"""
         SELECT id FROM state_groups
-        WHERE id > {initial_state_group}
+        WHERE id >= {initial_state_group}
         ORDER BY id
         LIMIT {limit}
         """

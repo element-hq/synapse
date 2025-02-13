@@ -24,6 +24,7 @@ from synapse.api.errors import NotFoundError, SynapseError
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -278,6 +279,12 @@ class PurgeTests(HomeserverTestCase):
         state1 = self.helper.send_state(
             self.room_id, "org.matrix.test", body={"number": 2}
         )
+        # Create enough state events to require multiple batches of
+        # delete_unreferenced_state_groups_bg_update to be run.
+        for i in range(200):
+            self.helper.send_state(
+                self.room_id, "org.matrix.test", body={"number": i}
+            )
         state2 = self.helper.send_state(
             self.room_id, "org.matrix.test", body={"number": 3}
         )
@@ -309,14 +316,20 @@ class PurgeTests(HomeserverTestCase):
             )
         )
 
-        # Advance so that the background job to clear unreferenced state groups runs
-        self.reactor.advance(
-            1
-            + self._storage_controllers.purge_events.CLEAR_UNREFERENCED_STATE_GROUPS_PERIOD_MS
-            / 1000
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE,
+                    "progress_json": "{}",
+                },
+            )
         )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
 
-        # Advance so that the background jobs to delete the state groups runs
+        # Advance so that the background job to delete the state groups runs
         self.reactor.advance(
             1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
         )
@@ -355,4 +368,4 @@ class PurgeTests(HomeserverTestCase):
                 desc="test_purge_unreferenced_state_group",
             )
         )
-        self.assertEqual(len(state_groups), 8)
+        self.assertEqual(len(state_groups), 208)
