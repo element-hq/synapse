@@ -271,7 +271,7 @@ class Store(
     def insert_many_txn(
         self, txn: LoggingTransaction, table: str, headers: List[str], rows: List[Tuple]
     ) -> None:
-        sql = "INSERT INTO %s (%s) VALUES (%s) OVERRIDING SYSTEM VALUE" % (
+        sql = "INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE VALUES (%s)" % (
             table,
             ", ".join(k for k in headers),
             ", ".join("%s" for _ in headers),
