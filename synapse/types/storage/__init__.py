@@ -48,3 +48,7 @@ class _BackgroundUpdates:
     SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE = (
         "sliding_sync_membership_snapshots_fix_forgotten_column_bg_update"
     )
+
+    DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE = (
+        "delete_unreferenced_state_groups_bg_update"
+    )
