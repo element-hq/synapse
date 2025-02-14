@@ -1944,7 +1944,7 @@ Example configuration:
 rc_presence:
   per_user:
     per_second: 0.05
-    burst_count: 0.5
+    burst_count: 1
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
