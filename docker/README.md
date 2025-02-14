@@ -114,6 +114,9 @@ The following environment variables are supported in `run` mode:
   is set via `docker run --user`, defaults to `991`, `991`. Note that this user
   must have permission to read the config files, and write to the data directories.
 * `TZ`: the [timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) the container will run with. Defaults to `UTC`.
+* `SYNAPSE_HTTP_PROXY`: Passed through to the Synapse process as the `http_proxy` environment variable.
+* `SYNAPSE_HTTPS_PROXY`: Passed through to the Synapse process as the `https_proxy` environment variable.
+* `SYNAPSE_NO_PROXY`: Passed through to the Synapse process as `no_proxy` environment variable.
 
 For more complex setups (e.g. for workers) you can also pass your args directly to synapse using `run` mode. For example like this:
 
