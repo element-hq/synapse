@@ -3989,10 +3989,23 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
         self.user2 = self.register_user("teresa", "hackme")
         self.tok2 = self.login("teresa", "hackme")
 
+        self.admin = self.register_user("admin", "pass", True)
+        self.admin_tok = self.login("admin", "pass")
+
         self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
         self.store = hs.get_datastores().main
 
-    def test_suspended_user_cannot_send_message_to_room(self) -> None:
+        self.room2 = self.helper.create_room_as(
+            room_creator=self.user1, is_public=False, tok=self.tok1
+        )
+        self.helper.send_state(
+            self.room2,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=self.tok1,
+        )
+
+    def test_suspended_user_cannot_send_message_to_public_room(self) -> None:
         # set the user as suspended
         self.get_success(self.store.set_user_suspended_status(self.user1, True))
 
@@ -4001,6 +4014,24 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             f"/rooms/{self.room1}/send/m.room.message/1",
             access_token=self.tok1,
             content={"body": "hello", "msgtype": "m.text"},
+        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
+
+    def test_suspended_user_cannot_send_message_to_encrypted_room(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.user1}",
+            {"suspend": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {f"user_{self.user1}_suspended": True})
+
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{self.room2}/send/m.room.encrypted/1",
+            access_token=self.tok1,
+            content={},
         )
         self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
