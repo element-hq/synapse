@@ -2324,6 +2324,14 @@ set.</p>
 <p>This is primarily intended for use with the <code>register_new_matrix_user</code> script
 (see <a href="../../setup/installation.html#registering-a-user">Registering a user</a>);
 however, the interface is <a href="../../admin_api/register_api.html">documented</a>.</p>
+<p>Replacing an existing <code>registration_shared_secret</code> with a new one requires users
+of the <a href="../../admin_api/register_api.html">Shared-Secret Registration API</a> to
+start using the new secret for requesting any further one-time nonces.</p>
+<blockquote>
+<p>⚠️ <strong>Warning</strong> – The additional consequences of replacing
+<a href="#macaroon_secret_key"><code>macaroon_secret_key</code></a> will apply in case it delegates
+to <code>registration_shared_secret</code>.</p>
+</blockquote>
 <p>See also <a href="#registration_shared_secret_path"><code>registration_shared_secret_path</code></a>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">registration_shared_secret: &lt;PRIVATE STRING&gt;
@@ -2754,6 +2762,12 @@ access tokens via a query parameter.</p>
 </ul>
 <p>If none is specified, the <code>registration_shared_secret</code> is used, if one is given;
 otherwise, a secret key is derived from the signing key.</p>
+<blockquote>
+<p>⚠️ <strong>Warning</strong> – Replacing an existing <code>macaroon_secret_key</code> with a new one
+will lead to invalidation of access tokens for all guest users. It will also
+break unsubscribe links in emails sent before the change. An unlucky user
+might encounter a broken SSO login flow and would have to start again.</p>
+</blockquote>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">macaroon_secret_key: &lt;PRIVATE STRING&gt;
 </code></pre>
@@ -2772,6 +2786,8 @@ Synapse reads the secret key from the given file once at startup.</p>
 <p>A secret which is used to calculate HMACs for form values, to stop
 falsification of values. Must be specified for the User Consent
 forms to work.</p>
+<p>Replacing an existing <code>form_secret</code> with a new one might break the user consent
+page for an unlucky user and require them to reopen the page from a new link.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">form_secret: &lt;PRIVATE STRING&gt;
 </code></pre>
@@ -3961,6 +3977,8 @@ controls the behaviour of individual workers in isolation.</li>
 HTTP requests from workers.</p>
 <p>The default, this value is omitted (equivalently <code>null</code>), which means that
 traffic between the workers and the main process is not authenticated.</p>
+<p>Replacing an existing <code>worker_replication_secret</code> with a new one will break
+communication with all workers that have not yet updated their secret.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">worker_replication_secret: &quot;secret_secret&quot;
 </code></pre>
