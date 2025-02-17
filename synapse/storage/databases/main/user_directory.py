@@ -1237,7 +1237,13 @@ def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
     search_term = _filter_text_for_index(search_term)
 
     escaped_words = []
-    for word in _parse_words(search_term):
+    for index, word in enumerate(_parse_words(search_term)):
+        if index >= 10:
+            # We limit how many terms we include, as otherwise it can use
+            # excessive database time if people accidentally search for large
+            # strings.
+            break
+
         # Postgres tsvector and tsquery quoting rules:
         # words potentially containing punctuation should be quoted
         # and then existing quotes and backslashes should be doubled
