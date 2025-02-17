@@ -1239,7 +1239,7 @@ def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
 
     escaped_words = []
     for index, word in enumerate(_parse_words(search_term)):
-        if index > 10:
+        if index >= 10:
             # We limit how many terms we include, as otherwise it can use
             # excessive database time if people accidentally search for large
             # strings.
