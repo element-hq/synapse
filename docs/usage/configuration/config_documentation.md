@@ -162,6 +162,53 @@ Example configuration:
 pid_file: DATADIR/homeserver.pid
 ```
 ---
+### `daemonize`
+
+Specifies whether Synapse should be started as a daemon process. If Synapse is being
+managed by [systemd](../../systemd-with-workers/), this option must be omitted or set to
+`false`.
+
+This can also be set by the `--daemonize` (`-D`) argument when starting Synapse.
+
+See `worker_daemonize` for more information on daemonizing workers.
+
+Example configuration:
+```yaml
+daemonize: true
+```
+---
+### `print_pidfile`
+
+Print the path to the pidfile just before daemonizing. Defaults to false.
+
+This can also be set by the `--print-pidfile` argument when starting Synapse.
+
+Example configuration:
+```yaml
+print_pidfile: true
+```
+---
+### `user_agent_suffix`
+
+A suffix that is appended to the Synapse user-agent (ex. `Synapse/v1.123.0`). Defaults
+to None
+
+Example configuration:
+```yaml
+user_agent_suffix: " (I'm a teapot; Linux x86_64)"
+```
+---
+### `use_frozen_dicts`
+
+Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing
+prevents bugs where we accidentally share e.g. signature dicts. However, freezing a
+dict is expensive. Defaults to false.
+
+Example configuration:
+```yaml
+use_frozen_dicts: true
+```
+---
 ### `web_client_location`
 
 The absolute URL to the web client which `/` will redirect to. Defaults to none.
@@ -595,6 +642,17 @@ listeners:
       - names: [client, federation]
 ```
 
+---
+### `manhole`
+
+Turn on the Twisted telnet manhole service on the given port. Defaults to none.
+
+This can also be set by the `--manhole` argument when starting Synapse.
+
+Example configuration:
+```yaml
+manhole: 1234
+```
 ---
 ### `manhole_settings`
 
@@ -1886,7 +1944,7 @@ Example configuration:
 rc_presence:
   per_user:
     per_second: 0.05
-    burst_count: 0.5
+    burst_count: 1
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -2534,6 +2592,14 @@ This is primarily intended for use with the `register_new_matrix_user` script
 (see [Registering a user](../../setup/installation.md#registering-a-user));
 however, the interface is [documented](../../admin_api/register_api.html).
 
+Replacing an existing `registration_shared_secret` with a new one requires users
+of the [Shared-Secret Registration API](../../admin_api/register_api.html) to
+start using the new secret for requesting any further one-time nonces.
+
+> ⚠️ **Warning** – The additional consequences of replacing
+> [`macaroon_secret_key`](#macaroon_secret_key) will apply in case it delegates
+> to `registration_shared_secret`.
+
 See also [`registration_shared_secret_path`](#registration_shared_secret_path).
 
 Example configuration:
@@ -3110,6 +3176,11 @@ A secret which is used to sign
 If none is specified, the `registration_shared_secret` is used, if one is given;
 otherwise, a secret key is derived from the signing key.
 
+> ⚠️ **Warning** – Replacing an existing `macaroon_secret_key` with a new one
+> will lead to invalidation of access tokens for all guest users. It will also
+> break unsubscribe links in emails sent before the change. An unlucky user
+> might encounter a broken SSO login flow and would have to start again.
+
 Example configuration:
 ```yaml
 macaroon_secret_key: <PRIVATE STRING>
@@ -3136,6 +3207,9 @@ _Added in Synapse 1.121.0._
 A secret which is used to calculate HMACs for form values, to stop
 falsification of values. Must be specified for the User Consent
 forms to work.
+
+Replacing an existing `form_secret` with a new one might break the user consent
+page for an unlucky user and require them to reopen the page from a new link.
 
 Example configuration:
 ```yaml
@@ -4384,6 +4458,9 @@ HTTP requests from workers.
 
 The default, this value is omitted (equivalently `null`), which means that
 traffic between the workers and the main process is not authenticated.
+
+Replacing an existing `worker_replication_secret` with a new one will break
+communication with all workers that have not yet updated their secret.
 
 Example configuration:
 ```yaml
