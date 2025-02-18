@@ -627,27 +627,25 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                 ),
             )
 
-            referenced = {row[0] for row in rows}
-            next_set -= referenced
+            next_set.difference_update({row[0] for row in rows})
 
             if len(next_set) == 0:
                 return last_checked_state_group, final_batch
 
             # ... and discard any that are referenced by other state groups.
             rows = cast(
-                List[Tuple[int, int]],
+                List[Tuple[int]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="state_group_edges",
                     column="prev_state_group",
                     iterable=next_set,
                     keyvalues={},
-                    retcols=("state_group", "prev_state_group"),
+                    retcols=("DISTINCT prev_state_group",),
                 ),
             )
 
-            next_state_groups = dict(rows)
-            next_set.difference_update(next_state_groups.values())
+            next_set.difference_update(row[0] for row in rows)
 
             if len(next_set) == 0:
                 return last_checked_state_group, final_batch
@@ -669,7 +667,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             """
 
             now = self._clock.time_msec()
-            rows = [
+            deletion_rows = [
                 (
                     state_group,
                     now,
@@ -677,9 +675,9 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                 for state_group in to_delete
             ]
             if isinstance(txn.database_engine, PostgresEngine):
-                txn.execute_values(sql % ("?",), rows, fetch=False)
+                txn.execute_values(sql % ("?",), deletion_rows, fetch=False)
             else:
-                txn.execute_batch(sql % ("(?, ?)",), rows)
+                txn.execute_batch(sql % ("(?, ?)",), deletion_rows)
 
             return last_checked_state_group, final_batch
 
