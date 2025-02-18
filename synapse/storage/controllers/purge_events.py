@@ -72,11 +72,8 @@ class PurgeEventsStorageController:
             )
 
             logger.info("[purge] finding state groups that can be deleted")
-            sg_to_delete = await self.stores.main.db_pool.runInteraction(
-                "find_unreferenced_state_groups",
-                find_unreferenced_groups,
-                self.stores.main.db_pool,
-                state_groups,
+            sg_to_delete = await find_unreferenced_groups(
+                self.stores.main.db_pool, state_groups
             )
 
             # Mark these state groups as pending deletion, they will actually
