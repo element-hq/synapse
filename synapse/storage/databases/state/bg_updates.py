@@ -723,13 +723,16 @@ async def find_unreferenced_groups(
             current_search = set(itertools.islice(next_to_search, 100))
             next_to_search -= current_search
 
-        referenced_state_groups = await db_pool.simple_select_many_batch(
-            table="event_to_state_groups",
-            column="state_group",
-            iterable=current_search,
-            keyvalues={},
-            retcols=("DISTINCT state_group",),
-            desc="get_referenced_state_groups",
+        referenced_state_groups = cast(
+            List[Tuple[int]],
+            await db_pool.simple_select_many_batch(
+                table="event_to_state_groups",
+                column="state_group",
+                iterable=current_search,
+                keyvalues={},
+                retcols=("DISTINCT state_group",),
+                desc="get_referenced_state_groups",
+            ),
         )
 
         referenced = {row[0] for row in referenced_state_groups}
@@ -739,13 +742,16 @@ async def find_unreferenced_groups(
         # groups that are referenced.
         current_search -= referenced
 
-        prev_state_groups = await db_pool.simple_select_many_batch(
-            table="state_group_edges",
-            column="state_group",
-            iterable=current_search,
-            keyvalues={},
-            retcols=("state_group", "prev_state_group"),
-            desc="get_previous_state_groups",
+        prev_state_groups = cast(
+            List[Tuple[int, int]],
+            await db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="state_group",
+                iterable=current_search,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+                desc="get_previous_state_groups",
+            ),
         )
 
         edges = dict(prev_state_groups)
@@ -760,13 +766,16 @@ async def find_unreferenced_groups(
         # also unreferenced. This helps ensure that we delete unreferenced
         # state groups, if we don't then we will de-delta them when we
         # delete the other state groups leading to increased DB usage.
-        next_state_groups = await db_pool.simple_select_many_batch(
-            table="state_group_edges",
-            column="prev_state_group",
-            iterable=current_search,
-            keyvalues={},
-            retcols=("state_group", "prev_state_group"),
-            desc="get_next_state_groups",
+        next_state_groups = cast(
+            List[Tuple[int, int]],
+            await db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="prev_state_group",
+                iterable=current_search,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+                desc="get_next_state_groups",
+            ),
         )
 
         next_edges = dict(next_state_groups)
