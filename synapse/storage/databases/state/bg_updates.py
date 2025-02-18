@@ -718,7 +718,7 @@ def find_unreferenced_groups(
             current_search = set(itertools.islice(next_to_search, 100))
             next_to_search -= current_search
 
-        rows = db_pool.simple_select_many_txn(
+        referenced_state_groups = db_pool.simple_select_many_txn(
             txn,
             table="event_to_state_groups",
             column="state_group",
@@ -727,14 +727,14 @@ def find_unreferenced_groups(
             retcols=("DISTINCT state_group",),
         )
 
-        referenced = {row[0] for row in rows}
+        referenced = {row[0] for row in referenced_state_groups}
         referenced_groups |= referenced
 
         # We don't continue iterating up the state group graphs for state
         # groups that are referenced.
         current_search -= referenced
 
-        rows = db_pool.simple_select_many_txn(
+        next_state_groups = db_pool.simple_select_many_txn(
             txn,
             table="state_group_edges",
             column="state_group",
@@ -743,7 +743,7 @@ def find_unreferenced_groups(
             retcols=("state_group", "prev_state_group"),
         )
 
-        edges = dict(rows)
+        edges = dict(next_state_groups)
 
         prevs = set(edges.values())
         # We don't bother re-handling groups we've already seen
@@ -755,7 +755,7 @@ def find_unreferenced_groups(
         # also unreferenced. This helps ensure that we delete unreferenced
         # state groups, if we don't then we will de-delta them when we
         # delete the other state groups leading to increased DB usage.
-        rows = db_pool.simple_select_many_txn(
+        previous_state_groups = db_pool.simple_select_many_txn(
             txn,
             table="state_group_edges",
             column="prev_state_group",
@@ -764,7 +764,7 @@ def find_unreferenced_groups(
             retcols=("state_group", "prev_state_group"),
         )
 
-        next_edges = dict(rows)
+        next_edges = dict(previous_state_groups)
         nexts = set(next_edges.keys())
         nexts -= state_groups_seen
         next_to_search |= nexts
