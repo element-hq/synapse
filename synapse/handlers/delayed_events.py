@@ -19,6 +19,7 @@ from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import ShadowBanError
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import event_processing_positions
@@ -57,9 +58,18 @@ class DelayedEventsHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
         self._clock = hs.get_clock()
-        self._request_ratelimiter = hs.get_request_ratelimiter()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
+
+        self._request_ratelimiter = hs.get_request_ratelimiter()
+
+        # Ratelimiter for management of existing delayed events,
+        # keyed by the sending user ID & device ID.
+        self._delayed_event_mgmt_ratelimiter = Ratelimiter(
+            store=self._store,
+            clock=self._clock,
+            cfg=self._config.ratelimiting.rc_delayed_event_mgmt,
+        )
 
         self._next_delayed_event_call: Optional[IDelayedCall] = None
 
@@ -227,6 +237,9 @@ class DelayedEventsHandler:
         Raises:
             SynapseError: if the delayed event fails validation checks.
         """
+        # Use standard request limiter for scheduling new delayed events.
+        # TODO: Instead apply ratelimiting based on the scheduled send time.
+        # See https://github.com/element-hq/synapse/issues/18021
         await self._request_ratelimiter.ratelimit(requester)
 
         self._event_creation_handler.validator.validate_builder(
@@ -285,7 +298,10 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._request_ratelimiter.ratelimit(requester)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
+            requester,
+            (requester.user.to_string(), requester.device_id),
+        )
         await self._initialized_from_db
 
         next_send_ts = await self._store.cancel_delayed_event(
@@ -308,7 +324,10 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._request_ratelimiter.ratelimit(requester)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
+            requester,
+            (requester.user.to_string(), requester.device_id),
+        )
         await self._initialized_from_db
 
         next_send_ts = await self._store.restart_delayed_event(
@@ -332,6 +351,8 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
+        # Use standard request limiter for sending delayed events on-demand,
+        # as an on-demand send is similar to sending a regular event.
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
@@ -415,7 +436,10 @@ class DelayedEventsHandler:
 
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
-        await self._request_ratelimiter.ratelimit(requester)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
+            requester,
+            (requester.user.to_string(), requester.device_id),
+        )
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart
         )
