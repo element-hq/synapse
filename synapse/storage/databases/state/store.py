@@ -829,7 +829,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             [(sg,) for sg in state_groups_to_delete],
         )
         txn.execute_batch(
+            "DELETE FROM state_group_edges WHERE state_group = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+        txn.execute_batch(
             "DELETE FROM state_groups WHERE id = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+        txn.execute_batch(
+            "DELETE FROM state_groups_pending_deletion WHERE state_group = ?",
             [(sg,) for sg in state_groups_to_delete],
         )
 
