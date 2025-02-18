@@ -596,12 +596,10 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             txn: LoggingTransaction, last_checked_state_group: int, batch_size: int
         ) -> Tuple[int, bool]:
             # Look for state groups that can be cleaned up.
-            txn.execute(f"""
-            SELECT id FROM state_groups
-            WHERE id > {last_checked_state_group}
-            ORDER BY id
-            LIMIT {batch_size}
-            """)
+            state_group_sql = (
+                "SELECT id FROM state_groups WHERE id > ? ORDER BY id LIMIT ?"
+            )
+            txn.execute(state_group_sql, (last_checked_state_group, batch_size))
 
             next_set = {row[0] for row in txn}
 
