@@ -662,10 +662,10 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
 
             # Mark the state groups for deletion by the deletion background task.
             sql = """
-            INSERT INTO state_groups_pending_deletion (state_group, insertion_ts)
-            VALUES %s
-            ON CONFLICT (state_group)
-            DO NOTHING
+                INSERT INTO state_groups_pending_deletion (state_group, insertion_ts)
+                VALUES %s
+                ON CONFLICT (state_group)
+                DO NOTHING
             """
 
             now = self._clock.time_msec()
