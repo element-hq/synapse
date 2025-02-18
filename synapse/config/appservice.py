@@ -30,9 +30,19 @@ from netaddr import IPSet
 from synapse.appservice import ApplicationService
 from synapse.types import JsonDict, UserID
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, read_file
 
 logger = logging.getLogger(__name__)
+
+CONFLICTING_AS_TOKEN_OPTS_ERROR = """\
+You have configured both `as_token` and `as_token_path`.
+These are mutually incompatible.
+"""
+
+CONFLICTING_HS_TOKEN_OPTS_ERROR = """\
+You have configured both `hs_token` and `hs_token_path`.
+These are mutually incompatible.
+"""
 
 
 class AppServiceConfig(Config):
@@ -105,12 +115,36 @@ def load_appservices(
 def _load_appservice(
     hostname: str, as_info: JsonDict, config_filename: str
 ) -> ApplicationService:
-    required_string_fields = ["id", "as_token", "hs_token", "sender_localpart"]
-    for field in required_string_fields:
-        if not isinstance(as_info.get(field), str):
+    required_fields = ["id", "sender_localpart"]
+    for field in required_fields:
+        if field not in as_info:
+            raise KeyError("Required field: '%s' (%s)" % (field, config_filename))
+    string_fields = [
+        "id",
+        "sender_localpart",
+        "as_token",
+        "as_token_path",
+        "hs_token",
+        "hs_token_path",
+    ]
+    for field in string_fields:
+        if not isinstance(as_info.get(field, ""), (str, type(None))):
             raise KeyError(
-                "Required string field: '%s' (%s)" % (field, config_filename)
+                "Field must be a string: '%s' (%s)" % (field, config_filename)
             )
+
+    if token_path := as_info.get("as_token_path"):
+        if as_info.get("as_token"):
+            raise ConfigError(CONFLICTING_AS_TOKEN_OPTS_ERROR)
+        token = read_file(token_path, ("as_token_path",)).strip()
+    else:
+        token = as_info["as_token"]
+
+    hs_token = as_info.get("hs_token")
+    if hs_token_path := as_info.get("hs_token_path"):
+        if "hs_token" in as_info:
+            raise ConfigError(CONFLICTING_HS_TOKEN_OPTS_ERROR)
+        hs_token = read_file(hs_token_path, ("hs_token_path",)).strip()
 
     # 'url' must either be a string or explicitly null, not missing
     # to avoid accidentally turning off push for ASes.
@@ -196,10 +230,10 @@ def _load_appservice(
         )
 
     return ApplicationService(
-        token=as_info["as_token"],
+        token=token,
         url=as_info["url"],
         namespaces=as_info["namespaces"],
-        hs_token=as_info["hs_token"],
+        hs_token=hs_token,
         sender=user_id,
         id=as_info["id"],
         protocols=protocols,
