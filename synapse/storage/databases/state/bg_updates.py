@@ -603,8 +603,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             LIMIT {batch_size}
             """)
 
-            rows = txn.fetchall()
-            next_set = {row[0] for row in rows}
+            next_set = {row[0] for row in txn}
 
             final_batch = False
             if len(next_set) < batch_size:
