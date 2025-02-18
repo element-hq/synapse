@@ -46,6 +46,10 @@ ARG TEST_ONLY_SKIP_DEP_HASH_VERIFICATION
 # Instead, we'll just install what a regular `pip install` would from PyPI.
 ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
 
+# This silences a warning as uv isn't able to do hardlinks between its cache
+# (mounted as --mount=type=cache) and the target directory.
+ENV UV_LINK_MODE=copy
+
 # Export the dependencies, but only if we're actually going to use the Poetry lockfile.
 # Otherwise, just create an empty requirements file so that the Dockerfile can
 # proceed.
@@ -62,6 +66,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS builder
 
+# This silences a warning as uv isn't able to do hardlinks between its cache
+# (mounted as --mount=type=cache) and the target directory.
 ENV UV_LINK_MODE=copy
 
 # Install rust and ensure its in the PATH
@@ -154,9 +160,9 @@ RUN \
     mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
     for deb in /tmp/debs-${arch}/*.deb; do \
       package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
-      echo "Process: ${package_name}"; \
+      echo "Extracting: ${package_name}"; \
       dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
-      dpkg --extract $deb /install-${arch} || exit 10; \
+      dpkg --extract $deb /install-${arch}; \
     done; \
     rsync -avr /install-${arch}/lib/ /install-${arch}/usr/lib; \
     rm -rf /install-${arch}/lib /install-${arch}/lib64; \
