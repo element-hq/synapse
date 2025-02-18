@@ -191,6 +191,11 @@ APPEND_ONLY_TABLES = [
 
 
 IGNORED_TABLES = {
+    # Porting the auto generated sequence in this table is non-trivial.
+    # And anything not ported, will get automatically added back by the
+    # `delete_unreferenced_state_groups_bg_update` background task.
+    # This makes it safe to ignore porting this table.
+    "state_groups_pending_deletion",
     # We don't port these tables, as they're a faff and we can regenerate
     # them anyway.
     "user_directory",
@@ -271,7 +276,7 @@ class Store(
     def insert_many_txn(
         self, txn: LoggingTransaction, table: str, headers: List[str], rows: List[Tuple]
     ) -> None:
-        sql = "INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE VALUES (%s)" % (
+        sql = "INSERT INTO %s (%s) VALUES (%s)" % (
             table,
             ", ".join(k for k in headers),
             ", ".join("%s" for _ in headers),
