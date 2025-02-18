@@ -13,4 +13,4 @@
 
 -- Add a background update to delete any unreferenced state groups
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9001, 'delete_unreferenced_state_groups_bg_update', '{}');
+  (8902, 'delete_unreferenced_state_groups_bg_update', '{}');
