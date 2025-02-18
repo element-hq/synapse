@@ -43,6 +43,7 @@ from synapse.api.errors import (
     OAuthInsufficientScopeError,
     SynapseError,
 )
+from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
 from synapse.rest import admin
 from synapse.rest.client import account, devices, keys, login, logout, register
@@ -639,15 +640,35 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
     def test_registration_endpoints_removed(self) -> None:
         """Test that registration endpoints that were removed in MSC2964 are no longer available."""
+        appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@alice:.+", "exclusive": True}]},
+            sender="@as_main:test",
+        )
+
+        self.hs.get_datastores().main.services_cache = [appservice]
         self.expect_unrecognized(
             "GET", "/_matrix/client/v1/register/m.login.registration_token/validity"
         )
-        # This is still available for AS registrations
+
+        # Registration is disabled
         self.expect_forbidden(
             "POST",
             "/_matrix/client/v3/register",
             {"username": "alice", "password": "hunter2"},
         )
+
+        # This is still available for AS registrations
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/register",
+            {"username": "alice", "type": "m.login.application_service"},
+            shorthand=False,
+            access_token="i_am_an_app_service",
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
         self.expect_unrecognized("GET", "/_matrix/client/v3/register/available")
         self.expect_unrecognized(
             "POST", "/_matrix/client/v3/register/email/requestToken"
