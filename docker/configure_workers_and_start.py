@@ -1099,6 +1099,13 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
     else:
         log("Could not find %s, will not use" % (jemallocpath,))
 
+    # Empty strings are falsy in Python so this default is fine. We just can't have these
+    # be undefined because supervisord will complain about our
+    # `%(ENV_SYNAPSE_HTTP_PROXY)s` usage.
+    environ.setdefault("SYNAPSE_HTTP_PROXY", "")
+    environ.setdefault("SYNAPSE_HTTPS_PROXY", "")
+    environ.setdefault("SYNAPSE_NO_PROXY", "")
+
     # Start supervisord, which will start Synapse, all of the configured worker
     # processes, redis, nginx etc. according to the config we created above.
     log("Starting supervisord")

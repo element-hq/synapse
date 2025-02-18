@@ -1271,6 +1271,38 @@ class OidcHandlerTestCase(HomeserverTestCase):
         {
             "oidc_config": {
                 **DEFAULT_CONFIG,
+                "attribute_requirements": [
+                    {"attribute": "test", "one_of": ["foo", "bar"]}
+                ],
+            }
+        }
+    )
+    def test_attribute_requirements_one_of(self) -> None:
+        """Test that auth succeeds if userinfo attribute has multiple values and CONTAINS required value"""
+        # userinfo with "test": ["bar"] attribute should succeed.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "test": ["bar"],
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+
+        # check that the auth handler got called as expected
+        self.complete_sso_login.assert_called_once_with(
+            "@tester:test",
+            self.provider.idp_id,
+            request,
+            ANY,
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
+        )
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
                 "attribute_requirements": [{"attribute": "test", "value": "foobar"}],
             }
         }
