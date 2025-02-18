@@ -19,13 +19,13 @@
 #
 #
 
-import itertools
 import logging
-from typing import TYPE_CHECKING, Collection, Mapping, Set
+from typing import TYPE_CHECKING, Mapping
 
 from synapse.logging.context import nested_logging_context
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases import Databases
+from synapse.storage.databases.state.bg_updates import find_unreferenced_groups
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -72,75 +72,18 @@ class PurgeEventsStorageController:
             )
 
             logger.info("[purge] finding state groups that can be deleted")
-            sg_to_delete = await self._find_unreferenced_groups(state_groups)
+            sg_to_delete = await self.stores.state.db_pool.runInteraction(
+                "find_unreferenced_state_groups",
+                find_unreferenced_groups,
+                self.stores.state.db_pool,
+                state_groups,
+            )
 
             # Mark these state groups as pending deletion, they will actually
             # get deleted automatically later.
             await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
                 sg_to_delete
             )
-
-    async def _find_unreferenced_groups(
-        self, state_groups: Collection[int]
-    ) -> Set[int]:
-        """Used when purging history to figure out which state groups can be
-        deleted.
-
-        Args:
-            state_groups: Set of state groups referenced by events
-                that are going to be deleted.
-
-        Returns:
-            The set of state groups that can be deleted.
-        """
-        # Set of events that we have found to be referenced by events
-        referenced_groups = set()
-
-        # Set of state groups we've already seen
-        state_groups_seen = set(state_groups)
-
-        # Set of state groups to handle next.
-        next_to_search = set(state_groups)
-        while next_to_search:
-            # We bound size of groups we're looking up at once, to stop the
-            # SQL query getting too big
-            if len(next_to_search) < 100:
-                current_search = next_to_search
-                next_to_search = set()
-            else:
-                current_search = set(itertools.islice(next_to_search, 100))
-                next_to_search -= current_search
-
-            referenced = await self.stores.main.get_referenced_state_groups(
-                current_search
-            )
-            referenced_groups |= referenced
-
-            # We don't continue iterating up the state group graphs for state
-            # groups that are referenced.
-            current_search -= referenced
-
-            edges = await self.stores.state.get_previous_state_groups(current_search)
-
-            prevs = set(edges.values())
-            # We don't bother re-handling groups we've already seen
-            prevs -= state_groups_seen
-            next_to_search |= prevs
-            state_groups_seen |= prevs
-
-            # We also check to see if anything referencing the state groups are
-            # also unreferenced. This helps ensure that we delete unreferenced
-            # state groups, if we don't then we will de-delta them when we
-            # delete the other state groups leading to increased DB usage.
-            next_edges = await self.stores.state.get_next_state_groups(current_search)
-            nexts = set(next_edges.keys())
-            nexts -= state_groups_seen
-            next_to_search |= nexts
-            state_groups_seen |= nexts
-
-        to_delete = state_groups_seen - referenced_groups
-
-        return to_delete
 
     @wrap_as_background_process("_delete_state_groups_loop")
     async def _delete_state_groups_loop(self) -> None:
