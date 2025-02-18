@@ -23,10 +23,9 @@
 """Contains functions for registering clients."""
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
 
 from prometheus_client import Counter
-from typing_extensions import TypedDict
 
 from synapse import types
 from synapse.api.constants import (
@@ -630,7 +629,9 @@ class RegistrationHandler:
         """
         await self._auto_join_rooms(user_id)
 
-    async def appservice_register(self, user_localpart: str, as_token: str) -> str:
+    async def appservice_register(
+        self, user_localpart: str, as_token: str
+    ) -> Tuple[str, ApplicationService]:
         user = UserID(user_localpart, self.hs.hostname)
         user_id = user.to_string()
         service = self.store.get_app_service_by_token(as_token)
@@ -653,7 +654,7 @@ class RegistrationHandler:
             appservice_id=service_id,
             create_profile_with_displayname=user.localpart,
         )
-        return user_id
+        return (user_id, service)
 
     def check_user_id_not_appservice_exclusive(
         self, user_id: str, allowed_appservice: Optional[ApplicationService] = None

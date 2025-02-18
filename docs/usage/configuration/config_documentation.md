@@ -162,6 +162,53 @@ Example configuration:
 pid_file: DATADIR/homeserver.pid
 ```
 ---
+### `daemonize`
+
+Specifies whether Synapse should be started as a daemon process. If Synapse is being
+managed by [systemd](../../systemd-with-workers/), this option must be omitted or set to
+`false`.
+
+This can also be set by the `--daemonize` (`-D`) argument when starting Synapse.
+
+See `worker_daemonize` for more information on daemonizing workers.
+
+Example configuration:
+```yaml
+daemonize: true
+```
+---
+### `print_pidfile`
+
+Print the path to the pidfile just before daemonizing. Defaults to false.
+
+This can also be set by the `--print-pidfile` argument when starting Synapse.
+
+Example configuration:
+```yaml
+print_pidfile: true
+```
+---
+### `user_agent_suffix`
+
+A suffix that is appended to the Synapse user-agent (ex. `Synapse/v1.123.0`). Defaults
+to None
+
+Example configuration:
+```yaml
+user_agent_suffix: " (I'm a teapot; Linux x86_64)"
+```
+---
+### `use_frozen_dicts`
+
+Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing
+prevents bugs where we accidentally share e.g. signature dicts. However, freezing a
+dict is expensive. Defaults to false.
+
+Example configuration:
+```yaml
+use_frozen_dicts: true
+```
+---
 ### `web_client_location`
 
 The absolute URL to the web client which `/` will redirect to. Defaults to none.
@@ -596,6 +643,17 @@ listeners:
 ```
 
 ---
+### `manhole`
+
+Turn on the Twisted telnet manhole service on the given port. Defaults to none.
+
+This can also be set by the `--manhole` argument when starting Synapse.
+
+Example configuration:
+```yaml
+manhole: 1234
+```
+---
 ### `manhole_settings`
 
 Connection settings for the manhole. You can find more information
@@ -673,8 +731,9 @@ This setting has the following sub-options:
    TLS via STARTTLS *if the SMTP server supports it*. If this option is set,
    Synapse will refuse to connect unless the server supports STARTTLS.
 * `enable_tls`: By default, if the server supports TLS, it will be used, and the server
-   must present a certificate that is valid for 'smtp_host'. If this option
+   must present a certificate that is valid for `tlsname`. If this option
    is set to false, TLS will not be used.
+* `tlsname`: The domain name the SMTP server's TLS certificate must be valid for, defaulting to `smtp_host`.
 * `notif_from`: defines the "From" address to use when sending emails.
     It must be set if email sending is enabled. The placeholder '%(app)s' will be replaced by the application name,
     which is normally set in `app_name`, but may be overridden by the
@@ -741,6 +800,7 @@ email:
   force_tls: true
   require_transport_security: true
   enable_tls: false
+  tlsname: mail.server.example.com
   notif_from: "Your Friendly %(app)s homeserver <noreply@example.com>"
   app_name: my_branded_matrix_server
   enable_notifs: true
@@ -760,6 +820,19 @@ email:
     invite_from_person: "[%(app)s] %(person)s has invited you to chat on %(app)s..."
     password_reset: "[%(server_name)s] Password reset"
     email_validation: "[%(server_name)s] Validate your email"
+```
+---
+### `max_event_delay_duration`
+
+The maximum allowed duration by which sent events can be delayed, as per
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
+Must be a positive value if set.
+
+Defaults to no duration (`null`), which disallows sending delayed events.
+
+Example configuration:
+```yaml
+max_event_delay_duration: 24h
 ```
 
 ## Homeserver blocking
@@ -1421,7 +1494,7 @@ number of entries that can be stored.
    Please see the [Config Conventions](#config-conventions) for information on how to specify memory size and cache expiry
    durations.
      * `max_cache_memory_usage` sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-        They will continue to be evicted until the memory usage drops below the `target_memory_usage`, set in
+        They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in
         the setting below, or until the `min_cache_ttl` is hit. There is no default value for this option.
      * `target_cache_memory_usage` sets a rough target for the desired memory usage of the caches. There is no default value
         for this option.
@@ -1853,6 +1926,27 @@ rc_federation:
   concurrent: 5
 ```
 ---
+### `rc_presence`
+
+This option sets ratelimiting for presence.
+
+The `rc_presence.per_user` option sets rate limits on how often a specific
+users' presence updates are evaluated. Ratelimited presence updates sent via sync are
+ignored, and no error is returned to the client.
+This option also sets the rate limit for the
+[`PUT /_matrix/client/v3/presence/{userId}/status`](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3presenceuseridstatus)
+endpoint.
+
+`per_user` defaults to `per_second: 0.1`, `burst_count: 1`.
+
+Example configuration:
+```yaml
+rc_presence:
+  per_user:
+    per_second: 0.05
+    burst_count: 1
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 Sets outgoing federation transaction frequency for sending read-receipts,
@@ -1874,12 +1968,33 @@ Config options related to Synapse's media store.
 
 When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
 unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_matrix/media/(r0|v3|v1)/thumbnail`) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints `_matrix/client/v1/media/download` and `_matrix/client/v1/media/thumbnail`. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
-after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
-this will change to true in a future Synapse release.
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to true (previously false). In a future release of Synapse, this option will be removed and become always-on.
+
+In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
+case-by-case breakdown describes whether media downloads are permitted:
+
+* `enable_authenticated_media = False`:
+  * unauthenticated client or homeserver requesting local media: allowed
+  * unauthenticated client or homeserver requesting remote media: allowed as long as the media is in the cache,
+    or as long as the remote homeserver does not require authentication to retrieve the media
+* `enable_authenticated_media = True`:
+  * unauthenticated client or homeserver requesting local media:
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+  * unauthenticated client or homeserver requesting remote media: the same as for local media;
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+
+It is especially notable that media downloaded before this option existed (in older Synapse versions), or whilst this option was set to `False`,
+will perpetually be available over the legacy, unauthenticated endpoint, even after this option is set to `True`.
+This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
+those older clients or homeservers will not be cut off from media they can already see.
+
+_Changed in Synapse 1.120:_ This option now defaults to `True` when not set, whereas before this version it defaulted to `False`.
 
 Example configuration:
 ```yaml
-enable_authenticated_media: true
+enable_authenticated_media: false
 ```
 ---
 ### `enable_media_repo`
@@ -2316,6 +2431,22 @@ Example configuration:
 turn_shared_secret: "YOUR_SHARED_SECRET"
 ```
 ---
+### `turn_shared_secret_path`
+
+An alternative to [`turn_shared_secret`](#turn_shared_secret):
+allows the shared secret to be specified in an external file.
+
+The file should be a plain text file, containing only the shared secret.
+Synapse reads the shared secret from the given file once at startup.
+
+Example configuration:
+```yaml
+turn_shared_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.116.0._
+
+---
 ### `turn_username` and `turn_password`
 
 The Username and password if the TURN server needs them and does not use a token.
@@ -2460,6 +2591,14 @@ set.
 This is primarily intended for use with the `register_new_matrix_user` script
 (see [Registering a user](../../setup/installation.md#registering-a-user));
 however, the interface is [documented](../../admin_api/register_api.html).
+
+Replacing an existing `registration_shared_secret` with a new one requires users
+of the [Shared-Secret Registration API](../../admin_api/register_api.html) to
+start using the new secret for requesting any further one-time nonces.
+
+> ⚠️ **Warning** – The additional consequences of replacing
+> [`macaroon_secret_key`](#macaroon_secret_key) will apply in case it delegates
+> to `registration_shared_secret`.
 
 See also [`registration_shared_secret_path`](#registration_shared_secret_path).
 
@@ -3037,16 +3176,40 @@ A secret which is used to sign
 If none is specified, the `registration_shared_secret` is used, if one is given;
 otherwise, a secret key is derived from the signing key.
 
+> ⚠️ **Warning** – Replacing an existing `macaroon_secret_key` with a new one
+> will lead to invalidation of access tokens for all guest users. It will also
+> break unsubscribe links in emails sent before the change. An unlucky user
+> might encounter a broken SSO login flow and would have to start again.
+
 Example configuration:
 ```yaml
 macaroon_secret_key: <PRIVATE STRING>
 ```
+---
+### `macaroon_secret_key_path`
+
+An alternative to [`macaroon_secret_key`](#macaroon_secret_key):
+allows the secret key to be specified in an external file.
+
+The file should be a plain text file, containing only the secret key.
+Synapse reads the secret key from the given file once at startup.
+
+Example configuration:
+```yaml
+macaroon_secret_key_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.121.0._
+
 ---
 ### `form_secret`
 
 A secret which is used to calculate HMACs for form values, to stop
 falsification of values. Must be specified for the User Consent
 forms to work.
+
+Replacing an existing `form_secret` with a new one might break the user consent
+page for an unlucky user and require them to reopen the page from a new link.
 
 Example configuration:
 ```yaml
@@ -3078,6 +3241,15 @@ it was last used.
 
 It is possible to build an entry from an old `signing.key` file using the
 `export_signing_key` script which is provided with synapse.
+
+If you have lost the private key file, you can ask another server you trust to
+tell you the public keys it has seen from your server. To fetch the keys from
+`matrix.org`, try something like:
+
+```
+curl https://matrix-federation.matrix.org/_matrix/key/v2/query/myserver.example.com |
+  jq '.server_keys | map(.verify_keys) | add'
+```
 
 Example configuration:
 ```yaml
@@ -3239,8 +3411,9 @@ This setting has the following sub-options:
    The default is 'uid'.
 * `attribute_requirements`: It is possible to configure Synapse to only allow logins if SAML attributes
     match particular values. The requirements can be listed under
-   `attribute_requirements` as shown in the example. All of the listed attributes must
-    match for the login to be permitted.
+    `attribute_requirements` as shown in the example. All of the listed attributes must
+    match for the login to be permitted. Values can be specified in a `one_of` list to allow
+    multiple values for an attribute.
 * `idp_entityid`: If the metadata XML contains multiple IdP entities then the `idp_entityid`
    option must be set to the entity to redirect users to.
    Most deployments only have a single IdP entity and so should omit this option.
@@ -3321,7 +3494,9 @@ saml2_config:
     - attribute: userGroup
       value: "staff"
     - attribute: department
-      value: "sales"
+      one_of:
+        - "sales"
+        - "admins"
 
   idp_entityid: 'https://our_idp/entityid'
 ```
@@ -3693,6 +3868,8 @@ Additional sub-options for this setting include:
    Required if `enabled` is set to true.
 * `subject_claim`: Name of the claim containing a unique identifier for the user.
    Optional, defaults to `sub`.
+* `display_name_claim`: Name of the claim containing the display name for the user. Optional.
+   If provided, the display name will be set to the value of this claim upon first login.
 * `issuer`: The issuer to validate the "iss" claim against. Optional. If provided the
    "iss" claim will be required and validated for all JSON web tokens.
 * `audiences`: A list of audiences to validate the "aud" claim against. Optional.
@@ -3707,6 +3884,7 @@ jwt_config:
     secret: "provided-by-your-issuer"
     algorithm: "provided-by-your-issuer"
     subject_claim: "name_of_claim"
+    display_name_claim: "name_of_claim"
     issuer: "provided-by-your-issuer"
     audiences:
         - "provided-by-your-issuer"
@@ -4281,6 +4459,9 @@ HTTP requests from workers.
 The default, this value is omitted (equivalently `null`), which means that
 traffic between the workers and the main process is not authenticated.
 
+Replacing an existing `worker_replication_secret` with a new one will break
+communication with all workers that have not yet updated their secret.
+
 Example configuration:
 ```yaml
 worker_replication_secret: "secret_secret"
@@ -4341,6 +4522,12 @@ a `federation_sender_instances` map. Doing so will remove handling of this funct
 the main process. Multiple workers can be added to this map, in which case the work is
 balanced across them.
 
+The way that the load balancing works is any outbound federation request will be assigned
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple `federation_sender_instances` are useful if there is a federation
+with multiple servers.
+
 This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
 and then started, to ensure that all instances are running with the same config (otherwise
@@ -4379,6 +4566,10 @@ instance_map:
   worker1:
     host: localhost
     port: 8034
+  other:
+    host: localhost
+    port: 8035
+    tls: true
 ```
 Example configuration(#2, for UNIX sockets):
 ```yaml
@@ -4489,6 +4680,9 @@ This setting has the following sub-options:
 * `path`: The full path to a local Unix socket file. **If this is used, `host` and
  `port` are ignored.** Defaults to `/tmp/redis.sock'
 * `password`: Optional password if configured on the Redis instance.
+* `password_path`: Alternative to `password`, reading the password from an
+   external file. The file should be a plain text file, containing only the
+   password. Synapse reads the password from the given file once at startup.
 * `dbid`: Optional redis dbid if needs to connect to specific redis logical db.
 * `use_tls`: Whether to use tls connection. Defaults to false.
 * `certificate_file`: Optional path to the certificate file
@@ -4502,13 +4696,16 @@ This setting has the following sub-options:
 
   _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
+  _Changed in Synapse 1.116.0: Added password\_path_
+
 Example configuration:
 ```yaml
 redis:
   enabled: true
   host: localhost
   port: 6379
-  password: <secret_password>
+  password_path: <path_to_the_password_file>
+  # OR password: <secret_password>
   dbid: <dbid>
   #use_tls: True
   #certificate_file: <path_to_the_certificate_file>
@@ -4686,7 +4883,7 @@ This setting has the following sub-options:
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
-* `worker_to_run_on`: Which worker to run this module on. This must match 
+* `worker_to_run_on`: Which worker to run this module on. This must match
   the "worker_name". If not set or `null`, invites will be accepted on the
   main process.
 

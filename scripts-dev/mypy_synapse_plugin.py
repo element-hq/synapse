@@ -360,7 +360,7 @@ def is_cacheable(
         # For a type alias, check if the underlying real type is cachable.
         return is_cacheable(mypy.types.get_proper_type(rt), signature, verbose)
 
-    elif isinstance(rt, UninhabitedType) and rt.is_noreturn:
+    elif isinstance(rt, UninhabitedType):
         # There is no return value, just consider it cachable. This is only used
         # in tests.
         return True, None

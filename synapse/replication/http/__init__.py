@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from synapse.http.server import JsonResource
 from synapse.replication.http import (
     account_data,
+    delayed_events,
     devices,
     federation,
     login,
@@ -64,3 +65,4 @@ class ReplicationRestResource(JsonResource):
             login.register_servlets(hs, self)
             register.register_servlets(hs, self)
             devices.register_servlets(hs, self)
+            delayed_events.register_servlets(hs, self)

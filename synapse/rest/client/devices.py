@@ -24,13 +24,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra, StrictStr
-else:
-    from pydantic import Extra, StrictStr
-
+from synapse._pydantic_compat import Extra, StrictStr
 from synapse.api import errors
 from synapse.api.errors import NotFoundError, SynapseError, UnrecognizedRequestError
 from synapse.handlers.device import DeviceHandler
@@ -120,15 +114,19 @@ class DeleteDevicesRestServlet(RestServlet):
             else:
                 raise e
 
-        await self.auth_handler.validate_user_via_ui_auth(
-            requester,
-            request,
-            body.dict(exclude_unset=True),
-            "remove device(s) from your account",
-            # Users might call this multiple times in a row while cleaning up
-            # devices, allow a single UI auth session to be re-used.
-            can_skip_ui_auth=True,
-        )
+        if requester.app_service and requester.app_service.msc4190_device_management:
+            # MSC4190 can skip UIA for this endpoint
+            pass
+        else:
+            await self.auth_handler.validate_user_via_ui_auth(
+                requester,
+                request,
+                body.dict(exclude_unset=True),
+                "remove device(s) from your account",
+                # Users might call this multiple times in a row while cleaning up
+                # devices, allow a single UI auth session to be re-used.
+                can_skip_ui_auth=True,
+            )
 
         await self.device_handler.delete_devices(
             requester.user.to_string(), body.devices
@@ -181,9 +179,6 @@ class DeviceRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
-        if self._msc3861_oauth_delegation_enabled:
-            raise UnrecognizedRequestError(code=404)
-
         requester = await self.auth.get_user_by_req(request)
 
         try:
@@ -198,15 +193,24 @@ class DeviceRestServlet(RestServlet):
             else:
                 raise
 
-        await self.auth_handler.validate_user_via_ui_auth(
-            requester,
-            request,
-            body.dict(exclude_unset=True),
-            "remove a device from your account",
-            # Users might call this multiple times in a row while cleaning up
-            # devices, allow a single UI auth session to be re-used.
-            can_skip_ui_auth=True,
-        )
+        if requester.app_service and requester.app_service.msc4190_device_management:
+            # MSC4190 allows appservices to delete devices through this endpoint without UIA
+            # It's also allowed with MSC3861 enabled
+            pass
+
+        else:
+            if self._msc3861_oauth_delegation_enabled:
+                raise UnrecognizedRequestError(code=404)
+
+            await self.auth_handler.validate_user_via_ui_auth(
+                requester,
+                request,
+                body.dict(exclude_unset=True),
+                "remove a device from your account",
+                # Users might call this multiple times in a row while cleaning up
+                # devices, allow a single UI auth session to be re-used.
+                can_skip_ui_auth=True,
+            )
 
         await self.device_handler.delete_devices(
             requester.user.to_string(), [device_id]
@@ -222,6 +226,16 @@ class DeviceRestServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
+
+        # MSC4190 allows appservices to create devices through this endpoint
+        if requester.app_service and requester.app_service.msc4190_device_management:
+            created = await self.device_handler.upsert_device(
+                user_id=requester.user.to_string(),
+                device_id=device_id,
+                display_name=body.display_name,
+            )
+            return 201 if created else 200, {}
+
         await self.device_handler.update_device(
             requester.user.to_string(), device_id, body.dict()
         )

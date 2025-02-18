@@ -26,7 +26,13 @@ from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 from twisted.internet.interfaces import IDelayedCall
 
 import synapse.metrics
-from synapse.api.constants import EventTypes, HistoryVisibility, JoinRules, Membership
+from synapse.api.constants import (
+    EventTypes,
+    HistoryVisibility,
+    JoinRules,
+    Membership,
+    ProfileFields,
+)
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -161,7 +167,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         non_spammy_users = []
         for user in results["results"]:
             if not await self._spam_checker_module_callbacks.check_username_for_spam(
-                user
+                user, user_id
             ):
                 non_spammy_users.append(user)
         results["results"] = non_spammy_users
@@ -756,6 +762,10 @@ class UserDirectoryHandler(StateDeltasHandler):
 
                 await self.store.update_profile_in_user_dir(
                     user_id,
-                    display_name=non_null_str_or_none(profile.get("displayname")),
-                    avatar_url=non_null_str_or_none(profile.get("avatar_url")),
+                    display_name=non_null_str_or_none(
+                        profile.get(ProfileFields.DISPLAYNAME)
+                    ),
+                    avatar_url=non_null_str_or_none(
+                        profile.get(ProfileFields.AVATAR_URL)
+                    ),
                 )

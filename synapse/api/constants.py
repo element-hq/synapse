@@ -231,6 +231,8 @@ class EventContentFields:
     ROOM_NAME: Final = "name"
 
     MEMBERSHIP: Final = "membership"
+    MEMBERSHIP_DISPLAYNAME: Final = "displayname"
+    MEMBERSHIP_AVATAR_URL: Final = "avatar_url"
 
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
@@ -318,3 +320,8 @@ class ApprovalNoticeMedium:
 class Direction(enum.Enum):
     BACKWARDS = "b"
     FORWARDS = "f"
+
+
+class ProfileFields:
+    DISPLAYNAME: Final = "displayname"
+    AVATAR_URL: Final = "avatar_url"

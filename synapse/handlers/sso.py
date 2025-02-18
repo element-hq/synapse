@@ -33,17 +33,17 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Protocol,
     Set,
 )
 from urllib.parse import urlencode
 
 import attr
-from typing_extensions import Protocol
 
 from twisted.web.iweb import IRequest
 from twisted.web.server import Request
 
-from synapse.api.constants import LoginType
+from synapse.api.constants import LoginType, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError
 from synapse.config.sso import SsoAttributeRequirement
 from synapse.handlers.device import DeviceHandler
@@ -813,9 +813,10 @@ class SsoHandler:
 
             # bail if user already has the same avatar
             profile = await self._profile_handler.get_profile(user_id)
-            if profile["avatar_url"] is not None:
-                server_name = profile["avatar_url"].split("/")[-2]
-                media_id = profile["avatar_url"].split("/")[-1]
+            if ProfileFields.AVATAR_URL in profile:
+                avatar_url_parts = profile[ProfileFields.AVATAR_URL].split("/")
+                server_name = avatar_url_parts[-2]
+                media_id = avatar_url_parts[-1]
                 if self._is_mine_server_name(server_name):
                     media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
                     if media is not None and upload_name == media.upload_name:
@@ -1276,12 +1277,16 @@ def _check_attribute_requirement(
         return False
 
     # If the requirement is None, the attribute existing is enough.
-    if req.value is None:
+    if req.value is None and req.one_of is None:
         return True
 
     values = attributes[req.attribute]
     if req.value in values:
         return True
+    if req.one_of:
+        for value in req.one_of:
+            if value in values:
+                return True
 
     logger.info(
         "SSO attribute %s did not match required value '%s' (was '%s')",

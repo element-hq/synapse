@@ -1,1 +1,0 @@
-Clarify that the admin api resource is only loaded on the main process and not workers.

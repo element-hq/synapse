@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -195,7 +195,9 @@ class RoomStateEventRestServlet(RestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.room_member_handler = hs.get_room_member_handler()
         self.message_handler = hs.get_message_handler()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._max_event_delay_ms = hs.config.server.max_event_delay_ms
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -291,6 +293,22 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
+        delay = _parse_request_delay(request, self._max_event_delay_ms)
+        if delay is not None:
+            delay_id = await self.delayed_events_handler.add(
+                requester,
+                room_id=room_id,
+                event_type=event_type,
+                state_key=state_key,
+                origin_server_ts=origin_server_ts,
+                content=content,
+                delay=delay,
+            )
+
+            set_tag("delay_id", delay_id)
+            ret = {"delay_id": delay_id}
+            return 200, ret
+
         try:
             if event_type == EventTypes.Member:
                 membership = content.get("membership", None)
@@ -341,7 +359,9 @@ class RoomSendEventRestServlet(TransactionRestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
         self.event_creation_handler = hs.get_event_creation_handler()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._max_event_delay_ms = hs.config.server.max_event_delay_ms
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
@@ -358,6 +378,26 @@ class RoomSendEventRestServlet(TransactionRestServlet):
     ) -> Tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
+        origin_server_ts = None
+        if requester.app_service:
+            origin_server_ts = parse_integer(request, "ts")
+
+        delay = _parse_request_delay(request, self._max_event_delay_ms)
+        if delay is not None:
+            delay_id = await self.delayed_events_handler.add(
+                requester,
+                room_id=room_id,
+                event_type=event_type,
+                state_key=None,
+                origin_server_ts=origin_server_ts,
+                content=content,
+                delay=delay,
+            )
+
+            set_tag("delay_id", delay_id)
+            ret = {"delay_id": delay_id}
+            return 200, ret
+
         event_dict: JsonDict = {
             "type": event_type,
             "content": content,
@@ -365,10 +405,8 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             "sender": requester.user.to_string(),
         }
 
-        if requester.app_service:
-            origin_server_ts = parse_integer(request, "ts")
-            if origin_server_ts is not None:
-                event_dict["origin_server_ts"] = origin_server_ts
+        if origin_server_ts is not None:
+            event_dict["origin_server_ts"] = origin_server_ts
 
         try:
             (
@@ -411,6 +449,49 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         )
 
 
+def _parse_request_delay(
+    request: SynapseRequest,
+    max_delay: Optional[int],
+) -> Optional[int]:
+    """Parses from the request string the delay parameter for
+        delayed event requests, and checks it for correctness.
+
+    Args:
+        request: the twisted HTTP request.
+        max_delay: the maximum allowed value of the delay parameter,
+            or None if no delay parameter is allowed.
+    Returns:
+        The value of the requested delay, or None if it was absent.
+
+    Raises:
+        SynapseError: if the delay parameter is present and forbidden,
+            or if it exceeds the maximum allowed value.
+    """
+    delay = parse_integer(request, "org.matrix.msc4140.delay")
+    if delay is None:
+        return None
+    if max_delay is None:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            "Delayed events are not supported on this server",
+            Codes.UNKNOWN,
+            {
+                "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
+            },
+        )
+    if delay > max_delay:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            "The requested delay exceeds the allowed maximum.",
+            Codes.UNKNOWN,
+            {
+                "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
+                "org.matrix.msc4140.max_delay": max_delay,
+            },
+        )
+    return delay
+
+
 # TODO: Needs unit testing for room ID + alias joins
 class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
     CATEGORY = "Event sending requests"
@@ -419,7 +500,6 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         super().__init__(hs)
         super(ResolveRoomIdMixin, self).__init__(hs)  # ensure the Mixin is set up
         self.auth = hs.get_auth()
-        self._support_via = hs.config.experimental.msc4156_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /join/$room_identifier[/$txn_id]
@@ -437,13 +517,11 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
-        remote_room_hosts = parse_strings_from_args(args, "server_name", required=False)
-        if self._support_via:
+        # Prefer via over server_name (deprecated with MSC4156)
+        remote_room_hosts = parse_strings_from_args(args, "via", required=False)
+        if remote_room_hosts is None:
             remote_room_hosts = parse_strings_from_args(
-                args,
-                "org.matrix.msc4156.via",
-                default=remote_room_hosts,
-                required=False,
+                args, "server_name", required=False
             )
         room_id, remote_room_hosts = await self.resolve_room_id(
             room_identifier,
@@ -705,9 +783,9 @@ class RoomMessageListRestServlet(RestServlet):
         # decorator on `get_number_joined_users_in_room` doesn't play well with
         # the type system. Maybe in the future, it can use some ParamSpec
         # wizardry to fix it up.
-        room_member_count_deferred = run_in_background(  # type: ignore[call-arg]
+        room_member_count_deferred = run_in_background(  # type: ignore[call-overload]
             self.store.get_number_joined_users_in_room,
-            room_id,  # type: ignore[arg-type]
+            room_id,
         )
 
         requester = await self.auth.get_user_by_req(request, allow_guest=True)

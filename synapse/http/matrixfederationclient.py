@@ -19,7 +19,6 @@
 #
 #
 import abc
-import cgi
 import codecs
 import logging
 import random
@@ -35,6 +34,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Literal,
     Optional,
     TextIO,
     Tuple,
@@ -49,7 +49,6 @@ import treq
 from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
 from signedjson.sign import sign_json
-from typing_extensions import Literal
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError
@@ -792,7 +791,7 @@ class MatrixFederationHttpClient:
                                 url_str,
                                 _flatten_response_never_received(e),
                             )
-                            body = None
+                            body = b""
 
                         exc = HttpResponseException(
                             response.code, response_phrase, body
@@ -1813,8 +1812,9 @@ def check_content_type_is(headers: Headers, expected_content_type: str) -> None:
         )
 
     c_type = content_type_headers[0].decode("ascii")  # only the first header
-    val, options = cgi.parse_header(c_type)
-    if val != expected_content_type:
+    # Extract the 'essence' of the mimetype, removing any parameter
+    c_type_parsed = c_type.split(";", 1)[0].strip()
+    if c_type_parsed != expected_content_type:
         raise RequestSendFailed(
             RuntimeError(
                 f"Remote server sent Content-Type header of '{c_type}', not '{expected_content_type}'",

@@ -20,29 +20,15 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import (
-        Extra,
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        conint,
-        constr,
-        validator,
-    )
-else:
-    from pydantic import (
-        Extra,
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        conint,
-        constr,
-        validator,
-    )
-
+from synapse._pydantic_compat import (
+    Extra,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    conint,
+    constr,
+    validator,
+)
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 
@@ -384,7 +370,7 @@ class SlidingSyncBody(RequestBodyModel):
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
 
-    conn_id: Optional[str]
+    conn_id: Optional[StrictStr]
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:

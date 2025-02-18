@@ -24,14 +24,13 @@ import json
 import os
 import re
 import shutil
-from typing import Any, BinaryIO, Dict, List, Optional, Sequence, Tuple, Type
+from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
-from typing_extensions import ClassVar
 
 from twisted.internet import defer
 from twisted.internet._resolver import HostResolution
@@ -66,6 +65,7 @@ from tests.media.test_media_storage import (
     SVG,
     TestImage,
     empty_file,
+    small_cmyk_jpeg,
     small_lossless_webp,
     small_png,
     small_png_with_transparency,
@@ -1916,6 +1916,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 test_images = [
     small_png,
     small_png_with_transparency,
+    small_cmyk_jpeg,
     small_lossless_webp,
     empty_file,
     SVG,
@@ -2400,7 +2401,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
 
             if expected_body is not None:
                 self.assertEqual(
-                    channel.result["body"], expected_body, channel.result["body"]
+                    channel.result["body"], expected_body, channel.result["body"].hex()
                 )
             else:
                 # ensure that the result is at least some valid image

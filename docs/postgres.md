@@ -100,6 +100,10 @@ database:
     keepalives_count: 3
 ```
 
+## Backups
+
+Don't forget to [back up](./usage/administration/backups.md#database) your database!
+
 ## Tuning Postgres
 
 The default settings should be fine for most deployments. For larger
