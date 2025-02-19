@@ -702,17 +702,17 @@ class Porter:
         return autovacuum_setting != 0
 
     async def remove_ignored_background_updates_from_database(self) -> None:
-        def _remove_delete_unreferenced_state_groups_bg_update(
+        def _remove_delete_unreferenced_state_groups_bg_updates(
             txn: LoggingTransaction,
         ) -> None:
             txn.execute(
-                "DELETE FROM background_updates WHERE update_name IN (%s)",
-                ", ".join(u for u in IGNORED_BACKGROUND_UPDATES),
+                "DELETE FROM background_updates WHERE update_name IN (%s)"
+                % (", ".join(u for u in IGNORED_BACKGROUND_UPDATES),)
             )
 
         await self.postgres_store.db_pool.runInteraction(
-            "remove_delete_unreferenced_state_groups_bg_update",
-            _remove_delete_unreferenced_state_groups_bg_update,
+            "remove_delete_unreferenced_state_groups_bg_updates",
+            _remove_delete_unreferenced_state_groups_bg_updates,
         )
 
     async def run(self) -> None:
