@@ -192,9 +192,9 @@ APPEND_ONLY_TABLES = [
 
 IGNORED_TABLES = {
     # Porting the auto generated sequence in this table is non-trivial.
-    # And anything not ported, will get automatically added back by the
-    # `delete_unreferenced_state_groups_bg_update` background task.
-    # This makes it safe to ignore porting this table.
+    # None of the entries in this list are mandatory for Synapse to keep working.
+    # If state group disk space is an issue after the port, the 
+    # `delete_unreferenced_state_groups_bg_update` background task can be run again.
     "state_groups_pending_deletion",
     # We don't port these tables, as they're a faff and we can regenerate
     # them anyway.
