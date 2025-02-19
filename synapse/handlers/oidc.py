@@ -731,6 +731,7 @@ class OidcProvider:
         }
 
         args = {
+            "client_id": self._client_auth.client_id,
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": self._callback_url,
