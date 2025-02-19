@@ -380,6 +380,37 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         )
         self.assertEqual(requester.device_id, DEVICE)
 
+    def test_active_user_with_device_explicit_device_id(self) -> None:
+        """The handler should return a requester with normal user rights and a device ID, given explicitly, as supported by MAS 0.15+"""
+
+        self.http_client.request = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join([MATRIX_USER_SCOPE]),
+                    "device_id": DEVICE,
+                    "username": USERNAME,
+                },
+            )
+        )
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_user_by_req(request))
+        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
+        self.http_client.request.assert_called_once_with(
+            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        )
+        self._assertParams()
+        self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
+        self.assertEqual(requester.is_guest, False)
+        self.assertEqual(
+            get_awaitable_result(self.auth.is_server_admin(requester)), False
+        )
+        self.assertEqual(requester.device_id, DEVICE)
+
     def test_multiple_devices(self) -> None:
         """The handler should raise an error if multiple devices are found in the scope."""
 
