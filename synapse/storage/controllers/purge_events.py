@@ -79,28 +79,6 @@ class PurgeEventsStorageController:
             await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
                 sg_to_delete
             )
-
-    @wrap_as_background_process("_delete_state_groups_loop")
-    async def _delete_state_groups_loop(self) -> None:
-        """Background task that deletes any state groups that may be pending
-        deletion."""
-
-        while True:
-            next_to_delete = await self.stores.state_deletion.get_next_state_group_collection_to_delete()
-            if next_to_delete is None:
-                break
-
-            (room_id, groups_to_sequences) = next_to_delete
-            made_progress = await self._delete_state_groups(
-                room_id, groups_to_sequences
-            )
-
-            # If no progress was made in deleting the state groups, then we
-            # break to allow a pause before trying again next time we get
-            # called.
-            if not made_progress:
-                break
-
     async def _find_unreferenced_groups(
         self, state_groups: Collection[int]
     ) -> Set[int]:
@@ -197,6 +175,27 @@ class PurgeEventsStorageController:
         to_delete = state_groups_seen - referenced_groups
 
         return to_delete
+
+    @wrap_as_background_process("_delete_state_groups_loop")
+    async def _delete_state_groups_loop(self) -> None:
+        """Background task that deletes any state groups that may be pending
+        deletion."""
+
+        while True:
+            next_to_delete = await self.stores.state_deletion.get_next_state_group_collection_to_delete()
+            if next_to_delete is None:
+                break
+
+            (room_id, groups_to_sequences) = next_to_delete
+            made_progress = await self._delete_state_groups(
+                room_id, groups_to_sequences
+            )
+
+            # If no progress was made in deleting the state groups, then we
+            # break to allow a pause before trying again next time we get
+            # called.
+            if not made_progress:
+                break
 
     async def _delete_state_groups(
         self, room_id: str, groups_to_sequences: Mapping[int, int]
