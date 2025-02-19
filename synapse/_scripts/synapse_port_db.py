@@ -221,6 +221,15 @@ IGNORED_TABLES = {
 }
 
 
+# These background updates will not be applied upon creation of the postgres database.
+IGNORED_BACKGROUND_UPDATES = {
+    # Reapplying this background update to the postgres database is unnecessary after
+    # already having waited for the SQLite database to complete all running background
+    # updates.
+    "delete_unreferenced_state_groups_bg_update",
+}
+
+
 # Error returned by the run function. Used at the top-level part of the script to
 # handle errors and return codes.
 end_error: Optional[str] = None
@@ -692,6 +701,20 @@ class Porter:
         # 0 means off. 1 means full. 2 means incremental.
         return autovacuum_setting != 0
 
+    async def remove_ignored_background_updates_from_database(self) -> None:
+        def _remove_delete_unreferenced_state_groups_bg_update(
+            txn: LoggingTransaction,
+        ) -> None:
+            txn.execute(
+                "DELETE FROM background_updates WHERE update_name IN (%s)",
+                ", ".join(u for u in IGNORED_BACKGROUND_UPDATES),
+            )
+
+        await self.postgres_store.db_pool.runInteraction(
+            "remove_delete_unreferenced_state_groups_bg_update",
+            _remove_delete_unreferenced_state_groups_bg_update,
+        )
+
     async def run(self) -> None:
         """Ports the SQLite database to a PostgreSQL database.
 
@@ -736,6 +759,8 @@ class Porter:
             self.postgres_store = self.build_db_store(
                 self.hs_config.database.get_single_database()
             )
+
+            await self.remove_ignored_background_updates_from_database()
 
             await self.run_background_updates_on_postgres()
 
