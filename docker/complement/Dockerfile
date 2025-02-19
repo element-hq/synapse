@@ -18,6 +18,7 @@ FROM $FROM
 # This trick only works because we use a postgres image based on the same debian
 # version as Synapse's docker image (so the versions of the shared libraries
 # match).
+RUN echo "nogroup:x:65534:" >> /etc/group
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
 COPY --from=docker.io/library/postgres:13-bookworm /usr/lib /usr/lib
 COPY --from=docker.io/library/postgres:13-bookworm /usr/share/postgresql /usr/share/postgresql

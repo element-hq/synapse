@@ -17,38 +17,40 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
 ENV UV_LINK_MODE=copy
 
 RUN \
-    --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update -qq && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
-    redis-server nginx-light
+  --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update -qq && \
+  apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
+      redis-server \
+      nginx-light \
+      mawk \
+    | grep '^\w' > /tmp/pkg-list && \
+  mkdir -p /tmp/debs && \
+  cat /tmp/pkg-list && \
+  cd /tmp/debs && \
+  xargs apt-get download </tmp/pkg-list
+
+# Extract the debs for each architecture
+RUN \
+    mkdir -p /install/var/lib/dpkg/status.d/ && \
+    for deb in /tmp/debs/*.deb; do \
+      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
+      echo "Extracting: ${package_name}"; \
+      dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install/var/lib/dpkg/status.d/${package_name}; \
+      dpkg --extract $deb /install; \
+    done;
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --prefix="/install" supervisor~=4.2
-
-# Similarly, a base to copy the redis server from.
-#
-# The redis docker image has fewer dynamic libraries than the debian package,
-# which makes it much easier to copy (but we need to make sure we use an image
-# based on the same debian version as the synapse image, to make sure we get
-# the expected version of libc.
-FROM docker.io/library/redis:7-bookworm AS redis_base
+    uv pip install --prefix="/install/usr/local" supervisor~=4.2
 
 # now build the final image, based on the the regular Synapse docker image
 FROM $FROM
 
 # Copy over redis, nginx and supervisor
-COPY --from=redis_base /usr/local/bin/redis-server /usr/local/bin
-
-COPY --from=deps_base /install /usr/local
-COPY --from=deps_base /usr/sbin/nginx /usr/sbin
-COPY --from=deps_base /usr/share/nginx /usr/share/nginx
-COPY --from=deps_base /usr/lib/nginx /usr/lib/nginx
-COPY --from=deps_base /etc/nginx /etc/nginx
-RUN rm /etc/nginx/sites-enabled/default
-RUN mkdir -p /var/log/nginx /var/lib/nginx /etc/supervisor/conf.d
-RUN echo "nogroup:x:65534:" >> /etc/group
-RUN adduser -S -u 33 -h /var/www -s /usr/sbin/nologin -H www-data
+COPY --from=deps_base /install /
+RUN mkdir -p /etc/supervisor/conf.d
+RUN addgroup -S -g 33 www-data
+RUN adduser -S -u 33 -G www-data -h /var/www -s /usr/sbin/nologin -H www-data
 RUN chown www-data /var/lib/nginx
 
 # have nginx log to stderr/out
