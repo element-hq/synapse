@@ -193,7 +193,7 @@ APPEND_ONLY_TABLES = [
 IGNORED_TABLES = {
     # Porting the auto generated sequence in this table is non-trivial.
     # None of the entries in this list are mandatory for Synapse to keep working.
-    # If state group disk space is an issue after the port, the 
+    # If state group disk space is an issue after the port, the
     # `delete_unreferenced_state_groups_bg_update` background task can be run again.
     "state_groups_pending_deletion",
     # We don't port these tables, as they're a faff and we can regenerate
@@ -707,12 +707,13 @@ class Porter:
         ) -> None:
             txn.execute(
                 "DELETE FROM background_updates WHERE update_name IN (%s)"
-                % (", ".join(u for u in IGNORED_BACKGROUND_UPDATES),)
+                % (", ".join("%s" for _ in IGNORED_BACKGROUND_UPDATES),)
             )
 
         await self.postgres_store.db_pool.runInteraction(
             "remove_delete_unreferenced_state_groups_bg_updates",
             _remove_delete_unreferenced_state_groups_bg_updates,
+            IGNORED_BACKGROUND_UPDATES,
         )
 
     async def run(self) -> None:
