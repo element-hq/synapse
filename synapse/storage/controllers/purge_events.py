@@ -19,9 +19,8 @@
 #
 #
 
-import itertools
 import logging
-from typing import TYPE_CHECKING, Collection, List, Mapping, Set, Tuple, cast
+from typing import TYPE_CHECKING, Mapping
 
 from synapse.logging.context import nested_logging_context
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -85,103 +84,6 @@ class PurgeEventsStorageController:
             await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
                 sg_to_delete
             )
-
-    async def _find_unreferenced_groups(
-        self, state_groups: Collection[int]
-    ) -> Set[int]:
-        """Used when purging history to figure out which state groups can be
-        deleted.
-
-        Args:
-            state_groups: Set of state groups referenced by events
-                that are going to be deleted.
-
-        Returns:
-            The set of state groups that can be deleted.
-        """
-
-        # Set of events that we have found to be referenced by events
-        referenced_groups = set()
-
-        # Set of state groups we've already seen
-        state_groups_seen = set(state_groups)
-
-        # Set of state groups to handle next.
-        next_to_search = set(state_groups)
-        while next_to_search:
-            # We bound size of groups we're looking up at once, to stop the
-            # SQL query getting too big
-            if len(next_to_search) < 100:
-                current_search = next_to_search
-                next_to_search = set()
-            else:
-                current_search = set(itertools.islice(next_to_search, 100))
-                next_to_search -= current_search
-
-            referenced_state_groups = cast(
-                List[Tuple[int]],
-                await self.stores.main.db_pool.simple_select_many_batch(
-                    table="event_to_state_groups",
-                    column="state_group",
-                    iterable=current_search,
-                    keyvalues={},
-                    retcols=("DISTINCT state_group",),
-                    desc="get_referenced_state_groups",
-                ),
-            )
-
-            referenced = {row[0] for row in referenced_state_groups}
-            referenced_groups |= referenced
-
-            # We don't continue iterating up the state group graphs for state
-            # groups that are referenced.
-            current_search -= referenced
-
-            prev_state_groups = cast(
-                List[Tuple[int, int]],
-                await self.stores.state.db_pool.simple_select_many_batch(
-                    table="state_group_edges",
-                    column="state_group",
-                    iterable=current_search,
-                    keyvalues={},
-                    retcols=("state_group", "prev_state_group"),
-                    desc="get_previous_state_groups",
-                ),
-            )
-
-            edges = dict(prev_state_groups)
-
-            prevs = set(edges.values())
-            # We don't bother re-handling groups we've already seen
-            prevs -= state_groups_seen
-            next_to_search |= prevs
-            state_groups_seen |= prevs
-
-            # We also check to see if anything referencing the state groups are
-            # also unreferenced. This helps ensure that we delete unreferenced
-            # state groups, if we don't then we will de-delta them when we
-            # delete the other state groups leading to increased DB usage.
-            next_state_groups = cast(
-                List[Tuple[int, int]],
-                await self.stores.state.db_pool.simple_select_many_batch(
-                    table="state_group_edges",
-                    column="prev_state_group",
-                    iterable=current_search,
-                    keyvalues={},
-                    retcols=("state_group", "prev_state_group"),
-                    desc="get_next_state_groups",
-                ),
-            )
-
-            next_edges = dict(next_state_groups)
-            nexts = set(next_edges.keys())
-            nexts -= state_groups_seen
-            next_to_search |= nexts
-            state_groups_seen |= nexts
-
-        to_delete = state_groups_seen - referenced_groups
-
-        return to_delete
 
     @wrap_as_background_process("_delete_state_groups_loop")
     async def _delete_state_groups_loop(self) -> None:
