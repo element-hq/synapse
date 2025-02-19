@@ -707,13 +707,13 @@ class Porter:
         ) -> None:
             txn.execute(
                 "DELETE FROM background_updates WHERE update_name IN (%s)"
-                % (", ".join("%s" for _ in IGNORED_BACKGROUND_UPDATES),)
+                % (", ".join("%s" for _ in IGNORED_BACKGROUND_UPDATES),),
+                list(IGNORED_BACKGROUND_UPDATES),
             )
 
         await self.postgres_store.db_pool.runInteraction(
             "remove_delete_unreferenced_state_groups_bg_updates",
             _remove_delete_unreferenced_state_groups_bg_updates,
-            IGNORED_BACKGROUND_UPDATES,
         )
 
     async def run(self) -> None:
