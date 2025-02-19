@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Collection, List, Mapping, Set, Tuple, cast
 from synapse.logging.context import nested_logging_context
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases import Databases
+from synapse.storage.databases.state.bg_updates import find_unreferenced_groups
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -72,7 +73,12 @@ class PurgeEventsStorageController:
             )
 
             logger.info("[purge] finding state groups that can be deleted")
-            sg_to_delete = await self._find_unreferenced_groups(state_groups)
+            # sg_to_delete = await self._find_unreferenced_groups(state_groups)
+            sg_to_delete = await find_unreferenced_groups(
+                self.stores.main.db_pool,
+                self.stores.state.db_pool,
+                state_groups,
+            )
 
             # Mark these state groups as pending deletion, they will actually
             # get deleted automatically later.

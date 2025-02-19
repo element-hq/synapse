@@ -655,7 +655,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
         # Find all state groups that can be deleted if the original set is deleted.
         # This set includes the original set, as well as any state groups that would
         # become unreferenced upon deleting the original set.
-        to_delete = await find_unreferenced_groups(self.db_pool, next_set)
+        to_delete = await find_unreferenced_groups(self.db_pool, self.db_pool, next_set)
 
         if len(to_delete) == 0:
             return last_checked_state_group, final_batch
@@ -693,7 +693,9 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
 
 
 async def find_unreferenced_groups(
-    db_pool: DatabasePool, state_groups: Collection[int]
+    main_db_pool: DatabasePool,
+    state_db_pool: DatabasePool,
+    state_groups: Collection[int],
 ) -> Set[int]:
     """Used when purging history to figure out which state groups can be
     deleted.
@@ -725,7 +727,7 @@ async def find_unreferenced_groups(
 
         referenced_state_groups = cast(
             List[Tuple[int]],
-            await db_pool.simple_select_many_batch(
+            await main_db_pool.simple_select_many_batch(
                 table="event_to_state_groups",
                 column="state_group",
                 iterable=current_search,
@@ -744,7 +746,7 @@ async def find_unreferenced_groups(
 
         prev_state_groups = cast(
             List[Tuple[int, int]],
-            await db_pool.simple_select_many_batch(
+            await state_db_pool.simple_select_many_batch(
                 table="state_group_edges",
                 column="state_group",
                 iterable=current_search,
@@ -768,7 +770,7 @@ async def find_unreferenced_groups(
         # delete the other state groups leading to increased DB usage.
         next_state_groups = cast(
             List[Tuple[int, int]],
-            await db_pool.simple_select_many_batch(
+            await state_db_pool.simple_select_many_batch(
                 table="state_group_edges",
                 column="prev_state_group",
                 iterable=current_search,
