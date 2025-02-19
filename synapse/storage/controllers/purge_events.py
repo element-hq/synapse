@@ -101,47 +101,6 @@ class PurgeEventsStorageController:
             if not made_progress:
                 break
 
-    async def _delete_state_groups(
-        self, room_id: str, groups_to_sequences: Mapping[int, int]
-    ) -> bool:
-        """Tries to delete the given state groups.
-
-        Returns:
-            Whether we made progress in deleting the state groups (or marking
-            them as referenced).
-        """
-
-        # We double check if any of the state groups have become referenced.
-        # This shouldn't happen, as any usages should cause the state group to
-        # be removed as pending deletion.
-        referenced_state_groups = await self.stores.main.get_referenced_state_groups(
-            groups_to_sequences
-        )
-
-        if referenced_state_groups:
-            # We mark any state groups that have become referenced as being
-            # used.
-            await self.stores.state_deletion.mark_state_groups_as_used(
-                referenced_state_groups
-            )
-
-            # Update list of state groups to remove referenced ones
-            groups_to_sequences = {
-                state_group: sequence_number
-                for state_group, sequence_number in groups_to_sequences.items()
-                if state_group not in referenced_state_groups
-            }
-
-        if not groups_to_sequences:
-            # We made progress here as long as we marked some state groups as
-            # now referenced.
-            return len(referenced_state_groups) > 0
-
-        return await self.stores.state.purge_unreferenced_state_groups(
-            room_id,
-            groups_to_sequences,
-        )
-
     async def _find_unreferenced_groups(
         self, state_groups: Collection[int]
     ) -> Set[int]:
@@ -238,3 +197,44 @@ class PurgeEventsStorageController:
         to_delete = state_groups_seen - referenced_groups
 
         return to_delete
+
+    async def _delete_state_groups(
+        self, room_id: str, groups_to_sequences: Mapping[int, int]
+    ) -> bool:
+        """Tries to delete the given state groups.
+
+        Returns:
+            Whether we made progress in deleting the state groups (or marking
+            them as referenced).
+        """
+
+        # We double check if any of the state groups have become referenced.
+        # This shouldn't happen, as any usages should cause the state group to
+        # be removed as pending deletion.
+        referenced_state_groups = await self.stores.main.get_referenced_state_groups(
+            groups_to_sequences
+        )
+
+        if referenced_state_groups:
+            # We mark any state groups that have become referenced as being
+            # used.
+            await self.stores.state_deletion.mark_state_groups_as_used(
+                referenced_state_groups
+            )
+
+            # Update list of state groups to remove referenced ones
+            groups_to_sequences = {
+                state_group: sequence_number
+                for state_group, sequence_number in groups_to_sequences.items()
+                if state_group not in referenced_state_groups
+            }
+
+        if not groups_to_sequences:
+            # We made progress here as long as we marked some state groups as
+            # now referenced.
+            return len(referenced_state_groups) > 0
+
+        return await self.stores.state.purge_unreferenced_state_groups(
+            room_id,
+            groups_to_sequences,
+        )
