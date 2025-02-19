@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/local/bin/python
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #

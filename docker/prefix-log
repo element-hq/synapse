@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Prefixes all lines on stdout and stderr with the process name (as determined by
 # the SUPERVISOR_PROCESS_NAME env var, which is automatically set by Supervisor).

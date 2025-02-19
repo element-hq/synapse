@@ -1,6 +1,6 @@
 #!/bin/sh
-# This healthcheck script is designed to return OK when every 
+# This healthcheck script is designed to return OK when every
 # host involved returns OK
 {%- for healthcheck_url in healthcheck_urls %}
-curl -fSs {{ healthcheck_url }} || exit 1
+wget --quiet --tries=1 --spider {{ healthcheck_url }} || exit 1
 {%- endfor %}
