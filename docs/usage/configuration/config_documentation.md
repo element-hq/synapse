@@ -4227,8 +4227,8 @@ unwanted entries from being published in the public room list.
 
 The format of this option is the same as that for
 [`alias_creation_rules`](#alias_creation_rules): an optional list of 0 or more
-rules. By default, no list is provided, meaning that all rooms may be
-published to the room list.
+rules. By default, no list is provided, meaning that no one may publish to the
+room list (except server admins).
 
 Otherwise, requests to publish a room are matched against each rule in order.
 The first rule that matches decides if the request is allowed or denied. If no
@@ -4252,6 +4252,10 @@ Each of the glob patterns is optional, defaulting to `*` ("match anything").
 Note that the patterns match against fully qualified IDs, e.g. against
 `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead
 of `alice`, `room` and `abcedgghijk`.
+
+
+_Changed in Synapse 1.126.0: The default was changed to deny publishing to the
+room list by default_
 
 
 Example configuration:

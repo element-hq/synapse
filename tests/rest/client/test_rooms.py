@@ -67,6 +67,7 @@ from tests.http.server._base import make_request_with_cancellation_test
 from tests.storage.test_stream import PaginationTestCase
 from tests.test_utils.event_injection import create_event
 from tests.unittest import override_config
+from tests.utils import default_config
 
 PATH_PREFIX = b"/_matrix/client/api/v1"
 
@@ -2547,6 +2548,11 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
             },
             tok=self.token,
         )
+
+    def default_config(self) -> JsonDict:
+        config = default_config("test")
+        config["room_list_publication_rules"] = [{"action": "allow"}]
+        return config
 
     def make_public_rooms_request(
         self,
