@@ -4,9 +4,8 @@ name: Build docker images
 
 on:
   push:
-    # TEMP
-    # tags: ["v*"]
-    # branches: [ master, main, develop ]
+    tags: ["v*"]
+    branches: [ master, main, develop ]
   workflow_dispatch:
 
 permissions:
@@ -45,16 +44,12 @@ jobs:
 
       - name: Log in to DockerHub
         uses: docker/login-action@v3
-        # TEMP
-        if: ${{ false }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
-        # TEMP
-        if: ${{ false }}
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -79,8 +74,7 @@ jobs:
         id: build-and-push
         uses: docker/build-push-action@v6
         with:
-          # TEMP
-          push: false
+          push: true
           labels: |
             gitsha1=${{ github.sha }}
             org.opencontainers.image.version=${{ env.SYNAPSE_VERSION }}
@@ -94,8 +88,6 @@ jobs:
             CARGO_NET_GIT_FETCH_WITH_CLI=true
 
       - name: Sign the images with GitHub OIDC Token
-        # TEMP
-        if: ${{ false }}
         env:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           TAGS: ${{ steps.set-tag.outputs.tags }}
