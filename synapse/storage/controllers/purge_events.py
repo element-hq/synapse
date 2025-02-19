@@ -79,6 +79,7 @@ class PurgeEventsStorageController:
             await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
                 sg_to_delete
             )
+
     async def _find_unreferenced_groups(
         self, state_groups: Collection[int]
     ) -> Set[int]:
