@@ -1,0 +1,1 @@
+Pass required parameter `client_id` when making an OAuth access token request.
