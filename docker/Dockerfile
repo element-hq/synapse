@@ -194,6 +194,7 @@ COPY ./docker/conf /conf
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
 
+SHELL ["/busybox/sh", "-c"]
 ENTRYPOINT ["/start.py"]
 
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \

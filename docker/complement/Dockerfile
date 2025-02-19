@@ -15,13 +15,14 @@ FROM $FROM
 # since for repeated rebuilds, this is much faster than apt installing
 # postgres each time.
 
-# This trick only works because (a) the Synapse image happens to have all the
-# shared libraries that postgres wants, (b) we use a postgres image based on
-# the same debian version as Synapse's docker image (so the versions of the
-# shared libraries match).
+# This trick only works because we use a postgres image based on the same debian
+# version as Synapse's docker image (so the versions of the shared libraries
+# match).
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
-COPY --from=docker.io/library/postgres:13-bookworm /usr/lib/postgresql /usr/lib/postgresql
+COPY --from=docker.io/library/postgres:13-bookworm /usr/lib /usr/lib
 COPY --from=docker.io/library/postgres:13-bookworm /usr/share/postgresql /usr/share/postgresql
+# initdb expects /bin/sh to be available
+RUN ln -s /busybox/sh /bin/sh
 RUN mkdir /var/run/postgresql && chown postgres /var/run/postgresql
 ENV PATH="${PATH}:/usr/lib/postgresql/13/bin"
 ENV PGDATA=/var/lib/postgresql/data
