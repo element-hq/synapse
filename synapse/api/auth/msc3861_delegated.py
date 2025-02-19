@@ -216,7 +216,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             "Accept": "application/json",
             # Tell MAS that we support reading the device ID as an explicit
             # value, not encoded in the scope. This is supported by MAS 0.15+
-            # "X-MAS-Supports-Device-Id": "1",
+            "X-MAS-Supports-Device-Id": "1",
         }
 
         args = {"token": token, "token_type_hint": "access_token"}

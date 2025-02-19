@@ -403,6 +403,13 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         self.http_client.request.assert_called_once_with(
             method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
         )
+        # It should have called with the 'X-MAS-Supports-Device-Id: 1' header
+        self.assertEqual(
+            self.http_client.request.call_args[1]["headers"].getRawHeaders(
+                b"X-MAS-Supports-Device-Id",
+            ),
+            [b"1"],
+        )
         self._assertParams()
         self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
         self.assertEqual(requester.is_guest, False)
