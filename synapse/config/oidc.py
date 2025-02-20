@@ -409,7 +409,7 @@ class OidcProviderConfig:
     # Valid values are 'auto', 'always', and 'never'.
     pkce_method: str
 
-    id_token_signing_alg_values_supported: Optional[List[str]] = None
+    id_token_signing_alg_values_supported: Optional[List[str]]
     """
     List of the JWS signing algorithms (`alg` values) that are supported for signing the
     `id_token`.
