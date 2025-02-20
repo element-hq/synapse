@@ -1371,6 +1371,23 @@ class RoomJoinTestCase(RoomBase):
         )
         self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
+    def test_suspended_user_can_leave_room(self) -> None:
+        channel = self.make_request(
+            "POST", f"/join/{self.room1}", access_token=self.tok1
+        )
+        self.assertEqual(channel.code, 200)
+
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # leave room
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room1}/leave",
+            access_token=self.tok1,
+        )
+        self.assertEqual(channel.code, 200)
+
 
 class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -3992,7 +4009,9 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
         self.admin = self.register_user("admin", "pass", True)
         self.admin_tok = self.login("admin", "pass")
 
-        self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+        self.room1 = self.helper.create_room_as(
+            room_creator=self.user1, tok=self.tok1, room_version="11"
+        )
         self.store = hs.get_datastores().main
 
         self.room2 = self.helper.create_room_as(
@@ -4100,3 +4119,23 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/send/m.room.redaction/3456346",
+            access_token=self.tok1,
+            content={"reason": "bogus", "redacts": event_id},
+            shorthand=False,
+        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/send/m.room.redaction/3456346",
+            access_token=self.tok1,
+            content={"reason": "bogus", "redacts": event_id2},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+
+
