@@ -648,6 +648,9 @@ class EventCreationHandler:
             requester.user.to_string()
         )
         if requester_suspended:
+            # We want to allow suspended users to perform "corrective" actions
+            # asked of them by server admins, such as redact their messages and
+            # leave rooms.
             if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
                 if event_dict["type"] == "m.room.redaction":
                     event = await self.store.get_event(
