@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -38,7 +38,6 @@ from synapse.api.errors import (
     HttpResponseException,
     InvalidClientTokenError,
     OAuthInsufficientScopeError,
-    StoreError,
     SynapseError,
     UnrecognizedRequestError,
 )
@@ -71,7 +70,7 @@ SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
 SCOPE_SYNAPSE_ADMIN = "urn:synapse:admin:*"
 
 
-def scope_to_list(scope: str) -> List[str]:
+def scope_to_list(scope: str) -> list[str]:
     """Convert a scope string to a list of scope tokens"""
     return scope.strip().split(" ")
 
@@ -175,7 +174,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.warning("Failed to load metadata:", exc_info=True)
             return None
 
-    async def auth_metadata(self) -> Dict[str, Any]:
+    async def auth_metadata(self) -> dict[str, Any]:
         """
         Returns the auth metadata dict
         """
@@ -210,7 +209,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             The introspection response
         """
         introspection_endpoint = await self._introspection_endpoint()
-        raw_headers: Dict[str, str] = {
+        raw_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": str(self._http_client.user_agent, "utf-8"),
             "Accept": "application/json",
@@ -354,7 +353,13 @@ class MSC3861DelegatedAuth(BaseAuth):
             raise InvalidClientTokenError("Token is not active")
 
         # Let's look at the scope
-        scope: List[str] = scope_to_list(introspection_result.get("scope", ""))
+        scope_str = introspection_result.get("scope")
+        if scope_str is None or not isinstance(scope_str, str):
+            raise InvalidClientTokenError(
+                "Invalid scope claim in the introspection result"
+            )
+
+        scope = scope_to_list(scope_str)
 
         # Determine type of user based on presence of particular scopes
         has_user_scope = SCOPE_MATRIX_API in scope
@@ -364,8 +369,8 @@ class MSC3861DelegatedAuth(BaseAuth):
             raise InvalidClientTokenError("No scope in token granting user rights")
 
         # Match via the sub claim
-        sub: Optional[str] = introspection_result.get("sub")
-        if sub is None:
+        sub = introspection_result.get("sub")
+        if sub is None or not isinstance(sub, str):
             raise InvalidClientTokenError(
                 "Invalid sub claim in the introspection result"
             )
@@ -377,8 +382,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             # If we could not find a user via the external_id, it either does not exist,
             # or the external_id was never recorded
 
-            # TODO: claim mapping should be configurable
-            username: Optional[str] = introspection_result.get("username")
+            username = introspection_result.get("username")
             if username is None or not isinstance(username, str):
                 raise AuthError(
                     500,
@@ -386,20 +390,12 @@ class MSC3861DelegatedAuth(BaseAuth):
                 )
             user_id = UserID(username, self._hostname)
 
-            # First try to find a user from the username claim
+            # Try to find a user from the username claim
             user_info = await self.store.get_user_by_id(user_id=user_id.to_string())
             if user_info is None:
-                # If the user does not exist, we should create it on the fly
-                # TODO: we could use SCIM to provision users ahead of time and listen
-                # for SCIM SET events if those ever become standard:
-                # https://datatracker.ietf.org/doc/html/draft-hunt-scim-notify-00
-
-                # TODO: claim mapping should be configurable
-                # If present, use the name claim as the displayname
-                name: Optional[str] = introspection_result.get("name")
-
-                await self.store.register_user(
-                    user_id=user_id.to_string(), create_profile_with_displayname=name
+                raise AuthError(
+                    500,
+                    "User not found",
                 )
 
             # And record the sub as external_id
@@ -434,17 +430,10 @@ class MSC3861DelegatedAuth(BaseAuth):
                     "Invalid device ID in scope",
                 )
 
-            # Create the device on the fly if it does not exist
-            try:
-                await self.store.get_device(
-                    user_id=user_id.to_string(), device_id=device_id
-                )
-            except StoreError:
-                await self.store.store_device(
-                    user_id=user_id.to_string(),
-                    device_id=device_id,
-                    initial_device_display_name="OIDC-native client",
-                )
+            # Make sure the device exists
+            await self.store.get_device(
+                user_id=user_id.to_string(), device_id=device_id
+            )
 
         # TODO: there is a few things missing in the requester here, which still need
         # to be figured out, like:
