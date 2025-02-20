@@ -125,6 +125,10 @@ OIDC_PROVIDER_CONFIG_SCHEMA = {
             "enum": ["client_secret_basic", "client_secret_post", "none"],
         },
         "pkce_method": {"type": "string", "enum": ["auto", "always", "never"]},
+        "id_token_signing_alg_values_supported": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
         "scopes": {"type": "array", "items": {"type": "string"}},
         "authorization_endpoint": {"type": "string"},
         "token_endpoint": {"type": "string"},
@@ -326,6 +330,9 @@ def _parse_oidc_config_dict(
         client_secret_jwt_key=client_secret_jwt_key,
         client_auth_method=client_auth_method,
         pkce_method=oidc_config.get("pkce_method", "auto"),
+        id_token_signing_alg_values_supported=oidc_config.get(
+            "id_token_signing_alg_values_supported"
+        ),
         scopes=oidc_config.get("scopes", ["openid"]),
         authorization_endpoint=oidc_config.get("authorization_endpoint"),
         token_endpoint=oidc_config.get("token_endpoint"),
@@ -401,6 +408,34 @@ class OidcProviderConfig:
     # Whether to enable PKCE when exchanging the authorization & token.
     # Valid values are 'auto', 'always', and 'never'.
     pkce_method: str
+
+    id_token_signing_alg_values_supported: Optional[List[str]] = None
+    """
+    List of the JWS signing algorithms (`alg` values) that are supported for signing the
+    `id_token`.
+
+    This is *not* required if `discovery` is disabled. We default to supporting `RS256`
+    in the downstream usage if no algorithms are configured here or in the discovery
+    document.
+
+    According to the spec, the algorithm `"RS256"` MUST be included. The absolute rigid
+    approach would be to reject this provider as non-compliant if it's not included but
+    we can just allow whatever and see what happens (they're the ones that configured
+    the value and cooperating with the identity provider). It wouldn't be wise to add it
+    ourselves because absence of `RS256` might indicate that the provider actually
+    doesn't support it, despite the spec requirement. Adding it silently could lead to
+    failed authentication attempts or strange mismatch attacks.
+
+    The `alg` value `"none"` MAY be supported but can only be used if the Authorization
+    Endpoint does not include `id_token` in the `response_type` (ex.
+    `/authorize?response_type=code` where `none` can apply,
+    `/authorize?response_type=code%20id_token` where `none` can't apply) (such as when
+    using the Authorization Code Flow).
+
+    Spec:
+     - https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderMetadata
+     - https://openid.net/specs/openid-connect-core-1_0.html#AuthorizationExamples
+    """
 
     # list of scopes to request
     scopes: Collection[str]

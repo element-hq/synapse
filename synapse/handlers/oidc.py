@@ -640,6 +640,9 @@ class OidcProvider:
         elif self._config.pkce_method == "never":
             metadata.pop("code_challenge_methods_supported", None)
 
+        if self._config.id_token_signing_alg_values_supported:
+            metadata["id_token_signing_alg_values_supported"] = self._config.id_token_signing_alg_values_supported
+
         self._validate_metadata(metadata)
 
         return metadata
