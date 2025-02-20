@@ -120,7 +120,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers[b"Content-Type"], [b"application/json"])
         self.assertEqual(headers[b"Access-Control-Allow-Origin"], [b"*"])
         self.assertEqual(headers[b"Access-Control-Expose-Headers"], [b"etag"])
-        self.assertEqual(headers[b"Cache-Control"], [b"no-store"])
+        self.assertEqual(headers[b"Cache-Control"], [b"no-store, no-transform"])
         self.assertEqual(headers[b"Pragma"], [b"no-cache"])
         self.assertIn("url", channel.json_body)
         self.assertTrue(channel.json_body["url"].startswith("https://"))
@@ -143,7 +143,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(headers[b"Content-Type"], [b"text/plain"])
         self.assertEqual(headers[b"Access-Control-Allow-Origin"], [b"*"])
         self.assertEqual(headers[b"Access-Control-Expose-Headers"], [b"etag"])
-        self.assertEqual(headers[b"Cache-Control"], [b"no-store"])
+        self.assertEqual(headers[b"Cache-Control"], [b"no-store, no-transform"])
         self.assertEqual(headers[b"Pragma"], [b"no-cache"])
         self.assertEqual(channel.text_body, "foo=bar")
 

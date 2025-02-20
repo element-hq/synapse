@@ -47,7 +47,7 @@ fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(AccessControlAllowOrigin::ANY);
     headers.typed_insert(AccessControlExposeHeaders::from_iter([ETAG]));
     headers.typed_insert(Pragma::no_cache());
-    headers.typed_insert(CacheControl::new().with_no_store());
+    headers.typed_insert(CacheControl::new().with_no_store().with_no_transform());
     headers.typed_insert(session.etag());
     headers.typed_insert(session.expires());
     headers.typed_insert(session.last_modified());
