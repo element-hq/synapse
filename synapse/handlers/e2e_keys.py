@@ -158,7 +158,33 @@ class E2eKeysHandler:
                 the number of in-flight queries at a time.
         """
         async with self._query_devices_linearizer.queue((from_user_id, from_device_id)):
-            device_keys_query: Dict[str, List[str]] = query_body.get("device_keys", {})
+
+            async def filter_device_key_query(
+                query: Dict[str, List[str]],
+            ) -> Dict[str, List[str]]:
+                if not self.config.server.limit_key_queries_to_users_who_share_rooms:
+                    # Only ignore invalid user IDs, which is the same behaviour as if
+                    # the user existed but had no keys.
+                    return {
+                        user_id: v
+                        for user_id, v in query.items()
+                        if UserID.is_valid(user_id)
+                    }
+
+                # Strip invalid user IDs and user IDs the requesting user does not share rooms with.
+                result: Dict[str, List[str]] = {}
+                from_rooms = await self.store.get_rooms_for_user(from_user_id)
+                for user_id, v in query.items():
+                    if not UserID.is_valid(user_id):
+                        continue
+                    rooms = await self.store.get_rooms_for_user(user_id)
+                    if not rooms.isdisjoint(from_rooms):
+                        result[user_id] = v
+                return result
+
+            device_keys_query: Dict[str, List[str]] = await filter_device_key_query(
+                query_body.get("device_keys", {})
+            )
 
             # separate users by domain.
             # make a map from domain to user_id to device_ids
@@ -166,11 +192,6 @@ class E2eKeysHandler:
             remote_queries = {}
 
             for user_id, device_ids in device_keys_query.items():
-                if not UserID.is_valid(user_id):
-                    # Ignore invalid user IDs, which is the same behaviour as if
-                    # the user existed but had no keys.
-                    continue
-
                 # we use UserID.from_string to catch invalid user ids
                 if self.is_mine(UserID.from_string(user_id)):
                     local_query[user_id] = device_ids
