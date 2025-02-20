@@ -191,3 +191,9 @@ trusted_key_servers:
 
 password_config:
    enabled: true
+
+
+## Rooms ##
+
+room_list_publication_rules:
+  - action: allow
