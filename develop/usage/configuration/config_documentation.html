@@ -3144,6 +3144,22 @@ to <code>auto</code>, which uses PKCE if supported during metadata discovery. Se
 to force enable PKCE or <code>never</code> to force disable PKCE.</p>
 </li>
 <li>
+<p><code>id_token_signing_alg_values_supported</code>: List of the JWS signing algorithms (<code>alg</code>
+values) that are supported for signing the <code>id_token</code>.</p>
+<p>This is <em>not</em> required if <code>discovery</code> is disabled. We default to supporting <code>RS256</code> in
+the downstream usage if no algorithms are configured here or in the discovery
+document.</p>
+<p>According to the spec, the algorithm <code>&quot;RS256&quot;</code> MUST be included. The absolute rigid
+approach would be to reject this provider as non-compliant if it's not included but we
+simply allow whatever and see what happens (you're the one that configured the value
+and cooperating with the identity provider).</p>
+<p>The <code>alg</code> value <code>&quot;none&quot;</code> MAY be supported but can only be used if the Authorization
+Endpoint does not include <code>id_token</code> in the <code>response_type</code> (ex.
+<code>/authorize?response_type=code</code> where <code>none</code> can apply,
+<code>/authorize?response_type=code%20id_token</code> where <code>none</code> can't apply) (such as when
+using the Authorization Code Flow).</p>
+</li>
+<li>
 <p><code>scopes</code>: list of scopes to request. This should normally include the &quot;openid&quot;
 scope. Defaults to <code>[&quot;openid&quot;]</code>.</p>
 </li>
