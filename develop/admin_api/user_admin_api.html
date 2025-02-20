@@ -575,6 +575,22 @@ is set to <code>true</code>:</p>
 <li>Remove from monthly active users</li>
 <li>Remove user's consent information (consent version and timestamp)</li>
 </ul>
+<h2 id="suspendunsuspend-account"><a class="header" href="#suspendunsuspend-account">Suspend/Unsuspend Account</a></h2>
+<p>This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is 
+prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own. </p>
+<p>The api is:</p>
+<pre><code>PUT /_synapse/admin/v1/suspend/&lt;user_id&gt;
+</code></pre>
+<p>with a body of:</p>
+<pre><code class="language-json">{
+    &quot;suspend&quot;: true
+}
+</code></pre>
+<p>To unsuspend a user, use the same endpoint with a body of:</p>
+<pre><code class="language-json">{
+  &quot;suspend&quot;: false
+}
+</code></pre>
 <h2 id="reset-password"><a class="header" href="#reset-password">Reset password</a></h2>
 <p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 <p>Changes the password of another user. This will automatically log the user out of all their devices.</p>
