@@ -139,4 +139,9 @@ caches:
   sync_response_cache_duration: 0
 
 
+# Complement assumes that it can publish to the room list by default.
+room_list_publication_rules:
+  - action: allow
+
+
 {% include "shared-orig.yaml.j2" %}
