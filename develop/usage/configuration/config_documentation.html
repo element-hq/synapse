@@ -3803,8 +3803,8 @@ alias_creation_rules:
 unwanted entries from being published in the public room list.</p>
 <p>The format of this option is the same as that for
 <a href="#alias_creation_rules"><code>alias_creation_rules</code></a>: an optional list of 0 or more
-rules. By default, no list is provided, meaning that all rooms may be
-published to the room list.</p>
+rules. By default, no list is provided, meaning that no one may publish to the
+room list (except server admins).</p>
 <p>Otherwise, requests to publish a room are matched against each rule in order.
 The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
@@ -3828,6 +3828,8 @@ the configured rules will result in the room being created but not published to 
 Note that the patterns match against fully qualified IDs, e.g. against
 <code>@alice:example.com</code>, <code>#room:example.com</code> and <code>!abcdefghijk:example.com</code> instead
 of <code>alice</code>, <code>room</code> and <code>abcedgghijk</code>.</p>
+<p><em>Changed in Synapse 1.126.0: The default was changed to deny publishing to the
+room list by default</em></p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml"># No rule list specified. Anyone may publish any room to the public list.
 # This is the default behaviour.

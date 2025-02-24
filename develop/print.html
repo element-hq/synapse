@@ -1887,6 +1887,17 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11260"><a class="header" href="#upgrading-to-v11260">Upgrading to v1.126.0</a></h1>
+<h2 id="room-list-publication-rules-change"><a class="header" href="#room-list-publication-rules-change">Room list publication rules change</a></h2>
+<p>The default <a href="usage/configuration/config_documentation.html#room_list_publication_rules"><code>room_list_publication_rules</code></a> setting was changed to disallow
+anyone (except server admins) from publishing to the room list by default.</p>
+<p>This is in line with Synapse policy of locking down features by default that can
+be abused without moderation.</p>
+<p>To keep the previous behavior of allowing publication by default, add the
+following to the config:</p>
+<pre><code class="language-yaml">room_list_publication_rules:
+  - &quot;action&quot;: &quot;allow&quot;
+</code></pre>
 <h1 id="upgrading-to-v11220"><a class="header" href="#upgrading-to-v11220">Upgrading to v1.122.0</a></h1>
 <h2 id="dropping-support-for-postgresql-11-and-12"><a class="header" href="#dropping-support-for-postgresql-11-and-12">Dropping support for PostgreSQL 11 and 12</a></h2>
 <p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
@@ -7490,8 +7501,8 @@ alias_creation_rules:
 unwanted entries from being published in the public room list.</p>
 <p>The format of this option is the same as that for
 <a href="usage/configuration/config_documentation.html#alias_creation_rules"><code>alias_creation_rules</code></a>: an optional list of 0 or more
-rules. By default, no list is provided, meaning that all rooms may be
-published to the room list.</p>
+rules. By default, no list is provided, meaning that no one may publish to the
+room list (except server admins).</p>
 <p>Otherwise, requests to publish a room are matched against each rule in order.
 The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
@@ -7515,6 +7526,8 @@ the configured rules will result in the room being created but not published to 
 Note that the patterns match against fully qualified IDs, e.g. against
 <code>@alice:example.com</code>, <code>#room:example.com</code> and <code>!abcdefghijk:example.com</code> instead
 of <code>alice</code>, <code>room</code> and <code>abcedgghijk</code>.</p>
+<p><em>Changed in Synapse 1.126.0: The default was changed to deny publishing to the
+room list by default</em></p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml"># No rule list specified. Anyone may publish any room to the public list.
 # This is the default behaviour.
