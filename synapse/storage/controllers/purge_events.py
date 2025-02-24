@@ -160,22 +160,38 @@ class PurgeEventsStorageController:
         """This background update will slowly delete any unreferenced state groups"""
 
         last_checked_state_group = progress.get("last_checked_state_group")
+        max_state_group = progress.get("max_state_group")
 
-        if last_checked_state_group is None:
+        if last_checked_state_group is None or max_state_group is None:
             # This is the first run.
             last_checked_state_group = 0
+
+            max_state_group = await self.stores.state.db_pool.simple_select_one_onecol(
+                table="state_groups",
+                keyvalues={},
+                retcol="MAX(id)",
+                allow_none=True,
+                desc="get_max_state_group",
+            )
+            if max_state_group is None:
+                # There are no state groups so the background process is finished.
+                await self.stores.state.db_pool.updates._end_background_update(
+                    _BackgroundUpdates.DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE
+                )
+                return batch_size
 
         (
             last_checked_state_group,
             final_batch,
         ) = await self._delete_unreferenced_state_groups_batch(
-            last_checked_state_group, batch_size
+            last_checked_state_group, batch_size, max_state_group
         )
 
         if not final_batch:
             # There are more state groups to check.
             progress = {
                 "last_checked_state_group": last_checked_state_group,
+                "max_state_group": max_state_group,
             }
             await self.stores.state.db_pool.updates._background_update_progress(
                 _BackgroundUpdates.DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE,
@@ -190,7 +206,10 @@ class PurgeEventsStorageController:
         return batch_size
 
     async def _delete_unreferenced_state_groups_batch(
-        self, last_checked_state_group: int, batch_size: int
+        self,
+        last_checked_state_group: int,
+        batch_size: int,
+        max_state_group: int,
     ) -> tuple[int, bool]:
         """Looks for unreferenced state groups starting from the last state group
         checked, and any state groups which would become unreferenced if a state group
@@ -206,12 +225,13 @@ class PurgeEventsStorageController:
 
         # Look for state groups that can be cleaned up.
         def get_next_state_groups_txn(txn: LoggingTransaction) -> Set[int]:
-            state_group_sql = (
-                "SELECT id FROM state_groups WHERE id > ? ORDER BY id LIMIT ?"
+            state_group_sql = "SELECT id FROM state_groups WHERE ? < id AND id <= ? ORDER BY id LIMIT ?"
+            txn.execute(
+                state_group_sql, (last_checked_state_group, max_state_group, batch_size)
             )
-            txn.execute(state_group_sql, (last_checked_state_group, batch_size))
 
             next_set = {row[0] for row in txn}
+            logger.error("Next: %s", next_set)
 
             return next_set
 
