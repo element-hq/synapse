@@ -366,4 +366,4 @@ class PurgeTests(HomeserverTestCase):
                 desc="test_purge_unreferenced_state_group",
             )
         )
-        self.assertEqual(len(state_groups), 208)
+        self.assertEqual(len(state_groups), 207)

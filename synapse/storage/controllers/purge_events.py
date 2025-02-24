@@ -24,11 +24,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Collection,
-    List,
     Mapping,
     Set,
-    Tuple,
-    cast,
 )
 
 from synapse.logging.context import nested_logging_context
@@ -227,42 +224,6 @@ class PurgeEventsStorageController:
             final_batch = True
         else:
             last_checked_state_group = max(next_set)
-
-        if len(next_set) == 0:
-            return last_checked_state_group, final_batch
-
-        # Discard any state groups referenced directly by an event...
-        rows = cast(
-            List[Tuple[int]],
-            await self.stores.main.db_pool.simple_select_many_batch(
-                table="event_to_state_groups",
-                column="state_group",
-                iterable=next_set,
-                keyvalues={},
-                retcols=("DISTINCT state_group",),
-                desc="get_referenced_state_groups",
-            ),
-        )
-
-        next_set.difference_update({row[0] for row in rows})
-
-        if len(next_set) == 0:
-            return last_checked_state_group, final_batch
-
-        # ... and discard any that are referenced by other state groups.
-        rows = cast(
-            List[Tuple[int]],
-            await self.stores.state.db_pool.simple_select_many_batch(
-                table="state_group_edges",
-                column="prev_state_group",
-                iterable=next_set,
-                keyvalues={},
-                retcols=("DISTINCT prev_state_group",),
-                desc="get_previous_state_groups",
-            ),
-        )
-
-        next_set.difference_update(row[0] for row in rows)
 
         if len(next_set) == 0:
             return last_checked_state_group, final_batch
