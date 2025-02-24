@@ -706,9 +706,8 @@ class Porter:
             txn: LoggingTransaction,
         ) -> None:
             txn.execute(
-                "DELETE FROM background_updates WHERE update_name IN (%s)"
-                % (", ".join("%s" for _ in IGNORED_BACKGROUND_UPDATES),),
-                list(IGNORED_BACKGROUND_UPDATES),
+                "DELETE FROM background_updates WHERE update_name = ANY(?)"
+                (list(IGNORED_BACKGROUND_UPDATES),),
             )
 
         await self.postgres_store.db_pool.runInteraction(
