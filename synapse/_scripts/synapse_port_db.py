@@ -706,7 +706,7 @@ class Porter:
             txn: LoggingTransaction,
         ) -> None:
             txn.execute(
-                "DELETE FROM background_updates WHERE update_name = ANY(?)"
+                "DELETE FROM background_updates WHERE update_name = ANY(?)",
                 (list(IGNORED_BACKGROUND_UPDATES),),
             )
 
