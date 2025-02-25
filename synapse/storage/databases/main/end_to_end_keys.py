@@ -27,6 +27,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -39,7 +40,6 @@ from typing import (
 
 import attr
 from canonicaljson import encode_canonical_json
-from typing_extensions import Literal
 
 from synapse.api.constants import DeviceKeyAlgorithms
 from synapse.appservice import (
