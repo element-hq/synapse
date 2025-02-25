@@ -1,0 +1,1 @@
+Fix MSC4108 QR-code login not working with some reverse-proxy setups.
