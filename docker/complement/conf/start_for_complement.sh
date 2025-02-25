@@ -44,13 +44,13 @@ case "$SYNAPSE_COMPLEMENT_DATABASE" in
 esac
 
 
-if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
+if [ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]; then
   # Specify the workers to test with
   # Allow overriding by explicitly setting SYNAPSE_WORKER_TYPES outside, while still
   # utilizing WORKERS=1 for backwards compatibility.
   # -n True if the length of string is non-zero.
   # -z True if the length of string is zero.
-  if [[ -z "$SYNAPSE_WORKER_TYPES" ]]; then
+  if [ -z "$SYNAPSE_WORKER_TYPES" ]; then
     export SYNAPSE_WORKER_TYPES="\
       event_persister:2, \
       background_worker, \
@@ -82,8 +82,8 @@ else
 fi
 
 
-if [[ -n "$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR" ]]; then
-  if [[ -n "$SYNAPSE_USE_EXPERIMENTAL_FORKING_LAUNCHER" ]]; then
+if [ -n "$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR" ]; then
+  if [ -n "$SYNAPSE_USE_EXPERIMENTAL_FORKING_LAUNCHER" ]; then
     export SYNAPSE_COMPLEMENT_FORKING_LAUNCHER_ASYNC_IO_REACTOR="1"
   else
     export SYNAPSE_ASYNC_IO_REACTOR="1"
