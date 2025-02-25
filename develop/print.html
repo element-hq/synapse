@@ -6507,6 +6507,16 @@ page for an unlucky user and require them to reopen the page from a new link.</p
 <pre><code class="language-yaml">form_secret: &lt;PRIVATE STRING&gt;
 </code></pre>
 <hr />
+<h3 id="form_secret_path"><a class="header" href="#form_secret_path"><code>form_secret_path</code></a></h3>
+<p>An alternative to <a href="usage/configuration/config_documentation.html#form_secret"><code>form_secret</code></a>:
+allows the secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">form_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.125.0.</em></p>
+<hr />
 <h2 id="signing-keys"><a class="header" href="#signing-keys">Signing Keys</a></h2>
 <p>Config options relating to signing keys</p>
 <hr />
