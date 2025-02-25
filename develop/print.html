@@ -1869,7 +1869,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.124.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.125.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -18134,7 +18134,7 @@ by a unique name, the current status (stored in JSON), and some dependency infor
 <li>Whether the update requires a previous update to be complete.</li>
 <li>A rough ordering for which to complete updates.</li>
 </ul>
-<p>A new background updates needs to be added to the <code>background_updates</code> table:</p>
+<p>A new background update needs to be added to the <code>background_updates</code> table:</p>
 <pre><code class="language-sql">INSERT INTO background_updates (ordering, update_name, depends_on, progress_json) VALUES
   (7706, 'my_background_update', 'a_previous_background_update' '{}');
 </code></pre>
