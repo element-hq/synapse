@@ -1822,6 +1822,23 @@ endpoint.</p>
     burst_count: 1
 </code></pre>
 <hr />
+<h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
+<p>Ratelimiting settings for delayed event management.</p>
+<p>This is a ratelimiting option that ratelimits
+attempts to restart, cancel, or view delayed events
+based on the sending client's account and device ID.
+It defaults to: <code>per_second: 1</code>, <code>burst_count: 5</code>.</p>
+<p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
+<p>Setting this to a high value allows clients to make delayed event management requests often
+(such as repeatedly restarting a delayed event with a short timeout,
+or restarting several different delayed events all at once)
+without the risk of being ratelimited.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_delayed_event_mgmt:
+  per_second: 2
+  burst_count: 20
+</code></pre>
+<hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
 <p>Sets outgoing federation transaction frequency for sending read-receipts,
 per-room.</p>
