@@ -231,7 +231,6 @@ class PurgeEventsStorageController:
             )
 
             next_set = {row[0] for row in txn}
-            logger.error("Next: %s", next_set)
 
             return next_set
 
