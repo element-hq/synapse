@@ -1,0 +1,1 @@
+Add appservice config options `as_token_path` and `hs_token_path`.
