@@ -133,6 +133,8 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
             "form_secret_path: /does/not/exist",
+            "experimental_features:\n  msc3861:\n    client_secret_path: /does/not/exist",
+            "experimental_features:\n  msc3861:\n    admin_token_path: /does/not/exist",
             *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
             * (hiredis is not None),
         ]
@@ -161,6 +163,14 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "form_secret_path: {}",
                 lambda c: c.key.form_secret.encode("utf-8"),
+            ),
+            (
+                "experimental_features:\n  msc3861:\n    client_secret_path: {}",
+                lambda c: c.experimental.msc3861.client_secret().encode("utf-8"),
+            ),
+            (
+                "experimental_features:\n  msc3861:\n    admin_token_path: {}",
+                lambda c: c.experimental.msc3861.admin_token().encode("utf-8"),
             ),
             *[
                 (

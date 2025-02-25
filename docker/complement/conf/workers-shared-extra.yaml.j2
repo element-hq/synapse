@@ -89,6 +89,11 @@ rc_invites:
     per_second: 1000
     burst_count: 1000
 
+rc_presence:
+  per_user:
+    per_second: 9999
+    burst_count: 9999
+
 federation_rr_transactions_per_room_per_second: 9999
 
 allow_device_name_lookup_over_federation: true
@@ -132,6 +137,11 @@ max_event_delay_duration: 24h
 # Disable sync cache so that initial `/sync` requests are up-to-date.
 caches:
   sync_response_cache_duration: 0
+
+
+# Complement assumes that it can publish to the room list by default.
+room_list_publication_rules:
+  - action: allow
 
 
 {% include "shared-orig.yaml.j2" %}
