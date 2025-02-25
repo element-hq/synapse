@@ -259,3 +259,37 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
 
             # Check lenient mode with a single offender.
             HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_no_secrets_in_config_but_in_files(self) -> None:
+        with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
+            secret_file.write(b"53C237")
+
+            self.generate_config_and_remove_lines_containing(
+                ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
+            )
+            self.add_lines_to_config(
+                [
+                    "",
+                    f"turn_shared_secret_path: {secret_file.name}",
+                    f"registration_shared_secret_path: {secret_file.name}",
+                    f"macaroon_secret_key_path: {secret_file.name}",
+                    f"recaptcha_private_key_path: {secret_file.name}",
+                    f"recaptcha_public_key_path: {secret_file.name}",
+                    f"form_secret_path: {secret_file.name}",
+                    f"worker_replication_secret_path: {secret_file.name}",
+                    *[
+                        "experimental_features:\n"
+                        "  msc3861:\n"
+                        "    enabled: true\n"
+                        f"    admin_token_path: {secret_file.name}\n"
+                        f"    client_secret_path: {secret_file.name}\n"
+                        # f"    jwk_path: {secret_file.name}"
+                    ]
+                    * (authlib is not None),
+                    *[f"redis:\n  enabled: true\n  password_path: {secret_file.name}"]
+                    * (hiredis is not None),
+                ]
+            )
+            HomeServerConfig.load_config(
+                "", ["-c", self.config_file, "--no-secrets-in-config"]
+            )

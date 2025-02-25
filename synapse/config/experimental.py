@@ -262,7 +262,7 @@ class MSC3861:
         if not self.enabled:
             return
 
-        if self.client_secret() and not allow_secrets_in_config:
+        if self._client_secret and not allow_secrets_in_config:
             raise ConfigError(
                 "Config options that expect an in-line secret as value are disabled",
                 ("experimental", "msc3861", "client_secret"),
@@ -274,7 +274,7 @@ class MSC3861:
                 ("experimental", "msc3861", "jwk"),
             )
 
-        if self.admin_token() and not allow_secrets_in_config:
+        if self._admin_token and not allow_secrets_in_config:
             raise ConfigError(
                 "Config options that expect an in-line secret as value are disabled",
                 ("experimental", "msc3861", "admin_token"),
