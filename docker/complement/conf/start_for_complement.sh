@@ -5,12 +5,12 @@
 set -e
 
 echo "Complement Synapse launcher"
-echo "  Args: $@"
+echo "  Args: $*"
 echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR"
 
 function log {
     d=$(date +"%Y-%m-%d %H:%M:%S,%3N")
-    echo "$d $@"
+    echo "$d $*"
 }
 
 # Set the server name of the homeserver
