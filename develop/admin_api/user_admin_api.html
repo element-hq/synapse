@@ -1427,12 +1427,12 @@ a redact id which can be used to query the status of the redaction process:</p>
 <li><code>rooms</code> - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
 the user is a member of will be redacted</li>
 </ul>
-<p><em>Added in Synapse 1.116.0.</em></p>
 <p>The following JSON body parameters are optional:</p>
 <ul>
 <li><code>reason</code> - Reason the redaction is being requested, ie &quot;spam&quot;, &quot;abuse&quot;, etc. This will be included in each redaction event, and be visible to users.</li>
 <li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided</li>
 </ul>
+<p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
 <p>It is possible to query the status of the background task for redacting a user's events.
 The status can be queried up to 24 hours after completion of the task,
