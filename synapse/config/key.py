@@ -117,7 +117,11 @@ class KeyConfig(Config):
     section = "key"
 
     def read_config(
-        self, config: JsonDict, config_dir_path: str, **kwargs: Any
+        self,
+        config: JsonDict,
+        config_dir_path: str,
+        allow_secrets_in_config: bool,
+        **kwargs: Any,
     ) -> None:
         # the signing key can be specified inline or in a separate file
         if "signing_key" in config:
@@ -177,6 +181,11 @@ class KeyConfig(Config):
         )
 
         macaroon_secret_key = config.get("macaroon_secret_key")
+        if macaroon_secret_key and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("macaroon_secret_key",),
+            )
         macaroon_secret_key_path = config.get("macaroon_secret_key_path")
         if macaroon_secret_key_path:
             if macaroon_secret_key:
@@ -197,12 +206,19 @@ class KeyConfig(Config):
 
         # a secret which is used to calculate HMACs for form values, to stop
         # falsification of values
-        self.form_secret = config.get("form_secret", None)
+        form_secret = config.get("form_secret", None)
+        if form_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("form_secret",),
+            )
         form_secret_path = config.get("form_secret_path", None)
         if form_secret_path:
-            if self.form_secret:
+            if form_secret:
                 raise ConfigError(CONFLICTING_FORM_SECRET_OPTS_ERROR)
             self.form_secret = read_file(form_secret_path, "form_secret_path").strip()
+        else:
+            self.form_secret = form_secret
 
     def generate_config_section(
         self,

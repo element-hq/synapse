@@ -1,0 +1,1 @@
+Add the `--no-secrets-in-config` command line option.
