@@ -2817,7 +2817,7 @@ Synapse reads the secret from the given file once at startup.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">form_secret_path: /path/to/secrets/file
 </code></pre>
-<p><em>Added in Synapse 1.125.0.</em></p>
+<p><em>Added in Synapse 1.126.0.</em></p>
 <hr />
 <h2 id="signing-keys"><a class="header" href="#signing-keys">Signing Keys</a></h2>
 <p>Config options relating to signing keys</p>
@@ -4027,6 +4027,16 @@ communication with all workers that have not yet updated their secret.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">worker_replication_secret: &quot;secret_secret&quot;
 </code></pre>
+<hr />
+<h3 id="worker_replication_secret_path"><a class="header" href="#worker_replication_secret_path"><code>worker_replication_secret_path</code></a></h3>
+<p>An alternative to <a href="#worker_replication_secret"><code>worker_replication_secret</code></a>:
+allows the secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">worker_replication_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.126.0.</em></p>
 <hr />
 <h3 id="start_pushers"><a class="header" href="#start_pushers"><code>start_pushers</code></a></h3>
 <p>Unnecessary to set if using <a href="#pusher_instances"><code>pusher_instances</code></a> with <a href="../../workers.html#synapseappgeneric_worker"><code>generic_workers</code></a>.</p>
