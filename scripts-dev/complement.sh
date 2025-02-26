@@ -181,24 +181,40 @@ if [ -z "$skip_docker_build" ]; then
 
         # Build the base Synapse image from the local checkout
         echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
-        $CONTAINER_RUNTIME build -t matrixdotorg/synapse \
-        --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
-        --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
-        -f "docker/Dockerfile" .
+
+        # Tag local builds with a dummy registry so that later builds
+        # may reference them instead of pulling from a remote registry
+        LOCAL_REGISTRY=localhost:5000
+
+        SYNAPSE_TAG=matrixdotorg/synapse
+        $CONTAINER_RUNTIME build \
+            -t "$SYNAPSE_TAG" \
+            -t "$LOCAL_REGISTRY/$SYNAPSE_TAG" \
+            --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
+            --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
+            -f "docker/Dockerfile" .
         echo_if_github "::endgroup::"
 
         # Build the workers docker image (from the base Synapse image we just built).
+        SYNAPSE_WORKERS_TAG=matrixdotorg/synapse-workers
         echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
-        $CONTAINER_RUNTIME build -t matrixdotorg/synapse-workers -f "docker/Dockerfile-workers" .
+        $CONTAINER_RUNTIME build \
+            -t "$SYNAPSE_WORKERS_TAG" \
+            -t "$LOCAL_REGISTRY/$SYNAPSE_WORKERS_TAG" \
+            --build-arg FROM="$LOCAL_REGISTRY/$SYNAPSE_TAG" \
+            -f "docker/Dockerfile-workers" .
         echo_if_github "::endgroup::"
 
         # Build the unified Complement image (from the worker Synapse image we just built).
+        COMPLEMENT_SYNAPSE_TAG=complement-synapse
         echo_if_github "::group::Build Docker image: complement/Dockerfile"
-        $CONTAINER_RUNTIME build -t complement-synapse \
+        $CONTAINER_RUNTIME build \
+            -t "$COMPLEMENT_SYNAPSE_TAG" \
             `# This is the tag we end up pushing to the registry (see` \
             `# .github/workflows/push_complement_image.yml) so let's just label it now` \
             `# so people can reference it by the same name locally.` \
-            -t ghcr.io/element-hq/synapse/complement-synapse \
+            -t "ghcr.io/element-hq/synapse/$COMPLEMENT_SYNAPSE_TAG" \
+            --build-arg FROM="$LOCAL_REGISTRY/$SYNAPSE_WORKERS_TAG" \
             -f "docker/complement/Dockerfile" "docker/complement"
         echo_if_github "::endgroup::"
 
