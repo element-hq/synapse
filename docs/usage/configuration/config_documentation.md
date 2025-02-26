@@ -3252,7 +3252,7 @@ Example configuration:
 form_secret_path: /path/to/secrets/file
 ```
 
-_Added in Synapse 1.125.0._
+_Added in Synapse 1.126.0._
 
 ---
 ## Signing Keys
@@ -4527,6 +4527,22 @@ Example configuration:
 ```yaml
 worker_replication_secret: "secret_secret"
 ```
+---
+### `worker_replication_secret_path`
+
+An alternative to [`worker_replication_secret`](#worker_replication_secret):
+allows the secret to be specified in an external file.
+
+The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+worker_replication_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.126.0._
+
 ---
 ### `start_pushers`
 
