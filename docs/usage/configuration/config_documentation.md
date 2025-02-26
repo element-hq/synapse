@@ -3252,7 +3252,7 @@ Example configuration:
 form_secret_path: /path/to/secrets/file
 ```
 
-_Added in Synapse 1.125.0._
+_Added in Synapse 1.126.0._
 
 ---
 ## Signing Keys
