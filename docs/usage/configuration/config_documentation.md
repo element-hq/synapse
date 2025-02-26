@@ -3239,6 +3239,22 @@ Example configuration:
 form_secret: <PRIVATE STRING>
 ```
 ---
+### `form_secret_path`
+
+An alternative to [`form_secret`](#form_secret):
+allows the secret to be specified in an external file.
+
+The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+form_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.125.0._
+
+---
 ## Signing Keys
 Config options relating to signing keys
 

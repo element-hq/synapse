@@ -138,6 +138,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
+            "form_secret_path: /does/not/exist",
             "worker_replication_secret_path: /does/not/exist",
             "experimental_features:\n  msc3861:\n    client_secret_path: /does/not/exist",
             "experimental_features:\n  msc3861:\n    admin_token_path: /does/not/exist",
@@ -167,6 +168,10 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
                 lambda c: c.key.macaroon_secret_key,
             ),
             (
+                "form_secret_path: {}",
+                lambda c: c.key.form_secret.encode("utf-8"),
+            ),
+            (
                 "worker_replication_secret_path: {}",
                 lambda c: c.worker.worker_replication_secret.encode("utf-8"),
             ),
@@ -191,7 +196,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self, config_line: str, get_secret: Callable[[RootConfig], str]
     ) -> None:
         self.generate_config_and_remove_lines_containing(
-            ["registration_shared_secret", "macaroon_secret_key"]
+            ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
         )
         with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
             secret_file.write(b"53C237")
