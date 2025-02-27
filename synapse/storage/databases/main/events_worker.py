@@ -30,7 +30,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -42,6 +41,7 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
+from typing_extensions import Literal
 
 from twisted.internet import defer
 

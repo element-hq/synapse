@@ -41,7 +41,6 @@ from typing import (
     Hashable,
     Iterable,
     List,
-    Literal,
     Optional,
     Set,
     Tuple,
@@ -52,7 +51,7 @@ from typing import (
 )
 
 import attr
-from typing_extensions import Concatenate, ParamSpec, Unpack
+from typing_extensions import Concatenate, Literal, ParamSpec, Unpack
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError

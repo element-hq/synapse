@@ -34,7 +34,6 @@ from typing import (
     Generic,
     Iterable,
     List,
-    Literal,
     Optional,
     Set,
     Tuple,
@@ -44,6 +43,8 @@ from typing import (
     cast,
     overload,
 )
+
+from typing_extensions import Literal
 
 from twisted.internet import reactor
 from twisted.internet.interfaces import IReactorTime

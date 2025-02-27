@@ -35,12 +35,12 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    TypedDict,
     cast,
 )
 
 import attr
 from prometheus_client import Counter
+from typing_extensions import TypedDict
 
 import synapse.metrics
 from synapse.api.constants import (

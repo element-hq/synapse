@@ -30,12 +30,13 @@ from typing import (
     Iterator,
     List,
     Mapping,
-    Protocol,
     Set,
     Sized,
     Tuple,
     TypeVar,
 )
+
+from typing_extensions import Protocol
 
 T = TypeVar("T")
 S = TypeVar("S", bound="_SelfSlice")

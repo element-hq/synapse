@@ -31,7 +31,6 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Protocol,
     Tuple,
     Union,
 )
@@ -41,6 +40,7 @@ import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
 from prometheus_client import Counter
+from typing_extensions import Protocol
 from zope.interface import implementer
 
 from OpenSSL import SSL

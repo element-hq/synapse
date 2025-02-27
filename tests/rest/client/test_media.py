@@ -24,13 +24,14 @@ import json
 import os
 import re
 import shutil
-from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
+from typing import Any, BinaryIO, Dict, List, Optional, Sequence, Tuple, Type
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
+from typing_extensions import ClassVar
 
 from twisted.internet import defer
 from twisted.internet._resolver import HostResolution

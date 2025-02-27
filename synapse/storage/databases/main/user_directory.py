@@ -31,7 +31,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    TypedDict,
     cast,
 )
 
@@ -44,6 +43,8 @@ try:
     USE_ICU = True
 except ModuleNotFoundError:
     USE_ICU = False
+
+from typing_extensions import TypedDict
 
 from synapse.api.errors import StoreError
 from synapse.util.stringutils import non_null_str_or_none

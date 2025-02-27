@@ -23,9 +23,10 @@
 """Contains functions for registering clients."""
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple
 
 from prometheus_client import Counter
+from typing_extensions import TypedDict
 
 from synapse import types
 from synapse.api.constants import (

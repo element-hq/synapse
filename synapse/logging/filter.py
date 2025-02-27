@@ -19,7 +19,8 @@
 #
 #
 import logging
-from typing import Literal
+
+from typing_extensions import Literal
 
 
 class MetadataFilter(logging.Filter):

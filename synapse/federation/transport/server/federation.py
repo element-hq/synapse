@@ -24,7 +24,6 @@ from typing import (
     TYPE_CHECKING,
     Dict,
     List,
-    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -32,6 +31,8 @@ from typing import (
     Type,
     Union,
 )
+
+from typing_extensions import Literal
 
 from synapse.api.constants import Direction, EduTypes
 from synapse.api.errors import Codes, SynapseError

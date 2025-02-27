@@ -21,10 +21,11 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import attr
+from typing_extensions import Literal
 
 from twisted.web.server import Request
 

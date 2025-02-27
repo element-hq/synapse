@@ -27,7 +27,6 @@ from typing import (
     Collection,
     Dict,
     List,
-    Literal,
     Optional,
     Tuple,
     Union,
@@ -36,6 +35,7 @@ from unittest.mock import Mock
 from urllib.parse import urlencode
 
 import pymacaroons
+from typing_extensions import Literal
 
 from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource

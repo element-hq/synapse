@@ -20,7 +20,9 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
+
+from typing_extensions import Literal
 
 from twisted.web.server import Request
 

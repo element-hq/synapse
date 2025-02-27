@@ -29,14 +29,14 @@ from typing import (
     Generator,
     Iterable,
     List,
-    Literal,
     Optional,
-    Protocol,
     Sequence,
     Set,
     Tuple,
     overload,
 )
+
+from typing_extensions import Literal, Protocol
 
 from synapse import event_auth
 from synapse.api.constants import EventTypes

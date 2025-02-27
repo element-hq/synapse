@@ -40,7 +40,6 @@ from typing import (
     Set,
     Tuple,
     Type,
-    TypedDict,
     TypeVar,
     Union,
     overload,
@@ -50,7 +49,7 @@ import attr
 from immutabledict import immutabledict
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
-from typing_extensions import Self
+from typing_extensions import Self, TypedDict
 from unpaddedbase64 import decode_base64
 from zope.interface import Interface
 

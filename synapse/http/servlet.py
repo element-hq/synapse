@@ -28,7 +28,6 @@ from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     List,
-    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -37,6 +36,8 @@ from typing import (
     TypeVar,
     overload,
 )
+
+from typing_extensions import Literal
 
 from twisted.web.server import Request
 

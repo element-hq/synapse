@@ -139,13 +139,13 @@ from typing import (
     Hashable,
     Iterable,
     List,
-    Literal,
     Optional,
     Tuple,
 )
 
 import attr
 from prometheus_client import Counter
+from typing_extensions import Literal
 
 from twisted.internet import defer
 

@@ -1,0 +1,1 @@
+Revert "Cleanup Python 3.8 leftovers (#17967)" to fix Synapse in RHEL9.

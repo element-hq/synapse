@@ -40,7 +40,6 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
-    Protocol,
     Tuple,
     Type,
     TypeVar,
@@ -51,7 +50,7 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, ParamSpec, Protocol
 
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.python.failure import Failure

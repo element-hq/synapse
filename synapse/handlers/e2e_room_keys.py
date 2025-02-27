@@ -20,7 +20,9 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Literal, Optional, cast
+from typing import TYPE_CHECKING, Dict, Optional, cast
+
+from typing_extensions import Literal
 
 from synapse.api.errors import (
     Codes,

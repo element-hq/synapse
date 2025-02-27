@@ -23,13 +23,14 @@ import shutil
 import tempfile
 from binascii import unhexlify
 from io import BytesIO
-from typing import Any, BinaryIO, ClassVar, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Tuple, Union
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 
 import attr
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
+from typing_extensions import Literal
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred

@@ -27,7 +27,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Mapping,
     Optional,
     Set,
@@ -36,6 +35,7 @@ from typing import (
 )
 
 from canonicaljson import encode_canonical_json
+from typing_extensions import Literal
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import Codes, StoreError

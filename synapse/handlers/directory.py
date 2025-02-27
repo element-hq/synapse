@@ -21,7 +21,9 @@
 
 import logging
 import string
-from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
+
+from typing_extensions import Literal
 
 from synapse.api.constants import MAX_ALIAS_LENGTH, EventTypes
 from synapse.api.errors import (

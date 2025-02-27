@@ -18,7 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
+
+from typing_extensions import Protocol
 
 from twisted.web.server import Request
 
