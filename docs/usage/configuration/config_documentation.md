@@ -3662,6 +3662,13 @@ Options for each entry include:
    not included in `scopes`. Set to `userinfo_endpoint` to always use the
    userinfo endpoint.
 
+* `redirect_uri`: An optional string, that if set will override the `redirect_uri`
+  parameter sent in the requests to the authorization and token endpoints.
+  Useful if you want to redirect the client to another endpoint as part of the
+  OIDC login. Be aware that the client must then call Synapse's OIDC callback
+  URL (`<public_baseurl>/_synapse/client/oidc/callback`) manually afterwards.
+  Must be a valid URL including scheme and path.
+
 * `additional_authorization_parameters`: String to string dictionary that will be passed as
    additional parameters to the authorization grant URL.
 
