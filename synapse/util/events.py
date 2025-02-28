@@ -13,6 +13,8 @@
 #
 #
 
+from typing import Optional
+
 from synapse.types import JsonDict
 from synapse.util.stringutils import random_string
 
@@ -30,7 +32,7 @@ def generate_fake_event_id() -> str:
     return "$" + random_string(43)
 
 
-def get_plain_text_topic_from_event_content(content: JsonDict):
+def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     """
     Given the content of an m.room.topic event returns the plain text topic
     representation if any exists.

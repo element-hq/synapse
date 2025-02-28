@@ -3106,7 +3106,7 @@ class PersistEventsStore:
                 txn,
                 event,
                 "content.topic",
-                get_plain_text_topic_from_event_content(event.content),
+                get_plain_text_topic_from_event_content(event.content) or "",
             )
 
     def _store_room_name_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
