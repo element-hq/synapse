@@ -1531,7 +1531,9 @@ class RoomHierarchyRestServlet(RestServlet):
         remote_room_hosts: List[str] | None
         if self.msc4235_enabled:
             args: Dict[bytes, List[bytes]] = request.args  # type: ignore
-            remote_room_hosts = parse_strings_from_args(args, "org.matrix.msc4235.via", required=False)
+            remote_room_hosts = parse_strings_from_args(
+                args, "org.matrix.msc4235.via", required=False
+            )
 
         return 200, await self._room_summary_handler.get_room_hierarchy(
             requester,
