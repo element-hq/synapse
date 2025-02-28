@@ -13,6 +13,7 @@
 #
 #
 
+from synapse.types import JsonDict
 from synapse.util.stringutils import random_string
 
 
@@ -27,3 +28,31 @@ def generate_fake_event_id() -> str:
         A string intended to look like an event ID, but with no actual meaning.
     """
     return "$" + random_string(43)
+
+
+def get_plain_text_topic_from_event_content(content: JsonDict):
+    """
+    Given the content of an m.room.topic event returns the plain text topic
+    representation if any exists.
+
+    Returns:
+        A string representing the plain text topic.
+    """
+    topic = content.get("topic")
+
+    m_topic = content.get("m.topic")
+    if not m_topic:
+        return topic
+
+    m_text = m_topic.get("m.text")
+    if not m_text:
+        return topic
+
+    representation = next(
+        (r for r in m_text if "mimetype" not in r or r["mimetype"] == "text/plain"),
+        None,
+    )
+    if not representation or "body" not in representation:
+        return topic
+
+    return representation["body"]
