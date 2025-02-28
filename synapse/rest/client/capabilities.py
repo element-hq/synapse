@@ -109,6 +109,11 @@ class CapabilitiesRestServlet(RestServlet):
                     "disallowed"
                 ] = disallowed
 
+        if self.config.experimental.msc4267_enabled:
+            response["capabilities"]["org.matrix.msc4267.leave_without_forget"] = {
+                "enabled": not self.config.room.forget_on_leave,
+            }
+
         return HTTPStatus.OK, response
 
 
