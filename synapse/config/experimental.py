@@ -447,4 +447,3 @@ class ExperimentalConfig(Config):
 
         # MSC4235: Add `via` param to hierarchy endpoint
         self.msc4235_enabled: bool = experimental.get("msc4235_enabled", False)
-
