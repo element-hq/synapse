@@ -141,6 +141,9 @@ OIDC_PROVIDER_CONFIG_SCHEMA = {
             "type": "string",
             "enum": ["auto", "userinfo_endpoint"],
         },
+        "redirect_uri": {
+            "type": ["string", "null"],
+        },
         "allow_existing_users": {"type": "boolean"},
         "user_mapping_provider": {"type": ["object", "null"]},
         "attribute_requirements": {
@@ -344,6 +347,7 @@ def _parse_oidc_config_dict(
         ),
         skip_verification=oidc_config.get("skip_verification", False),
         user_profile_method=oidc_config.get("user_profile_method", "auto"),
+        redirect_uri=oidc_config.get("redirect_uri"),
         allow_existing_users=oidc_config.get("allow_existing_users", False),
         user_mapping_provider_class=user_mapping_provider_class,
         user_mapping_provider_config=user_mapping_provider_config,
@@ -466,6 +470,18 @@ class OidcProviderConfig:
     # Whether to fetch the user profile from the userinfo endpoint. Valid
     # values are: "auto" or "userinfo_endpoint".
     user_profile_method: str
+
+    redirect_uri: Optional[str]
+    """
+    An optional replacement for Synapse's hardcoded `redirect_uri` URL
+    (`<public_baseurl>/_synapse/client/oidc/callback`). This can be used to send
+    the client to a different URL after it receives a response from the
+    `authorization_endpoint`.
+
+    If this is set, the client is expected to call Synapse's OIDC callback URL
+    reproduced above itself with the necessary parameters and session cookie, in
+    order to complete OIDC login.
+    """
 
     # whether to allow a user logging in via OIDC to match a pre-existing account
     # instead of failing
