@@ -1528,7 +1528,7 @@ class RoomHierarchyRestServlet(RestServlet):
         limit = parse_integer(request, "limit")
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-        remote_room_hosts: List[str] | None
+        remote_room_hosts = None
         if self.msc4235_enabled:
             args: Dict[bytes, List[bytes]] = request.args  # type: ignore
             remote_room_hosts = parse_strings_from_args(
