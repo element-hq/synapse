@@ -57,6 +57,7 @@ CLIENT_ID = "test-client-id"
 CLIENT_SECRET = "test-client-secret"
 BASE_URL = "https://synapse/"
 CALLBACK_URL = BASE_URL + "_synapse/client/oidc/callback"
+TEST_REDIRECT_URI = "https://test/oidc/callback"
 SCOPES = ["openid"]
 
 # config for common cases
@@ -586,6 +587,24 @@ class OidcHandlerTestCase(HomeserverTestCase):
         code_verifier = get_value_from_macaroon(macaroon, "code_verifier")
         self.assertEqual(code_verifier, "")
 
+    @override_config(
+        {"oidc_config": {**DEFAULT_CONFIG, "redirect_uri": TEST_REDIRECT_URI}}
+    )
+    def test_redirect_request_with_overridden_redirect_uri(self) -> None:
+        """The redirect request has the overridden redirect_uri value."""
+        req = Mock(spec=["cookies"])
+        req.cookies = []
+
+        url = urlparse(
+            self.get_success(
+                self.provider.handle_redirect_request(req, b"http://client/redirect")
+            )
+        )
+
+        # Ensure that the redirect_uri in the returned url has been overridden.
+        params = parse_qs(url.query)
+        self.assertEqual(params["redirect_uri"], [TEST_REDIRECT_URI])
+
     @override_config({"oidc_config": DEFAULT_CONFIG})
     def test_callback_error(self) -> None:
         """Errors from the provider returned in the callback are displayed."""
@@ -952,6 +971,37 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(args["code"], [code])
         self.assertEqual(args["client_id"], [CLIENT_ID])
         self.assertEqual(args["redirect_uri"], [CALLBACK_URL])
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "redirect_uri": TEST_REDIRECT_URI,
+            }
+        }
+    )
+    def test_exchange_code_with_overridden_redirect_uri(self) -> None:
+        """Code exchange behaves correctly and handles various error scenarios."""
+        # Set up a fake IdP with a token endpoint handler.
+        token = {
+            "type": "Bearer",
+            "access_token": "aabbcc",
+        }
+
+        self.fake_server.post_token_handler.side_effect = None
+        self.fake_server.post_token_handler.return_value = FakeResponse.json(
+            payload=token
+        )
+        code = "code"
+
+        # Exchange the code against the fake IdP.
+        self.get_success(self.provider._exchange_code(code, code_verifier=""))
+
+        # Check that the `redirect_uri` parameter provided matches our
+        # overridden config value.
+        kwargs = self.fake_server.request.call_args[1]
+        args = parse_qs(kwargs["data"].decode("utf-8"))
+        self.assertEqual(args["redirect_uri"], [TEST_REDIRECT_URI])
 
     @override_config(
         {
