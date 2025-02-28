@@ -1,3 +1,4 @@
+L
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -1529,7 +1530,7 @@ class RoomHierarchyRestServlet(RestServlet):
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         remote_room_hosts: List[str] | None
-        if self.msc4235_enabled
+        if self.msc4235_enabled:
             args: Dict[bytes, List[bytes]] = request.args  # type: ignore
             remote_room_hosts = parse_strings_from_args(args, "org.matrix.msc4235.via", required=False)
 
