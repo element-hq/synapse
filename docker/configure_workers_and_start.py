@@ -376,9 +376,11 @@ def convert(src: str, dst: str, **template_vars: object) -> None:
     #
     # We use append mode in case the files have already been written to by something else
     # (for instance, as part of the instructions in a dockerfile).
+    exists = os.path.isfile(dst)
     with open(dst, "a") as outfile:
         # In case the existing file doesn't end with a newline
-        outfile.write("\n")
+        if exists:
+            outfile.write("\n")
 
         outfile.write(rendered)
 
@@ -994,10 +996,11 @@ def generate_worker_files(
 
     # healthcheck config
     convert(
-        "/conf/healthcheck.sh.j2",
-        "/healthcheck.sh",
+        "/conf/healthcheck.py.j2",
+        "/healthcheck.py",
         healthcheck_urls=healthcheck_urls,
     )
+    os.chmod("/healthcheck.py", 0o755)
 
     # Ensure the logging directory exists
     log_dir = data_dir + "/logs"

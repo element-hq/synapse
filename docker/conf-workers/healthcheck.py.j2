@@ -1,0 +1,10 @@
+#!/usr/local/bin/python
+# This healthcheck script is designed to return OK when every
+# host involved returns OK
+import subprocess
+import sys
+try:
+    for healthcheck_url in {{ healthcheck_urls }}:
+        subprocess.check_call(["curl", "-fSs", healthcheck_url])
+except subprocess.CalledProcessError as e:
+    sys.exit(1)

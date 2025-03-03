@@ -103,12 +103,11 @@ fi
 # Note that both the key and certificate are in PEM format (not DER).
 
 # First generate a configuration file to set up a Subject Alternative Name.
-cat > /conf/server.tls.conf <<EOF
+echo "\
 .include /etc/ssl/openssl.cnf
 
 [SAN]
-subjectAltName=DNS:${SERVER_NAME}
-EOF
+subjectAltName=DNS:${SERVER_NAME}" > /conf/server.tls.conf
 
 # Generate an RSA key
 openssl genrsa -out /conf/server.tls.key 2048
@@ -123,8 +122,10 @@ openssl x509 -req -in /conf/server.tls.csr \
   -out /conf/server.tls.crt -extfile /conf/server.tls.conf -extensions SAN
 
 # Assert that we have a Subject Alternative Name in the certificate.
-# (grep will exit with 1 here if there isn't a SAN in the certificate.)
-openssl x509 -in /conf/server.tls.crt -noout -text | grep DNS:
+case $(openssl x509 -in /conf/server.tls.crt -noout -text) in
+    *DNS:*) ;;
+    *) exit 1
+esac
 
 export SYNAPSE_TLS_CERT=/conf/server.tls.crt
 export SYNAPSE_TLS_KEY=/conf/server.tls.key

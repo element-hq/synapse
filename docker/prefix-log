@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/local/bin/python
 #
 # Prefixes all lines on stdout and stderr with the process name (as determined by
 # the SUPERVISOR_PROCESS_NAME env var, which is automatically set by Supervisor).
@@ -6,10 +6,30 @@
 # Usage:
 #   prefix-log command [args...]
 #
+import os
+import sys
 
 # '-W interactive' is a `mawk` extension which disables buffering on stdout and sets line-buffered reads on
 # stdin. The effect is that the output is flushed after each line, rather than being batched, which helps reduce
 # confusion due to to interleaving of the different processes.
-exec 1> >(mawk -W interactive '{print "'"${SUPERVISOR_PROCESS_NAME}"' | "$0; fflush() }' >&1)
-exec 2> >(mawk -W interactive '{print "'"${SUPERVISOR_PROCESS_NAME}"' | "$0; fflush() }' >&2)
-exec "$@"
+prefixer = ['mawk', '-W', 'interactive', f'{{print "{os.environ['SUPERVISOR_PROCESS_NAME']} | "$0; fflush() }}']
+
+r_out, w_out = os.pipe()
+if os.fork() == 0:
+    os.close(w_out)
+    os.dup2(r_out, sys.stdin.fileno())
+    os.execvp(prefixer[0], prefixer)
+os.close(r_out)
+
+r_err, w_err = os.pipe()
+if os.fork() == 0:
+    os.close(w_out)
+    os.close(w_err)
+    os.dup2(r_err, sys.stdin.fileno())
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    os.execvp(prefixer[0], prefixer)
+os.close(r_err)
+
+os.dup2(w_out, sys.stdout.fileno())
+os.dup2(w_err, sys.stderr.fileno())
+os.execvp(sys.argv[1], sys.argv[1:])

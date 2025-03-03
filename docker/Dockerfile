@@ -145,15 +145,14 @@ RUN \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
+      curl \
       gosu \
-      zlib1g \
       libjpeg62-turbo \
       libpq5 \
       libwebp7 \
       xmlsec1 \
       libjemalloc2 \
       libicu \
-      openssl \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
@@ -178,7 +177,7 @@ RUN \
 ### Stage 3: runtime
 ###
 
-FROM gcr.io/distroless/base-nossl-debian${DEBIAN_VERSION_NUMERIC}:debug
+FROM gcr.io/distroless/base-debian${DEBIAN_VERSION_NUMERIC}
 
 ARG TARGETARCH
 
@@ -188,14 +187,16 @@ LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
 COPY --from=runtime-deps /install-${TARGETARCH} /
+# needed for start.py's config generation scripts
+COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
 
-SHELL ["/busybox/sh", "-c"]
 ENTRYPOINT ["/start.py"]
 
+COPY ./docker/healthcheck.py /healthcheck.py
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
-  CMD wget --quiet --tries=1 --spider http://localhost:8008/health || exit 1
+  CMD ["/healthcheck.py"]
