@@ -47,7 +47,7 @@ from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVers
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches import intern_dict
-from synapse.util.frozenutils import freeze
+from synapse.util.frozenutils import freeze, unfreeze
 from synapse.util.stringutils import strtobool
 
 if TYPE_CHECKING:
@@ -318,6 +318,12 @@ class EventBase(metaclass=abc.ABCMeta):
 
         # this will be a no-op if the event dict is already frozen.
         self._dict = freeze(self._dict)
+
+    def unfreeze(self) -> None:
+        """'Unfreeze' the event dict, so it can be modified afterwards"""
+
+        # this will be a no-op if the event dict is already unfrozen.
+        self._dict = unfreeze(self._dict)
 
     def __str__(self) -> str:
         return self.__repr__()
