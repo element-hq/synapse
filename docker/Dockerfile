@@ -117,9 +117,9 @@ RUN \
   fi
 
 ###
-## Stage 2: runtime dependencies download for ARM64 and AMD64
+### Stage 2: runtime dependencies download for ARM64 and AMD64
 ###
-FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:${DEBIAN_VERSION} AS runtime-deps
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS runtime-deps
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
@@ -133,9 +133,9 @@ RUN uv python install \
   cpython-${PYTHON_VERSION}-linux-aarch64-gnu \
   cpython-${PYTHON_VERSION}-linux-x86_64_v2-gnu
 
-RUN mkdir -p /install-amd64/usr/lib /install-arm64/usr/lib
-RUN mv $(uv python dir)/cpython-*-linux-aarch64-gnu/ /install-arm64/usr/local
-RUN mv $(uv python dir)/cpython-*-linux-x86_64_v2-gnu/ /install-amd64/usr/local
+RUN mkdir -p /install-amd64/usr /install-arm64/usr
+RUN mv $(uv python dir)/cpython-*-linux-aarch64-gnu /install-arm64/usr/local
+RUN mv $(uv python dir)/cpython-*-linux-x86_64_v2-gnu /install-amd64/usr/local
 
 # Fetch the runtime dependencies debs for both architectures
 # We do that by building a recursive list of packages we need to download with `apt-cache depends`

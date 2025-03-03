@@ -604,9 +604,9 @@ def generate_base_homeserver_config() -> None:
     Raises: CalledProcessError if calling start.py returned a non-zero exit code.
     """
     # start.py already does this for us, so just call that.
-    # note that this script is copied in in the official, monolith dockerfile
+    # note that this script is copied in the official, monolith dockerfile
     os.environ["SYNAPSE_HTTP_PORT"] = str(MAIN_PROCESS_HTTP_LISTENER_PORT)
-    subprocess.run(["/usr/local/bin/python", "/start.py", "migrate_config"], check=True)
+    subprocess.run([sys.executable, "/start.py", "migrate_config"], check=True)
 
 
 def parse_worker_types(

@@ -26,9 +26,8 @@ RUN \
       mawk \
     | grep '^\w' > /tmp/pkg-list && \
   mkdir -p /tmp/debs && \
-  cat /tmp/pkg-list && \
   cd /tmp/debs && \
-  xargs apt-get download </tmp/pkg-list
+  apt-get download $(cat /tmp/pkg-list)
 
 # Extract the debs for each architecture
 RUN \
