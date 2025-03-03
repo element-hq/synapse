@@ -131,4 +131,4 @@ export SYNAPSE_TLS_KEY=/conf/server.tls.key
 
 # Run the script that writes the necessary config files and starts supervisord, which in turn
 # starts everything else
-exec /configure_workers_and_start.py
+exec /configure_workers_and_start.py "$@"
