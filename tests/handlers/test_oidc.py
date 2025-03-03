@@ -591,7 +591,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
         {"oidc_config": {**DEFAULT_CONFIG, "redirect_uri": TEST_REDIRECT_URI}}
     )
     def test_redirect_request_with_overridden_redirect_uri(self) -> None:
-        """The redirect request has the overridden redirect_uri value."""
+        """The authorization endpoint redirect has the overridden `redirect_uri` value."""
         req = Mock(spec=["cookies"])
         req.cookies = []
 
@@ -980,7 +980,7 @@ class OidcHandlerTestCase(HomeserverTestCase):
             }
         }
     )
-    def test_exchange_code_with_overridden_redirect_uri(self) -> None:
+    def test_code_exchange_with_overridden_redirect_uri(self) -> None:
         """Code exchange behaves correctly and handles various error scenarios."""
         # Set up a fake IdP with a token endpoint handler.
         token = {
