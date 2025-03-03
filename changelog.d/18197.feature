@@ -1,0 +1,1 @@
+Add support for specifying/overriding `redirect_uri` in the authorization and token requests against an OpenID identity provider.
