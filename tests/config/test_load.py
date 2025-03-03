@@ -21,6 +21,7 @@
 #
 import tempfile
 from typing import Callable
+from unittest import mock
 
 import yaml
 from parameterized import parameterized
@@ -30,6 +31,11 @@ from synapse.config._base import RootConfig
 from synapse.config.homeserver import HomeServerConfig
 
 from tests.config.utils import ConfigFileTestCase
+
+try:
+    import authlib
+except ImportError:
+    authlib = None
 
 try:
     import hiredis
@@ -132,6 +138,8 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
+            "form_secret_path: /does/not/exist",
+            "worker_replication_secret_path: /does/not/exist",
             "experimental_features:\n  msc3861:\n    client_secret_path: /does/not/exist",
             "experimental_features:\n  msc3861:\n    admin_token_path: /does/not/exist",
             *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
@@ -160,6 +168,14 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
                 lambda c: c.key.macaroon_secret_key,
             ),
             (
+                "form_secret_path: {}",
+                lambda c: c.key.form_secret.encode("utf-8"),
+            ),
+            (
+                "worker_replication_secret_path: {}",
+                lambda c: c.worker.worker_replication_secret.encode("utf-8"),
+            ),
+            (
                 "experimental_features:\n  msc3861:\n    client_secret_path: {}",
                 lambda c: c.experimental.msc3861.client_secret().encode("utf-8"),
             ),
@@ -180,7 +196,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self, config_line: str, get_secret: Callable[[RootConfig], str]
     ) -> None:
         self.generate_config_and_remove_lines_containing(
-            ["registration_shared_secret", "macaroon_secret_key"]
+            ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
         )
         with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
             secret_file.write(b"53C237")
@@ -189,3 +205,101 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             config = HomeServerConfig.load_config("", ["-c", self.config_file])
 
             self.assertEqual(get_secret(config), b"53C237")
+
+    @parameterized.expand(
+        [
+            "turn_shared_secret: 53C237",
+            "registration_shared_secret: 53C237",
+            "macaroon_secret_key: 53C237",
+            "recaptcha_private_key: 53C237",
+            "recaptcha_public_key: ¬53C237",
+            "form_secret: 53C237",
+            "worker_replication_secret: 53C237",
+            *[
+                "experimental_features:\n"
+                "  msc3861:\n"
+                "    enabled: true\n"
+                "    client_secret: 53C237"
+            ]
+            * (authlib is not None),
+            *[
+                "experimental_features:\n"
+                "  msc3861:\n"
+                "    enabled: true\n"
+                "    client_auth_method: private_key_jwt\n"
+                '    jwk: {{"mock": "mock"}}'
+            ]
+            * (authlib is not None),
+            *[
+                "experimental_features:\n"
+                "  msc3861:\n"
+                "    enabled: true\n"
+                "    admin_token: 53C237\n"
+                "    client_secret_path: {secret_file}"
+            ]
+            * (authlib is not None),
+            *["redis:\n  enabled: true\n  password: 53C237"] * (hiredis is not None),
+        ]
+    )
+    def test_no_secrets_in_config(self, config_line: str) -> None:
+        if authlib is not None:
+            patcher = mock.patch("authlib.jose.rfc7517.JsonWebKey.import_key")
+            self.addCleanup(patcher.stop)
+            patcher.start()
+
+        with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
+            # Only used for less mocking with admin_token
+            secret_file.write(b"53C237")
+
+            self.generate_config_and_remove_lines_containing(
+                ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
+            )
+            # Check strict mode with no offenders.
+            HomeServerConfig.load_config(
+                "", ["-c", self.config_file, "--no-secrets-in-config"]
+            )
+            self.add_lines_to_config(
+                ["", config_line.format(secret_file=secret_file.name)]
+            )
+            # Check strict mode with a single offender.
+            with self.assertRaises(ConfigError):
+                HomeServerConfig.load_config(
+                    "", ["-c", self.config_file, "--no-secrets-in-config"]
+                )
+
+            # Check lenient mode with a single offender.
+            HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_no_secrets_in_config_but_in_files(self) -> None:
+        with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
+            secret_file.write(b"53C237")
+
+            self.generate_config_and_remove_lines_containing(
+                ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
+            )
+            self.add_lines_to_config(
+                [
+                    "",
+                    f"turn_shared_secret_path: {secret_file.name}",
+                    f"registration_shared_secret_path: {secret_file.name}",
+                    f"macaroon_secret_key_path: {secret_file.name}",
+                    f"recaptcha_private_key_path: {secret_file.name}",
+                    f"recaptcha_public_key_path: {secret_file.name}",
+                    f"form_secret_path: {secret_file.name}",
+                    f"worker_replication_secret_path: {secret_file.name}",
+                    *[
+                        "experimental_features:\n"
+                        "  msc3861:\n"
+                        "    enabled: true\n"
+                        f"    admin_token_path: {secret_file.name}\n"
+                        f"    client_secret_path: {secret_file.name}\n"
+                        # f"    jwk_path: {secret_file.name}"
+                    ]
+                    * (authlib is not None),
+                    *[f"redis:\n  enabled: true\n  password_path: {secret_file.name}"]
+                    * (hiredis is not None),
+                ]
+            )
+            HomeServerConfig.load_config(
+                "", ["-c", self.config_file, "--no-secrets-in-config"]
+            )
