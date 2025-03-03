@@ -200,7 +200,6 @@ if [ -z "$skip_docker_build" ]; then
         echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
         $CONTAINER_RUNTIME build \
             -t "$SYNAPSE_WORKERS_TAG" \
-            -t "$LOCAL_REGISTRY/$SYNAPSE_WORKERS_TAG" \
             --build-arg FROM="$LOCAL_REGISTRY/$SYNAPSE_TAG" \
             -f "docker/Dockerfile-workers" .
         echo_if_github "::endgroup::"
@@ -214,7 +213,6 @@ if [ -z "$skip_docker_build" ]; then
             `# .github/workflows/push_complement_image.yml) so let's just label it now` \
             `# so people can reference it by the same name locally.` \
             -t "ghcr.io/element-hq/synapse/$COMPLEMENT_SYNAPSE_TAG" \
-            --build-arg FROM="$LOCAL_REGISTRY/$SYNAPSE_WORKERS_TAG" \
             -f "docker/complement/Dockerfile" "docker/complement"
         echo_if_github "::endgroup::"
 
