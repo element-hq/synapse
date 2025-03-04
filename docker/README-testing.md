@@ -35,7 +35,7 @@ docker build -t matrixdotorg/synapse:testing -f docker/Dockerfile .
 ```
 
 Next, build the workerised Synapse docker image, which is a layer over the base
-image. To test with your local checkout, pass the tag of the Synapse docker image
+image. To test with your local checkout, pass the name of the Synapse docker image
 built in the previous step as a build argument. Otherwise, the build will pull the
 image of the latest Synapse release and use that as the base of the workers image.
 
@@ -49,7 +49,7 @@ Finally, build the multi-purpose image for Complement, which is a layer over the
 docker build -t complement-synapse -f docker/complement/Dockerfile docker/complement
 ```
 
-This will build an image with the tag `complement-synapse`, which can be handed to
+This will build an image with the name `complement-synapse`, which can be handed to
 Complement for testing via the `COMPLEMENT_BASE_IMAGE` environment variable. Refer to
 [Complement's documentation](https://github.com/matrix-org/complement/#running) for
 how to run the tests, as well as the various available command line flags.
