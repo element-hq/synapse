@@ -1,0 +1,1 @@
+In scripts-dev/complement.sh, ensure that the synapse-workers & complement-synapse images are built from the local base synapse image that was just built, instead of from the latest synapse image pulled from a public registry.
