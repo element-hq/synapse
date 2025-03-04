@@ -296,6 +296,17 @@ following to the config:</p>
 <pre><code class="language-yaml">room_list_publication_rules:
   - &quot;action&quot;: &quot;allow&quot;
 </code></pre>
+<h2 id="change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository"><a class="header" href="#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository">Change of signing key expiry date for the Debian/Ubuntu package repository</a></h2>
+<p>Administrators using the Debian/Ubuntu packages from <code>packages.matrix.org</code>,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.</p>
+<p>If you have the <code>matrix-org-archive-keyring</code> package installed and it updates before the current key expires, this should
+happen automatically.</p>
+<p>Otherwise, if you see an error similar to <code>The following signatures were invalid: EXPKEYSIG F473DD4473365DE1</code>, you
+will need to get a fresh copy of the keys. You can do so with:</p>
+<pre><code class="language-sh">sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+</code></pre>
+<p>The old version of the key will expire on <code>2025-03-15</code>.</p>
 <h1 id="upgrading-to-v11220"><a class="header" href="#upgrading-to-v11220">Upgrading to v1.122.0</a></h1>
 <h2 id="dropping-support-for-postgresql-11-and-12"><a class="header" href="#dropping-support-for-postgresql-11-and-12">Dropping support for PostgreSQL 11 and 12</a></h2>
 <p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
