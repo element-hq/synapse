@@ -1,8 +1,64 @@
+# Synapse 1.126.0rc1 (2025-03-04)
+
+Installations using the Debian/Ubuntu packages from `packages.matrix.org`:
+Please be aware that we have recently updated the expiry date on the repository's GPG signing key, but this change
+must be imported into your keyring.
+If you have the `matrix-org-archive-keyring` package installed and update before the current key expires, this should
+happen automatically.
+Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
+will need to get a fresh copy of the keys. You can do so with:
+
+```sh
+sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+```
+
+### Features
+
+- Define ratelimit configuration for delayed event management. ([\#18019](https://github.com/element-hq/synapse/issues/18019))
+- Add `form_secret_path` config option. ([\#18090](https://github.com/element-hq/synapse/issues/18090))
+- Add the `--no-secrets-in-config` command line option. ([\#18092](https://github.com/element-hq/synapse/issues/18092))
+- Add background job to clear unreferenced state groups. ([\#18154](https://github.com/element-hq/synapse/issues/18154))
+- Add support for specifying/overriding `id_token_signing_alg_values_supported` for an OpenID identity provider. ([\#18177](https://github.com/element-hq/synapse/issues/18177))
+- Add `worker_replication_secret_path` config option. ([\#18191](https://github.com/element-hq/synapse/issues/18191))
+- Add support for specifying/overriding `redirect_uri` in the authorization and token requests against an OpenID identity provider. ([\#18197](https://github.com/element-hq/synapse/issues/18197))
+
+### Bugfixes
+
+- Make sure we advertise registration as disabled when MSC3861 is enabled. ([\#17661](https://github.com/element-hq/synapse/issues/17661))
+- Prevent suspended users from sending encrypted messages. ([\#18157](https://github.com/element-hq/synapse/issues/18157))
+- Cleanup deleted state group references. ([\#18165](https://github.com/element-hq/synapse/issues/18165))
+- Fix MSC4108 QR-code login not working with some reverse-proxy setups. ([\#18178](https://github.com/element-hq/synapse/issues/18178))
+- Support device IDs that can't be represented in a scope when delegating auth to Matrix Authentication Service 0.15.0+. ([\#18174](https://github.com/element-hq/synapse/issues/18174))
+
+### Updates to the Docker image
+
+- Speed up the building of the Docker image. ([\#18038](https://github.com/element-hq/synapse/issues/18038))
+
+### Improved Documentation
+
+- Move incorrectly placed version indicator in User Event Redaction Admin API docs. ([\#18152](https://github.com/element-hq/synapse/issues/18152))
+- Document suspension Admin API. ([\#18162](https://github.com/element-hq/synapse/issues/18162))
+
+### Deprecations and Removals
+
+- Disable room list publication by default. ([\#18175](https://github.com/element-hq/synapse/issues/18175))
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.95 to 1.0.96. ([\#18187](https://github.com/element-hq/synapse/issues/18187))
+* Bump authlib from 1.4.0 to 1.4.1. ([\#18190](https://github.com/element-hq/synapse/issues/18190))
+* Bump click from 8.1.7 to 8.1.8. ([\#18189](https://github.com/element-hq/synapse/issues/18189))
+* Bump log from 0.4.25 to 0.4.26. ([\#18184](https://github.com/element-hq/synapse/issues/18184))
+* Bump pyo3-log from 0.12.0 to 0.12.1. ([\#18046](https://github.com/element-hq/synapse/issues/18046))
+* Bump serde from 1.0.217 to 1.0.218. ([\#18183](https://github.com/element-hq/synapse/issues/18183))
+* Bump serde_json from 1.0.138 to 1.0.139. ([\#18186](https://github.com/element-hq/synapse/issues/18186))
+* Bump sigstore/cosign-installer from 3.8.0 to 3.8.1. ([\#18185](https://github.com/element-hq/synapse/issues/18185))
+* Bump types-psycopg2 from 2.9.21.20241019 to 2.9.21.20250121. ([\#18188](https://github.com/element-hq/synapse/issues/18188))
+
+
 # Synapse 1.125.0 (2025-02-25)
 
 No significant changes since 1.125.0rc1.
-
-
 
 
 # Synapse 1.125.0rc1 (2025-02-18)
