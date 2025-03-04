@@ -38,6 +38,8 @@ Next, build the workerised Synapse docker image, which is a layer over the base
 image. To test with your local checkout, pass the name of the Synapse docker image
 built in the previous step as a build argument. Otherwise, the build will pull the
 image of the latest Synapse release and use that as the base of the workers image.
+To test with a specific release of Synapse, set the `SYNAPSE_VERSION` build argument
+to the desired release version.
 
 ```sh
 docker build -t matrixdotorg/synapse-workers --build-arg FROM=matrixdotorg/synapse:testing -f docker/Dockerfile-workers .
