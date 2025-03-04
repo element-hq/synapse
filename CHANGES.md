@@ -17,10 +17,10 @@ as we have recently updated the expiry date on the repository's GPG signing key.
 
 ### Bugfixes
 
-- Make sure we advertise registration as disabled when MSC3861 is enabled. ([\#17661](https://github.com/element-hq/synapse/issues/17661))
+- Make sure we advertise registration as disabled when [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) is enabled. ([\#17661](https://github.com/element-hq/synapse/issues/17661))
 - Prevent suspended users from sending encrypted messages. ([\#18157](https://github.com/element-hq/synapse/issues/18157))
 - Cleanup deleted state group references. ([\#18165](https://github.com/element-hq/synapse/issues/18165))
-- Fix MSC4108 QR-code login not working with some reverse-proxy setups. ([\#18178](https://github.com/element-hq/synapse/issues/18178))
+- Fix [MSC4108 QR-code login](https://github.com/matrix-org/matrix-spec-proposals/pull/4108) not working with some reverse-proxy setups. ([\#18178](https://github.com/element-hq/synapse/issues/18178))
 - Support device IDs that can't be represented in a scope when delegating auth to Matrix Authentication Service 0.15.0+. ([\#18174](https://github.com/element-hq/synapse/issues/18174))
 
 ### Updates to the Docker image
