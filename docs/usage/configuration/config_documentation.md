@@ -1947,6 +1947,29 @@ rc_presence:
     burst_count: 1
 ```
 ---
+### `rc_delayed_event_mgmt`
+
+Ratelimiting settings for delayed event management.
+
+This is a ratelimiting option that ratelimits
+attempts to restart, cancel, or view delayed events
+based on the sending client's account and device ID.
+It defaults to: `per_second: 1`, `burst_count: 5`.
+
+Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
+
+Setting this to a high value allows clients to make delayed event management requests often
+(such as repeatedly restarting a delayed event with a short timeout,
+or restarting several different delayed events all at once)
+without the risk of being ratelimited.
+
+Example configuration:
+```yaml
+rc_delayed_event_mgmt:
+  per_second: 2
+  burst_count: 20
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 Sets outgoing federation transaction frequency for sending read-receipts,
@@ -3216,6 +3239,22 @@ Example configuration:
 form_secret: <PRIVATE STRING>
 ```
 ---
+### `form_secret_path`
+
+An alternative to [`form_secret`](#form_secret):
+allows the secret to be specified in an external file.
+
+The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+form_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.126.0._
+
+---
 ## Signing Keys
 Config options relating to signing keys
 
@@ -3579,6 +3618,24 @@ Options for each entry include:
    to `auto`, which uses PKCE if supported during metadata discovery. Set to `always`
    to force enable PKCE or `never` to force disable PKCE.
 
+* `id_token_signing_alg_values_supported`: List of the JWS signing algorithms (`alg`
+  values) that are supported for signing the `id_token`.
+
+  This is *not* required if `discovery` is disabled. We default to supporting `RS256` in
+  the downstream usage if no algorithms are configured here or in the discovery
+  document.
+
+  According to the spec, the algorithm `"RS256"` MUST be included. The absolute rigid
+  approach would be to reject this provider as non-compliant if it's not included but we
+  simply allow whatever and see what happens (you're the one that configured the value
+  and cooperating with the identity provider).
+
+  The `alg` value `"none"` MAY be supported but can only be used if the Authorization
+  Endpoint does not include `id_token` in the `response_type` (ex.
+  `/authorize?response_type=code` where `none` can apply,
+  `/authorize?response_type=code%20id_token` where `none` can't apply) (such as when
+  using the Authorization Code Flow).
+
 * `scopes`: list of scopes to request. This should normally include the "openid"
    scope. Defaults to `["openid"]`.
 
@@ -3604,6 +3661,13 @@ Options for each entry include:
    Defaults to `auto`, which uses the userinfo endpoint if `openid` is
    not included in `scopes`. Set to `userinfo_endpoint` to always use the
    userinfo endpoint.
+
+* `redirect_uri`: An optional string, that if set will override the `redirect_uri`
+  parameter sent in the requests to the authorization and token endpoints.
+  Useful if you want to redirect the client to another endpoint as part of the
+  OIDC login. Be aware that the client must then call Synapse's OIDC callback
+  URL (`<public_baseurl>/_synapse/client/oidc/callback`) manually afterwards.
+  Must be a valid URL including scheme and path.
 
 * `additional_authorization_parameters`: String to string dictionary that will be passed as
    additional parameters to the authorization grant URL.
@@ -4227,8 +4291,8 @@ unwanted entries from being published in the public room list.
 
 The format of this option is the same as that for
 [`alias_creation_rules`](#alias_creation_rules): an optional list of 0 or more
-rules. By default, no list is provided, meaning that all rooms may be
-published to the room list.
+rules. By default, no list is provided, meaning that no one may publish to the
+room list (except server admins).
 
 Otherwise, requests to publish a room are matched against each rule in order.
 The first rule that matches decides if the request is allowed or denied. If no
@@ -4252,6 +4316,10 @@ Each of the glob patterns is optional, defaulting to `*` ("match anything").
 Note that the patterns match against fully qualified IDs, e.g. against
 `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead
 of `alice`, `room` and `abcedgghijk`.
+
+
+_Changed in Synapse 1.126.0: The default was changed to deny publishing to the
+room list by default_
 
 
 Example configuration:
@@ -4466,6 +4534,22 @@ Example configuration:
 ```yaml
 worker_replication_secret: "secret_secret"
 ```
+---
+### `worker_replication_secret_path`
+
+An alternative to [`worker_replication_secret`](#worker_replication_secret):
+allows the secret to be specified in an external file.
+
+The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+worker_replication_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.126.0._
+
 ---
 ### `start_pushers`
 

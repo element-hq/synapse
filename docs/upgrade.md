@@ -117,6 +117,26 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.126.0
+
+## Room list publication rules change
+
+The default [`room_list_publication_rules`] setting was changed to disallow
+anyone (except server admins) from publishing to the room list by default.
+
+This is in line with Synapse policy of locking down features by default that can
+be abused without moderation.
+
+To keep the previous behavior of allowing publication by default, add the
+following to the config:
+
+```yaml
+room_list_publication_rules:
+  - "action": "allow"
+```
+
+[`room_list_publication_rules`]: usage/configuration/config_documentation.md#room_list_publication_rules
+
 # Upgrading to v1.122.0
 
 ## Dropping support for PostgreSQL 11 and 12

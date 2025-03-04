@@ -43,6 +43,7 @@ from synapse.api.errors import (
     OAuthInsufficientScopeError,
     SynapseError,
 )
+from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
 from synapse.rest import admin
 from synapse.rest.client import account, devices, keys, login, logout, register
@@ -379,6 +380,44 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         )
         self.assertEqual(requester.device_id, DEVICE)
 
+    def test_active_user_with_device_explicit_device_id(self) -> None:
+        """The handler should return a requester with normal user rights and a device ID, given explicitly, as supported by MAS 0.15+"""
+
+        self.http_client.request = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join([MATRIX_USER_SCOPE]),
+                    "device_id": DEVICE,
+                    "username": USERNAME,
+                },
+            )
+        )
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_user_by_req(request))
+        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
+        self.http_client.request.assert_called_once_with(
+            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        )
+        # It should have called with the 'X-MAS-Supports-Device-Id: 1' header
+        self.assertEqual(
+            self.http_client.request.call_args[1]["headers"].getRawHeaders(
+                b"X-MAS-Supports-Device-Id",
+            ),
+            [b"1"],
+        )
+        self._assertParams()
+        self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
+        self.assertEqual(requester.is_guest, False)
+        self.assertEqual(
+            get_awaitable_result(self.auth.is_server_admin(requester)), False
+        )
+        self.assertEqual(requester.device_id, DEVICE)
+
     def test_multiple_devices(self) -> None:
         """The handler should raise an error if multiple devices are found in the scope."""
 
@@ -575,6 +614,16 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             channel.json_body["errcode"], Codes.UNRECOGNIZED, channel.json_body
         )
 
+    def expect_forbidden(
+        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+    ) -> None:
+        channel = self.make_request(method, path, content)
+
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
+        )
+
     def test_uia_endpoints(self) -> None:
         """Test that endpoints that were removed in MSC2964 are no longer available."""
 
@@ -629,11 +678,35 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
     def test_registration_endpoints_removed(self) -> None:
         """Test that registration endpoints that were removed in MSC2964 are no longer available."""
+        appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@alice:.+", "exclusive": True}]},
+            sender="@as_main:test",
+        )
+
+        self.hs.get_datastores().main.services_cache = [appservice]
         self.expect_unrecognized(
             "GET", "/_matrix/client/v1/register/m.login.registration_token/validity"
         )
+
+        # Registration is disabled
+        self.expect_forbidden(
+            "POST",
+            "/_matrix/client/v3/register",
+            {"username": "alice", "password": "hunter2"},
+        )
+
         # This is still available for AS registrations
-        # self.expect_unrecognized("POST", "/_matrix/client/v3/register")
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/register",
+            {"username": "alice", "type": "m.login.application_service"},
+            shorthand=False,
+            access_token="i_am_an_app_service",
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
         self.expect_unrecognized("GET", "/_matrix/client/v3/register/available")
         self.expect_unrecognized(
             "POST", "/_matrix/client/v3/register/email/requestToken"
