@@ -49,7 +49,7 @@ Finally, build the multi-purpose image for Complement, which is a layer over the
 docker build -t complement-synapse -f docker/complement/Dockerfile docker/complement
 ```
 
-This will build an image with the name `complement-synapse`, which can be handed to
+This will build an image with the name `complement-synapse:latest`, which can be handed to
 Complement for testing via the `COMPLEMENT_BASE_IMAGE` environment variable. Refer to
 [Complement's documentation](https://github.com/matrix-org/complement/#running) for
 how to run the tests, as well as the various available command line flags.
