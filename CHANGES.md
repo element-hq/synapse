@@ -1,16 +1,9 @@
 # Synapse 1.126.0rc1 (2025-03-04)
 
-Installations using the Debian/Ubuntu packages from `packages.matrix.org`:
-Please be aware that we have recently updated the expiry date on the repository's GPG signing key, but this change
-must be imported into your keyring.
-If you have the `matrix-org-archive-keyring` package installed and update before the current key expires, this should
-happen automatically.
-Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
-will need to get a fresh copy of the keys. You can do so with:
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.126/docs/upgrade.md#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2025-03-15`.
 
-```sh
-sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
-```
 
 ### Features
 
