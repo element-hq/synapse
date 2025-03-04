@@ -29,7 +29,6 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
       cd /tmp/debs && \
       apt-get download $(cat /tmp/pkg-list)
 
-    # Extract the debs for each architecture
     RUN \
         mkdir -p /install/var/lib/dpkg/status.d/ && \
         for deb in /tmp/debs/*.deb; do \
