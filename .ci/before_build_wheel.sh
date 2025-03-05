@@ -1,10 +1,9 @@
 #!/bin/sh
-set -eu
+set -xeu
 
 # On 32-bit Linux platforms, we need libatomic1 to use rustup
-if command -v apt-get &> /dev/null; then
-    apt-get update
-    apt-get install libatomic1
+if command -v yum &> /dev/null; then
+   yum install -y libatomic
 fi
 
 # Install a Rust toolchain
