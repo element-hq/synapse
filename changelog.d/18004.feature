@@ -1,1 +1,0 @@
-Add experimental config options `admin_token_path` and `client_secret_path` for MSC 3861.

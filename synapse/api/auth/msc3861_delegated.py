@@ -214,6 +214,9 @@ class MSC3861DelegatedAuth(BaseAuth):
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": str(self._http_client.user_agent, "utf-8"),
             "Accept": "application/json",
+            # Tell MAS that we support reading the device ID as an explicit
+            # value, not encoded in the scope. This is supported by MAS 0.15+
+            "X-MAS-Supports-Device-Id": "1",
         }
 
         args = {"token": token, "token_type_hint": "access_token"}
@@ -409,29 +412,41 @@ class MSC3861DelegatedAuth(BaseAuth):
         else:
             user_id = UserID.from_string(user_id_str)
 
-        # Find device_ids in scope
-        # We only allow a single device_id in the scope, so we find them all in the
-        # scope list, and raise if there are more than one. The OIDC server should be
-        # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-        device_ids = [
-            tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
-            for tok in scope
-            if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
-        ]
+        # MAS 0.15+ will give us the device ID as an explicit value for compatibility sessions
+        # If present, we get it from here, if not we get it in thee scope
+        device_id = introspection_result.get("device_id")
+        if device_id is not None:
+            # We got the device ID explicitly, just sanity check that it's a string
+            if not isinstance(device_id, str):
+                raise AuthError(
+                    500,
+                    "Invalid device ID in introspection result",
+                )
+        else:
+            # Find device_ids in scope
+            # We only allow a single device_id in the scope, so we find them all in the
+            # scope list, and raise if there are more than one. The OIDC server should be
+            # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
+            device_ids = [
+                tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
+                for tok in scope
+                if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
+            ]
 
-        if len(device_ids) > 1:
-            raise AuthError(
-                500,
-                "Multiple device IDs in scope",
-            )
+            if len(device_ids) > 1:
+                raise AuthError(
+                    500,
+                    "Multiple device IDs in scope",
+                )
 
-        device_id = device_ids[0] if device_ids else None
+            device_id = device_ids[0] if device_ids else None
+
         if device_id is not None:
             # Sanity check the device_id
             if len(device_id) > 255 or len(device_id) < 1:
                 raise AuthError(
                     500,
-                    "Invalid device ID in scope",
+                    "Invalid device ID in introspection result",
                 )
 
             # Create the device on the fly if it does not exist
