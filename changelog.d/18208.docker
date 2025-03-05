@@ -1,1 +1,1 @@
-Use a [`distroless`](https://github.com/GoogleContainerTools/distroless) base runtime image.
+Use a [`distroless`](https://github.com/GoogleContainerTools/distroless) base runtime image. This is a breaking change to downstream images that build on the Synapse image.
