@@ -1,9 +1,16 @@
-# Synapse 1.126.0rc1 (2025-03-04)
+# Synapse 1.126.0rc2 (2025-03-05)
 
 Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
 [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.126/docs/upgrade.md#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository)
 as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2025-03-15`.
 
+### Internal Changes
+
+- Fix wheel building configuration in CI by installing libatomic1. ([\#18212](https://github.com/element-hq/synapse/issues/18212), [\#18213](https://github.com/element-hq/synapse/issues/18213))
+
+# Synapse 1.126.0rc1 (2025-03-04)
+
+Synapse 1.126.0rc1 was not fully released due to an error in CI.
 
 ### Features
 

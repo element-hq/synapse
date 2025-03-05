@@ -1,1 +1,0 @@
-Fix wheel building configuration in CI by installing libatomic1.
