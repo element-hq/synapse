@@ -644,11 +644,33 @@ class EventCreationHandler:
         """
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
-        if event_dict["type"] == EventTypes.Message:
-            requester_suspended = await self.store.get_user_suspended_status(
-                requester.user.to_string()
-            )
-            if requester_suspended:
+        requester_suspended = await self.store.get_user_suspended_status(
+            requester.user.to_string()
+        )
+        if requester_suspended:
+            # We want to allow suspended users to perform "corrective" actions
+            # asked of them by server admins, such as redact their messages and
+            # leave rooms.
+            if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
+                if event_dict["type"] == "m.room.redaction":
+                    event = await self.store.get_event(
+                        event_dict["content"]["redacts"], allow_none=True
+                    )
+                    if event:
+                        if event.sender != requester.user.to_string():
+                            raise SynapseError(
+                                403,
+                                "You can only redact your own events while account is suspended.",
+                                Codes.USER_ACCOUNT_SUSPENDED,
+                            )
+                if event_dict["type"] == "m.room.member":
+                    if event_dict["content"]["membership"] != "leave":
+                        raise SynapseError(
+                            403,
+                            "Changing membership while account is suspended is not allowed.",
+                            Codes.USER_ACCOUNT_SUSPENDED,
+                        )
+            else:
                 raise SynapseError(
                     403,
                     "Sending messages while account is suspended is not allowed.",

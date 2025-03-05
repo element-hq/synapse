@@ -31,6 +31,7 @@ from typing import (
     AnyStr,
     Dict,
     Iterable,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -40,7 +41,6 @@ from typing import (
 from urllib.parse import urlencode
 
 import attr
-from typing_extensions import Literal
 
 from twisted.test.proto_helpers import MemoryReactorClock
 from twisted.web.server import Site
@@ -548,7 +548,7 @@ class RestHelper:
         room_id: str,
         event_type: str,
         body: Dict[str, Any],
-        tok: Optional[str],
+        tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
     ) -> JsonDict:

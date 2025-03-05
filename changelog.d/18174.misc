@@ -1,0 +1,1 @@
+Support device IDs that can't be represented in a scope when delegating auth to Matrix Authentication Service 0.15.0+.

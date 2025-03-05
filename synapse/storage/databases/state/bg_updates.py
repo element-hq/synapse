@@ -20,7 +20,15 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
