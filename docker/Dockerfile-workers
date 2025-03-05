@@ -10,7 +10,12 @@ ARG PYTHON_VERSION=3.12
 # target image. For repeated rebuilds, this is much faster than apt installing
 # each time.
 
-FROM docker.io/library/debian:${DEBIAN_VERSION}-slim AS deps_base
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
+
+    # This silences a warning as uv isn't able to do hardlinks between its cache
+    # (mounted as --mount=type=cache) and the target directory.
+    ENV UV_LINK_MODE=copy
+
     RUN \
        --mount=type=cache,target=/var/cache/apt,sharing=locked \
        --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -33,17 +38,14 @@ FROM docker.io/library/debian:${DEBIAN_VERSION}-slim AS deps_base
           dpkg --extract $deb /install; \
         done;
 
+    RUN --mount=type=cache,target=/root/.cache/uv \
+        uv pip install --prefix="/install/usr/local" supervisor~=4.2
+
 # now build the final image, based on the the regular Synapse docker image
 FROM $FROM
 
-    # Install supervisord with pip instead of apt, to avoid installing a second
-    # copy of python.
-    RUN --mount=type=cache,target=/root/.cache/pip \
-        ["pip", "install", "supervisor~=4.2"]
-
-    # Copy over redis and nginx
+    # Copy over redis, nginx and supervisor
     COPY --from=deps_base /install /
-
     RUN \
          --mount=type=bind,from=deps_base,source=/bin,target=/bin \
          --mount=type=bind,from=deps_base,source=/sbin,target=/sbin \

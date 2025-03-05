@@ -182,7 +182,8 @@ COPY --from=runtime-deps /install-${TARGETARCH} /
 # needed for start.py's config generation scripts
 COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
-COPY --from=python /usr/local /usr/local
+COPY --from=python /usr/local/bin/python* /usr/local/bin/
+COPY --from=python /usr/local/lib /usr/local/lib
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
