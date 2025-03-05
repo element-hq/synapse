@@ -1462,6 +1462,9 @@ class EventCreationHandler:
                     )
                     return prev_event
 
+            if event.type == "m.room.message" or event.type == "m.room.encrypted":
+                await self.store.set_room_participation(event.user_id, event.room_id)
+
             if event.internal_metadata.is_out_of_band_membership():
                 # the only sort of out-of-band-membership events we expect to see here are
                 # invite rejections and rescinded knocks that we have generated ourselves.
