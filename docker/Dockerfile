@@ -145,6 +145,17 @@ RUN \
       libicu \
 # for health checks (slimmer than curl)
       wget \
+# dependencies of debian's python3.12-minimal
+      zlib1g \
+      libexpat1 \
+# libraries used by python's lib-dynload (except libreadline8)
+      libbz2-1.0 \
+      libcrypt1 \
+      libgdbm6 \
+      libncursesw6 \
+      libnsl2 \
+      libsqlite3-0 \
+      libuuid1 \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
