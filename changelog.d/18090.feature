@@ -1,1 +1,0 @@
-Add `form_secret_path` config option.

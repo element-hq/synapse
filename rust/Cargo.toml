@@ -30,7 +30,7 @@ http = "1.1.0"
 lazy_static = "1.4.0"
 log = "0.4.17"
 mime = "0.3.17"
-pyo3 = { version = "0.23.2", features = [
+pyo3 = { version = "0.23.5", features = [
     "macros",
     "anyhow",
     "abi3",
