@@ -196,11 +196,10 @@ COPY --from=runtime-deps /install-${TARGETARCH} /
 # needed for start.py's config generation scripts
 COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
-COPY --from=python \
-    /usr/local/bin/python \
-    /usr/local/bin/python${PYTHON_VERSION%%.*} \
-    /usr/local/bin/python${PYTHON_VERSION} \
-    /usr/local/bin/
+COPY --from=python /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/
+RUN --mount=type=bind,from=python,source=/bin,target=/bin \
+    ln -s python${PYTHON_VERSION} /usr/local/bin/python${PYTHON_VERSION%%.*} && \
+    ln -s python${PYTHON_VERSION} /usr/local/bin/python
 COPY --from=python /usr/local/lib /usr/local/lib
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
