@@ -171,6 +171,7 @@ RUN \
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS python
 FROM gcr.io/distroless/base-debian${DEBIAN_VERSION_NUMERIC}
 
+ARG PYTHON_VERSION
 ARG TARGETARCH
 
 LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
@@ -182,7 +183,11 @@ COPY --from=runtime-deps /install-${TARGETARCH} /
 # needed for start.py's config generation scripts
 COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
-COPY --from=python /usr/local/bin/python* /usr/local/bin/
+COPY --from=python \
+    /usr/local/bin/python \
+    /usr/local/bin/python${PYTHON_VERSION%%.*} \
+    /usr/local/bin/python${PYTHON_VERSION} \
+    /usr/local/bin/
 COPY --from=python /usr/local/lib /usr/local/lib
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
