@@ -3,7 +3,6 @@
 ARG SYNAPSE_VERSION=latest
 ARG FROM=matrixdotorg/synapse:$SYNAPSE_VERSION
 ARG DEBIAN_VERSION=bookworm
-ARG DEBIAN_VERSION_NUMERIC=12
 ARG PYTHON_VERSION=3.12
 
 # first of all, we create a base image with an nginx which we can copy into the
