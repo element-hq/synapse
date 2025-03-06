@@ -253,9 +253,9 @@ Alongside all that, join our developer community on Matrix:
 Copyright and Licensing
 =======================
 
-Copyright 2014-2017 OpenMarket Ltd
-Copyright 2017 Vector Creations Ltd
-Copyright 2017-2025 New Vector Ltd 
+| Copyright 2014-2017 OpenMarket Ltd
+| Copyright 2017 Vector Creations Ltd
+| Copyright 2017-2025 New Vector Ltd
 
 This software is dual-licensed by New Vector Ltd (Element). It can be used either:
   
