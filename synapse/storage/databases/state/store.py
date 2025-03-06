@@ -739,8 +739,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         room_id: str,
         state_groups_to_sequence_numbers: Mapping[int, int],
     ) -> bool:
-        """Deletes no longer referenced state groups and de-deltas any state
-        groups that reference them.
+        """Deletes state groups that are no longer referenced by events <<<TODO confirm this is the intended meaning>>>
+        and de-deltas any state groups that reference them.
 
         Args:
             room_id: The room the state groups belong to (must all be in the
