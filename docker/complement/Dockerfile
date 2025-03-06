@@ -27,7 +27,7 @@ COPY --from=postgres /bin/sh /bin/sh
 # Choose useradd over adduser since the latter requires perl
 RUN --mount=type=bind,from=postgres,source=/sbin/useradd,target=/sbin/useradd \
     useradd --system --user-group --uid 999 --home-dir /var/lib/postgresql --shell /usr/sbin/nologin postgres
-COPY --from=postgres /usr/lib /usr/lib
+COPY --from=postgres /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres /usr/share/postgresql /usr/share/postgresql
 COPY --from=postgres --chown=postgres /var/lib/postgresql /var/lib/postgresql
 COPY --from=postgres --chown=postgres /var/run/postgresql /var/run/postgresql
