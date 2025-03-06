@@ -643,3 +643,92 @@ class StateStoreTestCase(HomeserverTestCase):
                     ),
                 )
                 self.assertEqual(context.state_group_before_event, groups[0][0])
+
+
+class StateGroupDataStoreTestCase(HomeserverTestCase):
+    """Tests for the StateGroupDataStore"""
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.storage = hs.get_storage_controllers()
+        self.state_datastore = self.storage.state.stores.state
+
+    def test_purge_unreferenced_state_groups__dedelta(self) -> None:
+        """
+        Tests the de-delta-ing behaviour of event-unreferenced state group purging.
+
+        Set up a state group DAG like:
+
+        1 {m.room.member/@a:h} -> 2 {m.room.member/@b:h} -> 3 {m.room.member/@c:h}
+
+        Then delete state group 2, supposing it is no longer referenced by any events.
+
+        The end state group DAG should look like ...
+        """
+
+        self.get_success(
+            self.state_datastore.db_pool.simple_insert_many(
+                table="state_groups_state",
+                keys=("state_group", "room_id", "type", "state_key", "event_id"),
+                values=[
+                    (1, "!r:h", "m.room.member", "@a:h", "$abc"),
+                    (2, "!r:h", "m.room.member", "@b:h", "$def"),
+                    (3, "!r:h", "m.room.member", "@c:h", "$ghi"),
+                ],
+                desc="_",
+            )
+        )
+
+        self.get_success(
+            self.state_datastore.db_pool.simple_insert_many(
+                table="state_group_edges",
+                keys=("state_group", "prev_state_group"),
+                values=[
+                    (2, 1),
+                    (3, 2),
+                ],
+                desc="_",
+            )
+        )
+
+        self.get_success(
+            self.state_datastore.db_pool.simple_insert_many(
+                table="state_groups_pending_deletion",
+                keys=("state_group", "sequence_number", "insertion_ts"),
+                values=[
+                    (2, 1, -90000000),
+                ],
+                desc="_",
+            )
+        )
+        self.assertTrue(
+            self.get_success(
+                self.state_datastore.purge_unreferenced_state_groups("!r:h", {2: 1})
+            )
+        )
+
+        snapshot_rows = sorted(
+            self.get_success(
+                self.state_datastore.db_pool.simple_select_list(
+                    "state_groups_state",
+                    {},
+                    ("state_group", "type", "state_key", "event_id"),
+                    desc="_",
+                )
+            )
+        )
+
+        self.assertEqual(
+            snapshot_rows,
+            [
+                (1, "m.room.member", "@a:h", "$abc"),
+                (
+                    3,
+                    "m.room.member",
+                    "@a:h",
+                    "$abc",
+                ),  # <--- BOOM, table increased in size!!!
+                (3, "m.room.member", "@b:h", "$def"),
+                (3, "m.room.member", "@c:h", "$ghi"),
+            ],
+        )
