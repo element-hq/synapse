@@ -136,7 +136,6 @@ RUN \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
-      curl \
       gosu \
       libjpeg62-turbo \
       libpq5 \
@@ -144,6 +143,8 @@ RUN \
       xmlsec1 \
       libjemalloc2 \
       libicu \
+# for health checks (slimmer than curl)
+      wget \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \

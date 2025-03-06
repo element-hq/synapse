@@ -5,6 +5,6 @@ import subprocess
 import sys
 try:
     for healthcheck_url in {{ healthcheck_urls }}:
-        subprocess.check_call(["curl", "-fSs", healthcheck_url])
+        subprocess.check_call(["wget", "--quiet", "--tries=1", "--spider", healthcheck_url])
 except subprocess.CalledProcessError as e:
     sys.exit(1)
