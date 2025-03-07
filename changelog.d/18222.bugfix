@@ -1,0 +1,1 @@
+Revert the background job to clear unreferenced state groups (that was introduced in v1.126.0rc1), due to a suspected issue that causes increased disk usage.
