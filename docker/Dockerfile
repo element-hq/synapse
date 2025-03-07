@@ -184,16 +184,11 @@ RUN \
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS python
 
 # Make a directory with just the Python binaries & symlinks to be copied into the final image
-ARG PYTHON_VERSION
 RUN \
     PYBIN=/usr/local/pybin && \
     mkdir ${PYBIN} && \
-    cd /usr/local/bin && \
-    cp -a \
-        python \
-        python${PYTHON_VERSION} \
-        python${PYTHON_VERSION%%.*} \
-        ${PYBIN}/
+    cp -a /usr/local/bin/python* ${PYBIN}/ && \
+    rm ${PYBIN}/python*-config
 
 
 ###
