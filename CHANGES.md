@@ -1,3 +1,12 @@
+# Synapse 1.126.0rc3 (2025-03-07)
+
+### Bugfixes
+
+- Revert the background job to clear unreferenced state groups (that was introduced in v1.126.0rc1), due to a suspected issue that causes increased disk usage. ([\#18222](https://github.com/element-hq/synapse/issues/18222))
+
+
+
+
 # Synapse 1.126.0rc2 (2025-03-05)
 
 Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
