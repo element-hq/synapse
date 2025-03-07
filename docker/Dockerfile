@@ -161,7 +161,7 @@ RUN \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
     cd /tmp/debs-${arch} && \
-    apt-get download $(sed '/:/!s/$/:'"${arch}"'/' /tmp/pkg-list); \
+    apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
   done
 
 # Extract the debs for each architecture
