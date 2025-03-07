@@ -178,13 +178,30 @@ RUN \
 
 
 ###
-### Stage 3: runtime
+### Stage 3: python
 ###
 
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS python
+
+# Make a directory with just the Python binaries & symlinks to be copied into the final image
+ARG PYTHON_VERSION
+RUN \
+    PYBIN=/usr/local/pybin && \
+    mkdir ${PYBIN} && \
+    cd /usr/local/bin && \
+    cp -a \
+        python \
+        python${PYTHON_VERSION} \
+        python${PYTHON_VERSION%%.*} \
+        ${PYBIN}/
+
+
+###
+### Stage 4: runtime
+###
+
 FROM gcr.io/distroless/base-debian${DEBIAN_VERSION_NUMERIC}
 
-ARG PYTHON_VERSION
 ARG TARGETARCH
 
 LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
@@ -193,13 +210,11 @@ LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
 COPY --from=runtime-deps /install-${TARGETARCH} /
-# needed for start.py's config generation scripts
+# Needed for start.py's config generation scripts
 COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
-COPY --from=python /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/
-RUN --mount=type=bind,from=python,source=/bin,target=/bin \
-    ln -s python${PYTHON_VERSION} /usr/local/bin/python${PYTHON_VERSION%%.*} && \
-    ln -s python${PYTHON_VERSION} /usr/local/bin/python
+# Copy the entire directory to preserve symlinks
+COPY --from=python /usr/local/pybin /usr/local/bin
 COPY --from=python /usr/local/lib /usr/local/lib
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
