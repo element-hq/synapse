@@ -1,16 +1,25 @@
+# Synapse 1.126.0rc3 (2025-03-07)
+
+### Bugfixes
+
+- Revert the background job to clear unreferenced state groups (that was introduced in v1.126.0rc1), due to [a suspected issue](https://github.com/element-hq/synapse/issues/18217) that causes increased disk usage. ([\#18222](https://github.com/element-hq/synapse/issues/18222))
+
+
+
+
+# Synapse 1.126.0rc2 (2025-03-05)
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.126/docs/upgrade.md#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2025-03-15`.
+
+### Internal Changes
+
+- Fix wheel building configuration in CI by installing libatomic1. ([\#18212](https://github.com/element-hq/synapse/issues/18212), [\#18213](https://github.com/element-hq/synapse/issues/18213))
+
 # Synapse 1.126.0rc1 (2025-03-04)
 
-Installations using the Debian/Ubuntu packages from `packages.matrix.org`:
-Please be aware that we have recently updated the expiry date on the repository's GPG signing key, but this change
-must be imported into your keyring.
-If you have the `matrix-org-archive-keyring` package installed and update before the current key expires, this should
-happen automatically.
-Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
-will need to get a fresh copy of the keys. You can do so with:
-
-```sh
-sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
-```
+Synapse 1.126.0rc1 was not fully released due to an error in CI.
 
 ### Features
 
@@ -24,10 +33,10 @@ sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages
 
 ### Bugfixes
 
-- Make sure we advertise registration as disabled when MSC3861 is enabled. ([\#17661](https://github.com/element-hq/synapse/issues/17661))
+- Make sure we advertise registration as disabled when [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) is enabled. ([\#17661](https://github.com/element-hq/synapse/issues/17661))
 - Prevent suspended users from sending encrypted messages. ([\#18157](https://github.com/element-hq/synapse/issues/18157))
 - Cleanup deleted state group references. ([\#18165](https://github.com/element-hq/synapse/issues/18165))
-- Fix MSC4108 QR-code login not working with some reverse-proxy setups. ([\#18178](https://github.com/element-hq/synapse/issues/18178))
+- Fix [MSC4108 QR-code login](https://github.com/matrix-org/matrix-spec-proposals/pull/4108) not working with some reverse-proxy setups. ([\#18178](https://github.com/element-hq/synapse/issues/18178))
 - Support device IDs that can't be represented in a scope when delegating auth to Matrix Authentication Service 0.15.0+. ([\#18174](https://github.com/element-hq/synapse/issues/18174))
 
 ### Updates to the Docker image
