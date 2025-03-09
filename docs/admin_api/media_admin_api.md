@@ -290,7 +290,7 @@ The purge remote media API allows server admins to purge old cached remote media
 The API is:
 
 ```
-POST /_synapse/admin/v1/purge_media_cache?before_ts=<unix_timestamp_in_ms>
+POST /_synapse/admin/v1/purge_media_cache?before_ts=<before_ts>
 
 {}
 ```
