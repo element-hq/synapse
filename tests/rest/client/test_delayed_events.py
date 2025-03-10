@@ -142,7 +142,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
         self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(self.user1_user_id, 0, 0)
+            self.hs.get_datastores().main.set_ratelimit_for_user(
+                self.user1_user_id, 0, 0
+            )
         )
 
         # Test that the request isn't ratelimited anymore.
@@ -289,7 +291,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
         self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(self.user1_user_id, 0, 0)
+            self.hs.get_datastores().main.set_ratelimit_for_user(
+                self.user1_user_id, 0, 0
+            )
         )
 
         # Test that the request isn't ratelimited anymore.
@@ -376,7 +380,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
         self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(self.user1_user_id, 0, 0)
+            self.hs.get_datastores().main.set_ratelimit_for_user(
+                self.user1_user_id, 0, 0
+            )
         )
 
         # Test that the request isn't ratelimited anymore.
@@ -480,7 +486,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
         # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
         self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(self.user1_user_id, 0, 0)
+            self.hs.get_datastores().main.set_ratelimit_for_user(
+                self.user1_user_id, 0, 0
+            )
         )
 
         # Test that the request isn't ratelimited anymore.
