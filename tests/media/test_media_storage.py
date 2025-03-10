@@ -23,14 +23,13 @@ import shutil
 import tempfile
 from binascii import unhexlify
 from io import BytesIO
-from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Tuple, Union
+from typing import Any, BinaryIO, ClassVar, Dict, List, Literal, Optional, Tuple, Union
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 
 import attr
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
-from typing_extensions import Literal
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
@@ -419,6 +418,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         return channel
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_handle_missing_content_type(self) -> None:
         channel = self._req(
             b"attachment; filename=out" + self.test_image.extension,
@@ -430,6 +434,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             headers.getRawHeaders(b"Content-Type"), [b"application/octet-stream"]
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_disposition_filename_ascii(self) -> None:
         """
         If the filename is filename=<ascii> then Synapse will decode it as an
@@ -450,6 +459,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             ],
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_disposition_filenamestar_utf8escaped(self) -> None:
         """
         If the filename is filename=*utf8''<utf8 escaped> then Synapse will
@@ -475,6 +489,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             ],
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_disposition_none(self) -> None:
         """
         If there is no filename, Content-Disposition should only
@@ -491,6 +510,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             [b"inline" if self.test_image.is_inline else b"attachment"],
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_thumbnail_crop(self) -> None:
         """Test that a cropped remote thumbnail is available."""
         self._test_thumbnail(
@@ -500,6 +524,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             unable_to_thumbnail=self.test_image.unable_to_thumbnail,
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_thumbnail_scale(self) -> None:
         """Test that a scaled remote thumbnail is available."""
         self._test_thumbnail(
@@ -509,6 +538,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             unable_to_thumbnail=self.test_image.unable_to_thumbnail,
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_invalid_type(self) -> None:
         """An invalid thumbnail type is never available."""
         self._test_thumbnail(
@@ -519,7 +553,10 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config(
-        {"thumbnail_sizes": [{"width": 32, "height": 32, "method": "scale"}]}
+        {
+            "thumbnail_sizes": [{"width": 32, "height": 32, "method": "scale"}],
+            "enable_authenticated_media": False,
+        },
     )
     def test_no_thumbnail_crop(self) -> None:
         """
@@ -533,7 +570,10 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config(
-        {"thumbnail_sizes": [{"width": 32, "height": 32, "method": "crop"}]}
+        {
+            "thumbnail_sizes": [{"width": 32, "height": 32, "method": "crop"}],
+            "enable_authenticated_media": False,
+        }
     )
     def test_no_thumbnail_scale(self) -> None:
         """
@@ -546,6 +586,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             unable_to_thumbnail=self.test_image.unable_to_thumbnail,
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_thumbnail_repeated_thumbnail(self) -> None:
         """Test that fetching the same thumbnail works, and deleting the on disk
         thumbnail regenerates it.
@@ -720,6 +765,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             )
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_x_robots_tag_header(self) -> None:
         """
         Tests that the `X-Robots-Tag` header is present, which informs web crawlers
@@ -733,6 +783,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             [b"noindex, nofollow, noarchive, noimageindex"],
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_cross_origin_resource_policy_header(self) -> None:
         """
         Test that the Cross-Origin-Resource-Policy header is set to "cross-origin"
@@ -747,6 +802,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             [b"cross-origin"],
         )
 
+    @unittest.override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     def test_unknown_v3_endpoint(self) -> None:
         """
         If the v3 endpoint fails, try the r0 one.
@@ -985,6 +1045,11 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         d.callback(52428800)
         return d
 
+    @override_config(
+        {
+            "enable_authenticated_media": False,
+        }
+    )
     @patch(
         "synapse.http.matrixfederationclient.read_body_with_max_size",
         read_body_with_max_size_30MiB,
@@ -1060,6 +1125,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         {
             "remote_media_download_per_second": "50M",
             "remote_media_download_burst_count": "50M",
+            "enable_authenticated_media": False,
         }
     )
     @patch(
@@ -1119,7 +1185,12 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 200
 
-    @override_config({"remote_media_download_burst_count": "87M"})
+    @override_config(
+        {
+            "remote_media_download_burst_count": "87M",
+            "enable_authenticated_media": False,
+        }
+    )
     @patch(
         "synapse.http.matrixfederationclient.read_body_with_max_size",
         read_body_with_max_size_30MiB,
@@ -1159,7 +1230,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         )
         assert channel2.code == 429
 
-    @override_config({"max_upload_size": "29M"})
+    @override_config({"max_upload_size": "29M", "enable_authenticated_media": False})
     @patch(
         "synapse.http.matrixfederationclient.read_body_with_max_size",
         read_body_with_max_size_30MiB,

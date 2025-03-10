@@ -1,1 +1,0 @@
-Support [MSC4151](https://github.com/matrix-org/matrix-spec-proposals/pull/4151)'s stable report room API.

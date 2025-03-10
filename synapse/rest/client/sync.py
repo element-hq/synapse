@@ -24,9 +24,10 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
-from synapse.api.errors import Codes, StoreError, SynapseError
+from synapse.api.errors import Codes, LimitExceededError, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
@@ -124,6 +125,13 @@ class SyncRestServlet(RestServlet):
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
             cache_name="sync_valid_filter",
+        )
+
+        # Ratelimiter for presence updates, keyed by requester.
+        self._presence_per_user_limiter = Ratelimiter(
+            store=self.store,
+            clock=self.clock,
+            cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -239,7 +247,14 @@ class SyncRestServlet(RestServlet):
         # send any outstanding server notices to the user.
         await self._server_notices_sender.on_user_syncing(user.to_string())
 
-        affect_presence = set_presence != PresenceState.OFFLINE
+        # ignore the presence update if the ratelimit is exceeded but do not pause the request
+        try:
+            await self._presence_per_user_limiter.ratelimit(requester, pause=0.0)
+        except LimitExceededError:
+            affect_presence = False
+            logger.debug("User set_presence ratelimit exceeded; ignoring it.")
+        else:
+            affect_presence = set_presence != PresenceState.OFFLINE
 
         context = await self.presence_handler.user_syncing(
             user.to_string(),
@@ -436,7 +451,12 @@ class SyncRestServlet(RestServlet):
             )
             unsigned = dict(invite.get("unsigned", {}))
             invite["unsigned"] = unsigned
-            invited_state = list(unsigned.pop("invite_room_state", []))
+
+            invited_state = unsigned.pop("invite_room_state", [])
+            if not isinstance(invited_state, list):
+                invited_state = []
+
+            invited_state = list(invited_state)
             invited_state.append(invite)
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
@@ -476,7 +496,10 @@ class SyncRestServlet(RestServlet):
             # Extract the stripped room state from the unsigned dict
             # This is for clients to get a little bit of information about
             # the room they've knocked on, without revealing any sensitive information
-            knocked_state = list(unsigned.pop("knock_room_state", []))
+            knocked_state = unsigned.pop("knock_room_state", [])
+            if not isinstance(knocked_state, list):
+                knocked_state = []
+            knocked_state = list(knocked_state)
 
             # Append the actual knock membership event itself as well. This provides
             # the client with:

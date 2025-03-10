@@ -20,17 +20,25 @@
 #
 
 import logging
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import attr
 
 from synapse.logging.opentracing import trace
 from synapse.storage._base import SQLBaseStore
-from synapse.storage.database import LoggingTransaction, make_in_list_sql_clause
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+    make_in_list_sql_clause,
+)
 from synapse.storage.databases.main.stream import _filter_results_by_stream
 from synapse.types import RoomStreamToken, StrCollection
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +61,21 @@ class StateDeltasStore(SQLBaseStore):
     # This class must be mixed in with a child class which provides the following
     # attribute. TODO: can we get static analysis to enforce this?
     _curr_state_delta_stream_cache: StreamChangeCache
+
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="current_state_delta_stream_room_index",
+            index_name="current_state_delta_stream_room_idx",
+            table="current_state_delta_stream",
+            columns=("room_id", "stream_id"),
+        )
 
     async def get_partial_current_state_deltas(
         self, prev_stream_id: int, max_stream_id: int
@@ -220,6 +243,13 @@ class StateDeltasStore(SQLBaseStore):
 
         (> `from_token` and <= `to_token`)
         """
+        # We can bail early if the `from_token` is after the `to_token`
+        if (
+            to_token is not None
+            and from_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            return []
 
         if (
             from_token is not None

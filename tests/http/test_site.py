@@ -90,3 +90,56 @@ class SynapseRequestTestCase(HomeserverTestCase):
         # default max upload size is 50M, so it should drop on the next buffer after
         # that.
         self.assertEqual(sent, 50 * 1024 * 1024 + 1024)
+
+    def test_content_type_multipart(self) -> None:
+        """HTTP POST requests with `content-type: multipart/form-data` should be rejected"""
+        self.hs.start_listening()
+
+        # find the HTTP server which is configured to listen on port 0
+        (port, factory, _backlog, interface) = self.reactor.tcpServers[0]
+        self.assertEqual(interface, "::")
+        self.assertEqual(port, 0)
+
+        # as a control case, first send a regular request.
+
+        # complete the connection and wire it up to a fake transport
+        client_address = IPv6Address("TCP", "::1", 2345)
+        protocol = factory.buildProtocol(client_address)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
+
+        protocol.dataReceived(
+            b"POST / HTTP/1.1\r\n"
+            b"Connection: close\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            b"0\r\n"
+            b"\r\n"
+        )
+
+        while not transport.disconnecting:
+            self.reactor.advance(1)
+
+        # we should get a 404
+        self.assertRegex(transport.value().decode(), r"^HTTP/1\.1 404 ")
+
+        # now send request with content-type header
+        protocol = factory.buildProtocol(client_address)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
+
+        protocol.dataReceived(
+            b"POST / HTTP/1.1\r\n"
+            b"Connection: close\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Content-Type: multipart/form-data\r\n"
+            b"\r\n"
+            b"0\r\n"
+            b"\r\n"
+        )
+
+        while not transport.disconnecting:
+            self.reactor.advance(1)
+
+        # we should get a 415
+        self.assertRegex(transport.value().decode(), r"^HTTP/1\.1 415 ")

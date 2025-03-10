@@ -21,7 +21,7 @@ jobs:
           # We use nightly so that `fmt` correctly groups together imports, and
           # clippy correctly fixes up the benchmarks.
           toolchain: nightly-2022-12-01
-          components: rustfmt
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
 
       - name: Setup Poetry
