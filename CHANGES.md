@@ -1,3 +1,13 @@
+# Synapse 1.126.0 (2025-03-11)
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.126/docs/upgrade.md#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2025-03-15`.
+
+No significant changes since 1.126.0rc3.
+
+
+
+
 # Synapse 1.126.0rc3 (2025-03-07)
 
 ### Bugfixes
@@ -9,9 +19,6 @@
 
 # Synapse 1.126.0rc2 (2025-03-05)
 
-Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
-[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.126/docs/upgrade.md#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository)
-as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2025-03-15`.
 
 ### Internal Changes
 
