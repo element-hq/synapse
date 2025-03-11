@@ -1869,7 +1869,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.125.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.126.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1887,6 +1887,28 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11260"><a class="header" href="#upgrading-to-v11260">Upgrading to v1.126.0</a></h1>
+<h2 id="room-list-publication-rules-change"><a class="header" href="#room-list-publication-rules-change">Room list publication rules change</a></h2>
+<p>The default <a href="usage/configuration/config_documentation.html#room_list_publication_rules"><code>room_list_publication_rules</code></a> setting was changed to disallow
+anyone (except server admins) from publishing to the room list by default.</p>
+<p>This is in line with Synapse policy of locking down features by default that can
+be abused without moderation.</p>
+<p>To keep the previous behavior of allowing publication by default, add the
+following to the config:</p>
+<pre><code class="language-yaml">room_list_publication_rules:
+  - &quot;action&quot;: &quot;allow&quot;
+</code></pre>
+<h2 id="change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository"><a class="header" href="#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository">Change of signing key expiry date for the Debian/Ubuntu package repository</a></h2>
+<p>Administrators using the Debian/Ubuntu packages from <code>packages.matrix.org</code>,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.</p>
+<p>If you have the <code>matrix-org-archive-keyring</code> package installed and it updates before the current key expires, this should
+happen automatically.</p>
+<p>Otherwise, if you see an error similar to <code>The following signatures were invalid: EXPKEYSIG F473DD4473365DE1</code>, you
+will need to get a fresh copy of the keys. You can do so with:</p>
+<pre><code class="language-sh">sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+</code></pre>
+<p>The old version of the key will expire on <code>2025-03-15</code>.</p>
 <h1 id="upgrading-to-v11220"><a class="header" href="#upgrading-to-v11220">Upgrading to v1.122.0</a></h1>
 <h2 id="dropping-support-for-postgresql-11-and-12"><a class="header" href="#dropping-support-for-postgresql-11-and-12">Dropping support for PostgreSQL 11 and 12</a></h2>
 <p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
@@ -5509,6 +5531,23 @@ endpoint.</p>
     burst_count: 1
 </code></pre>
 <hr />
+<h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
+<p>Ratelimiting settings for delayed event management.</p>
+<p>This is a ratelimiting option that ratelimits
+attempts to restart, cancel, or view delayed events
+based on the sending client's account and device ID.
+It defaults to: <code>per_second: 1</code>, <code>burst_count: 5</code>.</p>
+<p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
+<p>Setting this to a high value allows clients to make delayed event management requests often
+(such as repeatedly restarting a delayed event with a short timeout,
+or restarting several different delayed events all at once)
+without the risk of being ratelimited.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_delayed_event_mgmt:
+  per_second: 2
+  burst_count: 20
+</code></pre>
+<hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
 <p>Sets outgoing federation transaction frequency for sending read-receipts,
 per-room.</p>
@@ -6479,6 +6518,16 @@ page for an unlucky user and require them to reopen the page from a new link.</p
 <pre><code class="language-yaml">form_secret: &lt;PRIVATE STRING&gt;
 </code></pre>
 <hr />
+<h3 id="form_secret_path"><a class="header" href="#form_secret_path"><code>form_secret_path</code></a></h3>
+<p>An alternative to <a href="usage/configuration/config_documentation.html#form_secret"><code>form_secret</code></a>:
+allows the secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">form_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.126.0.</em></p>
+<hr />
 <h2 id="signing-keys"><a class="header" href="#signing-keys">Signing Keys</a></h2>
 <p>Config options relating to signing keys</p>
 <hr />
@@ -6831,6 +6880,22 @@ to <code>auto</code>, which uses PKCE if supported during metadata discovery. Se
 to force enable PKCE or <code>never</code> to force disable PKCE.</p>
 </li>
 <li>
+<p><code>id_token_signing_alg_values_supported</code>: List of the JWS signing algorithms (<code>alg</code>
+values) that are supported for signing the <code>id_token</code>.</p>
+<p>This is <em>not</em> required if <code>discovery</code> is disabled. We default to supporting <code>RS256</code> in
+the downstream usage if no algorithms are configured here or in the discovery
+document.</p>
+<p>According to the spec, the algorithm <code>&quot;RS256&quot;</code> MUST be included. The absolute rigid
+approach would be to reject this provider as non-compliant if it's not included but we
+simply allow whatever and see what happens (you're the one that configured the value
+and cooperating with the identity provider).</p>
+<p>The <code>alg</code> value <code>&quot;none&quot;</code> MAY be supported but can only be used if the Authorization
+Endpoint does not include <code>id_token</code> in the <code>response_type</code> (ex.
+<code>/authorize?response_type=code</code> where <code>none</code> can apply,
+<code>/authorize?response_type=code%20id_token</code> where <code>none</code> can't apply) (such as when
+using the Authorization Code Flow).</p>
+</li>
+<li>
 <p><code>scopes</code>: list of scopes to request. This should normally include the &quot;openid&quot;
 scope. Defaults to <code>[&quot;openid&quot;]</code>.</p>
 </li>
@@ -6862,6 +6927,14 @@ Valid values are: <code>auto</code> or <code>userinfo_endpoint</code>.
 Defaults to <code>auto</code>, which uses the userinfo endpoint if <code>openid</code> is
 not included in <code>scopes</code>. Set to <code>userinfo_endpoint</code> to always use the
 userinfo endpoint.</p>
+</li>
+<li>
+<p><code>redirect_uri</code>: An optional string, that if set will override the <code>redirect_uri</code>
+parameter sent in the requests to the authorization and token endpoints.
+Useful if you want to redirect the client to another endpoint as part of the
+OIDC login. Be aware that the client must then call Synapse's OIDC callback
+URL (<code>&lt;public_baseurl&gt;/_synapse/client/oidc/callback</code>) manually afterwards.
+Must be a valid URL including scheme and path.</p>
 </li>
 <li>
 <p><code>additional_authorization_parameters</code>: String to string dictionary that will be passed as
@@ -7474,8 +7547,8 @@ alias_creation_rules:
 unwanted entries from being published in the public room list.</p>
 <p>The format of this option is the same as that for
 <a href="usage/configuration/config_documentation.html#alias_creation_rules"><code>alias_creation_rules</code></a>: an optional list of 0 or more
-rules. By default, no list is provided, meaning that all rooms may be
-published to the room list.</p>
+rules. By default, no list is provided, meaning that no one may publish to the
+room list (except server admins).</p>
 <p>Otherwise, requests to publish a room are matched against each rule in order.
 The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
@@ -7499,6 +7572,8 @@ the configured rules will result in the room being created but not published to 
 Note that the patterns match against fully qualified IDs, e.g. against
 <code>@alice:example.com</code>, <code>#room:example.com</code> and <code>!abcdefghijk:example.com</code> instead
 of <code>alice</code>, <code>room</code> and <code>abcedgghijk</code>.</p>
+<p><em>Changed in Synapse 1.126.0: The default was changed to deny publishing to the
+room list by default</em></p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml"># No rule list specified. Anyone may publish any room to the public list.
 # This is the default behaviour.
@@ -7669,6 +7744,16 @@ communication with all workers that have not yet updated their secret.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">worker_replication_secret: &quot;secret_secret&quot;
 </code></pre>
+<hr />
+<h3 id="worker_replication_secret_path"><a class="header" href="#worker_replication_secret_path"><code>worker_replication_secret_path</code></a></h3>
+<p>An alternative to <a href="usage/configuration/config_documentation.html#worker_replication_secret"><code>worker_replication_secret</code></a>:
+allows the secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">worker_replication_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.126.0.</em></p>
 <hr />
 <h3 id="start_pushers"><a class="header" href="#start_pushers"><code>start_pushers</code></a></h3>
 <p>Unnecessary to set if using <a href="usage/configuration/config_documentation.html#pusher_instances"><code>pusher_instances</code></a> with <a href="usage/configuration/../../workers.html#synapseappgeneric_worker"><code>generic_workers</code></a>.</p>
@@ -15111,6 +15196,22 @@ is set to <code>true</code>:</p>
 <li>Remove from monthly active users</li>
 <li>Remove user's consent information (consent version and timestamp)</li>
 </ul>
+<h2 id="suspendunsuspend-account"><a class="header" href="#suspendunsuspend-account">Suspend/Unsuspend Account</a></h2>
+<p>This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is 
+prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own. </p>
+<p>The api is:</p>
+<pre><code>PUT /_synapse/admin/v1/suspend/&lt;user_id&gt;
+</code></pre>
+<p>with a body of:</p>
+<pre><code class="language-json">{
+    &quot;suspend&quot;: true
+}
+</code></pre>
+<p>To unsuspend a user, use the same endpoint with a body of:</p>
+<pre><code class="language-json">{
+  &quot;suspend&quot;: false
+}
+</code></pre>
 <h2 id="reset-password"><a class="header" href="#reset-password">Reset password</a></h2>
 <p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 <p>Changes the password of another user. This will automatically log the user out of all their devices.</p>
@@ -15947,12 +16048,12 @@ a redact id which can be used to query the status of the redaction process:</p>
 <li><code>rooms</code> - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
 the user is a member of will be redacted</li>
 </ul>
-<p><em>Added in Synapse 1.116.0.</em></p>
 <p>The following JSON body parameters are optional:</p>
 <ul>
 <li><code>reason</code> - Reason the redaction is being requested, ie &quot;spam&quot;, &quot;abuse&quot;, etc. This will be included in each redaction event, and be visible to users.</li>
 <li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided</li>
 </ul>
+<p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
 <p>It is possible to query the status of the background task for redacting a user's events.
 The status can be queried up to 24 hours after completion of the task,

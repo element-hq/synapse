@@ -575,6 +575,22 @@ is set to <code>true</code>:</p>
 <li>Remove from monthly active users</li>
 <li>Remove user's consent information (consent version and timestamp)</li>
 </ul>
+<h2 id="suspendunsuspend-account"><a class="header" href="#suspendunsuspend-account">Suspend/Unsuspend Account</a></h2>
+<p>This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is 
+prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own. </p>
+<p>The api is:</p>
+<pre><code>PUT /_synapse/admin/v1/suspend/&lt;user_id&gt;
+</code></pre>
+<p>with a body of:</p>
+<pre><code class="language-json">{
+    &quot;suspend&quot;: true
+}
+</code></pre>
+<p>To unsuspend a user, use the same endpoint with a body of:</p>
+<pre><code class="language-json">{
+  &quot;suspend&quot;: false
+}
+</code></pre>
 <h2 id="reset-password"><a class="header" href="#reset-password">Reset password</a></h2>
 <p><strong>Note:</strong> This API is disabled when MSC3861 is enabled. <a href="https://github.com/matrix-org/synapse/pull/15582">See #15582</a></p>
 <p>Changes the password of another user. This will automatically log the user out of all their devices.</p>
@@ -1411,12 +1427,12 @@ a redact id which can be used to query the status of the redaction process:</p>
 <li><code>rooms</code> - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
 the user is a member of will be redacted</li>
 </ul>
-<p><em>Added in Synapse 1.116.0.</em></p>
 <p>The following JSON body parameters are optional:</p>
 <ul>
 <li><code>reason</code> - Reason the redaction is being requested, ie &quot;spam&quot;, &quot;abuse&quot;, etc. This will be included in each redaction event, and be visible to users.</li>
 <li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided</li>
 </ul>
+<p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
 <p>It is possible to query the status of the background task for redacting a user's events.
 The status can be queried up to 24 hours after completion of the task,

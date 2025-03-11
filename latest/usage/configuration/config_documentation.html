@@ -1822,6 +1822,23 @@ endpoint.</p>
     burst_count: 1
 </code></pre>
 <hr />
+<h3 id="rc_delayed_event_mgmt"><a class="header" href="#rc_delayed_event_mgmt"><code>rc_delayed_event_mgmt</code></a></h3>
+<p>Ratelimiting settings for delayed event management.</p>
+<p>This is a ratelimiting option that ratelimits
+attempts to restart, cancel, or view delayed events
+based on the sending client's account and device ID.
+It defaults to: <code>per_second: 1</code>, <code>burst_count: 5</code>.</p>
+<p>Attempts to create or send delayed events are ratelimited not by this setting, but by <code>rc_message</code>.</p>
+<p>Setting this to a high value allows clients to make delayed event management requests often
+(such as repeatedly restarting a delayed event with a short timeout,
+or restarting several different delayed events all at once)
+without the risk of being ratelimited.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_delayed_event_mgmt:
+  per_second: 2
+  burst_count: 20
+</code></pre>
+<hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
 <p>Sets outgoing federation transaction frequency for sending read-receipts,
 per-room.</p>
@@ -2792,6 +2809,16 @@ page for an unlucky user and require them to reopen the page from a new link.</p
 <pre><code class="language-yaml">form_secret: &lt;PRIVATE STRING&gt;
 </code></pre>
 <hr />
+<h3 id="form_secret_path"><a class="header" href="#form_secret_path"><code>form_secret_path</code></a></h3>
+<p>An alternative to <a href="#form_secret"><code>form_secret</code></a>:
+allows the secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">form_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.126.0.</em></p>
+<hr />
 <h2 id="signing-keys"><a class="header" href="#signing-keys">Signing Keys</a></h2>
 <p>Config options relating to signing keys</p>
 <hr />
@@ -3144,6 +3171,22 @@ to <code>auto</code>, which uses PKCE if supported during metadata discovery. Se
 to force enable PKCE or <code>never</code> to force disable PKCE.</p>
 </li>
 <li>
+<p><code>id_token_signing_alg_values_supported</code>: List of the JWS signing algorithms (<code>alg</code>
+values) that are supported for signing the <code>id_token</code>.</p>
+<p>This is <em>not</em> required if <code>discovery</code> is disabled. We default to supporting <code>RS256</code> in
+the downstream usage if no algorithms are configured here or in the discovery
+document.</p>
+<p>According to the spec, the algorithm <code>&quot;RS256&quot;</code> MUST be included. The absolute rigid
+approach would be to reject this provider as non-compliant if it's not included but we
+simply allow whatever and see what happens (you're the one that configured the value
+and cooperating with the identity provider).</p>
+<p>The <code>alg</code> value <code>&quot;none&quot;</code> MAY be supported but can only be used if the Authorization
+Endpoint does not include <code>id_token</code> in the <code>response_type</code> (ex.
+<code>/authorize?response_type=code</code> where <code>none</code> can apply,
+<code>/authorize?response_type=code%20id_token</code> where <code>none</code> can't apply) (such as when
+using the Authorization Code Flow).</p>
+</li>
+<li>
 <p><code>scopes</code>: list of scopes to request. This should normally include the &quot;openid&quot;
 scope. Defaults to <code>[&quot;openid&quot;]</code>.</p>
 </li>
@@ -3175,6 +3218,14 @@ Valid values are: <code>auto</code> or <code>userinfo_endpoint</code>.
 Defaults to <code>auto</code>, which uses the userinfo endpoint if <code>openid</code> is
 not included in <code>scopes</code>. Set to <code>userinfo_endpoint</code> to always use the
 userinfo endpoint.</p>
+</li>
+<li>
+<p><code>redirect_uri</code>: An optional string, that if set will override the <code>redirect_uri</code>
+parameter sent in the requests to the authorization and token endpoints.
+Useful if you want to redirect the client to another endpoint as part of the
+OIDC login. Be aware that the client must then call Synapse's OIDC callback
+URL (<code>&lt;public_baseurl&gt;/_synapse/client/oidc/callback</code>) manually afterwards.
+Must be a valid URL including scheme and path.</p>
 </li>
 <li>
 <p><code>additional_authorization_parameters</code>: String to string dictionary that will be passed as
@@ -3787,8 +3838,8 @@ alias_creation_rules:
 unwanted entries from being published in the public room list.</p>
 <p>The format of this option is the same as that for
 <a href="#alias_creation_rules"><code>alias_creation_rules</code></a>: an optional list of 0 or more
-rules. By default, no list is provided, meaning that all rooms may be
-published to the room list.</p>
+rules. By default, no list is provided, meaning that no one may publish to the
+room list (except server admins).</p>
 <p>Otherwise, requests to publish a room are matched against each rule in order.
 The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
@@ -3812,6 +3863,8 @@ the configured rules will result in the room being created but not published to 
 Note that the patterns match against fully qualified IDs, e.g. against
 <code>@alice:example.com</code>, <code>#room:example.com</code> and <code>!abcdefghijk:example.com</code> instead
 of <code>alice</code>, <code>room</code> and <code>abcedgghijk</code>.</p>
+<p><em>Changed in Synapse 1.126.0: The default was changed to deny publishing to the
+room list by default</em></p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml"># No rule list specified. Anyone may publish any room to the public list.
 # This is the default behaviour.
@@ -3982,6 +4035,16 @@ communication with all workers that have not yet updated their secret.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">worker_replication_secret: &quot;secret_secret&quot;
 </code></pre>
+<hr />
+<h3 id="worker_replication_secret_path"><a class="header" href="#worker_replication_secret_path"><code>worker_replication_secret_path</code></a></h3>
+<p>An alternative to <a href="#worker_replication_secret"><code>worker_replication_secret</code></a>:
+allows the secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret.
+Synapse reads the secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">worker_replication_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.126.0.</em></p>
 <hr />
 <h3 id="start_pushers"><a class="header" href="#start_pushers"><code>start_pushers</code></a></h3>
 <p>Unnecessary to set if using <a href="#pusher_instances"><code>pusher_instances</code></a> with <a href="../../workers.html#synapseappgeneric_worker"><code>generic_workers</code></a>.</p>
