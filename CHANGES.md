@@ -1,3 +1,10 @@
+# Synapse 1.126.0 (2025-03-11)
+
+No significant changes since 1.126.0rc3.
+
+
+
+
 # Synapse 1.126.0rc3 (2025-03-07)
 
 ### Bugfixes
