@@ -416,6 +416,13 @@ class ServerConfig(Config):
             False,
         )
 
+        # Whether to require sharing a room with a user to retrieve their
+        # keys
+        self.limit_key_queries_to_users_who_share_rooms = config.get(
+            "limit_key_queries_to_users_who_share_rooms",
+            False,
+        )
+
         # Whether to retrieve and display profile data for a user when they
         # are invited to a room
         self.include_profile_data_on_invite = config.get(
