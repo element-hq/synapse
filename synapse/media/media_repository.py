@@ -544,6 +544,17 @@ class MediaRepository:
                 allow_authenticated,
             )
 
+        # Check if the media is cached on the client, if so return 304. We need
+        # to do this after we have fetched remote media, as we need it to do the
+        # auth.
+        if check_for_cached_entry_and_respond(request):
+            # We always need to use the responder.
+            if responder:
+                with responder:
+                    pass
+
+            return
+
         # We deliberately stream the file outside the lock
         if responder and media_info:
             upload_name = name if name else media_info.upload_name

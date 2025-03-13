@@ -442,6 +442,10 @@ class ThumbnailProvider:
                 respond_404(request)
                 return
 
+        # Check if the media is cached on the client, if so return 304.
+        if check_for_cached_entry_and_respond(request):
+            return
+
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
         )
@@ -520,6 +524,10 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # Check if the media is cached on the client, if so return 304.
+        if check_for_cached_entry_and_respond(request):
+            return
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
