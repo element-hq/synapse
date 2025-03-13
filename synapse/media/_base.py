@@ -238,7 +238,7 @@ def add_file_headers(
 def _add_cache_headers(request: Request) -> None:
     """Adds the appropriate cache headers to the response"""
 
-    # Cache for at least a day.
+    # Cache on the client for at least a day.
     #
     # We set this to "public,s-maxage=0,proxy-revalidate" to allow CDNs to cache
     # the media, so long as they "revalidate" the media on every request. By
@@ -455,9 +455,11 @@ def respond_with_304(request: SynapseRequest) -> None:
 
 def check_for_cached_entry_and_respond(request: SynapseRequest) -> bool:
     """Check if the request has a conditional header that allows us to return a
-    304 Not Modified response, and if it has return a 304 response.
+    304 Not Modified response, and if it does, return a 304 response.
 
-    # This handles clients and intermediary proxies caching media.
+    This handles clients and intermediary proxies caching media.
+    This method assumes that the user has already been
+    authorised to request the media.
 
     Returns True if we have responded."""
 

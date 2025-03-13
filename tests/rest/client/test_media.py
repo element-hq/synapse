@@ -2678,7 +2678,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel10.code, 200)
 
     def test_authenticated_media_etag(self) -> None:
-        """Test that ETag work correctly with authenticated media over client
+        """Test that ETag works correctly with authenticated media over client
         APIs"""
 
         # upload some local media with authentication on
