@@ -118,6 +118,9 @@ DEFAULT_MAX_TIMEOUT_MS = 20_000
 # Maximum allowed timeout_ms for download and thumbnail requests
 MAXIMUM_ALLOWED_MAX_TIMEOUT_MS = 60_000
 
+# The ETag header value to use for immutable media. This can be anything.
+_IMMUTABLE_ETAG = "1"
+
 
 def respond_404(request: SynapseRequest) -> None:
     assert request.path is not None
@@ -252,7 +255,7 @@ def _add_cache_headers(request: Request) -> None:
     # Set an ETag header to allow requesters to use it in requests to check if
     # the cache is still valid. Since media is immutable (though may be
     # deleted), we just set this to a constant.
-    request.setHeader(b"ETag", b"1")
+    request.setHeader(b"ETag", _IMMUTABLE_ETAG)
 
 
 # separators as defined in RFC2616. SP and HT are handled separately.
@@ -468,7 +471,7 @@ def check_for_cached_entry_and_respond(request: SynapseRequest) -> bool:
     # response. Since media is immutable (though may be deleted), we just
     # check this is the expected constant.
     etag = request.getHeader("If-None-Match")
-    if etag == "1":
+    if etag == _IMMUTABLE_ETAG:
         # Return a `304 Not modified`.
         respond_with_304(request)
         return True
