@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Default ENTRYPOINT for the docker image used for testing synapse with workers under complement
 
