@@ -224,12 +224,7 @@ def add_file_headers(
 
     request.setHeader(b"Content-Disposition", disposition.encode("ascii"))
 
-    # cache for at least a day.
-    # XXX: we might want to turn this off for data we don't want to
-    # recommend caching as it's sensitive or private - or at least
-    # select private. don't bother setting Expires as all our
-    # clients are smart enough to be happy with Cache-Control
-    request.setHeader(b"Cache-Control", b"public,max-age=86400,s-maxage=86400")
+    _add_cache_headers(request)
 
     if file_size is not None:
         request.setHeader(b"Content-Length", b"%d" % (file_size,))
@@ -238,6 +233,26 @@ def add_file_headers(
     # should help to prevent things in the media repo from showing up in web
     # search results.
     request.setHeader(b"X-Robots-Tag", "noindex, nofollow, noarchive, noimageindex")
+
+
+def _add_cache_headers(request: Request) -> None:
+    """Adds the appropriate cache headers to the response"""
+
+    # Cache for at least a day.
+    #
+    # We set this to "public,s-maxage=0,proxy-revalidate" to allow CDNs to cache
+    # the media, so long as they "revalidate" the media on every request. By
+    # revalidate, we mean send the request to Synapse with a `If-None-Match`
+    # header, to which Synapse can either respond with a 304 if the user is
+    # authenticated/authorized, or a 401/403 if they're not.
+    request.setHeader(
+        b"Cache-Control", b"public,max-age=86400,s-maxage=0,proxy-revalidate"
+    )
+
+    # Set an ETag header to allow requesters to use it in requests to check if
+    # the cache is still valid. Since media is immutable (though may be
+    # deleted), we just set this to a constant.
+    request.setHeader(b"ETag", b"1")
 
 
 # separators as defined in RFC2616. SP and HT are handled separately.
@@ -417,6 +432,44 @@ async def respond_with_responder(
                 request.unregisterProducer()
 
     finish_request(request)
+
+
+def respond_with_304(request: SynapseRequest) -> None:
+    request.setResponseCode(304)
+
+    # could alternatively use request.notifyFinish() and flip a flag when
+    # the Deferred fires, but since the flag is RIGHT THERE it seems like
+    # a waste.
+    if request._disconnected:
+        logger.warning(
+            "Not sending response to request %s, already disconnected.", request
+        )
+        return None
+
+    _add_cache_headers(request)
+
+    request.finish()
+
+
+def check_for_cached_entry_and_respond(request: SynapseRequest) -> bool:
+    """Check if the request has a conditional header that allows us to return a
+    304 Not Modified response, and if it has return a 304 response.
+
+    # This handles clients and intermediary proxies caching media.
+
+    Returns True if we have responded."""
+
+    # We've checked the user has access to the media, so we now check if it
+    # is a "conditional request" and we can just return a `304 Not Modified`
+    # response. Since media is immutable (though may be deleted), we just
+    # check this is the expected constant.
+    etag = request.getHeader("If-None-Match")
+    if etag == "1":
+        # Return a `304 Not modified`.
+        respond_with_304(request)
+        return True
+
+    return False
 
 
 class Responder(ABC):

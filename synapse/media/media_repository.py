@@ -52,6 +52,7 @@ from synapse.media._base import (
     FileInfo,
     Responder,
     ThumbnailInfo,
+    check_for_cached_entry_and_respond,
     get_filename_from_headers,
     respond_404,
     respond_with_multipart_responder,
@@ -458,6 +459,11 @@ class MediaRepository:
                 raise NotFoundError()
 
         self.mark_recently_accessed(None, media_id)
+
+        # Once we've checked auth we can return early if the media is cached on
+        # the client
+        if check_for_cached_entry_and_respond(request):
+            return
 
         media_type = media_info.media_type
         if not media_type:
