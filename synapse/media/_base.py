@@ -351,13 +351,15 @@ async def respond_with_multipart_responder(
 
         from synapse.media.media_storage import MultipartFileConsumer
 
+        _add_cache_headers(request)
+
         # note that currently the json_object is just {}, this will change when linked media
         # is implemented
         multipart_consumer = MultipartFileConsumer(
             clock,
             request,
             media_type,
-            {},
+            {},  # Note: if we change this we need to change the returned ETag.
             disposition,
             media_length,
         )
