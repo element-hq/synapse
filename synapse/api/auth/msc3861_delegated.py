@@ -47,6 +47,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
+from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
@@ -120,6 +121,31 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
         self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
+
+        # # Token Introspection Cache
+        # This remembers what users/devices are represented by which access tokens,
+        # in order to reduce overall system load:
+        # - on Synapse (as requests are relatively expensive)
+        # - on the network
+        # - on MAS
+        #
+        # Since there is no invalidation mechanism currently,
+        # the entries expire after 2 minutes.
+        # This does mean tokens can be treated as valid by Synapse
+        # for longer than reality.
+        #
+        # Ideally, tokens should logically be invalidated in the following circumstances:
+        # - If a session logout happens.
+        #   In this case, MAS will delete the device within Synapse
+        #   anyway and this is good enough as an invalidation.
+        # - If the client refreshes their token in MAS.
+        #   In this case, the device still exists and it's not the end of the world for
+        #   the old access token to continue working for a short time.
+        self._introspection_cache: ResponseCache[str] = ResponseCache(
+            self._clock,
+            "token_introspection",
+            timeout_ms=120_000,
+        )
 
         self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
             self._load_metadata
@@ -344,7 +370,9 @@ class MSC3861DelegatedAuth(BaseAuth):
             )
 
         try:
-            introspection_result = await self._introspect_token(token)
+            introspection_result = await self._introspection_cache.wrap(
+                token, self._introspect_token, token
+            )
         except Exception:
             logger.exception("Failed to introspect token")
             raise SynapseError(503, "Unable to introspect the access token")
