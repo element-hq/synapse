@@ -48,7 +48,7 @@ from synapse.logging.opentracing import trace
 from synapse.storage.controllers import StorageControllers
 from synapse.storage.databases.main import DataStore
 from synapse.synapse_rust.events import event_visible_to_server
-from synapse.types import RetentionPolicy, StateMap, StrCollection, get_domain_from_id
+from synapse.types import RetentionPolicy, StateMap, StrCollection, get_domain_from_id, UserID
 from synapse.types.state import StateFilter
 from synapse.util import Clock
 
@@ -106,9 +106,12 @@ async def filter_events_for_client(
         of `user_id` at each event.
     """
     # Filter out events that have been soft failed so that we don't relay them
-    # to clients.
+    # to clients, unless they're a server admin.
     events_before_filtering = events
-    events = [e for e in events if not e.internal_metadata.is_soft_failed()]
+    if filter_send_to_client and await storage.main.is_server_admin(UserID.from_string(user_id)):
+        events = events_before_filtering
+    else:
+        events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     if len(events_before_filtering) != len(events):
         if filtered_event_logger.isEnabledFor(logging.DEBUG):
             filtered_event_logger.debug(
