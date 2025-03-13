@@ -1296,7 +1296,7 @@ class RoomCreationHandler:
             topic = room_config["topic"]
             topic_event, topic_context = await create_event(
                 EventTypes.Topic,
-                {"topic": topic},
+                {"topic": topic, "m.topic": {"m.text": [{"body": topic}]}},
                 True,
             )
             events_to_send.append((topic_event, topic_context))
