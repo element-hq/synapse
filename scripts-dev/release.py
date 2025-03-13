@@ -592,7 +592,7 @@ def _wait_for_actions(gh_token: Optional[str]) -> None:
         if all(
             workflow["status"] != "in_progress" for workflow in resp["workflow_runs"]
         ):
-            success = (
+            success = all(
                 workflow["status"] == "completed" for workflow in resp["workflow_runs"]
             )
             if success:
