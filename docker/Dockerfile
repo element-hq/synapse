@@ -21,6 +21,7 @@
 # in `poetry export` in the past.
 
 ARG DEBIAN_VERSION=bookworm
+ARG DEBIAN_VERSION_NUMERIC=12
 ARG PYTHON_VERSION=3.12
 ARG POETRY_VERSION=1.8.3
 
@@ -134,9 +135,7 @@ RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
-  apt-get install -y --no-install-recommends rsync && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
-      curl \
       gosu \
       libjpeg62-turbo \
       libpq5 \
@@ -144,18 +143,28 @@ RUN \
       xmlsec1 \
       libjemalloc2 \
       libicu \
+# for health checks (slimmer than curl)
+      wget \
+# dependencies of debian's python3.12-minimal
+      zlib1g \
+      libexpat1 \
+# libraries used by python's lib-dynload
+      libbz2-1.0 \
+      libcrypt1 \
+      libgdbm6 \
+      libncursesw6 \
+      libnsl2 \
+      libreadline8 \
+      libsqlite3-0 \
+      libuuid1 \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
     cd /tmp/debs-${arch} && \
-    apt-get download $(sed "s/$/:${arch}/" /tmp/pkg-list); \
+    apt-get -o APT::Architecture="${arch}" download $(cat /tmp/pkg-list); \
   done
 
 # Extract the debs for each architecture
-# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
-# libraries to the right place, else the `COPY` won't work.
-# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
-# already present in the runtime image.
 RUN \
   for arch in arm64 amd64; do \
     mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
@@ -165,16 +174,28 @@ RUN \
       dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
       dpkg --extract $deb /install-${arch}; \
     done; \
-    rsync -avr /install-${arch}/lib/ /install-${arch}/usr/lib; \
-    rm -rf /install-${arch}/lib /install-${arch}/lib64; \
   done
 
 
 ###
-### Stage 3: runtime
+### Stage 3: python
 ###
 
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
+FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS python
+
+# Make a directory with just the Python binaries & symlinks to be copied into the final image
+RUN \
+    PYBIN=/usr/local/pybin && \
+    mkdir ${PYBIN} && \
+    cp -a /usr/local/bin/python* ${PYBIN}/ && \
+    rm ${PYBIN}/python*-config
+
+
+###
+### Stage 4: runtime
+###
+
+FROM gcr.io/distroless/base-debian${DEBIAN_VERSION_NUMERIC}
 
 ARG TARGETARCH
 
@@ -184,7 +205,12 @@ LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
 COPY --from=runtime-deps /install-${TARGETARCH} /
+# Needed for start.py's config generation scripts
+COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
+# Copy the entire directory to preserve symlinks
+COPY --from=python /usr/local/pybin /usr/local/bin
+COPY --from=python /usr/local/lib /usr/local/lib
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
@@ -192,5 +218,6 @@ EXPOSE 8008/tcp 8009/tcp 8448/tcp
 
 ENTRYPOINT ["/start.py"]
 
+COPY ./docker/healthcheck.py /healthcheck.py
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
-  CMD curl -fSs http://localhost:8008/health || exit 1
+  CMD ["/healthcheck.py"]

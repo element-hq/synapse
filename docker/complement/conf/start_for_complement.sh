@@ -1,16 +1,16 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Default ENTRYPOINT for the docker image used for testing synapse with workers under complement
 
 set -e
 
 echo "Complement Synapse launcher"
-echo "  Args: $@"
+echo "  Args: $*"
 echo "  Env: SYNAPSE_COMPLEMENT_DATABASE=$SYNAPSE_COMPLEMENT_DATABASE SYNAPSE_COMPLEMENT_USE_WORKERS=$SYNAPSE_COMPLEMENT_USE_WORKERS SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR=$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR"
 
-function log {
+log () {
     d=$(date +"%Y-%m-%d %H:%M:%S,%3N")
-    echo "$d $@"
+    echo "$d $*"
 }
 
 # Set the server name of the homeserver
@@ -44,13 +44,13 @@ case "$SYNAPSE_COMPLEMENT_DATABASE" in
 esac
 
 
-if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
+if [ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]; then
   # Specify the workers to test with
   # Allow overriding by explicitly setting SYNAPSE_WORKER_TYPES outside, while still
   # utilizing WORKERS=1 for backwards compatibility.
   # -n True if the length of string is non-zero.
   # -z True if the length of string is zero.
-  if [[ -z "$SYNAPSE_WORKER_TYPES" ]]; then
+  if [ -z "$SYNAPSE_WORKER_TYPES" ]; then
     export SYNAPSE_WORKER_TYPES="\
       event_persister:2, \
       background_worker, \
@@ -82,8 +82,8 @@ else
 fi
 
 
-if [[ -n "$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR" ]]; then
-  if [[ -n "$SYNAPSE_USE_EXPERIMENTAL_FORKING_LAUNCHER" ]]; then
+if [ -n "$SYNAPSE_COMPLEMENT_USE_ASYNCIO_REACTOR" ]; then
+  if [ -n "$SYNAPSE_USE_EXPERIMENTAL_FORKING_LAUNCHER" ]; then
     export SYNAPSE_COMPLEMENT_FORKING_LAUNCHER_ASYNC_IO_REACTOR="1"
   else
     export SYNAPSE_ASYNC_IO_REACTOR="1"
@@ -103,12 +103,11 @@ fi
 # Note that both the key and certificate are in PEM format (not DER).
 
 # First generate a configuration file to set up a Subject Alternative Name.
-cat > /conf/server.tls.conf <<EOF
+echo "\
 .include /etc/ssl/openssl.cnf
 
 [SAN]
-subjectAltName=DNS:${SERVER_NAME}
-EOF
+subjectAltName=DNS:${SERVER_NAME}" > /conf/server.tls.conf
 
 # Generate an RSA key
 openssl genrsa -out /conf/server.tls.key 2048
@@ -123,12 +122,14 @@ openssl x509 -req -in /conf/server.tls.csr \
   -out /conf/server.tls.crt -extfile /conf/server.tls.conf -extensions SAN
 
 # Assert that we have a Subject Alternative Name in the certificate.
-# (grep will exit with 1 here if there isn't a SAN in the certificate.)
-openssl x509 -in /conf/server.tls.crt -noout -text | grep DNS:
+case $(openssl x509 -in /conf/server.tls.crt -noout -text) in
+    *DNS:*) ;;
+    *) exit 1
+esac
 
 export SYNAPSE_TLS_CERT=/conf/server.tls.crt
 export SYNAPSE_TLS_KEY=/conf/server.tls.key
 
 # Run the script that writes the necessary config files and starts supervisord, which in turn
 # starts everything else
-exec /configure_workers_and_start.py
+exec /configure_workers_and_start.py "$@"
