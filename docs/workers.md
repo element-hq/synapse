@@ -255,7 +255,7 @@ information.
     ^/_matrix/client/(r0|v3|unstable)/keys/changes$
     ^/_matrix/client/(r0|v3|unstable)/keys/claim$
     ^/_matrix/client/(r0|v3|unstable)/room_keys/
-    ^/_matrix/client/(r0|v3|unstable)/keys/upload/
+    ^/_matrix/client/(r0|v3|unstable)/keys/upload$
 
     # Registration/login requests
     ^/_matrix/client/(api/v1|r0|v3|unstable)/login$
