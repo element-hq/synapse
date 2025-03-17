@@ -1,1 +1,0 @@
-Add `worker_replication_secret_path` config option.
