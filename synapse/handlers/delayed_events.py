@@ -191,18 +191,36 @@ class DelayedEventsHandler:
 
     async def _handle_state_deltas(self, deltas: List[StateDelta]) -> None:
         """
-        Process current state deltas to cancel pending delayed events
+        Process current state deltas to cancel other users' pending delayed events
         that target the same state.
         """
         for delta in deltas:
+            if delta.event_id is None:
+                logger.debug(
+                    "Not handling delta for deleted state: %r %r",
+                    delta.event_type,
+                    delta.state_key,
+                )
+                continue
+
             logger.debug(
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
+
+            event = await self._store.get_event(
+                delta.event_id, check_room_id=delta.room_id
+            )
+            sender = UserID.from_string(event.sender)
 
             next_send_ts = await self._store.cancel_delayed_state_events(
                 room_id=delta.room_id,
                 event_type=delta.event_type,
                 state_key=delta.state_key,
+                not_from_localpart=(
+                    sender.localpart
+                    if sender.domain == self._config.server.server_name
+                    else ""
+                ),
             )
 
             if self._next_send_ts_changed(next_send_ts):
