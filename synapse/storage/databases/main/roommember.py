@@ -1705,8 +1705,17 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
         """
         Background update to populate column `participant` on `room_memberships` table
 
-         A 'participant' is someone who is currently joined to a room and has sent at least
+        A 'participant' is someone who is currently joined to a room and has sent at least
         one `m.room.message` or `m.room.encrypted` event.
+
+        This background update will set the `participant` column across all rows in
+        `room_memberships` based on the user's *current* join status, and if
+        they've *ever* sent a message or encrypted event. Therefore one should
+        never assume the `participant` column's value is based solely on whether
+        the user participated in a previous "session" (where a "session" is defined
+        as a period between the user joining and leaving). See
+        https://github.com/element-hq/synapse/pull/18068#discussion_r1931070291
+        for further detail.
         """
         stream_token = progress.get("last_stream_token", None)
 
@@ -1742,17 +1751,17 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
                 WHERE room_memberships.user_id = subquery.state_key
                     AND room_memberships.room_id = subquery.room_id
                     AND room_memberships.event_stream_ordering <= ?
-                    AND room_memberships.event_stream_ordering >= 0;
+                    AND room_memberships.event_stream_ordering > ?;
             """
-
-            txn.execute(sql, (stream_token,))
+            batch = int(stream_token) - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
+            txn.execute(sql, (stream_token, batch))
 
         if stream_token is None:
             stream_token = await self.db_pool.runInteraction(
                 "_get_max_stream_token", _get_max_stream_token_txn
             )
 
-        if stream_token <= 0:
+        if stream_token < 0:
             await self.db_pool.updates._end_background_update(
                 "populate_participant_bg_update"
             )
