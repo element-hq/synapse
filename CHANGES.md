@@ -1,3 +1,160 @@
+# Synapse 1.127.0rc1 (2025-03-18)
+
+### Features
+
+- Update [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140) implementation to no longer cancel a user's own delayed state events with an event type & state key that match a more recent state event sent by that user. ([\#17810](https://github.com/element-hq/synapse/issues/17810))
+
+### Improved Documentation
+
+- Fixed a minor typo in the Synapse documentation. Contributed by @karuto12. ([\#18224](https://github.com/element-hq/synapse/issues/18224))
+
+### Internal Changes
+
+- Remove undocumented `SYNAPSE_USE_FROZEN_DICTS` environment variable. ([\#18123](https://github.com/element-hq/synapse/issues/18123))
+- Fix detection of workflow failures in the release script. ([\#18211](https://github.com/element-hq/synapse/issues/18211))
+- Add caching support to media endpoints. ([\#18235](https://github.com/element-hq/synapse/issues/18235))
+
+
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.96 to 1.0.97. ([\#18201](https://github.com/element-hq/synapse/issues/18201))
+* Bump bcrypt from 4.2.1 to 4.3.0. ([\#18207](https://github.com/element-hq/synapse/issues/18207))
+* Bump bytes from 1.10.0 to 1.10.1. ([\#18227](https://github.com/element-hq/synapse/issues/18227))
+* Bump http from 1.2.0 to 1.3.1. ([\#18245](https://github.com/element-hq/synapse/issues/18245))
+* Bump sentry-sdk from 2.19.2 to 2.22.0. ([\#18205](https://github.com/element-hq/synapse/issues/18205))
+* Bump serde from 1.0.218 to 1.0.219. ([\#18228](https://github.com/element-hq/synapse/issues/18228))
+* Bump serde_json from 1.0.139 to 1.0.140. ([\#18202](https://github.com/element-hq/synapse/issues/18202))
+* Bump ulid from 1.2.0 to 1.2.1. ([\#18246](https://github.com/element-hq/synapse/issues/18246))
+
+# Synapse 1.126.0 (2025-03-11)
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`, please check
+[the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/release-v1.126/docs/upgrade.md#change-of-signing-key-expiry-date-for-the-debianubuntu-package-repository)
+as we have recently updated the expiry date on the repository's GPG signing key. The old version of the key will expire on `2025-03-15`.
+
+No significant changes since 1.126.0rc3.
+
+
+
+
+# Synapse 1.126.0rc3 (2025-03-07)
+
+### Bugfixes
+
+- Revert the background job to clear unreferenced state groups (that was introduced in v1.126.0rc1), due to [a suspected issue](https://github.com/element-hq/synapse/issues/18217) that causes increased disk usage. ([\#18222](https://github.com/element-hq/synapse/issues/18222))
+
+
+
+
+# Synapse 1.126.0rc2 (2025-03-05)
+
+
+### Internal Changes
+
+- Fix wheel building configuration in CI by installing libatomic1. ([\#18212](https://github.com/element-hq/synapse/issues/18212), [\#18213](https://github.com/element-hq/synapse/issues/18213))
+
+# Synapse 1.126.0rc1 (2025-03-04)
+
+Synapse 1.126.0rc1 was not fully released due to an error in CI.
+
+### Features
+
+- Define ratelimit configuration for delayed event management. ([\#18019](https://github.com/element-hq/synapse/issues/18019))
+- Add `form_secret_path` config option. ([\#18090](https://github.com/element-hq/synapse/issues/18090))
+- Add the `--no-secrets-in-config` command line option. ([\#18092](https://github.com/element-hq/synapse/issues/18092))
+- Add background job to clear unreferenced state groups. ([\#18154](https://github.com/element-hq/synapse/issues/18154))
+- Add support for specifying/overriding `id_token_signing_alg_values_supported` for an OpenID identity provider. ([\#18177](https://github.com/element-hq/synapse/issues/18177))
+- Add `worker_replication_secret_path` config option. ([\#18191](https://github.com/element-hq/synapse/issues/18191))
+- Add support for specifying/overriding `redirect_uri` in the authorization and token requests against an OpenID identity provider. ([\#18197](https://github.com/element-hq/synapse/issues/18197))
+
+### Bugfixes
+
+- Make sure we advertise registration as disabled when [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) is enabled. ([\#17661](https://github.com/element-hq/synapse/issues/17661))
+- Prevent suspended users from sending encrypted messages. ([\#18157](https://github.com/element-hq/synapse/issues/18157))
+- Cleanup deleted state group references. ([\#18165](https://github.com/element-hq/synapse/issues/18165))
+- Fix [MSC4108 QR-code login](https://github.com/matrix-org/matrix-spec-proposals/pull/4108) not working with some reverse-proxy setups. ([\#18178](https://github.com/element-hq/synapse/issues/18178))
+- Support device IDs that can't be represented in a scope when delegating auth to Matrix Authentication Service 0.15.0+. ([\#18174](https://github.com/element-hq/synapse/issues/18174))
+
+### Updates to the Docker image
+
+- Speed up the building of the Docker image. ([\#18038](https://github.com/element-hq/synapse/issues/18038))
+
+### Improved Documentation
+
+- Move incorrectly placed version indicator in User Event Redaction Admin API docs. ([\#18152](https://github.com/element-hq/synapse/issues/18152))
+- Document suspension Admin API. ([\#18162](https://github.com/element-hq/synapse/issues/18162))
+
+### Deprecations and Removals
+
+- Disable room list publication by default. ([\#18175](https://github.com/element-hq/synapse/issues/18175))
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.95 to 1.0.96. ([\#18187](https://github.com/element-hq/synapse/issues/18187))
+* Bump authlib from 1.4.0 to 1.4.1. ([\#18190](https://github.com/element-hq/synapse/issues/18190))
+* Bump click from 8.1.7 to 8.1.8. ([\#18189](https://github.com/element-hq/synapse/issues/18189))
+* Bump log from 0.4.25 to 0.4.26. ([\#18184](https://github.com/element-hq/synapse/issues/18184))
+* Bump pyo3-log from 0.12.0 to 0.12.1. ([\#18046](https://github.com/element-hq/synapse/issues/18046))
+* Bump serde from 1.0.217 to 1.0.218. ([\#18183](https://github.com/element-hq/synapse/issues/18183))
+* Bump serde_json from 1.0.138 to 1.0.139. ([\#18186](https://github.com/element-hq/synapse/issues/18186))
+* Bump sigstore/cosign-installer from 3.8.0 to 3.8.1. ([\#18185](https://github.com/element-hq/synapse/issues/18185))
+* Bump types-psycopg2 from 2.9.21.20241019 to 2.9.21.20250121. ([\#18188](https://github.com/element-hq/synapse/issues/18188))
+
+
+# Synapse 1.125.0 (2025-02-25)
+
+No significant changes since 1.125.0rc1.
+
+
+# Synapse 1.125.0rc1 (2025-02-18)
+
+### Features
+
+- Add functionality to be able to use multiple values in SSO feature `attribute_requirements`. ([\#17949](https://github.com/element-hq/synapse/issues/17949))
+- Add experimental config options `admin_token_path` and `client_secret_path` for [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861). ([\#18004](https://github.com/element-hq/synapse/issues/18004))
+- Add `get_current_time_msec()` method to the [module API](https://matrix-org.github.io/synapse/latest/modules/writing_a_module.html) for sound time comparisons with Synapse. ([\#18144](https://github.com/element-hq/synapse/issues/18144))
+
+### Bugfixes
+
+- Update the response when a client attempts to add an invalid email address to the user's account from a 500, to a 400 with error text. ([\#18125](https://github.com/element-hq/synapse/issues/18125))
+- Fix user directory search when using a legacy module with a `check_username_for_spam` callback. Broke in v1.122.0. ([\#18135](https://github.com/element-hq/synapse/issues/18135))
+
+### Updates to the Docker image
+
+- Add `SYNAPSE_HTTP_PROXY`/`SYNAPSE_HTTPS_PROXY`/`SYNAPSE_NO_PROXY` environment variables to pass through specifically to the Synapse process (instead of needing to apply [`http_proxy`/`https_proxy`/`no_proxy`](https://element-hq.github.io/synapse/latest/setup/forward_proxy.html) globally). ([\#18158](https://github.com/element-hq/synapse/issues/18158))
+
+### Improved Documentation
+
+- Add Oracle Linux 8 and 9 installation instructions. ([\#17436](https://github.com/element-hq/synapse/issues/17436))
+- Document missing server config options (`daemonize`, `print_pidfile`, `user_agent_suffix`, `use_frozen_dicts`, `manhole`). ([\#18122](https://github.com/element-hq/synapse/issues/18122))
+- Document consequences of replacing secrets. ([\#18138](https://github.com/element-hq/synapse/issues/18138))
+- Make `burst_count` field an integer in `rc_presence` config documentation example. ([\#18159](https://github.com/element-hq/synapse/issues/18159))
+
+### Internal Changes
+
+- Overload `DatabasePool.simple_select_one_txn` to return non-`None` when the `allow_none` parameter is `False`. ([\#17616](https://github.com/element-hq/synapse/issues/17616))
+- Python 3.8 EOL: compile native extensions with the 3.9 ABI and use typing hints from the standard library. ([\#17967](https://github.com/element-hq/synapse/issues/17967))
+- Add log message when worker lock timeouts get large. ([\#18124](https://github.com/element-hq/synapse/issues/18124))
+- Make it explicit that you can buy an AGPL-alternative commercial license from Element. ([\#18134](https://github.com/element-hq/synapse/issues/18134))
+- Fix the 'Fix linting' GitHub Actions workflow. ([\#18136](https://github.com/element-hq/synapse/issues/18136))
+- Do not log at the exception-level when clients provide empty `since` token to `/sync` API. ([\#18139](https://github.com/element-hq/synapse/issues/18139))
+- Reduce database load of user search when using large search terms. ([\#18172](https://github.com/element-hq/synapse/issues/18172))
+
+
+
+### Updates to locked dependencies
+
+* Bump bcrypt from 4.2.0 to 4.2.1. ([\#18127](https://github.com/element-hq/synapse/issues/18127))
+* Bump bytes from 1.9.0 to 1.10.0. ([\#18149](https://github.com/element-hq/synapse/issues/18149))
+* Bump gitpython from 3.1.43 to 3.1.44. ([\#18128](https://github.com/element-hq/synapse/issues/18128))
+* Bump hiredis from 3.0.0 to 3.1.0. ([\#18169](https://github.com/element-hq/synapse/issues/18169))
+* Bump serde_json from 1.0.137 to 1.0.138. ([\#18129](https://github.com/element-hq/synapse/issues/18129))
+* Bump service-identity from 24.1.0 to 24.2.0. ([\#18171](https://github.com/element-hq/synapse/issues/18171))
+* Bump sigstore/cosign-installer from 3.7.0 to 3.8.0. ([\#18147](https://github.com/element-hq/synapse/issues/18147))
+* Bump twine from 6.0.1 to 6.1.0. ([\#18170](https://github.com/element-hq/synapse/issues/18170))
+* Bump types-pyyaml from 6.0.12.20240917 to 6.0.12.20241230. ([\#18097](https://github.com/element-hq/synapse/issues/18097))
+* Bump ulid from 1.1.4 to 1.2.0. ([\#18148](https://github.com/element-hq/synapse/issues/18148))
+
 # Synapse 1.124.0 (2025-02-11)
 
 No significant changes since 1.124.0rc3.

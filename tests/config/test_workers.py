@@ -47,7 +47,7 @@ class WorkerDutyConfigTestCase(TestCase):
             "worker_app": worker_app,
             **extras,
         }
-        worker_config.read_config(worker_config_dict)
+        worker_config.read_config(worker_config_dict, allow_secrets_in_config=True)
         return worker_config
 
     def test_old_configs_master(self) -> None:

@@ -247,12 +247,45 @@ class PurgeTests(HomeserverTestCase):
             1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
         )
 
-        # We expect that the unreferenced state group has been deleted.
+        # We expect that the unreferenced state group has been deleted from all tables.
         row = self.get_success(
             self.state_store.db_pool.simple_select_one_onecol(
                 table="state_groups",
                 keyvalues={"id": unreferenced_state_group},
                 retcol="id",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_groups_state",
+                keyvalues={"state_group": unreferenced_state_group},
+                retcol="state_group",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_group_edges",
+                keyvalues={"state_group": unreferenced_state_group},
+                retcol="state_group",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_groups_pending_deletion",
+                keyvalues={"state_group": unreferenced_state_group},
+                retcol="state_group",
                 allow_none=True,
                 desc="test_purge_unreferenced_state_group",
             )
