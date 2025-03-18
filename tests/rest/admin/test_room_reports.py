@@ -372,9 +372,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
-    def _report_room_without_parameters(
-        self, room_id: str, user_tok: str
-    ) -> None:
+    def _report_room_without_parameters(self, room_id: str, user_tok: str) -> None:
         """Report a room, but omit reason"""
         channel = self.make_request(
             "POST",
@@ -421,4 +419,3 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["total"], 2)
         # This is consistent with the number of rows actually returned.
         self.assertEqual(len(channel.json_body["room_reports"]), 2)
-
