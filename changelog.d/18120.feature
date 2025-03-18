@@ -1,1 +1,1 @@
-Add support for the unstable [MSC4260](https://github.com/matrix-org/matrix-spec-proposals/pull/4260) report user API.
+Add support for the [MSC4260 user report API](https://github.com/matrix-org/matrix-spec-proposals/pull/4260).

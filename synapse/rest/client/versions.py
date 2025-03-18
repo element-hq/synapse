@@ -174,8 +174,6 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.simplified_msc3575": msc3575_enabled,
                     # Arbitrary key-value profile fields.
                     "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
-                    # MSC4260: Report users API (Client-Server)
-                    "org.matrix.msc4260": self.config.experimental.msc4260_enabled,
                 },
             },
         )

@@ -560,6 +560,3 @@ class ExperimentalConfig(Config):
 
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
-
-        # MSC4260: Report user API (Client-Server)
-        self.msc4260_enabled: bool = experimental.get("msc4260_enabled", False)

@@ -156,12 +156,11 @@ class ReportUserRestServlet(RestServlet):
     Introduced by MSC4260: https://github.com/matrix-org/matrix-spec-proposals/pull/4260
     """
 
-    # Cast the Iterable to a list so that we can `append` below.
     PATTERNS = list(
         client_patterns(
-            "/org.matrix.msc4260/users/(?P<target_user_id>[^/]*)/report$",
-            releases=[],  # unstable only
-            unstable=True,
+            "/users/(?P<target_user_id>[^/]*)/report$",
+            releases=("v3",),
+            unstable=False,
             v1=False,
         )
     )
@@ -206,6 +205,4 @@ class ReportUserRestServlet(RestServlet):
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
     ReportRoomRestServlet(hs).register(http_server)
-
-    if hs.config.experimental.msc4260_enabled:
-        ReportUserRestServlet(hs).register(http_server)
+    ReportUserRestServlet(hs).register(http_server)
