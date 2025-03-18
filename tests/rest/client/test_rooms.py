@@ -4262,6 +4262,16 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
                 record_participation=True,
             ),
             # Should not record participation.
+            param(
+                is_state=False,
+                event_type="m.sticker",
+                event_content={
+                    "body": "My great sticker",
+                    "info": {},
+                    "url": "mxc://unused/mxcurl",
+                },
+                record_participation=False,
+            ),
             # An invalid **state event** with type `m.room.message`
             param(
                 is_state=True,
