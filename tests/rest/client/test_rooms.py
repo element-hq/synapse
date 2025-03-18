@@ -4225,15 +4225,21 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
         self.user2 = self.register_user("teresa", "hackme")
         self.tok2 = self.login("teresa", "hackme")
 
-        self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
-        self.room2 = self.helper.create_room_as(
-            self.user1, is_public=False, tok=self.tok1
+        self.room1 = self.helper.create_room_as(
+            room_creator=self.user1,
+            tok=self.tok1,
+            # Allow user2 to send state events into the room.
+            extra_content={
+                "power_level_content_override": {
+                    "state_default": 0,
+                },
+            },
         )
         self.store = hs.get_datastores().main
 
     @parameterized.expand(
         [
-            # Allow
+            # Should record participation.
             param(
                 is_state=False,
                 event_type="m.room.message",
@@ -4276,13 +4282,25 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
         )
         self.assertFalse(participant)
 
-        # sending a message should now mark user as participant
-        self.helper.send_event(
-            self.room1,
-            event_type,
-            content=event_content,
-            tok=self.tok2,
-        )
+        # send an event into the room
+        if is_state:
+            # send a state event
+            self.helper.send_state(
+                self.room1,
+                event_type,
+                body=event_content,
+                tok=self.tok2,
+            )
+        else:
+            # send a non-state event
+            self.helper.send_event(
+                self.room1,
+                event_type,
+                content=event_content,
+                tok=self.tok2,
+            )
+
+        # check whether the user has been marked as a participant
         participant = self.get_success(
             self.store.get_room_participation(self.user2, self.room1)
         )
