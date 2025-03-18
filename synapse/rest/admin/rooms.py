@@ -435,7 +435,12 @@ class RoomMembersRestServlet(RestServlet):
         if not room:
             raise NotFoundError("Room not found")
 
-        members = await self.store.get_users_in_room(room_id)
+        participant = parse_boolean(request, "participant", False)
+
+        if participant:
+            members = await self.store.get_participants_in_room(room_id)
+        else:
+            members = await self.store.get_users_in_room(room_id)
         ret = {"members": members, "total": len(members)}
 
         return HTTPStatus.OK, ret
