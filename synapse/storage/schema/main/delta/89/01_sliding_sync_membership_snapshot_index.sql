@@ -12,4 +12,4 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (8807, 'sliding_sync_membership_snapshots_membership_event_id_idx', '{}');
+    (8901, 'sliding_sync_membership_snapshots_membership_event_id_idx', '{}');
