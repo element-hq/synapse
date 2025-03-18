@@ -19,6 +19,7 @@
 #
 #
 
+import functools
 import inspect
 import logging
 from typing import (
@@ -28,14 +29,12 @@ from typing import (
     Callable,
     Collection,
     List,
+    Literal,
     Optional,
     Tuple,
     Union,
     cast,
 )
-
-# `Literal` appears with Python 3.8.
-from typing_extensions import Literal
 
 import synapse
 from synapse.api.errors import Codes
@@ -297,6 +296,7 @@ def load_legacy_spam_checkers(hs: "synapse.server.HomeServer") -> None:
                         "Bad signature for callback check_registration_for_spam",
                     )
 
+            @functools.wraps(wrapped_func)
             def run(*args: Any, **kwargs: Any) -> Awaitable:
                 # Assertion required because mypy can't prove we won't change `f`
                 # back to `None`. See

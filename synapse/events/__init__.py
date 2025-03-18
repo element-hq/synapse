@@ -29,6 +29,7 @@ from typing import (
     Generic,
     Iterable,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -38,7 +39,6 @@ from typing import (
 )
 
 import attr
-from typing_extensions import Literal
 from unpaddedbase64 import encode_base64
 
 from synapse.api.constants import EventTypes, RelationTypes
