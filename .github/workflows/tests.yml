@@ -90,7 +90,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
           python-version: "3.x"
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: "all"
       - run: poetry run scripts-dev/generate_sample_config.sh --check
       - run: poetry run scripts-dev/config-lint.sh
@@ -129,6 +129,7 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
+          poetry-version: "2.1.1"
           install-project: "false"
 
       - name: Run ruff check
@@ -161,6 +162,7 @@ jobs:
           # https://github.com/matrix-org/synapse/pull/15376#issuecomment-1498983775
           # To make CI green, err towards caution and install the project.
           install-project: "true"
+          poetry-version: "2.1.1"
 
       # Cribbed from
       # https://github.com/AustinScola/mypy-cache-github-action/blob/85ea4f2972abed39b33bd02c36e341b28ca59213/src/restore.ts#L10-L17
@@ -212,7 +214,7 @@ jobs:
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
       - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: "all"
       - run: poetry run scripts-dev/check_pydantic_models.py
 
@@ -366,7 +368,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
           python-version: ${{ matrix.job.python-version }}
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: ${{ matrix.job.extras }}
       - name: Await PostgreSQL
         if: ${{ matrix.job.postgres-version }}
@@ -468,7 +470,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
           python-version: ${{ matrix.python-version }}
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: ${{ matrix.extras }}
       - run: poetry run trial --jobs=2 tests
       - name: Dump logs
@@ -561,7 +563,7 @@ jobs:
       - run: sudo apt-get -qq install xmlsec1 postgresql-client
       - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: "postgres"
       - run: .ci/scripts/test_export_data_command.sh
         env:
@@ -615,7 +617,7 @@ jobs:
       - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
           python-version: ${{ matrix.python-version }}
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: "postgres"
       - run: .ci/scripts/test_synapse_port_db.sh
         id: run_tester_script

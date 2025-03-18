@@ -28,6 +28,7 @@ jobs:
         uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
         with:
           install-project: "false"
+          poetry-version: "2.1.1"
 
       - name: Run ruff check
         continue-on-error: true

@@ -50,6 +50,7 @@ jobs:
         with:
           python-version: "3.x"
           extras: "all"
+          poetry-version: "2.1.1"
       - run: |
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#${{ inputs.twisted_ref || 'trunk' }}
@@ -75,6 +76,7 @@ jobs:
         with:
           python-version: "3.x"
           extras: "all test"
+          poetry-version: "2.1.1"
       - run: |
           poetry remove twisted
           poetry add --extras tls git+https://github.com/twisted/twisted.git#trunk
@@ -181,11 +183,11 @@ jobs:
         run: |
           set -x
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -yqq python3 pipx
-          pipx install poetry==1.3.2
+          pipx install poetry==2.1.1
 
           poetry remove -n twisted
           poetry add -n --extras tls git+https://github.com/twisted/twisted.git#trunk
-          poetry lock --no-update
+          poetry lock
         working-directory: synapse
 
       - run: |
