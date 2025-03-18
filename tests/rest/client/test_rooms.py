@@ -4261,6 +4261,32 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
                 },
                 record_participation=True,
             ),
+            # Should not record participation.
+            # An invalid **state event** with type `m.room.message`
+            param(
+                is_state=True,
+                event_type="m.room.message",
+                event_content={
+                    "msgtype": "m.text",
+                    "body": "I am engaging in this room",
+                },
+                record_participation=False,
+            ),
+            # An invalid **state event** with type `m.room.encrypted`
+            # Note: this may become valid in the future with encrypted state, though we
+            # still may not want to consider it grounds for marking a user as participating.
+            param(
+                is_state=True,
+                event_type="m.room.encrypted",
+                event_content={
+                    "algorithm": "m.megolm.v1.aes-sha2",
+                    "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                    "device_id": "RJYKSTBOIE",
+                    "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                    "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
+                },
+                record_participation=False,
+            ),
         ]
     )
     def test_sending_message_records_participation(
