@@ -28,7 +28,6 @@ from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests import unittest
-from tests.unittest import override_config
 
 
 class ReportEventTestCase(unittest.HomeserverTestCase):
