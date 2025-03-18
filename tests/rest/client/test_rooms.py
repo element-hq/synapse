@@ -4231,108 +4231,42 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
         )
         self.store = hs.get_datastores().main
 
-    def test_sending_message_records_participation(self) -> None:
-        """
-        Test that sending an m.room.message event into a room causes the user to
-        be marked as a participant in that room
-        """
-        self.helper.join(self.room1, self.user2, tok=self.tok2)
-
-        # user has not sent any messages, so should not be a participant
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertFalse(participant)
-
-        # sending a message should now mark user as participant
-        self.helper.send_event(
-            self.room1,
-            "m.room.message",
-            content={
-                "msgtype": "m.text",
-                "body": "I am engaging in this room",
-            },
-            tok=self.tok2,
-        )
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertTrue(participant)
-
-    def test_sending_encrypted_event_records_participation(self) -> None:
-        """
-        Test that sending an m.room.encrypted event into a room causes the user to
-        be marked as a participant in that room
-        """
-        self.helper.join(self.room1, self.user2, tok=self.tok2)
-
-        # user has not sent any messages, so should not be a participant
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertFalse(participant)
-
-        # sending an encrypted event should now mark user as participant
-        self.helper.send_event(
-            self.room1,
-            "m.room.encrypted",
-            content={
-                "algorithm": "m.megolm.v1.aes-sha2",
-                "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
-                "device_id": "RJYKSTBOIE",
-                "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
-                "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
-            },
-            tok=self.tok2,
-        )
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertTrue(participant)
-
-    def test_sending_message_and_leaving_does_not_record_participation(self) -> None:
-        """
-        Test that sending an m.room.message event into a room and then leaving
-        causes the user to no longer be marked as a participant in that room
-        """
-        self.helper.join(self.room1, self.user2, tok=self.tok2)
-
-        # user has not sent any messages, so should not be a participant
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertFalse(participant)
-
-        # sending a message should now mark user as participant
-        self.helper.send_event(
-            self.room1,
-            "m.room.message",
-            content={
-                "msgtype": "m.text",
-                "body": "I am engaging in this room",
-            },
-            tok=self.tok2,
-        )
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertTrue(participant)
-
-        # leave the room
-        self.helper.leave(self.room1, self.user2, tok=self.tok2)
-
-        # user should no longer be considered a participant
-        participant = self.get_success(
-            self.store.get_room_participation(self.user2, self.room1)
-        )
-        self.assertFalse(participant)
-
-    def test_sending_encrypted_event_and_leaving_does_not_record_participation(
+    @parameterized.expand(
+        [
+            # Allow
+            param(
+                is_state=False,
+                event_type="m.room.message",
+                event_content={
+                    "msgtype": "m.text",
+                    "body": "I am engaging in this room",
+                },
+                record_participation=True,
+            ),
+            param(
+                is_state=False,
+                event_type="m.room.encrypted",
+                event_content={
+                    "algorithm": "m.megolm.v1.aes-sha2",
+                    "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                    "device_id": "RJYKSTBOIE",
+                    "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                    "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
+                },
+                record_participation=True,
+            ),
+        ]
+    )
+    def test_sending_message_records_participation(
         self,
+        is_state: bool,
+        event_type: str,
+        event_content: JsonDict,
+        record_participation: bool,
     ) -> None:
         """
-        Test that sending an m.room.encrypted event into a room and then leaving causes
-        the user to no longer be marked as a participant in that room
+        Test that sending an various events into a room causes the user to
+        appropriately marked or not marked as a participant in that room.
         """
         self.helper.join(self.room1, self.user2, tok=self.tok2)
 
@@ -4342,17 +4276,62 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
         )
         self.assertFalse(participant)
 
-        # sending an encrypted event should now mark user as participant
+        # sending a message should now mark user as participant
         self.helper.send_event(
             self.room1,
-            "m.room.encrypted",
-            content={
-                "algorithm": "m.megolm.v1.aes-sha2",
-                "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
-                "device_id": "RJYKSTBOIE",
-                "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
-                "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
-            },
+            event_type,
+            content=event_content,
+            tok=self.tok2,
+        )
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertEqual(participant, record_participation)
+
+    @parameterized.expand(
+        [
+            param(
+                event_type="m.room.message",
+                event_content={
+                    "msgtype": "m.text",
+                    "body": "I am engaging in this room",
+                },
+            ),
+            param(
+                event_type="m.room.encrypted",
+                event_content={
+                    "algorithm": "m.megolm.v1.aes-sha2",
+                    "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                    "device_id": "RJYKSTBOIE",
+                    "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                    "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
+                },
+            ),
+        ]
+    )
+    def test_sending_event_and_leaving_does_not_record_participation(
+        self,
+        event_type: str,
+        event_content: JsonDict,
+    ) -> None:
+        """
+        Test that sending an event into a room that should mark a user as a
+        participant, but then leaving the room, results in the user no longer
+        be marked as a participant in that room.
+        """
+        self.helper.join(self.room1, self.user2, tok=self.tok2)
+
+        # user has not sent any messages, so should not be a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertFalse(participant)
+
+        # sending a message should now mark user as participant
+        self.helper.send_event(
+            self.room1,
+            event_type,
+            content=event_content,
             tok=self.tok2,
         )
         participant = self.get_success(
