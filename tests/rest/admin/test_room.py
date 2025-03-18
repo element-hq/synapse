@@ -1282,6 +1282,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_list_rooms(self) -> None:
         """Test that we can list rooms"""
         # Create 3 test rooms
@@ -1795,6 +1796,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(room_id, channel.json_body["rooms"][0].get("room_id"))
         self.assertEqual("ж", channel.json_body["rooms"][0].get("name"))
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_filter_public_rooms(self) -> None:
         self.helper.create_room_as(
             self.admin_user, tok=self.admin_user_tok, is_public=True
@@ -1872,6 +1874,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, response.json_body["total_rooms"])
         self.assertEqual(1, len(response.json_body["rooms"]))
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_single_room(self) -> None:
         """Test that a single room can be requested correctly"""
         # Create two test rooms
