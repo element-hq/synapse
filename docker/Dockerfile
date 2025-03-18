@@ -119,7 +119,7 @@ RUN \
 ###
 ### Stage 2: runtime dependencies download for ARM64 and AMD64
 ###
-FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS runtime-deps
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
@@ -127,6 +127,23 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloa
 # Add both target architectures
 RUN dpkg --add-architecture arm64
 RUN dpkg --add-architecture amd64
+
+ARG PYTHON_VERSION
+RUN uv python install \
+  cpython-${PYTHON_VERSION}-linux-aarch64-gnu \
+  cpython-${PYTHON_VERSION}-linux-x86_64_v2-gnu
+
+RUN \
+  cd $(uv python dir) && \
+  mv cpython-*-linux-aarch64-gnu cpython-arm64 && \
+  mv cpython-*-linux-x86_64_v2-gnu cpython-amd64 && \
+  for arch in arm64 amd64; do \
+    dst=/install-${arch}/usr/local/ && \
+    mkdir -p ${dst}/bin && \
+    find cpython-${arch}/bin -name python\* ! -name \*-config -execdir mv {} ${dst}/bin/ \; && \
+    mv cpython-${arch}/lib ${dst}/; \
+  done && \
+  rm -rf $(uv python dir)
 
 # Fetch the runtime dependencies debs for both architectures
 # We do that by building a recursive list of packages we need to download with `apt-cache depends`
@@ -145,18 +162,6 @@ RUN \
       libicu \
 # for health checks (slimmer than curl)
       wget \
-# dependencies of debian's python3.12-minimal
-      zlib1g \
-      libexpat1 \
-# libraries used by python's lib-dynload
-      libbz2-1.0 \
-      libcrypt1 \
-      libgdbm6 \
-      libncursesw6 \
-      libnsl2 \
-      libreadline8 \
-      libsqlite3-0 \
-      libuuid1 \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
@@ -178,21 +183,7 @@ RUN \
 
 
 ###
-### Stage 3: python
-###
-
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS python
-
-# Make a directory with just the Python binaries & symlinks to be copied into the final image
-RUN \
-    PYBIN=/usr/local/pybin && \
-    mkdir ${PYBIN} && \
-    cp -a /usr/local/bin/python* ${PYBIN}/ && \
-    rm ${PYBIN}/python*-config
-
-
-###
-### Stage 4: runtime
+### Stage 3: runtime
 ###
 
 FROM gcr.io/distroless/base-debian${DEBIAN_VERSION_NUMERIC}
@@ -208,9 +199,6 @@ COPY --from=runtime-deps /install-${TARGETARCH} /
 # Needed for start.py's config generation scripts
 COPY --from=runtime-deps /usr/bin/chown /usr/bin/chown
 COPY --from=builder /install /usr/local
-# Copy the entire directory to preserve symlinks
-COPY --from=python /usr/local/pybin /usr/local/bin
-COPY --from=python /usr/local/lib /usr/local/lib
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
 
