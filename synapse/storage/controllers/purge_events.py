@@ -331,7 +331,7 @@ class PurgeEventsStorageController:
         del processed_groups[:processed_index]
 
         # Update the state groups set by removing groups that have already been processed.
-        next_set = set(next_set) - processed_groups
+        next_set = next_set - set(processed_groups)
 
         # Find all state groups that can be deleted if any of the original set are deleted.
         (
@@ -443,7 +443,7 @@ class PurgeEventsStorageController:
             nexts -= state_groups_seen.keys()
 
             # Filter out already processed groups from this batch
-            nexts -= processed_groups
+            nexts -= set(processed_groups)
             next_to_search |= nexts
             for next, curr in next_edges.items():
                 start_group = state_groups_seen[curr]
