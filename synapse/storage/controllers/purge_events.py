@@ -441,9 +441,6 @@ class PurgeEventsStorageController:
             next_edges = await self.stores.state.get_next_state_groups(current_search)
             nexts = set(next_edges.keys())
             nexts -= state_groups_seen.keys()
-
-            # Filter out already processed groups from this batch
-            nexts -= set(processed_groups)
             next_to_search |= nexts
             for next, curr in next_edges.items():
                 start_group = state_groups_seen[curr]
@@ -460,7 +457,7 @@ class PurgeEventsStorageController:
         # Limit the number of state groups we track so we don't end up spending all our
         # time de/serializing the progress json.
         tracking_space = MAX_PROCESSED_GROUPS - len(processed_groups)
-        newly_processed = state_groups_seen.keys() - processed_groups
+        newly_processed = state_groups_seen.keys() - set(processed_groups)
         processed_groups |= set(itertools.islice(iter(newly_processed), tracking_space))
 
         for group in referenced_groups:
