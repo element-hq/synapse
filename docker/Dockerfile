@@ -22,7 +22,7 @@
 
 ARG DEBIAN_VERSION=bookworm
 ARG PYTHON_VERSION=3.12
-ARG POETRY_VERSION=1.8.3
+ARG POETRY_VERSION=2.1.1
 
 ###
 ### Stage 0: generate requirements.txt
@@ -56,7 +56,7 @@ ENV UV_LINK_MODE=copy
 ARG POETRY_VERSION
 RUN --mount=type=cache,target=/root/.cache/uv \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-    uvx --with poetry-plugin-export==1.8.0 \
+    uvx --with poetry-plugin-export==1.9.0 \
         poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
   else \
     touch /synapse/requirements.txt; \
