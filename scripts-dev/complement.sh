@@ -184,7 +184,7 @@ if [ -z "$skip_docker_build" ]; then
 
         # Tag local builds with a dummy registry so that later builds
         # may reference them instead of pulling from a remote registry
-        LOCAL_REGISTRY=localhost:5000
+        LOCAL_REGISTRY=synapse-registry.localhost
 
         SYNAPSE_TAG=matrixdotorg/synapse
         $CONTAINER_RUNTIME build \
