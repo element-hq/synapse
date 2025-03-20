@@ -370,9 +370,11 @@ class PurgeEventsStorageController:
 
         to_delete = set()
 
-        # If any of the state groups have next edges and any of those next state groups
-        # are marked for deletion, the corresponding state groups in this batch can also
-        # be marked for deletion.
+        # If a state group's next edge is not pending deletion then we don't delete the state group.
+        # If there is no next edge or the next edges is marked for deletion, then delete
+        # the state group.
+        # This holds since we walk backwards from the latest state groups, ensuring that
+        # we've already checked newer state groups for event references along the way.
         def get_next_state_groups_marked_for_deletion_txn(
             txn: LoggingTransaction,
         ) -> tuple[Set[int], Set[int]]:
@@ -387,6 +389,7 @@ class PurgeEventsStorageController:
             """
             txn.execute(state_group_sql, args)
 
+            seen_state_groups: dict[int, bool] = {}  # state_group: delete
             groups_with_next_edges = set()
             next_marked_for_deletion = set()
             for row in txn:
@@ -396,8 +399,18 @@ class PurgeEventsStorageController:
 
                 if next_edge is not None:
                     groups_with_next_edges.add(state_group)
-                if pending_deletion is not None:
-                    next_marked_for_deletion.add(state_group)
+
+                previous_delete = seen_state_groups.get(state_group)
+                if previous_delete is None:
+                    if pending_deletion is not None:
+                        next_marked_for_deletion.add(state_group)
+                        seen_state_groups[state_group] = True
+                    else:
+                        seen_state_groups[state_group] = False
+                else:
+                    if previous_delete and pending_deletion is None:
+                        next_marked_for_deletion.remove(state_group)
+                        seen_state_groups[state_group] = False
 
             return groups_with_next_edges, next_marked_for_deletion
 
