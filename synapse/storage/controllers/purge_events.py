@@ -28,11 +28,9 @@ from typing import (
     Set,
 )
 
-from sortedcontainers import SortedSet
-
 from synapse.logging.context import nested_logging_context
 from synapse.metrics.background_process_metrics import wrap_as_background_process
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import LoggingTransaction, make_in_list_sql_clause
 from synapse.storage.databases import Databases
 from synapse.types.storage import _BackgroundUpdates
 
@@ -227,44 +225,38 @@ class PurgeEventsStorageController:
         """This background update will slowly delete any unreferenced state groups"""
 
         last_checked_state_group = progress.get("last_checked_state_group")
-        max_state_group = progress.get("max_state_group")
-        processed_groups: SortedSet[int] = SortedSet(progress.get("processed_groups"))
 
-        if last_checked_state_group is None or max_state_group is None:
+        if last_checked_state_group is None:
             # This is the first run.
-            last_checked_state_group = 0
-
-            max_state_group = await self.stores.state.db_pool.simple_select_one_onecol(
-                table="state_groups",
-                keyvalues={},
-                retcol="MAX(id)",
-                allow_none=True,
-                desc="get_max_state_group",
+            last_checked_state_group = (
+                await self.stores.state.db_pool.simple_select_one_onecol(
+                    table="state_groups",
+                    keyvalues={},
+                    retcol="MAX(id)",
+                    allow_none=True,
+                    desc="get_max_state_group",
+                )
             )
-            if max_state_group is None:
+            if last_checked_state_group is None:
                 # There are no state groups so the background process is finished.
                 await self.stores.state.db_pool.updates._end_background_update(
                     _BackgroundUpdates.MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE
                 )
                 return batch_size
+            last_checked_state_group += 1
 
         (
             last_checked_state_group,
-            processed_groups,
             final_batch,
         ) = await self._delete_unreferenced_state_groups_batch(
             last_checked_state_group,
             batch_size,
-            max_state_group,
-            processed_groups,
         )
 
         if not final_batch:
             # There are more state groups to check.
             progress = {
                 "last_checked_state_group": last_checked_state_group,
-                "max_state_group": max_state_group,
-                "processed_groups": list(processed_groups),
             }
             await self.stores.state.db_pool.updates._background_update_progress(
                 _BackgroundUpdates.MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE,
@@ -282,30 +274,24 @@ class PurgeEventsStorageController:
         self,
         last_checked_state_group: int,
         batch_size: int,
-        max_state_group: int,
-        processed_groups: SortedSet[int],
-    ) -> tuple[int, SortedSet[int], bool]:
+    ) -> tuple[int, bool]:
         """Looks for unreferenced state groups starting from the last state group
-        checked, and any state groups which would become unreferenced if a state group
-        was deleted, and marks them for deletion.
+        checked and marks them for deletion.
 
         Args:
             last_checked_state_group: The last state group that was checked.
             batch_size: How many state groups to process in this iteration.
-            max_state_group: The state group to check up to.
-            processed_groups: State groups that have already been processed. Only
-                includes state groups ahead of the last_checked_state_group.
 
         Returns:
-            (last_checked_state_group, processed_groups, final_batch)
+            (last_checked_state_group, final_batch)
         """
 
         # Look for state groups that can be cleaned up.
         def get_next_state_groups_txn(txn: LoggingTransaction) -> Set[int]:
-            state_group_sql = "SELECT id FROM state_groups WHERE ? < id AND id <= ? ORDER BY id LIMIT ?"
-            txn.execute(
-                state_group_sql, (last_checked_state_group, max_state_group, batch_size)
+            state_group_sql = (
+                "SELECT id FROM state_groups WHERE id < ? ORDER BY id DESC LIMIT ?"
             )
+            txn.execute(state_group_sql, (last_checked_state_group, batch_size))
 
             next_set = {row[0] for row in txn}
 
@@ -319,47 +305,31 @@ class PurgeEventsStorageController:
         if len(next_set) < batch_size:
             final_batch = True
         else:
-            last_checked_state_group = max(next_set)
+            last_checked_state_group = min(next_set)
 
         if len(next_set) == 0:
-            return last_checked_state_group, SortedSet(), final_batch
-
-        # Clear out old state groups from the processed set.
-        # Otherwise this can grow very large and we'll spend all our time de/serializing
-        # it to json.
-        processed_index = processed_groups.bisect_left(last_checked_state_group)
-        del processed_groups[:processed_index]
-
-        # Update the state groups set by removing groups that have already been processed.
-        next_set = next_set - set(processed_groups)
+            return last_checked_state_group, final_batch
 
         # Find all state groups that can be deleted if any of the original set are deleted.
-        (
-            to_delete,
-            processed_groups,
-        ) = await self._find_unreferenced_groups_for_background_deletion(
-            next_set,
-            processed_groups,
+        to_delete = await self._find_unreferenced_groups_for_background_deletion(
+            next_set
         )
 
         if len(to_delete) == 0:
-            return last_checked_state_group, processed_groups, final_batch
+            return last_checked_state_group, final_batch
 
         await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
             to_delete
         )
 
-        return last_checked_state_group, processed_groups, final_batch
+        return last_checked_state_group, final_batch
 
     async def _find_unreferenced_groups_for_background_deletion(
         self,
         state_groups: Set[int],
-        processed_groups: SortedSet[int],
-    ) -> tuple[Set[int], SortedSet[int]]:
+    ) -> Set[int]:
         """Used when deleting unreferenced state groups in the background to figure out
         which state groups can be deleted.
-        The deletion set includes any state groups that share edges with the state
-        groups that are candidates for deletion.
         To avoid increased DB usage due to de-deltaing state groups, this returns only
         state groups which are free standing (ie. no shared edges with referenced groups) or
         state groups which do not share edges which result in a future referenced group.
@@ -395,83 +365,66 @@ class PurgeEventsStorageController:
         Args:
             state_groups: Set of state groups referenced by events
                 that are going to be deleted.
-            processed_groups: State groups that have already been processed. Only
-                includes state groups ahead of the last_checked_state_group.
 
         Returns:
-            (to_delete, processed_groups)
+            to_delete
         """
-        # Set of groups that we have found to be referenced by events
-        referenced_groups = set()
 
-        # Set of state groups that share the same base state group
-        group_chains = {
-            group: [group] for group in state_groups
-        }  # Map[start_group, group_chain]
+        to_delete = set()
 
-        # Set of state groups we've already seen
-        state_groups_seen = {
-            group: group for group in state_groups
-        }  # Map[seen_group, start_group]
-
-        next_to_search = state_groups
-        while next_to_search:
-            # We bound size of groups we're looking up at once, to stop the
-            # SQL query getting too big
-            if len(next_to_search) < 100:
-                current_search = next_to_search
-                next_to_search = set()
-            else:
-                current_search = set(itertools.islice(next_to_search, 100))
-                next_to_search -= current_search
-
-            referenced = await self.stores.main.get_referenced_state_groups(
-                current_search
+        # If any of the state groups have next edges and any of those next state groups
+        # are marked for deletion, the corresponding state groups in this batch can also
+        # be marked for deletion.
+        def get_next_state_groups_marked_for_deletion_txn(
+            txn: LoggingTransaction,
+        ) -> tuple[Set[int], Set[int]]:
+            clause, args = make_in_list_sql_clause(
+                self.stores.state.database_engine, "e.prev_state_group", state_groups
             )
+            state_group_sql = f"""
+                SELECT e.prev_state_group, e.state_group, d.state_group
+                FROM state_group_edges AS e
+                LEFT JOIN state_groups_pending_deletion AS d ON (e.state_group = d.state_group)
+                WHERE {clause}
+            """
+            txn.execute(state_group_sql, args)
 
-            referenced_groups |= referenced
+            groups_with_next_edges = set()
+            next_marked_for_deletion = set()
+            for row in txn:
+                state_group = row[0]
+                next_edge = row[1]
+                pending_deletion = row[2]
 
-            # We don't continue iterating up the state group graphs for state
-            # groups that are referenced.
-            current_search -= referenced
+                if next_edge is not None:
+                    groups_with_next_edges.add(state_group)
+                if pending_deletion is not None:
+                    next_marked_for_deletion.add(state_group)
 
-            # We check to see if anything referencing the state groups are
-            # also unreferenced. This helps speed up deletion by proactively finding
-            # related state groups which can be deleted.
-            next_edges = await self.stores.state.get_next_state_groups(current_search)
-            nexts = set(next_edges.keys())
-            nexts -= state_groups_seen.keys()
-            next_to_search |= nexts
-            for next, curr in next_edges.items():
-                start_group = state_groups_seen[curr]
-                state_groups_seen[next] = start_group
+            return groups_with_next_edges, next_marked_for_deletion
 
-                # Store state group chains so we know which state groups to exclude if
-                # we happen upon a referenced state group later in the chain.
-                if start_group in group_chains:
-                    group_chains[start_group].append(next)
-                else:
-                    group_chains[start_group] = [next]
+        (
+            groups_with_next_edges,
+            next_marked_for_deletion,
+        ) = await self.stores.state.db_pool.runInteraction(
+            "get_next_state_groups_marked_for_deletion",
+            get_next_state_groups_marked_for_deletion_txn,
+        )
+        to_delete |= next_marked_for_deletion
 
-        # Update the processed groups
-        # Limit the number of state groups we track so we don't end up spending all our
-        # time de/serializing the progress json.
-        tracking_space = MAX_PROCESSED_GROUPS - len(processed_groups)
-        newly_processed = state_groups_seen.keys() - set(processed_groups)
-        processed_groups |= set(itertools.islice(iter(newly_processed), tracking_space))
+        # Any state groups that have next edges don't need further processing.
+        # They are either already in `to_delete` or their next edge leads to a
+        # referenced state group.
+        state_groups -= groups_with_next_edges
 
-        for group in referenced_groups:
-            # Remove each group along the same chain as the referenced group.
-            # Deleting any of these state groups would lead to de-deltaing of state
-            # groups and unwanted DB expansion.
-            start_group = state_groups_seen[group]
-            chain = group_chains[start_group]
-            state_groups_seen = {
-                key: value
-                for key, value in state_groups_seen.items()
-                if key not in chain
-            }
+        if len(state_groups) == 0:
+            return to_delete
 
-        to_delete = set(state_groups_seen.keys())
+        # Determine if any of the remaining state groups are directly referenced.
+        referenced = await self.stores.main.get_referenced_state_groups(state_groups)
+        state_groups -= referenced
 
-        return to_delete, processed_groups
+        # Any unreferenced state groups can be marked for deletion.
+        to_delete |= state_groups
+
+        return to_delete
