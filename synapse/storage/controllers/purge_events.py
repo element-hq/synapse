@@ -39,8 +39,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MAX_PROCESSED_GROUPS = 1000
-
 
 class PurgeEventsStorageController:
     """High level interface for purging rooms and event history."""
