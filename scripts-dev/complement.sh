@@ -186,33 +186,33 @@ if [ -z "$skip_docker_build" ]; then
         # may reference them instead of pulling from a remote registry
         LOCAL_REGISTRY=synapse-registry.localhost
 
-        SYNAPSE_TAG=matrixdotorg/synapse
+        SYNAPSE_IMAGE_PATH=matrixdotorg/synapse
         $CONTAINER_RUNTIME build \
-            -t "$SYNAPSE_TAG" \
-            -t "$LOCAL_REGISTRY/$SYNAPSE_TAG" \
+            -t "$SYNAPSE_IMAGE_PATH" \
+            -t "$LOCAL_REGISTRY/$SYNAPSE_IMAGE_PATH" \
             --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
             --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
             -f "docker/Dockerfile" .
         echo_if_github "::endgroup::"
 
         # Build the workers docker image (from the base Synapse image we just built).
-        SYNAPSE_WORKERS_TAG=matrixdotorg/synapse-workers
+        SYNAPSE_WORKERS_IMAGE_PATH=matrixdotorg/synapse-workers
         echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
         $CONTAINER_RUNTIME build \
-            -t "$SYNAPSE_WORKERS_TAG" \
-            --build-arg FROM="$LOCAL_REGISTRY/$SYNAPSE_TAG" \
+            -t "$SYNAPSE_WORKERS_IMAGE_PATH" \
+            --build-arg FROM="$LOCAL_REGISTRY/$SYNAPSE_IMAGE_PATH" \
             -f "docker/Dockerfile-workers" .
         echo_if_github "::endgroup::"
 
         # Build the unified Complement image (from the worker Synapse image we just built).
-        COMPLEMENT_SYNAPSE_TAG=complement-synapse
+        COMPLEMENT_SYNAPSE_IMAGE_PATH=complement-synapse
         echo_if_github "::group::Build Docker image: complement/Dockerfile"
         $CONTAINER_RUNTIME build \
-            -t "$COMPLEMENT_SYNAPSE_TAG" \
+            -t "$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
             `# This is the tag we end up pushing to the registry (see` \
             `# .github/workflows/push_complement_image.yml) so let's just label it now` \
             `# so people can reference it by the same name locally.` \
-            -t "ghcr.io/element-hq/synapse/$COMPLEMENT_SYNAPSE_TAG" \
+            -t "ghcr.io/element-hq/synapse/$COMPLEMENT_SYNAPSE_IMAGE_PATH" \
             -f "docker/complement/Dockerfile" "docker/complement"
         echo_if_github "::endgroup::"
 
