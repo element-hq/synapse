@@ -25,6 +25,7 @@ from typing import (
     TYPE_CHECKING,
     Collection,
     Mapping,
+    Optional,
     Set,
 )
 
@@ -436,7 +437,7 @@ class PurgeEventsStorageController:
 
         # Remove state groups from deletion_candidates which are directly referenced or share a
         # future edge with a referenced state group within this batch.
-        def filter_reference_chains(group: int) -> None:
+        def filter_reference_chains(group: Optional[int]) -> None:
             while group is not None:
                 deletion_candidates.discard(group)
                 group = state_group_edges.get(group)
