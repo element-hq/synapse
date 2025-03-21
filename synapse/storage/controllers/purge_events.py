@@ -30,7 +30,7 @@ from typing import (
 
 from synapse.logging.context import nested_logging_context
 from synapse.metrics.background_process_metrics import wrap_as_background_process
-from synapse.storage.database import LoggingTransaction, make_in_list_sql_clause
+from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases import Databases
 from synapse.types.storage import _BackgroundUpdates
 
@@ -285,8 +285,12 @@ class PurgeEventsStorageController:
         """
 
         # Find all state groups that can be deleted if any of the original set are deleted.
-        to_delete, last_checked_state_group, final_batch = await self._find_unreferenced_groups_for_background_deletion(
-                last_checked_state_group, batch_size
+        (
+            to_delete,
+            last_checked_state_group,
+            final_batch,
+        ) = await self._find_unreferenced_groups_for_background_deletion(
+            last_checked_state_group, batch_size
         )
 
         if len(to_delete) == 0:
@@ -353,7 +357,7 @@ class PurgeEventsStorageController:
         def get_next_state_groups_marked_for_deletion_txn(
             txn: LoggingTransaction,
         ) -> tuple[Set[int], Set[int], Set[int]]:
-            state_group_sql = f"""
+            state_group_sql = """
                 SELECT s.id, e.state_group, d.state_group
                 FROM state_groups as s
                 LEFT JOIN state_group_edges AS e ON (s.id = e.prev_state_group)
@@ -385,7 +389,11 @@ class PurgeEventsStorageController:
                         next_marked_for_deletion.remove(state_group)
                         seen_state_groups[state_group] = False
 
-            return set(seen_state_groups.keys()), groups_with_next_edges, next_marked_for_deletion
+            return (
+                set(seen_state_groups.keys()),
+                groups_with_next_edges,
+                next_marked_for_deletion,
+            )
 
         (
             state_groups,
