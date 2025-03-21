@@ -126,6 +126,46 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         return await self.db_pool.runInteraction("count_e2ee_messages", _count_messages)
 
+    async def count_total_messages(self) -> int:
+        """
+        Returns the total number of `m.room.message` events present on the
+        server.
+        """
+
+        def _count_total_messages(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT COUNT(*) FROM events
+                WHERE type = 'm.room.message'
+                    AND state_key IS NULL
+            """
+            txn.execute(sql)
+            (count,) = cast(Tuple[int], txn.fetchone())
+            return count
+
+        return await self.db_pool.runInteraction(
+            "count_total_messages", _count_total_messages
+        )
+
+    async def count_total_e2ee_events(self) -> int:
+        """
+        Returns the total number of `m.room.encrypted` events present on the
+        server.
+        """
+
+        def _count_total_e2ee_events(txn: LoggingTransaction) -> int:
+            sql = """
+                SELECT COUNT(*) FROM events
+                WHERE type = 'm.room.encrypted'
+                    AND state_key IS NULL
+            """
+            txn.execute(sql)
+            (count,) = cast(Tuple[int], txn.fetchone())
+            return count
+
+        return await self.db_pool.runInteraction(
+            "count_total_e2ee_events", _count_total_e2ee_events
+        )
+
     async def count_daily_sent_e2ee_messages(self) -> int:
         def _count_messages(txn: LoggingTransaction) -> int:
             # This is good enough as if you have silly characters in your own
