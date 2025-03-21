@@ -350,7 +350,7 @@ class PurgeEventsStorageController:
         """
 
         # If a state group's next edge is not pending deletion then we don't delete the state group.
-        # If there is no next edge or the next edges is marked for deletion, then delete
+        # If there is no next edge or the next edges are all marked for deletion, then delete
         # the state group.
         # This holds since we walk backwards from the latest state groups, ensuring that
         # we've already checked newer state groups for event references along the way.
