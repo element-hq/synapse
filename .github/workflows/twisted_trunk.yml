@@ -46,7 +46,7 @@ jobs:
         uses: dtolnay/rust-toolchain@fcf085fcb4b4b8f63f96906cd713eb52181b5ea4 # stable (rust 1.85.1)
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
 
-      - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
           extras: "all"
@@ -72,7 +72,7 @@ jobs:
         uses: dtolnay/rust-toolchain@fcf085fcb4b4b8f63f96906cd713eb52181b5ea4 # stable (rust 1.85.1)
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
 
-      - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
           extras: "all test"
