@@ -1,0 +1,1 @@
+Add `total_message_count` and `total_e2ee_event_count` parameters to the homeserver usage statistics.
