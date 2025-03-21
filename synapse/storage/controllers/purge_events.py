@@ -356,7 +356,7 @@ class PurgeEventsStorageController:
         # we've already checked newer state groups for event references along the way.
         def get_next_state_groups_marked_for_deletion_txn(
             txn: LoggingTransaction,
-        ) -> tuple[Set[int], Set[int], Set[int]]:
+        ) -> tuple[dict[int, bool], dict[int, int]]:
             state_group_sql = """
                 SELECT s.id, e.state_group, d.state_group
                 FROM (
@@ -368,65 +368,81 @@ class PurgeEventsStorageController:
             """
             txn.execute(state_group_sql, (last_checked_state_group, batch_size))
 
-            seen_state_groups: dict[int, bool] = {}  # state_group: delete
-            groups_with_next_edges = set()
-            next_marked_for_deletion = set()
+            # Mapping from state group to whether we should delete it.
+            state_groups_to_deletion: dict[int, bool] = {}
+
+            # Mapping from state group to prev state group.
+            state_groups_to_prev: dict[int, int] = {}
+
             for row in txn:
                 state_group = row[0]
                 next_edge = row[1]
                 pending_deletion = row[2]
 
                 if next_edge is not None:
-                    groups_with_next_edges.add(state_group)
+                    state_groups_to_prev[next_edge] = state_group
 
-                previous_delete = seen_state_groups.get(state_group)
-                if previous_delete is None:
-                    if pending_deletion is not None:
-                        next_marked_for_deletion.add(state_group)
-                        seen_state_groups[state_group] = True
+                if next_edge is not None and not pending_deletion:
+                    # We have found an edge not marked for deletion.
+                    # Check previous results to see if this group is part of a chain
+                    # within this batch that qualifies for deletion.
+                    # ie. batch contains:
+                    # SG_1 -> SG_2 -> SG_3
+                    # If SG_3 is a candidate for deletion, then SG_2 & SG_1 should also
+                    # be, even though they have edges which may not be marked for
+                    # deletion.
+                    # This relies on SQL results being sorted in DESC order to work.
+                    next_is_deletion_candidate = state_groups_to_deletion.get(next_edge)
+                    if (
+                        next_is_deletion_candidate is None
+                        or not next_is_deletion_candidate
+                    ):
+                        state_groups_to_deletion[state_group] = False
                     else:
-                        seen_state_groups[state_group] = False
+                        state_groups_to_deletion.setdefault(state_group, True)
                 else:
-                    if previous_delete and pending_deletion is None:
-                        next_marked_for_deletion.remove(state_group)
-                        seen_state_groups[state_group] = False
+                    # This state group may be a candidate for deletion
+                    state_groups_to_deletion.setdefault(state_group, True)
 
-            return (
-                set(seen_state_groups.keys()),
-                groups_with_next_edges,
-                next_marked_for_deletion,
-            )
+            return state_groups_to_deletion, state_groups_to_prev
 
         (
-            state_groups,
-            groups_with_next_edges,
-            next_marked_for_deletion,
+            state_groups_to_deletion,
+            state_group_edges,
         ) = await self.stores.state.db_pool.runInteraction(
             "get_next_state_groups_marked_for_deletion",
             get_next_state_groups_marked_for_deletion_txn,
         )
-        to_delete = set()
-        to_delete |= next_marked_for_deletion
+        deletion_candidates = {
+            state_group
+            for state_group, deletion in state_groups_to_deletion.items()
+            if deletion
+        }
 
         final_batch = False
+        state_groups = state_groups_to_deletion.keys()
         if len(state_groups) < batch_size:
             final_batch = True
         else:
             last_checked_state_group = min(state_groups)
 
-        # Any state groups that have next edges don't need further processing.
-        # They are either already in `to_delete` or their next edge leads to a
-        # referenced state group.
-        state_groups -= groups_with_next_edges
-
         if len(state_groups) == 0:
-            return to_delete, last_checked_state_group, final_batch
+            return set(), last_checked_state_group, final_batch
 
         # Determine if any of the remaining state groups are directly referenced.
-        referenced = await self.stores.main.get_referenced_state_groups(state_groups)
-        state_groups -= referenced
+        referenced = await self.stores.main.get_referenced_state_groups(
+            deletion_candidates
+        )
 
-        # Any unreferenced state groups can be marked for deletion.
-        to_delete |= state_groups
+        # Remove state groups from deletion_candidates which are directly referenced or share a
+        # future edge with a referenced state group within this batch.
+        def filter_reference_chains(group: int) -> None:
+            deletion_candidates.discard(group)
+            prev_group = state_group_edges.get(group)
+            if prev_group is not None:
+                filter_reference_chains(prev_group)
 
-        return to_delete, last_checked_state_group, final_batch
+        for referenced_group in referenced:
+            filter_reference_chains(referenced_group)
+
+        return deletion_candidates, last_checked_state_group, final_batch
