@@ -42,7 +42,7 @@ try:
     import icu
 
     USE_ICU = True
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     USE_ICU = False
 
 from synapse.api.errors import StoreError
