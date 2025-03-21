@@ -161,6 +161,7 @@ Changes in SCHEMA_VERSION = 89
 
 Changes in SCHEMA_VERSION = 90
     - Add a column `participant` to `room_memberships` table
+    - Add background update to delete unreferenced state groups.
 """
 
 
