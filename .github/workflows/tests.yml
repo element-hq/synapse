@@ -188,6 +188,19 @@ jobs:
     if: ${{ (github.base_ref == 'develop'  || contains(github.base_ref, 'release-')) && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     steps:
+      - run: |
+          env | while read -r line
+          do
+            var_name=$(echo "$line" | cut -d= -f1)
+  
+            var_value=$(eval echo "\$$var_name")
+  
+            if [ -z "$var_value" ]; then
+              echo "$var_name: EMPTY"
+            else
+              echo "$var_name: NOT EMPTY"
+            fi
+          done
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
