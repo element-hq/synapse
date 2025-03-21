@@ -46,10 +46,10 @@ jobs:
 
       # The dev dependencies aren't exposed in the wheel metadata (at least with current
       # poetry-core versions), so we install with poetry.
-      - uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
+      - uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           python-version: "3.x"
-          poetry-version: "1.3.2"
+          poetry-version: "2.1.1"
           extras: "all"
       # Dump installed versions for debugging.
       - run: poetry run pip list > before.txt
