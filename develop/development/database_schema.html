@@ -295,7 +295,7 @@ by a unique name, the current status (stored in JSON), and some dependency infor
 <li>Whether the update requires a previous update to be complete.</li>
 <li>A rough ordering for which to complete updates.</li>
 </ul>
-<p>A new background updates needs to be added to the <code>background_updates</code> table:</p>
+<p>A new background update needs to be added to the <code>background_updates</code> table:</p>
 <pre><code class="language-sql">INSERT INTO background_updates (ordering, update_name, depends_on, progress_json) VALUES
   (7706, 'my_background_update', 'a_previous_background_update' '{}');
 </code></pre>
