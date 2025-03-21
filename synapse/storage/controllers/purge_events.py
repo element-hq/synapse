@@ -359,10 +359,12 @@ class PurgeEventsStorageController:
         ) -> tuple[Set[int], Set[int], Set[int]]:
             state_group_sql = """
                 SELECT s.id, e.state_group, d.state_group
-                FROM state_groups as s
+                FROM (
+                    SELECT id FROM state_groups
+                    WHERE id < ? ORDER BY id DESC LIMIT ?
+                ) as s
                 LEFT JOIN state_group_edges AS e ON (s.id = e.prev_state_group)
                 LEFT JOIN state_groups_pending_deletion AS d ON (e.state_group = d.state_group)
-                WHERE id < ? ORDER BY id DESC LIMIT ?
             """
             txn.execute(state_group_sql, (last_checked_state_group, batch_size))
 
