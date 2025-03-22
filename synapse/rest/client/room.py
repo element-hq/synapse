@@ -528,6 +528,12 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
             remote_room_hosts,
         )
 
+        join_policy_token = parse_string(
+            request, "re.jki.join_policy_token", required=False
+        )
+
+        logger.info("re.jki.join_policy_token: %s", join_policy_token)
+
         await self.room_member_handler.update_membership(
             requester=requester,
             target=requester.user,
@@ -537,6 +543,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
             remote_room_hosts=remote_room_hosts,
             content=content,
             third_party_signed=content.get("third_party_signed", None),
+            join_policy_token=join_policy_token,
         )
 
         return 200, {"room_id": room_id}

@@ -894,6 +894,46 @@ class TransportLayerClient:
             ip_address=ip_address,
         )
 
+    async def join_policy_server_get_url(
+        self, policy_server: str, room_id: str, room_version: RoomVersion, user_id: str
+    ) -> JsonDict:
+        path = _create_path(
+            FEDERATION_UNSTABLE_PREFIX, "/re.jki.join_policy/request_join"
+        )
+        return await self.client.post_json(
+            policy_server,
+            path,
+            data={
+                "room_id": room_id,
+                "room_version": room_version.identifier,
+                "user_id": user_id,
+            },
+            ignore_backoff=True,
+        )
+
+    async def join_policy_server_sign_join(
+        self,
+        policy_server: str,
+        room_id: str,
+        user_id: str,
+        token: str,
+        room_version: RoomVersion,
+        event: EventBase,
+    ) -> JsonDict:
+        path = _create_path(FEDERATION_UNSTABLE_PREFIX, "/re.jki.join_policy/sign_join")
+        return await self.client.post_json(
+            policy_server,
+            path,
+            data={
+                "room_id": room_id,
+                "user_id": user_id,
+                "token": token,
+                "room_version": room_version.identifier,
+                "event": event.get_pdu_json(),
+            },
+            ignore_backoff=True,
+        )
+
 
 def _create_path(federation_prefix: str, path: str, *args: str) -> str:
     """

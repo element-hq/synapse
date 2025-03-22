@@ -552,10 +552,22 @@ def _is_membership_change_allowed(
 
     key = (EventTypes.JoinRules, "")
     join_rule_event = auth_events.get(key)
+    join_policy_server: Optional[str] = None
     if join_rule_event:
         join_rule = join_rule_event.content.get("join_rule", JoinRules.INVITE)
+        join_policy_server = join_rule_event.content.get("re.jki.join_policy_server")
     else:
         join_rule = JoinRules.INVITE
+
+    if (
+        join_policy_server
+        and membership == Membership.JOIN
+        and not (caller_in_room or caller_invited)
+    ):
+        logger.info("Checking sigs")
+        if not event.signatures.get(join_policy_server):
+            raise AuthError(403, "Not signed by join policy server")
+        caller_invited = True
 
     user_level = get_user_power_level(event.user_id, auth_events)
     target_level = get_user_power_level(target_user_id, auth_events)

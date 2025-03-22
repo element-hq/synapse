@@ -398,6 +398,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         require_consent: bool = True,
         outlier: bool = False,
         origin_server_ts: Optional[int] = None,
+        join_policy_token: Optional[str] = None,
     ) -> Tuple[str, int]:
         """
         Internal membership update function to get an existing event or create
@@ -491,8 +492,48 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 )
                 context = await unpersisted_context.persist(event)
                 prev_state_ids = await context.get_prev_state_ids(
-                    StateFilter.from_types([(EventTypes.Member, user_id)])
+                    StateFilter.from_types(
+                        [(EventTypes.Member, user_id), (EventTypes.JoinRules, "")]
+                    )
                 )
+
+                if membership == Membership.JOIN:
+                    join_rule_id = prev_state_ids.get((EventTypes.JoinRules, ""))
+                    if join_rule_id is not None:
+                        join_rule_event = await self.store.get_event(
+                            join_rule_id, allow_none=True
+                        )
+                        if join_rule_event:
+                            join_policy_server = join_rule_event.content.get(
+                                "re.jki.join_policy_server"
+                            )
+                            if isinstance(join_policy_server, str):
+                                if join_policy_token is None:
+                                    policy_url = await self.federation_handler.federation_client.join_policy_server_get_url(
+                                        policy_server=join_policy_server,
+                                        room_id=room_id,
+                                        room_version=event.room_version,
+                                        user_id=target.to_string(),
+                                    )
+
+                                    if policy_url is not None:
+                                        raise SynapseError(
+                                            403,
+                                            "Cannot join room",
+                                            errcode="RE_JKI_JOIN_POLICY_URL",
+                                            additional_fields={
+                                                "re.jki.join_policy_url": policy_url
+                                            },
+                                        )
+                                else:
+                                    await self.federation_handler.federation_client.join_policy_server_sign_join(
+                                        policy_server=join_policy_server,
+                                        room_id=room_id,
+                                        room_version=event.room_version,
+                                        user_id=target.to_string(),
+                                        token=join_policy_token,
+                                        event=event,
+                                    )
 
                 prev_member_event_id = prev_state_ids.get(
                     (EventTypes.Member, user_id), None
@@ -584,6 +625,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
+        join_policy_token: Optional[str] = None,
     ) -> Tuple[str, int]:
         """Update a user's membership in a room.
 
@@ -681,6 +723,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             state_event_ids=state_event_ids,
                             depth=depth,
                             origin_server_ts=origin_server_ts,
+                            join_policy_token=join_policy_token,
                         )
 
         return result
@@ -704,6 +747,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
         origin_server_ts: Optional[int] = None,
+        join_policy_token: Optional[str] = None,
     ) -> Tuple[str, int]:
         """Helper for update_membership.
 
@@ -929,6 +973,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 require_consent=require_consent,
                 outlier=outlier,
                 origin_server_ts=origin_server_ts,
+                join_policy_token=join_policy_token,
             )
 
         latest_event_ids = await self.store.get_prev_events_for_room(room_id)
@@ -1188,6 +1233,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             require_consent=require_consent,
             outlier=outlier,
             origin_server_ts=origin_server_ts,
+            join_policy_token=join_policy_token,
         )
 
     async def check_for_any_membership_in_room(

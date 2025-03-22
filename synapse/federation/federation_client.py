@@ -1960,6 +1960,43 @@ class FederationClient(FederationBase):
             ip_address=ip_address,
         )
 
+    async def join_policy_server_get_url(
+        self, policy_server: str, room_id: str, room_version: RoomVersion, user_id: str
+    ) -> Optional[str]:
+        result = await self.transport_layer.join_policy_server_get_url(
+            policy_server=policy_server,
+            room_id=room_id,
+            room_version=room_version,
+            user_id=user_id,
+        )
+
+        url = result.get("url")
+        if isinstance(url, str):
+            return url
+        return None
+
+    async def join_policy_server_sign_join(
+        self,
+        policy_server: str,
+        room_id: str,
+        user_id: str,
+        token: str,
+        room_version: RoomVersion,
+        event: EventBase,
+    ) -> None:
+        result = await self.transport_layer.join_policy_server_sign_join(
+            policy_server=policy_server,
+            room_id=room_id,
+            user_id=user_id,
+            token=token,
+            room_version=room_version,
+            event=event,
+        )
+
+        signatures = result.get("signatures")
+        if signatures:
+            event.signatures[policy_server] = signatures
+
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class TimestampToEventResponse:
