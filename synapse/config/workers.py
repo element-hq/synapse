@@ -38,6 +38,7 @@ from synapse.config._base import (
     ConfigError,
     RoutableShardedWorkerHandlingConfig,
     ShardedWorkerHandlingConfig,
+    read_file,
 )
 from synapse.config._util import parse_and_validate_mapping
 from synapse.config.server import (
@@ -63,6 +64,11 @@ WORKER_REPLICATION_SETTING_DEPRECATED_MESSAGE = """
 '%s' is no longer a supported worker setting, please place '%s' onto your shared
 configuration under `main` inside the `instance_map`. See workers documentation here:
 `https://element-hq.github.io/synapse/latest/workers.html#worker-configuration`
+"""
+
+CONFLICTING_WORKER_REPLICATION_SECRET_OPTS_ERROR = """\
+Conflicting options 'worker_replication_secret' and
+'worker_replication_secret_path' are both defined in config file.
 """
 
 # This allows for a handy knob when it's time to change from 'master' to
@@ -218,7 +224,9 @@ class WorkerConfig(Config):
 
     section = "worker"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         self.worker_app = config.get("worker_app")
 
         # Canonicalise worker_app so that master always has None
@@ -242,7 +250,23 @@ class WorkerConfig(Config):
             raise ConfigError(DIRECT_TCP_ERROR, ("worker_replication_port",))
 
         # The shared secret used for authentication when connecting to the main synapse.
-        self.worker_replication_secret = config.get("worker_replication_secret", None)
+        worker_replication_secret = config.get("worker_replication_secret", None)
+        if worker_replication_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("worker_replication_secret",),
+            )
+        worker_replication_secret_path = config.get(
+            "worker_replication_secret_path", None
+        )
+        if worker_replication_secret_path:
+            if worker_replication_secret:
+                raise ConfigError(CONFLICTING_WORKER_REPLICATION_SECRET_OPTS_ERROR)
+            self.worker_replication_secret = read_file(
+                worker_replication_secret_path, "worker_replication_secret_path"
+            ).strip()
+        else:
+            self.worker_replication_secret = worker_replication_secret
 
         self.worker_name = config.get("worker_name", self.worker_app)
         self.instance_name = self.worker_name or MAIN_PROCESS_INSTANCE_NAME

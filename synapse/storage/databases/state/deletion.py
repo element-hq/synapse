@@ -95,8 +95,18 @@ class StateDeletionDataStore:
         self.db_pool = database
         self._instance_name = hs.get_instance_name()
 
-        # TODO: Clear from `state_groups_persisting` any holdovers from previous
-        # running instance.
+        with db_conn.cursor(txn_name="_clear_existing_persising") as txn:
+            self._clear_existing_persising(txn)
+
+    def _clear_existing_persising(self, txn: LoggingTransaction) -> None:
+        """On startup we clear any entries in `state_groups_persisting` that
+        match our instance name, in case of a previous unclean shutdown"""
+
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="state_groups_persisting",
+            keyvalues={"instance_name": self._instance_name},
+        )
 
     async def check_state_groups_and_bump_deletion(
         self, state_groups: AbstractSet[int]
@@ -113,12 +123,28 @@ class StateDeletionDataStore:
             "check_state_groups_and_bump_deletion",
             self._check_state_groups_and_bump_deletion_txn,
             state_groups,
+            # We don't need to lock if we're just doing a quick check, as the
+            # lock doesn't prevent any races here.
+            lock=False,
         )
 
     def _check_state_groups_and_bump_deletion_txn(
-        self, txn: LoggingTransaction, state_groups: AbstractSet[int]
+        self, txn: LoggingTransaction, state_groups: AbstractSet[int], lock: bool = True
     ) -> Collection[int]:
-        existing_state_groups = self._get_existing_groups_with_lock(txn, state_groups)
+        """Checks to make sure that the state groups haven't been deleted, and
+        if they're pending deletion we delay it (allowing time for any event
+        that will use them to finish persisting).
+
+        The `lock` flag sets if we should lock the `state_group` rows we're
+        checking, which we should do when storing new groups.
+
+        Returns:
+            The state groups that are missing, if any.
+        """
+
+        existing_state_groups = self._get_existing_groups_with_lock(
+            txn, state_groups, lock=lock
+        )
 
         self._bump_deletion_txn(txn, existing_state_groups)
 
@@ -178,18 +204,18 @@ class StateDeletionDataStore:
             )
 
     def _get_existing_groups_with_lock(
-        self, txn: LoggingTransaction, state_groups: Collection[int]
+        self, txn: LoggingTransaction, state_groups: Collection[int], lock: bool = True
     ) -> AbstractSet[int]:
         """Return which of the given state groups are in the database, and locks
         those rows with `KEY SHARE` to ensure they don't get concurrently
-        deleted."""
+        deleted (if `lock` is true)."""
         clause, args = make_in_list_sql_clause(self.db_pool.engine, "id", state_groups)
 
         sql = f"""
             SELECT id FROM state_groups
             WHERE {clause}
         """
-        if isinstance(self.db_pool.engine, PostgresEngine):
+        if lock and isinstance(self.db_pool.engine, PostgresEngine):
             # On postgres we add a row level lock to the rows to ensure that we
             # conflict with any concurrent DELETEs. `FOR KEY SHARE` lock will
             # not conflict with other read
@@ -295,18 +321,42 @@ class StateDeletionDataStore:
     async def mark_state_groups_as_pending_deletion(
         self, state_groups: Collection[int]
     ) -> None:
-        """Mark the given state groups as pending deletion"""
+        """Mark the given state groups as pending deletion.
+
+        If any of the state groups are already pending deletion, then those records are
+        left as is.
+        """
+
+        await self.db_pool.runInteraction(
+            "mark_state_groups_as_pending_deletion",
+            self._mark_state_groups_as_pending_deletion_txn,
+            state_groups,
+        )
+
+    def _mark_state_groups_as_pending_deletion_txn(
+        self,
+        txn: LoggingTransaction,
+        state_groups: Collection[int],
+    ) -> None:
+        sql = """
+        INSERT INTO state_groups_pending_deletion (state_group, insertion_ts)
+        VALUES %s
+        ON CONFLICT (state_group)
+        DO NOTHING
+        """
 
         now = self._clock.time_msec()
-
-        await self.db_pool.simple_upsert_many(
-            table="state_groups_pending_deletion",
-            key_names=("state_group",),
-            key_values=[(state_group,) for state_group in state_groups],
-            value_names=("insertion_ts",),
-            value_values=[(now,) for _ in state_groups],
-            desc="mark_state_groups_as_pending_deletion",
-        )
+        rows = [
+            (
+                state_group,
+                now,
+            )
+            for state_group in state_groups
+        ]
+        if isinstance(txn.database_engine, PostgresEngine):
+            txn.execute_values(sql % ("?",), rows, fetch=False)
+        else:
+            txn.execute_batch(sql % ("(?, ?)",), rows)
 
     async def mark_state_groups_as_used(self, state_groups: Collection[int]) -> None:
         """Mark the given state groups as now being referenced"""

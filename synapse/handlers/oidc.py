@@ -31,6 +31,7 @@ from typing import (
     List,
     Optional,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -52,7 +53,6 @@ from pymacaroons.exceptions import (
     MacaroonInitException,
     MacaroonInvalidSignatureException,
 )
-from typing_extensions import TypedDict
 
 from twisted.web.client import readBody
 from twisted.web.http_headers import Headers
@@ -382,7 +382,12 @@ class OidcProvider:
         self._macaroon_generaton = macaroon_generator
 
         self._config = provider
-        self._callback_url: str = hs.config.oidc.oidc_callback_url
+
+        self._callback_url: str
+        if provider.redirect_uri is not None:
+            self._callback_url = provider.redirect_uri
+        else:
+            self._callback_url = hs.config.oidc.oidc_callback_url
 
         # Calculate the prefix for OIDC callback paths based on the public_baseurl.
         # We'll insert this into the Path= parameter of any session cookies we set.
@@ -639,6 +644,11 @@ class OidcProvider:
             metadata["code_challenge_methods_supported"] = ["S256"]
         elif self._config.pkce_method == "never":
             metadata.pop("code_challenge_methods_supported", None)
+
+        if self._config.id_token_signing_alg_values_supported:
+            metadata["id_token_signing_alg_values_supported"] = (
+                self._config.id_token_signing_alg_values_supported
+            )
 
         self._validate_metadata(metadata)
 

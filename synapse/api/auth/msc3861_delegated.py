@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -119,7 +119,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
-        self._admin_token = self._config.admin_token
+        self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
 
         self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
             self._load_metadata
@@ -133,9 +133,10 @@ class MSC3861DelegatedAuth(BaseAuth):
             )
         else:
             # Else use the client secret
-            assert self._config.client_secret, "No client_secret provided"
+            client_secret = self._config.client_secret()
+            assert client_secret, "No client_secret provided"
             self._client_auth = ClientAuth(
-                self._config.client_id, self._config.client_secret, auth_method
+                self._config.client_id, client_secret, auth_method
             )
 
     async def _load_metadata(self) -> OpenIDProviderMetadata:
@@ -213,6 +214,9 @@ class MSC3861DelegatedAuth(BaseAuth):
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": str(self._http_client.user_agent, "utf-8"),
             "Accept": "application/json",
+            # Tell MAS that we support reading the device ID as an explicit
+            # value, not encoded in the scope. This is supported by MAS 0.15+
+            "X-MAS-Supports-Device-Id": "1",
         }
 
         args = {"token": token, "token_type_hint": "access_token"}
@@ -283,7 +287,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             requester = await self.get_user_by_access_token(access_token, allow_expired)
 
         # Do not record requests from MAS using the virtual `__oidc_admin` user.
-        if access_token != self._admin_token:
+        if access_token != self._admin_token():
             await self._record_request(request, requester)
 
         if not allow_guest and requester.is_guest:
@@ -324,7 +328,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         token: str,
         allow_expired: bool = False,
     ) -> Requester:
-        if self._admin_token is not None and token == self._admin_token:
+        admin_token = self._admin_token()
+        if admin_token is not None and token == admin_token:
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
@@ -407,29 +412,41 @@ class MSC3861DelegatedAuth(BaseAuth):
         else:
             user_id = UserID.from_string(user_id_str)
 
-        # Find device_ids in scope
-        # We only allow a single device_id in the scope, so we find them all in the
-        # scope list, and raise if there are more than one. The OIDC server should be
-        # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-        device_ids = [
-            tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
-            for tok in scope
-            if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
-        ]
+        # MAS 0.15+ will give us the device ID as an explicit value for compatibility sessions
+        # If present, we get it from here, if not we get it in thee scope
+        device_id = introspection_result.get("device_id")
+        if device_id is not None:
+            # We got the device ID explicitly, just sanity check that it's a string
+            if not isinstance(device_id, str):
+                raise AuthError(
+                    500,
+                    "Invalid device ID in introspection result",
+                )
+        else:
+            # Find device_ids in scope
+            # We only allow a single device_id in the scope, so we find them all in the
+            # scope list, and raise if there are more than one. The OIDC server should be
+            # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
+            device_ids = [
+                tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
+                for tok in scope
+                if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
+            ]
 
-        if len(device_ids) > 1:
-            raise AuthError(
-                500,
-                "Multiple device IDs in scope",
-            )
+            if len(device_ids) > 1:
+                raise AuthError(
+                    500,
+                    "Multiple device IDs in scope",
+                )
 
-        device_id = device_ids[0] if device_ids else None
+            device_id = device_ids[0] if device_ids else None
+
         if device_id is not None:
             # Sanity check the device_id
             if len(device_id) > 255 or len(device_id) < 1:
                 raise AuthError(
                     500,
-                    "Invalid device ID in scope",
+                    "Invalid device ID in introspection result",
                 )
 
             # Create the device on the fly if it does not exist

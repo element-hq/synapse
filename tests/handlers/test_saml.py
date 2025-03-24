@@ -363,6 +363,52 @@ class SamlHandlerTestCase(HomeserverTestCase):
             auth_provider_session_id=None,
         )
 
+    @override_config(
+        {
+            "saml2_config": {
+                "attribute_requirements": [
+                    {"attribute": "userGroup", "one_of": ["staff", "admin"]},
+                ],
+            },
+        }
+    )
+    def test_attribute_requirements_one_of(self) -> None:
+        """The required attributes can be comma-separated."""
+
+        # stub out the auth handler
+        auth_handler = self.hs.get_auth_handler()
+        auth_handler.complete_sso_login = AsyncMock()  # type: ignore[method-assign]
+
+        # The response doesn't have the proper department.
+        saml_response = FakeAuthnResponse(
+            {"uid": "test_user", "username": "test_user", "userGroup": ["nogroup"]}
+        )
+        request = _mock_request()
+        self.get_success(
+            self.handler._handle_authn_response(request, saml_response, "redirect_uri")
+        )
+        auth_handler.complete_sso_login.assert_not_called()
+
+        # Add the proper attributes and it should succeed.
+        saml_response = FakeAuthnResponse(
+            {"uid": "test_user", "username": "test_user", "userGroup": ["admin"]}
+        )
+        request.reset_mock()
+        self.get_success(
+            self.handler._handle_authn_response(request, saml_response, "redirect_uri")
+        )
+
+        # check that the auth handler got called as expected
+        auth_handler.complete_sso_login.assert_called_once_with(
+            "@test_user:test",
+            "saml",
+            request,
+            "redirect_uri",
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
+        )
+
 
 def _mock_request() -> Mock:
     """Returns a mock which will stand in as a SynapseRequest"""

@@ -39,6 +39,7 @@ from typing import (
     List,
     Optional,
     Pattern,
+    Protocol,
     Tuple,
     Union,
 )
@@ -46,7 +47,6 @@ from typing import (
 import attr
 import jinja2
 from canonicaljson import encode_canonical_json
-from typing_extensions import Protocol
 from zope.interface import implementer
 
 from twisted.internet import defer, interfaces

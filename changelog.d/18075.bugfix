@@ -1,1 +1,0 @@
-Fix join being denied after being invited over federation. Also fixes other out-of-band membership transitions.
