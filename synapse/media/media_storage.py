@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import shutil
+import hashlib
 from contextlib import closing
 from io import BytesIO
 from types import TracebackType
@@ -69,6 +70,29 @@ logger = logging.getLogger(__name__)
 
 CRLF = b"\r\n"
 
+class SHA256TransparentFile:
+    def __init__(self, source):
+        self._sig = hashlib.sha256()
+        self._source = source
+
+    def read(self, buffer):
+        # we ignore the buffer size, just use the `.next()` value in the source iterator
+        try:
+            bytes = self._source.read()
+            self._sig.update(bytes)
+            return bytes
+        except StopIteration:
+            return b''
+
+    def write(self, buffer):
+        logger.info("Writing buffer %s", buffer)
+        res = self._source.write(buffer)
+        self._sig.update(buffer)
+        return res
+
+    def digest(self):
+        return self._sig.hexdigest()
+
 
 class MediaStorage:
     """Responsible for storing/fetching files from local sources.
@@ -96,7 +120,7 @@ class MediaStorage:
         self.clock = hs.get_clock()
 
     @trace_with_opname("MediaStorage.store_file")
-    async def store_file(self, source: IO, file_info: FileInfo) -> str:
+    async def store_file(self, source: IO, file_info: FileInfo) -> tuple[str,str]:
         """Write `source` to the on disk media store, and also any other
         configured storage providers
 
@@ -107,17 +131,17 @@ class MediaStorage:
         Returns:
             the file path written to in the primary media store
         """
-
+        digest = None
         async with self.store_into_file(file_info) as (f, fname):
             # Write to the main media repository
-            await self.write_to_file(source, f)
+            digest = await self.write_to_file(source, f)
 
-        return fname
+        return fname, digest
 
     @trace_with_opname("MediaStorage.write_to_file")
-    async def write_to_file(self, source: IO, output: IO) -> None:
+    async def write_to_file(self, source: IO, output: IO) -> str:
         """Asynchronously write the `source` to `output`."""
-        await defer_to_thread(self.reactor, _write_file_synchronously, source, output)
+        return await defer_to_thread(self.reactor, _write_file_synchronously, source, output)
 
     @trace_with_opname("MediaStorage.store_into_file")
     @contextlib.asynccontextmanager
@@ -321,7 +345,9 @@ def _write_file_synchronously(source: IO, dest: IO) -> None:
         dest: A file like object to be written to
     """
     source.seek(0)  # Ensure we read from the start of the file
-    shutil.copyfileobj(source, dest)
+    transport = SHA256TransparentFile(source)
+    shutil.copyfileobj(transport, dest)
+    return transport.digest()
 
 
 class FileResponder(Responder):

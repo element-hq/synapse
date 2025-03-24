@@ -1148,22 +1148,24 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """
 
         # Update all the tables to set the quarantined_by flag
+        # We also pick up any media with a matching hash.
         sql = """
             UPDATE local_media_repository
             SET quarantined_by = ?
             WHERE media_id = ?
+            OR sha256 IN (SELECT DISTINCT sha256 FROM local_media_repository WHERE media_id = ?)
         """
 
         # set quarantine
         if quarantined_by is not None:
             sql += "AND safe_from_quarantine = FALSE"
             txn.executemany(
-                sql, [(quarantined_by, media_id) for media_id in local_mxcs]
+                sql, [(quarantined_by, media_id, media_id) for media_id in local_mxcs]
             )
         # remove from quarantine
         else:
             txn.executemany(
-                sql, [(quarantined_by, media_id) for media_id in local_mxcs]
+                sql, [(quarantined_by, media_id, media_id) for media_id in local_mxcs]
             )
 
         # Note that a rowcount of -1 can be used to indicate no rows were affected.
@@ -1174,8 +1176,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
                 WHERE media_origin = ? AND media_id = ?
+                OR sha256 IN (SELECT DISTINCT sha256 FROM remote_media_cache WHERE media_origin = ? AND media_id = ?)
             """,
-            [(quarantined_by, origin, media_id) for origin, media_id in remote_mxcs],
+            [(quarantined_by, origin, media_id, origin, media_id) for origin, media_id in remote_mxcs],
         )
         total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 

@@ -23,6 +23,7 @@ import errno
 import logging
 import os
 import shutil
+import hashlib
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
@@ -59,7 +60,7 @@ from synapse.media._base import (
     respond_with_responder,
 )
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage
+from synapse.media.media_storage import MediaStorage, SHA256TransparentFile
 from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
@@ -301,8 +302,12 @@ class MediaRepository:
             auth_user: The user_id of the uploader
         """
         file_info = FileInfo(server_name=None, file_id=media_id)
-        fname = await self.media_storage.store_file(content, file_info)
+        fname, sha256 = await self.media_storage.store_file(content, file_info)
+        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
         logger.info("Stored local media in file %r", fname)
+
+        if should_quarantine:
+            logger.warn("Media has been automatically quarantined as it matched existing quarantined media")
 
         await self.store.update_local_media(
             media_id=media_id,
@@ -310,6 +315,8 @@ class MediaRepository:
             upload_name=upload_name,
             media_length=content_length,
             user_id=auth_user,
+            sha256=sha256,
+            quarantined_by="system" if should_quarantine else None
         )
 
         try:
@@ -343,9 +350,13 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=None, file_id=media_id)
 
-        fname = await self.media_storage.store_file(content, file_info)
+        fname, sha256 = await self.media_storage.store_file(content, file_info)
+        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
+
+        if should_quarantine:
+            logger.warn("Media has been automatically quarantined as it matched existing quarantined media")
 
         await self.store.store_local_media(
             media_id=media_id,
@@ -354,6 +365,9 @@ class MediaRepository:
             upload_name=upload_name,
             media_length=content_length,
             user_id=auth_user,
+            sha256=sha256,
+            # TODO: Better name?
+            quarantined_by="system" if should_quarantine else None
         )
 
         try:
@@ -755,12 +769,15 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
+        digest = None
+
         async with self.media_storage.store_into_file(file_info) as (f, fname):
+            wrapped_f = SHA256TransparentFile(f)
             try:
                 length, headers = await self.client.download_media(
                     server_name,
                     media_id,
-                    output_stream=f,
+                    output_stream=wrapped_f,
                     max_size=self.max_upload_size,
                     max_timeout_ms=max_timeout_ms,
                     download_ratelimiter=download_ratelimiter,
@@ -817,6 +834,7 @@ class MediaRepository:
             # alternative where we call `finish()` *after* this, where we could
             # end up having an entry in the DB but fail to write the files to
             # the storage providers.
+            digest = wrapped_f.digest()
             await self.store.store_cached_remote_media(
                 origin=server_name,
                 media_id=media_id,
@@ -825,6 +843,7 @@ class MediaRepository:
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
+                sha256=digest,
             )
 
         logger.info("Stored remote media in file %r", fname)
@@ -845,6 +864,7 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
+            sha256=digest,
         )
 
     async def _federation_download_remote_file(
@@ -1068,7 +1088,7 @@ class MediaRepository:
                     ),
                 )
 
-                output_path = await self.media_storage.store_file(
+                output_path, _ = await self.media_storage.store_file(
                     t_byte_source, file_info
                 )
             finally:
@@ -1144,7 +1164,7 @@ class MediaRepository:
                     ),
                 )
 
-                output_path = await self.media_storage.store_file(
+                output_path, _ = await self.media_storage.store_file(
                     t_byte_source, file_info
                 )
             finally:
