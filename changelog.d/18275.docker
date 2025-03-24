@@ -1,0 +1,1 @@
+Use uv pip to install supervisor in the worker image.
