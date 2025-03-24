@@ -508,9 +508,13 @@ class EventsPersistenceStorageController:
             )
         )
 
-        await self.persist_events_store.update_current_state(
-            room_id, delta, sliding_sync_table_changes
-        )
+        logger.error("Devon: persist update_current_state: %s %s %s", state, delta, sliding_sync_table_changes)
+
+        # FIXME: Devon removed this to stop deleting the leave event from the sliding sync
+        # tables
+        # await self.persist_events_store.update_current_state(
+        #     room_id, delta, sliding_sync_table_changes
+        # )
 
     async def _calculate_current_state(self, room_id: str) -> StateMap[str]:
         """Calculate the current state of a room, based on the forward extremities
@@ -635,6 +639,20 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
+            # FIXME: Temporary hack to add remote invite to state delta
+            if not new_forward_extremities:
+                state_map: MutableStateMap[str] = {}
+                for (a, _) in chunk:
+                    if a.type == EventTypes.Member and a.membership == Membership.LEAVE:
+                        state_key = a.get_state_key()
+                        if state_key:
+                            logger.error("Devon: injecting hack into state map")
+                            state_map[(a.type, state_key)] = a.event_id
+            
+                if state_map:
+                    state_delta_for_room = DeltaState([], state_map, False)
+
+            logger.error("Devon: state delta for room: %s", state_delta_for_room)
             await self.persist_events_store._persist_events_and_state_updates(
                 room_id,
                 chunk,
