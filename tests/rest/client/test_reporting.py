@@ -28,6 +28,7 @@ from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ReportEventTestCase(unittest.HomeserverTestCase):
@@ -96,6 +97,24 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
             channel.json_body["error"],
             msg=channel.result["body"],
         )
+
+    @override_config(
+        {
+            "experimental_features": {"msc4277_enabled": True},
+            "forget_rooms_on_leave": True,
+        }
+    )
+    def test_event_existence_hidden(self) -> None:
+        """
+        Tests that the requester cannot infer the existence of an event.
+        """
+        channel = self.make_request(
+            "POST",
+            f"rooms/{self.room_id}/report/$nonsenseeventid:test",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
 
     def test_cannot_report_event_if_not_in_room(self) -> None:
         """
@@ -191,6 +210,25 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
             channel.json_body["error"],
             msg=channel.result["body"],
         )
+
+    @override_config(
+        {
+            "experimental_features": {"msc4277_enabled": True},
+            "forget_rooms_on_leave": True,
+        }
+    )
+    def test_room_existence_hidden(self) -> None:
+        """
+        Tests that the requester cannot infer the existence of a room.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/rooms/!bloop:example.org/report",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(

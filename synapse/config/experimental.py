@@ -560,3 +560,9 @@ class ExperimentalConfig(Config):
 
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
+
+        # MSC4277: Harmonizing the reporting endpoints
+        #
+        # If enabled, respond with HTTP 200 on reporting requests regardless
+        # of the subject's existence.
+        self.msc4277_enabled: bool = experimental.get("msc4277_enabled", False)

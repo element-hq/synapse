@@ -85,10 +85,13 @@ class ReportEventRestServlet(RestServlet):
             event = None
 
         if event is None:
-            raise NotFoundError(
-                "Unable to report event: "
-                "it does not exist or you aren't able to see it."
-            )
+            if self.hs.config.experimental.msc4277_enabled:
+                return 200, {}  # Hide existence
+            else:
+                raise NotFoundError(
+                    "Unable to report event: "
+                    "it does not exist or you aren't able to see it."
+                )
 
         await self.store.add_event_report(
             room_id=room_id,
@@ -138,7 +141,10 @@ class ReportRoomRestServlet(RestServlet):
 
         room = await self.store.get_room(room_id)
         if room is None:
-            raise NotFoundError("Room does not exist")
+            if self.hs.config.experimental.msc4277_enabled:
+                return 200, {}  # Hide existence
+            else:
+                raise NotFoundError("Room does not exist")
 
         await self.store.add_room_report(
             room_id=room_id,
