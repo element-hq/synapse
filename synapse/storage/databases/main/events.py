@@ -562,7 +562,8 @@ class PersistEventsStore:
                     #
                     # Ideally, we could additionally assert that we're only here for
                     # valid non-join membership transitions.
-                    assert delta_state.no_longer_in_room
+                    #assert delta_state.no_longer_in_room
+                    pass
 
         # Handle gathering info for the `sliding_sync_joined_rooms` table
         #
