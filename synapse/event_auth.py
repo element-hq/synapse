@@ -32,6 +32,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Union,
@@ -41,7 +42,6 @@ from typing import (
 from canonicaljson import encode_canonical_json
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
-from typing_extensions import Protocol
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import (
@@ -566,6 +566,7 @@ def _is_membership_change_allowed(
     logger.debug(
         "_is_membership_change_allowed: %s",
         {
+            "caller_membership": caller.membership if caller else None,
             "caller_in_room": caller_in_room,
             "caller_invited": caller_invited,
             "caller_knocked": caller_knocked,
@@ -677,7 +678,8 @@ def _is_membership_change_allowed(
                 and join_rule == JoinRules.KNOCK_RESTRICTED
             )
         ):
-            if not caller_in_room and not caller_invited:
+            # You can only join the room if you are invited or are already in the room.
+            if not (caller_in_room or caller_invited):
                 raise AuthError(403, "You are not invited to this room.")
         else:
             # TODO (erikj): may_join list

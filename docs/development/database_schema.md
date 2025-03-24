@@ -162,7 +162,7 @@ by a unique name, the current status (stored in JSON), and some dependency infor
 * Whether the update requires a previous update to be complete.
 * A rough ordering for which to complete updates.
 
-A new background updates needs to be added to the `background_updates` table:
+A new background update needs to be added to the `background_updates` table:
 
 ```sql
 INSERT INTO background_updates (ordering, update_name, depends_on, progress_json) VALUES

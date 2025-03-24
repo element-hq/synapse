@@ -1022,14 +1022,20 @@ class SlidingSyncHandler:
                             and state_key == StateValues.LAZY
                         ):
                             lazy_load_room_members = True
+
                             # Everyone in the timeline is relevant
-                            #
-                            # FIXME: We probably also care about invite, ban, kick, targets, etc
-                            # but the spec only mentions "senders".
                             timeline_membership: Set[str] = set()
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
+                                    # Anyone who sent a message is relevant
                                     timeline_membership.add(timeline_event.sender)
+
+                                    # We also care about invite, ban, kick, targets,
+                                    # etc.
+                                    if timeline_event.type == EventTypes.Member:
+                                        timeline_membership.add(
+                                            timeline_event.state_key
+                                        )
 
                             # Update the required state filter so we pick up the new
                             # membership

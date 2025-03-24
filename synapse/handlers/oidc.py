@@ -31,6 +31,7 @@ from typing import (
     List,
     Optional,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -52,7 +53,6 @@ from pymacaroons.exceptions import (
     MacaroonInitException,
     MacaroonInvalidSignatureException,
 )
-from typing_extensions import TypedDict
 
 from twisted.web.client import readBody
 from twisted.web.http_headers import Headers
@@ -382,7 +382,12 @@ class OidcProvider:
         self._macaroon_generaton = macaroon_generator
 
         self._config = provider
-        self._callback_url: str = hs.config.oidc.oidc_callback_url
+
+        self._callback_url: str
+        if provider.redirect_uri is not None:
+            self._callback_url = provider.redirect_uri
+        else:
+            self._callback_url = hs.config.oidc.oidc_callback_url
 
         # Calculate the prefix for OIDC callback paths based on the public_baseurl.
         # We'll insert this into the Path= parameter of any session cookies we set.
@@ -639,6 +644,11 @@ class OidcProvider:
             metadata["code_challenge_methods_supported"] = ["S256"]
         elif self._config.pkce_method == "never":
             metadata.pop("code_challenge_methods_supported", None)
+
+        if self._config.id_token_signing_alg_values_supported:
+            metadata["id_token_signing_alg_values_supported"] = (
+                self._config.id_token_signing_alg_values_supported
+            )
 
         self._validate_metadata(metadata)
 
@@ -1002,7 +1012,21 @@ class OidcProvider:
         """
 
         state = generate_token()
-        nonce = generate_token()
+
+        # Generate a nonce 32 characters long. When encoded with base64url later on,
+        # the nonce will be 43 characters when sent to the identity provider.
+        #
+        # While RFC7636 does not specify a minimum length for the `nonce`
+        # parameter, the TI-Messenger IDP_FD spec v1.7.3 does require it to be
+        # between 43 and 128 characters. This spec concerns using Matrix for
+        # communication in German healthcare.
+        #
+        # As increasing the length only strengthens security, we use this length
+        # to allow TI-Messenger deployments using Synapse to satisfy this
+        # external spec.
+        #
+        # See https://github.com/element-hq/synapse/pull/18109 for more context.
+        nonce = generate_token(length=32)
         code_verifier = ""
 
         if not client_redirect_url:

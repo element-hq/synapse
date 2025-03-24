@@ -1282,6 +1282,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_list_rooms(self) -> None:
         """Test that we can list rooms"""
         # Create 3 test rooms
@@ -1795,6 +1796,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(room_id, channel.json_body["rooms"][0].get("room_id"))
         self.assertEqual("ж", channel.json_body["rooms"][0].get("name"))
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_filter_public_rooms(self) -> None:
         self.helper.create_room_as(
             self.admin_user, tok=self.admin_user_tok, is_public=True
@@ -1872,6 +1874,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, response.json_body["total_rooms"])
         self.assertEqual(1, len(response.json_body["rooms"]))
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_single_room(self) -> None:
         """Test that a single room can be requested correctly"""
         # Create two test rooms
@@ -2034,6 +2037,52 @@ class RoomTestCase(unittest.HomeserverTestCase):
         # testing that the state events match is painful and not done here. We assume that
         # the create_room already does the right thing, so no need to verify that we got
         # the state events it created.
+
+    def test_room_state_param(self) -> None:
+        """Test that filtering by state event type works when requesting state"""
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.room.member",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        # only one member has joined so there should be one membership event
+        self.assertEqual(1, len(state))
+        event = state[0]
+        self.assertEqual(event["type"], "m.room.member")
+        self.assertEqual(event["state_key"], self.admin_user)
+
+    def test_room_state_param_empty(self) -> None:
+        """Test that passing an empty string as state filter param returns no state events"""
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        self.assertEqual(5, len(state))
+
+    def test_room_state_param_not_in_room(self) -> None:
+        """
+        Test that passing a state filter param for a state event not in the room
+        returns no state events
+        """
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.room.custom",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        self.assertEqual(0, len(state))
 
     def _set_canonical_alias(
         self, room_id: str, test_alias: str, admin_user_tok: str
@@ -3050,7 +3099,7 @@ PURGE_TABLES = [
     "pusher_throttle",
     "room_account_data",
     "room_tags",
-    # "state_groups",  # Current impl leaves orphaned state groups around.
+    "state_groups",
     "state_groups_state",
     "federation_inbound_events_staging",
 ]

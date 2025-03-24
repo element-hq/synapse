@@ -332,6 +332,7 @@ class EventsPersistenceStorageController:
         # store for now.
         self.main_store = stores.main
         self.state_store = stores.state
+        self._state_deletion_store = stores.state_deletion
 
         assert stores.persist_events
         self.persist_events_store = stores.persist_events
@@ -553,7 +554,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_maps_by_state_group,
             event_map=None,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_deletion_store
+            ),
         )
 
         return await res.get_state(self._state_controller, StateFilter.all())
@@ -653,15 +656,21 @@ class EventsPersistenceStorageController:
                     state_delta_for_room = DeltaState([], state_map, False)
 
             logger.error("Devon: state delta for room: %s", state_delta_for_room)
-            await self.persist_events_store._persist_events_and_state_updates(
-                room_id,
-                chunk,
-                state_delta_for_room=state_delta_for_room,
-                new_forward_extremities=new_forward_extremities,
-                use_negative_stream_ordering=backfilled,
-                inhibit_local_membership_updates=backfilled,
-                new_event_links=new_event_links,
-            )
+            
+            # Stop the state groups from being deleted while we're persisting
+            # them.
+            async with self._state_deletion_store.persisting_state_group_references(
+                events_and_contexts
+            ):
+                await self.persist_events_store._persist_events_and_state_updates(
+                    room_id,
+                    chunk,
+                    state_delta_for_room=state_delta_for_room,
+                    new_forward_extremities=new_forward_extremities,
+                    use_negative_stream_ordering=backfilled,
+                    inhibit_local_membership_updates=backfilled,
+                    new_event_links=new_event_links,
+                )
 
         return replaced_events
 
@@ -983,7 +992,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_groups,
             events_map,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_deletion_store
+            ),
         )
 
         state_resolutions_during_persistence.inc()

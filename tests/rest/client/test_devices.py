@@ -24,6 +24,7 @@ from twisted.internet.defer import ensureDeferred
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import NotFoundError
+from synapse.appservice import ApplicationService
 from synapse.rest import admin, devices, sync
 from synapse.rest.client import keys, login, register
 from synapse.server import HomeServer
@@ -455,3 +456,183 @@ class DehydratedDeviceTestCase(unittest.HomeserverTestCase):
             token,
         )
         self.assertEqual(channel.json_body["device_keys"], {"@mikey:test": {}})
+
+
+class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        register.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.hs = self.setup_test_homeserver()
+
+        # This application service uses the new MSC4190 behaviours
+        self.msc4190_service = ApplicationService(
+            id="msc4190",
+            token="some_token",
+            hs_token="some_token",
+            sender="@as:example.com",
+            namespaces={
+                ApplicationService.NS_USERS: [{"regex": "@.*", "exclusive": False}]
+            },
+            msc4190_device_management=True,
+        )
+        # This application service doesn't use the new MSC4190 behaviours
+        self.pre_msc_service = ApplicationService(
+            id="regular",
+            token="other_token",
+            hs_token="other_token",
+            sender="@as2:example.com",
+            namespaces={
+                ApplicationService.NS_USERS: [{"regex": "@.*", "exclusive": False}]
+            },
+            msc4190_device_management=False,
+        )
+        self.hs.get_datastores().main.services_cache.append(self.msc4190_service)
+        self.hs.get_datastores().main.services_cache.append(self.pre_msc_service)
+        return self.hs
+
+    def test_PUT_device(self) -> None:
+        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user("bob", self.pre_msc_service.token)
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {"devices": []})
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/devices/AABBCCDD?user_id=@alice:test",
+            content={"display_name": "Alice's device"},
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 201, channel.json_body)
+
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(len(channel.json_body["devices"]), 1)
+        self.assertEqual(channel.json_body["devices"][0]["device_id"], "AABBCCDD")
+
+        # Doing a second time should return a 200 instead of a 201
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/devices/AABBCCDD?user_id=@alice:test",
+            content={"display_name": "Alice's device"},
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # On the regular service, that API should not allow for the
+        # creation of new devices.
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/devices/AABBCCDD?user_id=@bob:test",
+            content={"display_name": "Bob's device"},
+            access_token=self.pre_msc_service.token,
+        )
+        self.assertEqual(channel.code, 404, channel.json_body)
+
+    def test_DELETE_device(self) -> None:
+        self.register_appservice_user("alice", self.msc4190_service.token)
+
+        # There should be no device
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {"devices": []})
+
+        # Create a device
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/devices/AABBCCDD?user_id=@alice:test",
+            content={},
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 201, channel.json_body)
+
+        # There should be one device
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(len(channel.json_body["devices"]), 1)
+
+        # Delete the device. UIA should not be required.
+        channel = self.make_request(
+            "DELETE",
+            "/_matrix/client/v3/devices/AABBCCDD?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # There should be no device again
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {"devices": []})
+
+    def test_POST_delete_devices(self) -> None:
+        self.register_appservice_user("alice", self.msc4190_service.token)
+
+        # There should be no device
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {"devices": []})
+
+        # Create a device
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/v3/devices/AABBCCDD?user_id=@alice:test",
+            content={},
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 201, channel.json_body)
+
+        # There should be one device
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(len(channel.json_body["devices"]), 1)
+
+        # Delete the device with delete_devices
+        # UIA should not be required.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/delete_devices?user_id=@alice:test",
+            content={"devices": ["AABBCCDD"]},
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # There should be no device again
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v3/devices?user_id=@alice:test",
+            access_token=self.msc4190_service.token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertEqual(channel.json_body, {"devices": []})

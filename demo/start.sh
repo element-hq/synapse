@@ -138,6 +138,13 @@ for port in 8080 8081 8082; do
 			  per_user:
 			    per_second: 1000
 			    burst_count: 1000
+			rc_presence:
+			  per_user:
+			    per_second: 1000
+			    burst_count: 1000
+			rc_delayed_event_mgmt:
+			  per_second: 1000
+			  burst_count: 1000
 			RC
 			)
             echo "${ratelimiting}" >> "$port.config"
