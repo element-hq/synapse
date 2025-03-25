@@ -1,0 +1,1 @@
+Hashes of media files are now tracked by Synapse. Quarantining media will now apply to all files with the same hash.
