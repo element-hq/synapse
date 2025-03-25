@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -31,7 +32,7 @@ from typing import (
     cast,
 )
 
-import attr, logging
+import attr
 
 from synapse.api.constants import Direction
 from synapse.logging.opentracing import trace
@@ -52,6 +53,7 @@ BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2 = (
 )
 
 logger = logging.getLogger(__name__)
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class LocalMedia:
@@ -224,7 +226,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "safe_from_quarantine",
                 "user_id",
                 "authenticated",
-                "sha256"
+                "sha256",
             ),
             allow_none=True,
             desc="get_local_media",
@@ -243,7 +245,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             safe_from_quarantine=row[7],
             user_id=row[8],
             authenticated=row[9],
-            sha256=row[10]
+            sha256=row[10],
         )
 
     async def get_local_media_by_user_paginate(
@@ -490,20 +492,27 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         user_id: UserID,
         url_cache: Optional[str] = None,
         sha256: Optional[str] = None,
+        quarantined_by: Optional[str] = None,
     ) -> None:
+        updatevalues = {
+            "media_type": media_type,
+            "upload_name": upload_name,
+            "media_length": media_length,
+            "url_cache": url_cache,
+            "sha256": sha256,
+        }
+
+        # This should never be un-set by this function.
+        if quarantined_by is not None:
+            updatevalues["quarantined_by"] = quarantined_by
+
         await self.db_pool.simple_update_one(
             "local_media_repository",
             keyvalues={
                 "user_id": user_id.to_string(),
                 "media_id": media_id,
             },
-            updatevalues={
-                "media_type": media_type,
-                "upload_name": upload_name,
-                "media_length": media_length,
-                "url_cache": url_cache,
-                "sha256": sha256,
-            },
+            updatevalues=updatevalues,
             desc="update_local_media",
         )
 
@@ -971,7 +980,9 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             None if the media_id doesn't exist.
         """
 
-        def get_matching_media_txn(txn: LoggingTransaction, table: str, sha256: str) -> bool:
+        def get_matching_media_txn(
+            txn: LoggingTransaction, table: str, sha256: str
+        ) -> bool:
             # Return on first match
             sql = f"""
             SELECT sha256
@@ -979,22 +990,23 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             WHERE sha256 = ? AND quarantined_by IS NOT NULL
             LIMIT 1
             """
-            txn.execute(
-                sql,
-                (
-                    sha256,
-                )
-            )
+            txn.execute(sql, (sha256,))
             row = txn.fetchone()
             return row is not None
 
         if await self.db_pool.runInteraction(
-            "get_matching_media_txn", get_matching_media_txn, "local_media_repository", sha256
+            "get_matching_media_txn",
+            get_matching_media_txn,
+            "local_media_repository",
+            sha256,
         ):
             return True
 
         if await self.db_pool.runInteraction(
-            "get_matching_media_txn", get_matching_media_txn, "remote_media_cache", sha256
+            "get_matching_media_txn",
+            get_matching_media_txn,
+            "remote_media_cache",
+            sha256,
         ):
             return True
 

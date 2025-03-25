@@ -129,6 +129,7 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
                     time_now_ms=clock.time_msec(),
                     upload_name="testfile.txt",
                     filesystem_id="abcdefg12345",
+                    sha256="abcdefg12345",
                 )
             )
 

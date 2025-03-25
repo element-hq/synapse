@@ -1257,3 +1257,26 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 502
         assert channel.json_body["errcode"] == "M_TOO_LARGE"
+
+class MediaHashesTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+        self.store = hs.get_datastores().main
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    async def test_upload_innocent(self) -> None:
+        """Attempt to upload some innocent data that should be allowed."""
+        media = self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=200)
+        print(media)
+        store_media = self.store.get_local_media("abcdef")
+        print(store_media)
