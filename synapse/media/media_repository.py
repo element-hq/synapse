@@ -24,7 +24,7 @@ import logging
 import os
 import shutil
 from io import BytesIO
-from typing import IO, TYPE_CHECKING, BinaryIO, Dict, List, Optional, Set, Tuple, cast
+from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -305,12 +305,10 @@ class MediaRepository:
             auth_user: The user_id of the uploader
         """
         file_info = FileInfo(server_name=None, file_id=media_id)
-        wrapped_content = SHA256TransparentIOReader(content)
+        sha256reader = SHA256TransparentIOReader(content)
         # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(
-            cast(IO, wrapped_content), file_info
-        )
-        sha256 = wrapped_content.hexdigest()
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256 = sha256reader.hexdigest()
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
         logger.info("Stored local media in file %r", fname)
 
@@ -360,11 +358,9 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=None, file_id=media_id)
         # This implements all of IO as it has a passthrough
-        wrapped_content = SHA256TransparentIOReader(content)
-        fname = await self.media_storage.store_file(
-            cast(IO, wrapped_content), file_info
-        )
-        sha256 = wrapped_content.hexdigest()
+        sha256reader = SHA256TransparentIOReader(content)
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256 = sha256reader.hexdigest()
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
@@ -786,13 +782,13 @@ class MediaRepository:
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
-            wrapped_f = SHA256TransparentIOWriter(f)
+            sha256writer = SHA256TransparentIOWriter(f)
             try:
                 length, headers = await self.client.download_media(
                     server_name,
                     media_id,
                     # This implements all of BinaryIO as it has a passthrough
-                    output_stream=cast(BinaryIO, wrapped_f),
+                    output_stream=sha256writer.wrap(),
                     max_size=self.max_upload_size,
                     max_timeout_ms=max_timeout_ms,
                     download_ratelimiter=download_ratelimiter,
@@ -849,7 +845,6 @@ class MediaRepository:
             # alternative where we call `finish()` *after* this, where we could
             # end up having an entry in the DB but fail to write the files to
             # the storage providers.
-            digest = wrapped_f.hexdigest()
             await self.store.store_cached_remote_media(
                 origin=server_name,
                 media_id=media_id,
@@ -858,7 +853,7 @@ class MediaRepository:
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
-                sha256=digest,
+                sha256=sha256writer.hexdigest(),
             )
 
         logger.info("Stored remote media in file %r", fname)
@@ -879,7 +874,7 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
-            sha256=digest,
+            sha256=sha256writer.hexdigest(),
         )
 
     async def _federation_download_remote_file(
@@ -914,13 +909,13 @@ class MediaRepository:
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
-            wrapped_f = SHA256TransparentIOWriter(f)
+            sha256writer = SHA256TransparentIOWriter(f)
             try:
                 res = await self.client.federation_download_media(
                     server_name,
                     media_id,
                     # This implements all of BinaryIO as it has a passthrough
-                    output_stream=cast(BinaryIO, wrapped_f),
+                    output_stream=sha256writer.wrap(),
                     max_size=self.max_upload_size,
                     max_timeout_ms=max_timeout_ms,
                     download_ratelimiter=download_ratelimiter,
@@ -991,7 +986,7 @@ class MediaRepository:
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
-                sha256=wrapped_f.hexdigest(),
+                sha256=sha256writer.hexdigest(),
             )
 
         logger.debug("Stored remote media in file %r", fname)
@@ -1012,7 +1007,7 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
-            sha256=wrapped_f.hexdigest(),
+            sha256=sha256writer.hexdigest(),
         )
 
     def _get_thumbnail_requirements(

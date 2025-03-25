@@ -31,11 +31,9 @@ from typing import (
     IO,
     TYPE_CHECKING,
     Any,
-    AnyStr,
     AsyncIterator,
     BinaryIO,
     Callable,
-    Generic,
     List,
     Optional,
     Sequence,
@@ -105,12 +103,16 @@ class SHA256TransparentIOWriter:
         """
         return self._hash.hexdigest()
 
+    def wrap(self) -> BinaryIO:
+        # This class implements a subset the IO interface and passes through everything else via __getattr__
+        return cast(BinaryIO, self)
+
     # Passthrough any other calls
     def __getattr__(self, attr_name: str) -> Any:
         return getattr(self._source, attr_name)
 
 
-class SHA256TransparentIOReader(Generic[AnyStr]):
+class SHA256TransparentIOReader:
     """Will generate a SHA256 hash from a source stream transparently.
 
     Args:
@@ -121,7 +123,7 @@ class SHA256TransparentIOReader(Generic[AnyStr]):
         self._hash = hashlib.sha256()
         self._source = source
 
-    def read(self, n: int = -1) -> AnyStr:
+    def read(self, n: int = -1) -> bytes:
         """Wrapper for source.read()
 
         Args:
@@ -141,6 +143,10 @@ class SHA256TransparentIOReader(Generic[AnyStr]):
             The digest in hex formaat.
         """
         return self._hash.hexdigest()
+
+    def wrap(self) -> IO:
+        # This class implements a subset the IO interface and passes through everything else via __getattr__
+        return cast(IO, self)
 
     # Passthrough any other calls
     def __getattr__(self, attr_name: str) -> Any:
