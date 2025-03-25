@@ -10,7 +10,7 @@ As an example, a SSO service may return the email address
 to turn that into a displayname when creating a Matrix user for this individual.
 It may choose `John Smith`, or `Smith, John [Example.com]` or any number of
 variations. As each Synapse configuration may want something different, this is
-where SAML mapping providers come into play.
+where SSO mapping providers come into play.
 
 SSO mapping providers are currently supported for OpenID and SAML SSO
 configurations. Please see the details below for how to implement your own.
