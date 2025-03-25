@@ -107,7 +107,7 @@ class SHA256TransparentBinaryIO:
 
     # Passthrough any other calls
     def __getattr__(self, attr_name: str) -> Any:
-        return getattr(self.obj, attr_name)
+        return getattr(self._source, attr_name)
 
 
 class SHA256TransparentIO(Generic[AnyStr]):
@@ -144,7 +144,7 @@ class SHA256TransparentIO(Generic[AnyStr]):
 
     # Passthrough any other calls
     def __getattr__(self, attr_name: str) -> Any:
-        return getattr(self.obj, attr_name)
+        return getattr(self._source, attr_name)
 
 
 class MediaStorage:

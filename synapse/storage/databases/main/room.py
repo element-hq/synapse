@@ -1152,8 +1152,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         sql = """
             UPDATE local_media_repository
             SET quarantined_by = ?
-            WHERE media_id = ?
-            OR sha256 IN (SELECT DISTINCT sha256 FROM local_media_repository WHERE media_id = ?)
+            WHERE (media_id = ?
+            OR sha256 IN (SELECT DISTINCT sha256 FROM local_media_repository WHERE media_id = ?))
         """
 
         # set quarantine
