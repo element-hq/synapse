@@ -2,12 +2,13 @@
 
 ARG SYNAPSE_VERSION=latest
 ARG FROM=matrixdotorg/synapse:$SYNAPSE_VERSION
+ARG DEBIAN_VERSION=bookworm
 
 # first of all, we create a base image with an nginx which we can copy into the
 # target image. For repeated rebuilds, this is much faster than apt installing
 # each time.
 
-FROM docker.io/library/debian:bookworm-slim AS deps_base
+FROM docker.io/library/debian:${DEBIAN_VERSION}-slim AS deps_base
     RUN \
        --mount=type=cache,target=/var/cache/apt,sharing=locked \
        --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -21,7 +22,7 @@ FROM docker.io/library/debian:bookworm-slim AS deps_base
 # which makes it much easier to copy (but we need to make sure we use an image
 # based on the same debian version as the synapse image, to make sure we get
 # the expected version of libc.
-FROM docker.io/library/redis:7-bookworm AS redis_base
+FROM docker.io/library/redis:7-${DEBIAN_VERSION} AS redis_base
 
 # now build the final image, based on the the regular Synapse docker image
 FROM $FROM
