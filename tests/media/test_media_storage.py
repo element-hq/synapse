@@ -1260,6 +1260,15 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         assert channel.json_body["errcode"] == "M_TOO_LARGE"
 
 
+def read_body(
+    response: IResponse, stream: ByteWriteable, max_size: Optional[int]
+) -> Deferred:
+    d: Deferred = defer.Deferred()
+    stream.write(SMALL_PNG)
+    d.callback(len(SMALL_PNG))
+    return d
+
+
 class MediaHashesTestCase(unittest.HomeserverTestCase):
     servlets = [
         admin.register_servlets,
@@ -1312,15 +1321,6 @@ class MediaHashesTestCase(unittest.HomeserverTestCase):
             store_media_a.sha256,
             store_media_b.sha256,
         )
-
-    @staticmethod
-    def read_body(
-        response: IResponse, stream: ByteWriteable, max_size: Optional[int]
-    ) -> Deferred:
-        d: Deferred = defer.Deferred()
-        stream.write(SMALL_PNG)
-        d.callback(len(SMALL_PNG))
-        return d
 
     @override_config(
         {
