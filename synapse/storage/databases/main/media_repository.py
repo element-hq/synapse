@@ -1007,14 +1007,14 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             SELECT 1
             FROM local_media_repository
             WHERE sha256 = ? AND quarantined_by IS NOT NULL
-            LIMIT 1
 
             UNION ALL
 
             SELECT 1
             FROM remote_media_cache
             WHERE sha256 = ? AND quarantined_by IS NOT NULL
-            LIMIT 1"""
+            LIMIT 1
+            """
             txn.execute(sql, (sha256, sha256))
             row = txn.fetchone()
             return row is not None

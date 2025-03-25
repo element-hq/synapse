@@ -131,7 +131,7 @@ class SHA256TransparentIOReader(Generic[AnyStr]):
             the value of source.read()
         """
         bytes = self._source.read(n)
-        self._sig.update(bytes)
+        self._hash.update(bytes)
         return bytes
 
     def hexdigest(self) -> str:
@@ -140,7 +140,7 @@ class SHA256TransparentIOReader(Generic[AnyStr]):
         Returns:
             The digest in hex formaat.
         """
-        return self._sig.hexdigest()
+        return self._hash.hexdigest()
 
     # Passthrough any other calls
     def __getattr__(self, attr_name: str) -> Any:
