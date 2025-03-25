@@ -121,6 +121,8 @@ async def phone_stats_home(
 
     room_count = await store.get_room_count()
     stats["total_room_count"] = room_count
+    stats["total_message_count"] = await store.count_total_messages()
+    stats["total_e2ee_event_count"] = await store.count_total_e2ee_events()
 
     stats["daily_active_users"] = common_metrics.daily_active_users
     stats["monthly_active_users"] = await store.count_monthly_users()
