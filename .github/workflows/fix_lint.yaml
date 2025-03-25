@@ -25,9 +25,10 @@ jobs:
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
 
       - name: Setup Poetry
-        uses: matrix-org/setup-python-poetry@4421c92b6223f03ae55560e29aa8ebd39cf6314a # v1.2.4
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           install-project: "false"
+          poetry-version: "2.1.1"
 
       - name: Run ruff check
         continue-on-error: true
