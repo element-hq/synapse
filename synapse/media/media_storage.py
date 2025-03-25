@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 CRLF = b"\r\n"
 
 
-class SHA256TransparentBinaryIO:
+class SHA256TransparentIOWriter:
     """Will generate a SHA256 hash from a source stream transparently.
 
     Args:
@@ -81,7 +81,7 @@ class SHA256TransparentBinaryIO:
     """
 
     def __init__(self, source: BinaryIO):
-        self._sig = hashlib.sha256()
+        self._hash = hashlib.sha256()
         self._source = source
 
     def write(self, buffer: Union[bytes, bytearray]) -> int:
@@ -94,7 +94,7 @@ class SHA256TransparentBinaryIO:
             the value of source.write()
         """
         res = self._source.write(buffer)
-        self._sig.update(buffer)
+        self._hash.update(buffer)
         return res
 
     def hexdigest(self) -> str:
@@ -103,14 +103,14 @@ class SHA256TransparentBinaryIO:
         Returns:
             The digest in hex formaat.
         """
-        return self._sig.hexdigest()
+        return self._hash.hexdigest()
 
     # Passthrough any other calls
     def __getattr__(self, attr_name: str) -> Any:
         return getattr(self._source, attr_name)
 
 
-class SHA256TransparentIO(Generic[AnyStr]):
+class SHA256TransparentIOReader(Generic[AnyStr]):
     """Will generate a SHA256 hash from a source stream transparently.
 
     Args:
@@ -118,7 +118,7 @@ class SHA256TransparentIO(Generic[AnyStr]):
     """
 
     def __init__(self, source: IO):
-        self._sig = hashlib.sha256()
+        self._hash = hashlib.sha256()
         self._source = source
 
     def read(self, n: int = -1) -> AnyStr:

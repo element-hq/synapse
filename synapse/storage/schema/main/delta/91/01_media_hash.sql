@@ -11,10 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a column `sha256` to `local_media_repository` table.
+-- Store the SHA256 content hash of media files.
 ALTER TABLE local_media_repository ADD COLUMN sha256 TEXT;
 ALTER TABLE remote_media_cache ADD COLUMN sha256 TEXT;
-
--- Add a cache
-CREATE INDEX local_media_repository_sha256 ON local_media_repository (sha256, media_id);
-CREATE INDEX remote_media_cache_sha256 ON remote_media_cache (sha256, media_id);

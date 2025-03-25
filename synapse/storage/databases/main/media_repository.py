@@ -159,6 +159,26 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
             unique=True,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="local_media_repository_sha256_idx",
+            index_name="local_media_repository_sha256",
+            table="local_media_repository",
+            where_clause="WHERE sha256 IS NOT NULL",
+            columns=[
+                "sha256",
+            ],
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="remote_media_cache_sha256_idx",
+            index_name="remote_media_cache_sha256",
+            table="remote_media_cache",
+            where_clause="WHERE sha256 IS NOT NULL",
+            columns=[
+                "sha256",
+            ],
+        )
+
         self.db_pool.updates.register_background_update_handler(
             BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2,
             self._drop_media_index_without_method,
@@ -490,8 +510,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         upload_name: Optional[str],
         media_length: int,
         user_id: UserID,
+        sha256: str,
         url_cache: Optional[str] = None,
-        sha256: Optional[str] = None,
         quarantined_by: Optional[str] = None,
     ) -> None:
         updatevalues = {
@@ -973,7 +993,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         )
 
     async def get_is_hash_quarantined(self, sha256: str) -> bool:
-        """Get the metadata for a local piece of media
+        """Get whether a specific sha256 hash digest matches any quarantined media.
 
         Returns:
             None if the media_id doesn't exist.
@@ -983,30 +1003,25 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             txn: LoggingTransaction, table: str, sha256: str
         ) -> bool:
             # Return on first match
-            sql = f"""
-            SELECT sha256
-            FROM {table}
+            sql = """
+            SELECT 1
+            FROM local_media_repository
             WHERE sha256 = ? AND quarantined_by IS NOT NULL
             LIMIT 1
-            """
-            txn.execute(sql, (sha256,))
+
+            UNION ALL
+
+            SELECT 1
+            FROM remote_media_cache
+            WHERE sha256 = ? AND quarantined_by IS NOT NULL
+            LIMIT 1"""
+            txn.execute(sql, (sha256, sha256))
             row = txn.fetchone()
             return row is not None
 
-        if await self.db_pool.runInteraction(
+        return await self.db_pool.runInteraction(
             "get_matching_media_txn",
             get_matching_media_txn,
             "local_media_repository",
             sha256,
-        ):
-            return True
-
-        if await self.db_pool.runInteraction(
-            "get_matching_media_txn",
-            get_matching_media_txn,
-            "remote_media_cache",
-            sha256,
-        ):
-            return True
-
-        return False
+        )

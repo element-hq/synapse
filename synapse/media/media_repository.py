@@ -61,8 +61,8 @@ from synapse.media._base import (
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import (
     MediaStorage,
-    SHA256TransparentBinaryIO,
-    SHA256TransparentIO,
+    SHA256TransparentIOReader,
+    SHA256TransparentIOWriter,
 )
 from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
@@ -305,7 +305,7 @@ class MediaRepository:
             auth_user: The user_id of the uploader
         """
         file_info = FileInfo(server_name=None, file_id=media_id)
-        wrapped_content = SHA256TransparentIO(content)
+        wrapped_content = SHA256TransparentIOReader(content)
         # This implements all of IO as it has a passthrough
         fname = await self.media_storage.store_file(
             cast(IO, wrapped_content), file_info
@@ -360,7 +360,7 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=None, file_id=media_id)
         # This implements all of IO as it has a passthrough
-        wrapped_content = SHA256TransparentIO(content)
+        wrapped_content = SHA256TransparentIOReader(content)
         fname = await self.media_storage.store_file(
             cast(IO, wrapped_content), file_info
         )
@@ -785,10 +785,8 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
-        digest = None
-
         async with self.media_storage.store_into_file(file_info) as (f, fname):
-            wrapped_f = SHA256TransparentBinaryIO(f)
+            wrapped_f = SHA256TransparentIOWriter(f)
             try:
                 length, headers = await self.client.download_media(
                     server_name,
@@ -916,7 +914,7 @@ class MediaRepository:
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
-            wrapped_f = SHA256TransparentBinaryIO(f)
+            wrapped_f = SHA256TransparentIOWriter(f)
             try:
                 res = await self.client.federation_download_media(
                     server_name,

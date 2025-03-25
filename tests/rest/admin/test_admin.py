@@ -20,7 +20,7 @@
 #
 
 import urllib.parse
-from typing import Dict
+from typing import Dict, cast
 
 from parameterized import parameterized
 
@@ -238,14 +238,13 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Remove the hash from the media to simulate historic media.
         self.get_success(
             self.hs.get_datastores().main.update_local_media(
-                server_and_media_id_3.split("/")[1],
-                "image/png",
-                None,
-                500,
-                UserID.from_string(non_admin_user),
-                None,
-                None,
-                None,
+                media_id=server_and_media_id_3.split("/")[1],
+                media_type="image/png",
+                upload_name=None,
+                media_length=123,
+                user_id=UserID.from_string(non_admin_user),
+                # Hack to force some media to have no hash.
+                sha256=cast(str, None),
             )
         )
 
