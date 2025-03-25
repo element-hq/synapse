@@ -1127,10 +1127,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         return local_media_ids
 
-    def _quarantine_matching_media_txn(
+    def _quarantine_local_media_txn(
         self,
         txn: LoggingTransaction,
-        table: Union["local_media_repository","remote_media_cache"],
         mxcs: List[str],
         quarantined_by: Optional[str],
     ) -> int:
@@ -1138,7 +1137,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         Args:
             txn (cursor)
-            local_mxcs: A list of local mxc URLs
+            mxcs: A list of local media ids
             quarantined_by: The ID of the user who initiated the quarantine request
                 If it is `None` media will be removed from quarantine
         Returns:
@@ -1151,15 +1150,15 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         # First, determine the hashes of the media we want to delete locally.
         # We also want the media_ids for any media that lacks a hash.
-        hash_sql = f"SELECT sha256, media_id FROM {table} WHERE media_id IN (" + ", ".join(["?"] * len(mxcs)) + ")"
-        if table == "local_media_repository" and quarantined_by is not None:
+        hash_sql = (
+            "SELECT sha256, media_id FROM local_media_repository WHERE media_id IN ("
+            + ", ".join(["?"] * len(mxcs))
+            + ")"
+        )
+        if quarantined_by is not None:
             hash_sql += " AND safe_from_quarantine = FALSE"
 
-        print("mxcs", mxcs)
-        txn.execute(
-            hash_sql,
-            mxcs
-        )
+        txn.execute(hash_sql, mxcs)
         results = txn.fetchall()
 
         # Split results into hashes, and hashless media.
@@ -1171,19 +1170,87 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             else:
                 non_hashed_media_ids.add(row[1])
 
+        total_media_quarantined = 0
         # Effectively a legacy path, update any media
         # that was explicitly named.
         if len(non_hashed_media_ids):
-            sql = f"""
-                UPDATE {table}
+            sql = """
+                UPDATE local_media_repository
                 SET quarantined_by = ?
                 WHERE media_id = ?"""
-            
-            if table == "local_media_repository" and quarantined_by is not None:
+
+            if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
+            txn.executemany(sql, [(quarantined_by, x) for x in non_hashed_media_ids])
+            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+
+        # Update any media that was identified via hash.
+        if len(hashes):
+            # Update all the tables to set the quarantined_by flag
+            # We also pick up any media with a matching hash.
+            sql = """
+                UPDATE local_media_repository
+                SET quarantined_by = ?
+                WHERE sha256 = ?"""
+
+            # set quarantine
+            if quarantined_by is not None:
+                sql += " AND safe_from_quarantine = FALSE"
+
+            txn.executemany(sql, [(quarantined_by, x) for x in hashes])
+            # Note that a rowcount of -1 can be used to indicate no rows were affected.
+            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
+
+        return total_media_quarantined
+
+    def _quarantine_remote_media_txn(
+        self,
+        txn: LoggingTransaction,
+        mxcs: List[Tuple[str, str]],
+        quarantined_by: Optional[str],
+    ) -> int:
+        """Quarantine and unquarantine remote items
+
+        Args:
+            txn (cursor)
+            mxcs: A list of tuples of media_origin, media_id
+            quarantined_by: The ID of the user who initiated the quarantine request
+                If it is `None` media will be removed from quarantine
+        Returns:
+            The total number of media items quarantined
+        """
+
+        if not mxcs:
+            # Shortcircuit if the mxc list is empty
+            return 0
+
+        # First, determine the hashes of the media we want to delete locally.
+        # We also want the media_ids for any media that lacks a hash.
+        hashes = set()
+        non_hashed_media_ids = set()
+        for media_origin, media_id in mxcs:
+            hash_sql = "SELECT sha256, media_id, media_origin FROM remote_media_cache WHERE media_origin = ? AND media_id = ?"
+            txn.execute(hash_sql, (media_origin, media_id))
+            # Split results into hashes, and hashless media.
+            row = txn.fetchone()
+            if row:
+                if row[0]:
+                    hashes.add(row[0])
+                else:
+                    non_hashed_media_ids.add((row[1], row[2]))
+
+        total_media_quarantined = 0
+        # Effectively a legacy path, update any media
+        # that was explicitly named.
+        if len(non_hashed_media_ids):
+            sql = """
+                UPDATE remote_media_cache
+                SET quarantined_by = ?
+                WHERE media_id = ? AND media_origin = ?"""
+
             txn.executemany(
-                sql, [(quarantined_by, x) for x in non_hashed_media_ids]
+                sql, [(quarantined_by, x, y) for x, y in non_hashed_media_ids]
             )
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
@@ -1192,21 +1259,13 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         if len(hashes):
             # Update all the tables to set the quarantined_by flag
             # We also pick up any media with a matching hash.
-            sql = f"""
-                UPDATE {table}
+            sql = """
+                UPDATE remote_media_cache
                 SET quarantined_by = ?
                 WHERE sha256 = ?"""
-            
-            # set quarantine
-            if table == "local_media_repository" and quarantined_by is not None:
-                sql += " AND safe_from_quarantine = FALSE"
-
-            txn.executemany(
-                sql, [(quarantined_by, x) for x in hashes]
-            )
+            txn.executemany(sql, [(quarantined_by, x) for x in hashes])
             # Note that a rowcount of -1 can be used to indicate no rows were affected.
-            total_media_quarantined = txn.rowcount if txn.rowcount > 0 else 0
-
+            total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
         return total_media_quarantined
 
@@ -1230,8 +1289,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             The total number of media items quarantined
         """
 
-        count = self._quarantine_matching_media_txn(txn, "local_media_repository", local_mxcs, quarantined_by)
-        count += self._quarantine_matching_media_txn(txn, "remote_media_cache", remote_mxcs, quarantined_by)
+        count = self._quarantine_local_media_txn(txn, local_mxcs, quarantined_by)
+        count += self._quarantine_remote_media_txn(txn, remote_mxcs, quarantined_by)
 
         return count
 
