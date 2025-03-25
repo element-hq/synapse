@@ -509,7 +509,6 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         await self.db_pool.simple_update_one(
             "local_media_repository",
             keyvalues={
-                "user_id": user_id.to_string(),
                 "media_id": media_id,
             },
             updatevalues=updatevalues,
