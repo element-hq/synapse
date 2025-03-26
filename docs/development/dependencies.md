@@ -150,6 +150,28 @@ $ poetry shell
 $ poetry install --extras all
 ```
 
+If you want to go even further and remove the Poetry caches:
+
+```shell
+# Find your Poetry cache directory
+# Docs: https://github.com/python-poetry/poetry/blob/main/docs/configuration.md#cache-directory
+$ poetry config cache-dir
+
+# Remove packages from all cached repositories
+$ poetry cache clear --all .
+
+# Go completely nuclear and clear out everything Poetry cache related
+# including the wheel artifacts which is not covered by the above command
+# (see https://github.com/python-poetry/poetry/issues/10304)
+#
+# This is necessary in order to rebuild or fetch new wheels. For example, if you update
+# the `icu` library in on your system, you will need to rebuild the PyICU Python package
+# in order to incorporate the correct dynamically linked library locations otherwise you
+# will run into errors like: `ImportError: libicui18n.so.75: cannot open shared object file: No such file or directory`
+$ rm -rf $(poetry config cache-dir)
+```
+
+
 ## ...run a command in the `poetry` virtualenv?
 
 Use `poetry run cmd args` when you need the python virtualenv context.
