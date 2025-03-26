@@ -150,6 +150,24 @@ $ poetry shell
 $ poetry install --extras all
 ```
 
+If you want to go even further and remove the Poetry caches (this is necessary in order
+to rebuild or fetch new wheels):
+
+```shell
+# Find your Poetry cache directory
+# Docs: https://github.com/python-poetry/poetry/blob/main/docs/configuration.md#cache-directory
+$ poetry config cache-dir
+
+# Remove packages from all cached repositories
+$ poetry cache clear --all .
+
+# Go completely nuclear and clear out everything Poetry cache related
+# including the wheel artifacts which is not covered by the above command
+# (see https://github.com/python-poetry/poetry/issues/10304)
+$ rm -rf $(poetry config cache-dir)
+```
+
+
 ## ...run a command in the `poetry` virtualenv?
 
 Use `poetry run cmd args` when you need the python virtualenv context.
