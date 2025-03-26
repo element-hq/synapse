@@ -1167,11 +1167,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         # Split results into hashes, and hashless media.
         hashes = set()
         non_hashed_media_ids = set()
-        for row in results:
-            if row[0]:
-                hashes.add(row[0])
+        for sha256, media_id in txn:
+            if sha256:
+                hashes.add(sha256)
             else:
-                non_hashed_media_ids.add(row[1])
+                non_hashed_media_ids.add(media_id)
 
         total_media_quarantined = 0
 
@@ -1246,15 +1246,15 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             mxcs,
         )
 
-        hash_sql = f"SELECT sha256, media_id, media_origin FROM remote_media_cache WHERE {hash_sql_in_list_clause}"
+        hash_sql = f"SELECT sha256, media_origin, media_id FROM remote_media_cache WHERE {hash_sql_in_list_clause}"
         txn.execute(hash_sql, hash_sql_args)
+
         # Split results into hashes, and hashless media.
-        row = txn.fetchone()
-        if row:
-            if row[0]:
-                hashes.add(row[0])
+        for sha256, media_origin, media_id in txn:
+            if sha256:
+                hashes.add(sha256)
             else:
-                non_hashed_media_ids.add((row[1], row[2]))
+                non_hashed_media_ids.add((media_origin, media_id))
 
         total_media_quarantined = 0
         # Effectively a legacy path, update any media
