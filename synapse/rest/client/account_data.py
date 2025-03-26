@@ -68,7 +68,6 @@ class AccountDataServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self._hs = hs
-        self.defaults = hs.config.server.account_data_defaults
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.handler = hs.get_account_data_handler()
@@ -116,11 +115,6 @@ class AccountDataServlet(RestServlet):
             account_data = await self.store.get_global_account_data_by_type_for_user(
                 user_id, account_data_type
             )
-
-        if account_data is None:
-            account_data = self.defaults.get(account_data_type)
-            if account_data is None:
-                raise NotFoundError("Account data not found")
 
         # If experimental support for MSC3391 is enabled, then this endpoint should
         # return a 404 if the content for an account data type is an empty dict.

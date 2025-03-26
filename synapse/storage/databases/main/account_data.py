@@ -102,6 +102,8 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             self._delete_account_data_for_deactivated_users,
         )
 
+        self.defaults = hs.config.server.account_data_defaults
+
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
 
@@ -149,10 +151,16 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
             txn.execute(sql, (user_id,))
 
-            return {
+            user_account_data = {
                 account_data_type: db_to_json(content)
                 for account_data_type, content in txn
             }
+
+            for type, content in self.defaults.items():
+                if account_data.get(type) is None:
+                    account_data[type] = content
+
+            return account_data
 
         return await self.db_pool.runInteraction(
             "get_global_account_data_for_user", get_global_account_data_for_user
@@ -225,7 +233,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         if result:
             return db_to_json(result)
         else:
-            return None
+            return self.defaults.get(data_type)
 
     async def get_latest_stream_id_for_global_account_data_by_type_for_user(
         self, user_id: str, data_type: str
