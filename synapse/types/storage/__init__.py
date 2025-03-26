@@ -48,3 +48,5 @@ class _BackgroundUpdates:
     SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE = (
         "sliding_sync_membership_snapshots_fix_forgotten_column_bg_update"
     )
+
+    EVENTS_TRACK_COUNTS_BG_UPDATE = "events_track_counts"

@@ -311,6 +311,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             self._sliding_sync_membership_snapshots_fix_forgotten_column_bg_update,
         )
 
+        # Add a background update to add triggers which track event counts.
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.EVENTS_TRACK_COUNTS_BG_UPDATE,
+            self._events_track_event_counts_bg_update,
+        )
+
         # We want this to run on the main database at startup before we start processing
         # events.
         #
@@ -2546,6 +2552,90 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         return num_rows
+
+    async def _events_track_event_counts_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """
+        Background update to populate the `event_stats` table with initial
+        values, and register DB triggers to continue updating it.
+
+        The update will iterate through the `events` table in batches and keep
+        track of the the event counts it sees. Once the full table has been run
+        through, it registers TRIGGERs on rows being added/removed from the
+        events table, which will keep the event counts continuously updated.
+        
+        This data is intended to be used by the phone-home stats to keep track
+        of total event and message counts. A trigger is preferred to counting
+        rows in the `events` table, as said table can grow quite large.
+        
+        It is also preferable to adding an index on the `events` table, as even
+        an index can grow large. And calculating total counts would require
+        querying that entire index.
+        """
+        last_event_stream_ordering = progress.get(
+            "last_event_stream_ordering", -(1 << 31)
+        )
+
+        def _txn(
+            txn: LoggingTransaction,
+        ) -> None:
+            # Increment the counts based on the events present in this batch.
+            txn.execute(
+                """
+                UPDATE event_type_count (
+                    unencrypted_message_count,
+                    e2ee_event_count,
+                    total_event_count
+                ) SET
+                    unencrypted_message_count + (
+                        SELECT COUNT(stream_ordering)
+                            WHERE type = 'm.room.message'
+                                AND state_key IS NULL
+                                AND stream_ordering > ?
+                            ORDER BY stream_ordering ASC
+                            LIMIT ?
+                    ),
+                    e2ee_event_count + (
+                        SELECT COUNT(stream_ordering)
+                            WHERE type = 'm.room.encrypted'
+                                AND state_key IS NULL
+                                AND stream_ordering > ?
+                            ORDER BY stream_ordering ASC
+                            LIMIT ?
+                    ),
+                    total_event_count + (
+                        SELECT COUNT(stream_ordering)
+                            WHERE stream_ordering > ?
+                            ORDER BY stream_ordering ASC
+                            LIMIT ?
+                """,
+                (last_event_stream_ordering, batch_size),
+            )
+
+            self._stream_id_gen.get_current_token
+
+            # Update the progress
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.EVENTS_TRACK_COUNTS_BG_UPDATE,
+                {
+                    "last_event_stream_ordering": last_event_stream_ordering + batch_size,
+                },
+            )
+
+        await self.db_pool.runInteraction(
+            "_events_track_event_counts_bg_update",
+            _txn,
+        )
+
+        if not num_rows:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE
+            )
+
+        return batch_size
+
 
 
 def _resolve_stale_data_in_sliding_sync_tables(
