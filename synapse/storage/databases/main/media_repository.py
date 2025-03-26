@@ -163,7 +163,7 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
             update_name="local_media_repository_sha256_idx",
             index_name="local_media_repository_sha256",
             table="local_media_repository",
-            where_clause="WHERE sha256 IS NOT NULL",
+            where_clause="sha256 IS NOT NULL",
             columns=[
                 "sha256",
             ],
@@ -173,7 +173,7 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
             update_name="remote_media_cache_sha256_idx",
             index_name="remote_media_cache_sha256",
             table="remote_media_cache",
-            where_clause="WHERE sha256 IS NOT NULL",
+            where_clause="sha256 IS NOT NULL",
             columns=[
                 "sha256",
             ],

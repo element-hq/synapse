@@ -14,3 +14,8 @@
 -- Store the SHA256 content hash of media files.
 ALTER TABLE local_media_repository ADD COLUMN sha256 TEXT;
 ALTER TABLE remote_media_cache ADD COLUMN sha256 TEXT;
+
+-- Add a background updates to handle creating the new index.
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+    (9101, 'local_media_repository_sha256_idx', '{}'),
+    (9101, 'remote_media_cache_sha256_idx', '{}');

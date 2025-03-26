@@ -51,11 +51,15 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedRoomStream
-from synapse.storage._base import db_to_json, make_in_list_sql_clause
+from synapse.storage._base import (
+    db_to_json,
+    make_in_list_sql_clause,
+)
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.types import Cursor
@@ -1150,15 +1154,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         # First, determine the hashes of the media we want to delete locally.
         # We also want the media_ids for any media that lacks a hash.
-        hash_sql = (
-            "SELECT sha256, media_id FROM local_media_repository WHERE media_id IN ("
-            + ", ".join(["?"] * len(mxcs))
-            + ")"
+        hash_sql_many_clause_sql, hash_sql_many_clause_args = make_in_list_sql_clause(
+            txn.database_engine, "media_id", mxcs
         )
+        hash_sql = f"SELECT sha256, media_id FROM local_media_repository WHERE {hash_sql_many_clause_sql}"
         if quarantined_by is not None:
             hash_sql += " AND safe_from_quarantine = FALSE"
 
-        txn.execute(hash_sql, mxcs)
+        txn.execute(hash_sql, hash_sql_many_clause_args)
         results = txn.fetchall()
 
         # Split results into hashes, and hashless media.
@@ -1171,34 +1174,40 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 non_hashed_media_ids.add(row[1])
 
         total_media_quarantined = 0
+
         # Effectively a legacy path, update any media
         # that was explicitly named.
-        if len(non_hashed_media_ids):
-            sql = """
+        if non_hashed_media_ids:
+            sql_many_clause_sql, sql_many_clause_args = make_in_list_sql_clause(
+                txn.database_engine, "media_id", non_hashed_media_ids
+            )
+            sql = f"""
                 UPDATE local_media_repository
                 SET quarantined_by = ?
-                WHERE media_id = ?"""
+                WHERE {sql_many_clause_sql}"""
 
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
-            txn.executemany(sql, [(quarantined_by, x) for x in non_hashed_media_ids])
+            txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
         # Update any media that was identified via hash.
-        if len(hashes):
+        if hashes:
             # Update all the tables to set the quarantined_by flag
             # We also pick up any media with a matching hash.
-            sql = """
+            sql_many_clause_sql, sql_many_clause_args = make_in_list_sql_clause(
+                txn.database_engine, "sha256", hashes
+            )
+            sql = f"""
                 UPDATE local_media_repository
                 SET quarantined_by = ?
-                WHERE sha256 = ?"""
+                WHERE {sql_many_clause_sql}"""
 
-            # set quarantine
             if quarantined_by is not None:
                 sql += " AND safe_from_quarantine = FALSE"
 
-            txn.executemany(sql, [(quarantined_by, x) for x in hashes])
+            txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             # Note that a rowcount of -1 can be used to indicate no rows were affected.
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
@@ -1227,43 +1236,56 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         # First, determine the hashes of the media we want to delete locally.
         # We also want the media_ids for any media that lacks a hash.
+
         hashes = set()
         non_hashed_media_ids = set()
-        for media_origin, media_id in mxcs:
-            hash_sql = "SELECT sha256, media_id, media_origin FROM remote_media_cache WHERE media_origin = ? AND media_id = ?"
-            txn.execute(hash_sql, (media_origin, media_id))
-            # Split results into hashes, and hashless media.
-            row = txn.fetchone()
-            if row:
-                if row[0]:
-                    hashes.add(row[0])
-                else:
-                    non_hashed_media_ids.add((row[1], row[2]))
+
+        hash_sql_in_list_clause, hash_sql_args = make_tuple_in_list_sql_clause(
+            txn.database_engine,
+            ("media_origin", "media_id"),
+            mxcs,
+        )
+
+        hash_sql = f"SELECT sha256, media_id, media_origin FROM remote_media_cache WHERE {hash_sql_in_list_clause}"
+        txn.execute(hash_sql, hash_sql_args)
+        # Split results into hashes, and hashless media.
+        row = txn.fetchone()
+        if row:
+            if row[0]:
+                hashes.add(row[0])
+            else:
+                non_hashed_media_ids.add((row[1], row[2]))
 
         total_media_quarantined = 0
         # Effectively a legacy path, update any media
         # that was explicitly named.
-        if len(non_hashed_media_ids):
-            sql = """
+        if non_hashed_media_ids:
+            sql_in_list_clause, sql_args = make_tuple_in_list_sql_clause(
+                txn.database_engine,
+                ("media_origin", "media_id"),
+                non_hashed_media_ids,
+            )
+            sql = f"""
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
-                WHERE media_id = ? AND media_origin = ?"""
+                WHERE {sql_in_list_clause}"""
 
-            txn.executemany(
-                sql, [(quarantined_by, x, y) for x, y in non_hashed_media_ids]
-            )
+            txn.execute(sql, [quarantined_by] + sql_args)
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
         total_media_quarantined = 0
         # Update any media that was identified via hash.
-        if len(hashes):
+        if hashes:
+            sql_many_clause_sql, sql_many_clause_args = make_in_list_sql_clause(
+                txn.database_engine, "sha256", hashes
+            )
             # Update all the tables to set the quarantined_by flag
             # We also pick up any media with a matching hash.
-            sql = """
+            sql = f"""
                 UPDATE remote_media_cache
                 SET quarantined_by = ?
-                WHERE sha256 = ?"""
-            txn.executemany(sql, [(quarantined_by, x) for x in hashes])
+                WHERE {sql_many_clause_sql}"""
+            txn.execute(sql, [quarantined_by] + sql_many_clause_args)
             # Note that a rowcount of -1 can be used to indicate no rows were affected.
             total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
