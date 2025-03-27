@@ -20,6 +20,7 @@
 #
 
 import logging
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -44,7 +45,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, UserID
 from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.stream_change_cache import StreamChangeCache
@@ -53,6 +54,65 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class InviteRule(Enum):
+    """Enum to define the sorting method used when returning destinations."""
+
+    ALLOW = "allow"
+    BLOCK = "block"
+
+
+class InviteRulesConfig:
+    default: InviteRule
+    user_exceptions: Dict[UserID, InviteRule]
+    server_exceptions: Dict[str, InviteRule]
+
+    def __init__(self, account_data: Optional[JsonMapping]):
+        account_data_safe = account_data or {}
+
+        default_str = account_data_safe.get("default", "allow")
+        self.default = (
+            (InviteRule(default_str) or InviteRule.ALLOW)
+            if isinstance(default_str, str)
+            else InviteRule.ALLOW
+        )
+        self.user_exceptions = {}
+        self.server_exceptions = {}
+
+        for user_id, rule in account_data_safe.get("user_exceptions", {}):
+            if not UserID.is_valid(user_id):
+                continue
+            if InviteRule(rule) is None:
+                continue
+            self.user_exceptions[UserID.from_string(user_id)] = InviteRule(rule)
+
+        for server_name, rule in account_data_safe.get("server_exceptions", {}):
+            if not isinstance(server_name, str) or len(server_name) < 1:
+                continue
+            if InviteRule(rule) is None:
+                continue
+            self.server_exceptions[server_name] = InviteRule(rule)
+
+    def invite_allowed(self, user_id: UserID) -> bool:
+        user_rule = self.user_exceptions.get(user_id)
+        if user_rule:
+            logger.info(
+                "invite_allowed user_rule %s => %s", user_id.to_string(), user_rule
+            )
+            return user_rule == InviteRule.ALLOW
+
+        server_rule = self.server_exceptions.get(user_id.domain)
+        if server_rule:
+            logger.info(
+                "invite_allowed server_rule %s => %s", user_id.to_string(), server_rule
+            )
+            return server_rule == InviteRule.ALLOW
+
+        logger.info(
+            "invite_allowed default %s => %s", user_id.to_string(), self.default
+        )
+        return self.default == InviteRule.ALLOW
 
 
 class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore):
@@ -1015,6 +1075,25 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             )
 
         return number_deleted
+
+    async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
+        """
+        Get the invite configuration for the current user.
+
+        If experimental MSC3391 support is enabled, any entries with an empty
+        content body are excluded; as this means they have been deleted.
+
+        Args:
+            user_id: The user to get the account_data for.
+
+        Returns:
+            The global account_data.
+        """
+
+        data = await self.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.INVITE_PERMISSION_CONFIG
+        )
+        return InviteRulesConfig(data)
 
 
 class AccountDataStore(AccountDataWorkerStore):
