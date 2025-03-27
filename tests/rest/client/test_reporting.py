@@ -81,6 +81,11 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
         data = {"reason": None, "score": None}
         self._assert_status(400, data)
 
+    @override_config({"experimental_features": {"msc4277_enabled": True}})
+    def test_score_str(self) -> None:
+        data = {"score": "string"}
+        self._assert_status(200, data)
+
     def test_cannot_report_nonexistent_event(self) -> None:
         """
         Tests that we don't accept event reports for events which do not exist.
@@ -98,12 +103,7 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
             msg=channel.result["body"],
         )
 
-    @override_config(
-        {
-            "experimental_features": {"msc4277_enabled": True},
-            "forget_rooms_on_leave": True,
-        }
-    )
+    @override_config({"experimental_features": {"msc4277_enabled": True}})
     def test_event_existence_hidden(self) -> None:
         """
         Tests that the requester cannot infer the existence of an event.
@@ -211,12 +211,7 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
             msg=channel.result["body"],
         )
 
-    @override_config(
-        {
-            "experimental_features": {"msc4277_enabled": True},
-            "forget_rooms_on_leave": True,
-        }
-    )
+    @override_config({"experimental_features": {"msc4277_enabled": True}})
     def test_room_existence_hidden(self) -> None:
         """
         Tests that the requester cannot infer the existence of a room.

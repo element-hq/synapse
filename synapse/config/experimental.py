@@ -563,6 +563,6 @@ class ExperimentalConfig(Config):
 
         # MSC4277: Harmonizing the reporting endpoints
         #
-        # If enabled, respond with HTTP 200 on reporting requests regardless
-        # of the subject's existence.
+        # If enabled, ignore the score parameter and respond with HTTP 200 on
+        # reporting requests regardless of the subject's existence.
         self.msc4277_enabled: bool = experimental.get("msc4277_enabled", False)
