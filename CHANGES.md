@@ -1,3 +1,17 @@
+# Synapse 1.127.1 (2025-03-26)
+
+## Security
+- Fix [CVE-2025-30355](https://www.cve.org/CVERecord?id=CVE-2025-30355) / [GHSA-v56r-hwv5-mxg6](https://github.com/element-hq/synapse/security/advisories/GHSA-v56r-hwv5-mxg6). **High severity vulnerability affecting federation. The vulnerability has been exploited in the wild.**
+
+
+
+# Synapse 1.127.0 (2025-03-25)
+
+No significant changes since 1.127.0rc1.
+
+
+
+
 # Synapse 1.127.0rc1 (2025-03-18)
 
 ### Features
