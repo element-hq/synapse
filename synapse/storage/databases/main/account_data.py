@@ -62,7 +62,6 @@ class InviteRule(Enum):
     ALLOW = "allow"
     BLOCK = "block"
 
-
 class InviteRulesConfig:
     default: InviteRule
     user_exceptions: Dict[UserID, InviteRule]
@@ -97,19 +96,19 @@ class InviteRulesConfig:
     def invite_allowed(self, user_id: UserID) -> bool:
         user_rule = self.user_exceptions.get(user_id)
         if user_rule:
-            logger.info(
+            logger.debug(
                 "invite_allowed user_rule %s => %s", user_id.to_string(), user_rule
             )
             return user_rule == InviteRule.ALLOW
 
         server_rule = self.server_exceptions.get(user_id.domain)
         if server_rule:
-            logger.info(
+            logger.debug(
                 "invite_allowed server_rule %s => %s", user_id.to_string(), server_rule
             )
             return server_rule == InviteRule.ALLOW
 
-        logger.info(
+        logger.debug(
             "invite_allowed default %s => %s", user_id.to_string(), self.default
         )
         return self.default == InviteRule.ALLOW
