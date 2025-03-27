@@ -990,6 +990,7 @@ class OidcProvider:
           - ``state``: a random string
           - ``nonce``: a random string
           - ``code_challenge``: a RFC7636 code challenge (if PKCE is supported)
+          - ``login_hint``: provide login to avoid re-entering it in the upstream idp
 
         In addition to generating a redirect URL, we are setting a cookie with
         a signed macaroon token containing the state, the nonce, the
@@ -1005,7 +1006,6 @@ class OidcProvider:
                 when everything is done (or None for UI Auth)
             ui_auth_session_id: The session ID of the ongoing UI Auth (or
                 None if this is a login).
-
         Returns:
             The redirect URL to the authorization endpoint.
 
@@ -1077,6 +1077,11 @@ class OidcProvider:
                     options,
                 )
             )
+        # gather login_hint from query string
+        login_hint = parse_string(request, "login_hint")
+
+        if login_hint:
+            additional_authorization_parameters.update({"login_hint": login_hint})
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         return prepare_grant_uri(
