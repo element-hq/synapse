@@ -36,6 +36,7 @@ from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import JsonDict
+from synapse.util.events import get_plain_text_topic_from_event_content
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -299,7 +300,9 @@ class StatsHandler:
             elif delta.event_type == EventTypes.Name:
                 room_state["name"] = event_content.get("name")
             elif delta.event_type == EventTypes.Topic:
-                room_state["topic"] = event_content.get("topic")
+                room_state["topic"] = get_plain_text_topic_from_event_content(
+                    event_content
+                )
             elif delta.event_type == EventTypes.RoomAvatar:
                 room_state["avatar"] = event_content.get("url")
             elif delta.event_type == EventTypes.CanonicalAlias:
