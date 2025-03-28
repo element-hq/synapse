@@ -245,11 +245,15 @@ class SlidingSyncHandler:
             to_token=to_token,
         )
 
+        print("interested_rooms:", interested_rooms)
+
         lists = interested_rooms.lists
         relevant_room_map = interested_rooms.relevant_room_map
         all_rooms = interested_rooms.all_rooms
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
+
+        print("relevant_rooms_to_send_map:", relevant_rooms_to_send_map)
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
@@ -273,6 +277,8 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
+
+            print("room_sync_result:", room_id, room_sync_result)
 
             # Filter out empty room results during incremental sync
             if room_sync_result or not from_token:
@@ -856,6 +862,10 @@ class SlidingSyncHandler:
             # TODO: Limit the number of state events we're about to send down
             # the room, if its too many we should change this to an
             # `initial=True`?
+
+            # TODO: We need to pull out membership changes if the user isn't in
+            # the room, i.e. to deal with rejecting remote invites.
+
             deltas = await self.get_current_state_deltas_for_room(
                 room_id=room_id,
                 room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,

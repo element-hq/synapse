@@ -80,6 +80,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
+from synapse.storage.roommember import RoomsForUserStateReset
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import PersistedEventPosition, RoomStreamToken, StrCollection
 from synapse.util.caches.descriptors import cached, cachedList
@@ -1135,6 +1136,170 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             for membership_change in membership_changes
             if membership_change.room_id not in room_ids_to_exclude
         ]
+
+    @trace
+    async def get_sliding_sync_membership_changes(
+        self,
+        user_id: str,
+        from_key: RoomStreamToken,
+        to_key: RoomStreamToken,
+        excluded_room_ids: Optional[List[str]] = None,
+    ) -> Dict[str, RoomsForUserStateReset]:
+        # Start by ruling out cases where a DB query is not necessary.
+        if from_key == to_key:
+            return []
+
+        if from_key:
+            has_changed = self._membership_stream_cache.has_entity_changed(
+                user_id, int(from_key.stream)
+            )
+            if not has_changed:
+                return []
+
+        room_ids_to_exclude: AbstractSet[str] = set()
+        if excluded_room_ids is not None:
+            room_ids_to_exclude = set(excluded_room_ids)
+
+        def f(txn: LoggingTransaction) -> Dict[str, RoomsForUserStateReset]:
+            # To handle tokens with a non-empty instance_map we fetch more
+            # results than necessary and then filter down
+            min_from_id = from_key.stream
+            max_to_id = to_key.get_max_stream_pos()
+
+            # This query looks at membership changes in
+            # `sliding_sync_membership_snapshots`. These will not include where
+            # users get state reset out of rooms, so we need to look for that
+            # case in `current_state_delta_stream`.
+            #
+            # TODO: Add an index a better index on sliding_sync_membership_snapshots
+            sql = """
+                SELECT
+                    room_id,
+                    membership_event_id,
+                    event_instance_name,
+                    event_stream_ordering,
+                    membership,
+                    sender,
+                    prev_membership,
+                    room_version
+                FROM
+                (
+                    SELECT
+                        room_id,
+                        membership_event_id,
+                        event_instance_name,
+                        event_stream_ordering,
+                        membership,
+                        sender,
+                        null AS prev_membership
+                    FROM sliding_sync_membership_snapshots
+
+                    UNION
+
+                    SELECT
+                        s.room_id,
+                        e.event_id,
+                        s.instance_name,
+                        s.stream_id,
+                        m.membership,
+                        e.sender,
+                        m_prev.membership AS prev_membership
+                    FROM current_state_delta_stream AS s
+                        LEFT JOIN events AS e ON e.event_id = s.event_id
+                        LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
+                        LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
+                    WHERE
+                        s.type = ?
+                        AND s.state_key = ?
+                        AND s.event_id IS NULL
+                ) AS c
+                INNER JOIN rooms USING (room_id)
+                WHERE event_stream_ordering > ? AND event_stream_ordering <= ?
+                ORDER BY event_stream_ordering ASC
+            """
+
+            txn.execute(
+                sql,
+                (EventTypes.Member, user_id, min_from_id, max_to_id),
+            )
+
+            membership_changes: Dict[str, RoomsForUserStateReset] = {}
+            for (
+                room_id,
+                membership_event_id,
+                event_instance_name,
+                event_stream_ordering,
+                membership,
+                sender,
+                prev_membership,
+                room_version_id,
+            ) in txn:
+                assert room_id is not None
+                assert event_stream_ordering is not None
+
+                if room_id in room_ids_to_exclude:
+                    continue
+
+                print(
+                    room_id,
+                    membership_event_id,
+                    event_instance_name,
+                    event_stream_ordering,
+                    membership,
+                    sender,
+                    prev_membership,
+                    room_version_id,
+                )
+
+                if _filter_results_by_stream(
+                    from_key,
+                    to_key,
+                    event_instance_name,
+                    event_stream_ordering,
+                ):
+                    # When the server leaves a room, it will insert new rows into the
+                    # `current_state_delta_stream` table with `event_id = null` for all
+                    # current state. This means we might already have a row for the
+                    # leave event and then another for the same leave where the
+                    # `event_id=null` but the `prev_event_id` is pointing back at the
+                    # earlier leave event. We don't want to report the leave, if we
+                    # already have a leave event.
+                    if (
+                        membership_event_id is None
+                        and prev_membership == Membership.LEAVE
+                    ):
+                        continue
+
+                    if membership_event_id is None and room_id in membership_changes:
+                        continue
+
+                    if membership is None:
+                        membership = Membership.LEAVE
+
+                    # TODO: If we see a JOIN we need to check if the user newly
+                    # joined the room (instead of just changing their display
+                    # name)
+
+                    membership_change = RoomsForUserStateReset(
+                        room_id=room_id,
+                        sender=sender,
+                        membership=membership,
+                        event_id=membership_event_id,
+                        event_pos=PersistedEventPosition(
+                            event_instance_name, event_stream_ordering
+                        ),
+                        room_version_id=room_version_id,
+                    )
+
+                    membership_changes[room_id] = membership_change
+
+            return membership_changes
+
+        membership_changes = await self.db_pool.runInteraction(
+            "get_sliding_sync_membership_changes", f
+        )
+
+        return membership_changes
 
     @cancellable
     async def get_membership_changes_for_user(

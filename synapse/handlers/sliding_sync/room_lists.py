@@ -299,6 +299,8 @@ class SlidingSyncRoomLists:
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
+        print("newly left:", newly_left_room_map)
+
         # Add back `newly_left` rooms (rooms left in the from -> to token range).
         #
         # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include
@@ -1109,6 +1111,24 @@ class SlidingSyncRoomLists:
         """
         newly_joined_room_ids: Set[str] = set()
         newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
+
+        if not from_token:
+            return (), {}
+
+        changes = await self.store.get_sliding_sync_membership_changes(
+            user_id,
+            from_key=from_token.room_key,
+            to_key=to_token.room_key,
+            excluded_room_ids=self.rooms_to_exclude_globally,
+        )
+
+        for room_id, entry in changes.items():
+            if entry.membership == Membership.JOIN:
+                newly_joined_room_ids.add(room_id)
+            elif entry.membership == Membership.LEAVE:
+                newly_left_room_map[room_id] = entry
+
+        return newly_joined_room_ids, newly_left_room_map
 
         # We need to figure out the
         #
