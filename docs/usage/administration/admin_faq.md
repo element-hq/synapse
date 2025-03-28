@@ -160,7 +160,7 @@ Using the following curl command:
 ```console
 curl -H 'Authorization: Bearer <access-token>' -X DELETE https://matrix.org/_matrix/client/r0/directory/room/<room-alias>
 ```
-`<access-token>` - can be obtained in riot by looking in the riot settings, down the bottom is:
+`<access-token>` - can be obtained in element by looking in All settings, clicking Help & About and down the bottom is:
 Access Token:\<click to reveal\>
 
 `<room-alias>` - the room alias, eg. #my_room:matrix.org this possibly needs to be URL encoded also, for example  %23my_room%3Amatrix.org
