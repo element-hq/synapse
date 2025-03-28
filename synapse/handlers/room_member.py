@@ -904,6 +904,18 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     logger.info("Blocking invite due to spam checker")
                     block_invite_result = spam_check
 
+            if self.config.experimental.msc4155_enabled:
+                invite_config = await self.store.get_invite_config_for_user(target_id)
+                if not invite_config.invite_allowed(requester.user):
+                    logger.info(
+                        f"User {target_id} rejected invite from {requester.user}"
+                    )
+                    raise SynapseError(
+                        403,
+                        "You are not permitted to invite this user.",
+                        errcode=Codes.FORBIDDEN,
+                    )
+
             if block_invite_result is not None:
                 raise SynapseError(
                     403,

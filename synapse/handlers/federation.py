@@ -78,7 +78,7 @@ from synapse.replication.http.federation import (
     ReplicationStoreRoomOnOutlierMembershipRestServlet,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.types import JsonDict, StrCollection, get_domain_from_id
+from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
@@ -1088,6 +1088,18 @@ class FederationHandler:
         # block any attempts to invite the server notices mxid
         if event.state_key == self._server_notices_mxid:
             raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
+
+        if self.config.experimental.msc4155_enabled:
+            invite_config = await self.store.get_invite_config_for_user(event.state_key)
+            if not invite_config.invite_allowed(UserID.from_string(event.sender)):
+                logger.info(
+                    f"User {event.state_key} rejected invite from {event.sender}"
+                )
+                raise SynapseError(
+                    403,
+                    "You are not permitted to invite this user.",
+                    errcode=Codes.FORBIDDEN,
+                )
 
         # We retrieve the room member handler here as to not cause a cyclic dependency
         member_handler = self.hs.get_room_member_handler()
