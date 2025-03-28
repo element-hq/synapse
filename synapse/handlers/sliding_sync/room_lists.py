@@ -104,10 +104,6 @@ class SlidingSyncInterestedRooms:
         lists: A mapping from list name to the list result for the response
         relevant_room_map: A map from rooms that match the sync request to
             their room sync config.
-        relevant_rooms_to_send_map: Subset of `relevant_room_map` that
-            includes the rooms that *may* have relevant updates. Rooms not
-            in this map will definitely not have room updates (though
-            extensions may have updates in these rooms).
         newly_joined_rooms: The set of rooms that were joined in the token range
             and the user is still joined to at the end of this range.
         newly_left_rooms: The set of rooms that we left in the token range
@@ -129,7 +125,6 @@ class SlidingSyncInterestedRooms:
         return SlidingSyncInterestedRooms(
             lists={},
             relevant_room_map={},
-            relevant_rooms_to_send_map={},
             all_rooms=set(),
             room_membership_for_user_map={},
             newly_joined_rooms=set(),

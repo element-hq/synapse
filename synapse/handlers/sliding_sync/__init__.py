@@ -303,7 +303,7 @@ class SlidingSyncHandler:
                 to_token=to_token,
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
-                receipts=receipts,
+                room_receipts=receipts[room_id] if room_id in receipts else None,
             )
 
             # Filter out empty room results during incremental sync
@@ -575,7 +575,7 @@ class SlidingSyncHandler:
         to_token: StreamToken,
         newly_joined: bool,
         is_dm: bool,
-        receipts: Sequence[ReceiptInRoom],
+        room_receipts: Sequence[ReceiptInRoom],
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -1370,7 +1370,7 @@ class SlidingSyncHandler:
             joined_count=joined_count,
             invited_count=invited_count,
             notif_counts=unread_notifs,
-            room_receipts=receipts[room_id] if room_id in receipts else None,
+            room_receipts=room_receipts,
         )
 
     @trace
