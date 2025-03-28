@@ -19,7 +19,7 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
        --mount=type=cache,target=/var/lib/apt,sharing=locked \
       apt-get update -qq && \
       DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
-          redis-server nginx-light
+          nginx-light
 
     # --link-mode=copy silences a warning as uv isn't able to do hardlinks between its cache
     # (mounted as --mount=type=cache) and the target directory.
