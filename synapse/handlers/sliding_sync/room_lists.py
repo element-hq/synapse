@@ -740,7 +740,7 @@ class SlidingSyncRoomLists:
         previous_connection_state: PerConnectionState,
         from_token: Optional[StreamToken],
         to_token: StreamToken,
-        relevant_room_map: Dict[str, RoomSyncConfig],
+        relevant_room_map: Mapping[str, RoomSyncConfig],
         receipts: Mapping[str, Sequence[ReceiptInRoom]],
     ) -> Dict[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have

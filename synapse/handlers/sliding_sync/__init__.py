@@ -575,7 +575,7 @@ class SlidingSyncHandler:
         to_token: StreamToken,
         newly_joined: bool,
         is_dm: bool,
-        room_receipts: Sequence[ReceiptInRoom],
+        room_receipts: Optional[Sequence[ReceiptInRoom]],
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
