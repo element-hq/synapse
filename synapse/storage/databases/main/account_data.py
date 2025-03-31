@@ -65,13 +65,17 @@ class InviteRule(Enum):
 
 class InviteRulesConfig:
     default: InviteRule
-    user_exceptions: Dict[UserID, InviteRule]
+    user_exceptions: Dict[str, InviteRule]
     server_exceptions: Dict[str, InviteRule]
 
-    def __init__(self, account_data: Optional[JsonMapping]):
+    def __init__(
+        self,
+        account_data: Optional[JsonMapping],
+        always_allow_user_id: Optional[str],
+    ):
         account_data_safe = account_data or {}
 
-        default_str = account_data_safe.get("default", "allow")
+        default_str = account_data_safe.get("default")
         self.default = (
             (InviteRule(default_str) or InviteRule.ALLOW)
             if isinstance(default_str, str)
@@ -85,7 +89,11 @@ class InviteRulesConfig:
                 continue
             if InviteRule(rule) is None:
                 continue
-            self.user_exceptions[UserID.from_string(user_id)] = InviteRule(rule)
+            self.user_exceptions[user_id] = InviteRule(rule)
+
+        # If server notices are configured, force enable this user.
+        if always_allow_user_id:
+            self.user_exceptions[always_allow_user_id] = InviteRule.ALLOW
 
         for server_name, rule in account_data_safe.get("server_exceptions", {}).items():
             if not isinstance(server_name, str) or len(server_name) < 1:
@@ -95,23 +103,14 @@ class InviteRulesConfig:
             self.server_exceptions[server_name] = InviteRule(rule)
 
     def invite_allowed(self, user_id: UserID) -> bool:
-        user_rule = self.user_exceptions.get(user_id)
+        user_rule = self.user_exceptions.get(user_id.to_string())
         if user_rule:
-            logger.debug(
-                "invite_allowed user_rule %s => %s", user_id.to_string(), user_rule
-            )
             return user_rule == InviteRule.ALLOW
 
         server_rule = self.server_exceptions.get(user_id.domain)
         if server_rule:
-            logger.debug(
-                "invite_allowed server_rule %s => %s", user_id.to_string(), server_rule
-            )
             return server_rule == InviteRule.ALLOW
 
-        logger.debug(
-            "invite_allowed default %s => %s", user_id.to_string(), self.default
-        )
         return self.default == InviteRule.ALLOW
 
 
@@ -161,6 +160,8 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             "delete_account_data_for_deactivated_users",
             self._delete_account_data_for_deactivated_users,
         )
+
+        self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
@@ -1093,7 +1094,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         data = await self.get_global_account_data_by_type_for_user(
             user_id, AccountDataTypes.INVITE_PERMISSION_CONFIG
         )
-        return InviteRulesConfig(data)
+        return InviteRulesConfig(data, self._server_notices_mxid)
 
 
 class AccountDataStore(AccountDataWorkerStore):

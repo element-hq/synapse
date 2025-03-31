@@ -253,6 +253,44 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
         self.assertFalse(config.invite_allowed(UserID.from_string("@baduser:test")))
         self.assertTrue(config.invite_allowed(UserID.from_string("@gooduser:test")))
 
+    @unittest.override_config(
+        {"server_notices": {"system_mxid_localpart": "notice_user"}}
+    )
+    def test_always_allow_server_notices_user(self) -> None:
+        """Check that users cannot block the server notices user."""
+
+        # Either because of the defaults
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
+                {"default": "block"},
+            )
+        )
+        config = self.get_success(self.store.get_invite_config_for_user(self.user))
+        self.assertTrue(config.invite_allowed(UserID.from_string("@notice_user:test")))
+
+        # Or specific exceptions
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
+                {"default": "allow", "user_exceptions": {"@notice_user:test": "block"}},
+            )
+        )
+        config = self.get_success(self.store.get_invite_config_for_user(self.user))
+        self.assertTrue(config.invite_allowed(UserID.from_string("@notice_user:test")))
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
+                {"default": "allow", "server_exceptions": {"test": "block"}},
+            )
+        )
+        config = self.get_success(self.store.get_invite_config_for_user(self.user))
+        self.assertTrue(config.invite_allowed(UserID.from_string("@notice_user:test")))
+
     def test_block_server(self) -> None:
         """Check that a user who has set their account data to block all invites blocks invites."""
         self.get_success(

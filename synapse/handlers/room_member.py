@@ -912,6 +912,19 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     additional_fields=block_invite_result[1],
                 )
 
+            # check the invitee's configuration and apply rules
+            if self.config.experimental.msc4155_enabled:
+                invite_config = await self.store.get_invite_config_for_user(target_id)
+                if not invite_config.invite_allowed(requester.user):
+                    logger.info(
+                        f"User {target_id} rejected invite from {requester.user}"
+                    )
+                    raise SynapseError(
+                        403,
+                        "You are not permitted to invite this user.",
+                        errcode=Codes.FORBIDDEN,
+                    )
+
         # An empty prev_events list is allowed as long as the auth_event_ids are present
         if prev_event_ids is not None:
             return await self._local_membership_update(
