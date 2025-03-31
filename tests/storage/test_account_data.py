@@ -25,8 +25,8 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes
 from synapse.server import HomeServer
-from synapse.util import Clock
 from synapse.types import UserID
+from synapse.util import Clock
 
 from tests import unittest
 
@@ -201,16 +201,13 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
         self.assertTrue(config.invite_allowed(UserID.from_string("@other:test")))
 
-
     def test_default_allow(self) -> None:
         """Check that a user who has set their account data to allow all invites accepts invites."""
         self.get_success(
             self.store.add_account_data_for_user(
                 self.user,
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "default": "allow"
-                },
+                {"default": "allow"},
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
@@ -222,9 +219,7 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
             self.store.add_account_data_for_user(
                 self.user,
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "default": "block"
-                },
+                {"default": "block"},
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
@@ -236,12 +231,7 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
             self.store.add_account_data_for_user(
                 self.user,
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "default": "allow",
-                    "user_exceptions": {
-                        "@baduser:test": "block"
-                    }
-                },
+                {"default": "allow", "user_exceptions": {"@baduser:test": "block"}},
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
@@ -255,12 +245,7 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
             self.store.add_account_data_for_user(
                 self.user,
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "default": "block",
-                    "user_exceptions": {
-                        "@gooduser:test": "allow"
-                    }
-                },
+                {"default": "block", "user_exceptions": {"@gooduser:test": "allow"}},
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
@@ -274,17 +259,14 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
             self.store.add_account_data_for_user(
                 self.user,
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "default": "allow",
-                    "server_exceptions": {
-                        "badserver.org": "block"
-                    }
-                },
+                {"default": "allow", "server_exceptions": {"badserver.org": "block"}},
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
 
-        self.assertFalse(config.invite_allowed(UserID.from_string("@baduser:badserver.org")))
+        self.assertFalse(
+            config.invite_allowed(UserID.from_string("@baduser:badserver.org"))
+        )
         self.assertTrue(config.invite_allowed(UserID.from_string("@gooduser:test")))
 
     def test_allow_server(self) -> None:
@@ -293,20 +275,19 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
             self.store.add_account_data_for_user(
                 self.user,
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "default": "block",
-                    "server_exceptions": {
-                        "goodserver.org": "allow"
-                    }
-                },
+                {"default": "block", "server_exceptions": {"goodserver.org": "allow"}},
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
 
-        self.assertFalse(config.invite_allowed(UserID.from_string("@baduser:badserver.org")))
-        self.assertTrue(config.invite_allowed(UserID.from_string("@gooduser:goodserver.org")))
+        self.assertFalse(
+            config.invite_allowed(UserID.from_string("@baduser:badserver.org"))
+        )
+        self.assertTrue(
+            config.invite_allowed(UserID.from_string("@gooduser:goodserver.org"))
+        )
 
-    def test_mixed_rules(self) -> None:
+    def test_mixed_rules_block(self) -> None:
         """Check that a user who has set their account data to block all invites blocks invites."""
         self.get_success(
             self.store.add_account_data_for_user(
@@ -314,16 +295,48 @@ class InviteFilterTestCase(unittest.HomeserverTestCase):
                 AccountDataTypes.INVITE_PERMISSION_CONFIG,
                 {
                     "default": "block",
-                    "server_exceptions": {
-                        "goodserver.org": "allow"
-                    },
+                    "server_exceptions": {"goodserver.org": "allow"},
                     "user_exceptions": {
-                        "@badguy:goodserver.org": "block"
-                    }
+                        "@baduser:goodserver.org": "block",
+                    },
                 },
             )
         )
         config = self.get_success(self.store.get_invite_config_for_user(self.user))
 
-        self.assertFalse(config.invite_allowed(UserID.from_string("@baduser:badserver.org")))
-        self.assertTrue(config.invite_allowed(UserID.from_string("@gooduser:goodserver.org")))
+        self.assertFalse(
+            config.invite_allowed(UserID.from_string("@baduser:goodserver.org"))
+        )
+        self.assertFalse(
+            config.invite_allowed(UserID.from_string("@other:unlisted.org"))
+        )
+        self.assertTrue(
+            config.invite_allowed(UserID.from_string("@gooduser:goodserver.org"))
+        )
+
+    def test_mixed_rules_allow(self) -> None:
+        """Check that a user who has set their account data to block all invites blocks invites."""
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.INVITE_PERMISSION_CONFIG,
+                {
+                    "default": "block",
+                    "server_exceptions": {"badserver.org": "block"},
+                    "user_exceptions": {
+                        "@gooduser:badserver.org": "allow",
+                    },
+                },
+            )
+        )
+        config = self.get_success(self.store.get_invite_config_for_user(self.user))
+
+        self.assertFalse(
+            config.invite_allowed(UserID.from_string("@anyuser:badserver.org"))
+        )
+        self.assertFalse(
+            config.invite_allowed(UserID.from_string("@other:unlisted.org"))
+        )
+        self.assertTrue(
+            config.invite_allowed(UserID.from_string("@gooduser:badserver.org"))
+        )
