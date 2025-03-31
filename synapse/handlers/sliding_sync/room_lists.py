@@ -742,7 +742,7 @@ class SlidingSyncRoomLists:
         to_token: StreamToken,
         relevant_room_map: Mapping[str, RoomSyncConfig],
         receipts: Mapping[str, Sequence[ReceiptInRoom]],
-    ) -> Dict[str, RoomSyncConfig]:
+    ) -> Mapping[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have
         updates we need to fetch and return."""
 
