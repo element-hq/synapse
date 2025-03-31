@@ -11,7 +11,7 @@
 # stdin. The effect is that the output is flushed after each line, rather than being batched, which helps reduce
 # confusion due to to interleaving of the different processes.
 prefixer() {
-    mawk -W interactive '{print ENVIRON["SUPERVISOR_PROCESS_NAME"] | "$0; fflush() }'
+    mawk -W interactive '{print ENVIRON["SUPERVISOR_PROCESS_NAME"]" | "$0; fflush() }'
 }
 exec 1> >(prefixer)
 exec 2> >(prefixer >&2)
