@@ -20,7 +20,7 @@
 #
 
 import urllib.parse
-from typing import Dict
+from typing import Dict, cast
 
 from parameterized import parameterized
 
@@ -32,6 +32,7 @@ from synapse.http.server import JsonResource
 from synapse.rest.admin import VersionServlet
 from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
+from synapse.types import UserID
 from synapse.util import Clock
 
 from tests import unittest
@@ -227,10 +228,25 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Upload some media
         response_1 = self.helper.upload_media(SMALL_PNG, tok=non_admin_user_tok)
         response_2 = self.helper.upload_media(SMALL_PNG, tok=non_admin_user_tok)
+        response_3 = self.helper.upload_media(SMALL_PNG, tok=non_admin_user_tok)
 
         # Extract media IDs
         server_and_media_id_1 = response_1["content_uri"][6:]
         server_and_media_id_2 = response_2["content_uri"][6:]
+        server_and_media_id_3 = response_3["content_uri"][6:]
+
+        # Remove the hash from the media to simulate historic media.
+        self.get_success(
+            self.hs.get_datastores().main.update_local_media(
+                media_id=server_and_media_id_3.split("/")[1],
+                media_type="image/png",
+                upload_name=None,
+                media_length=123,
+                user_id=UserID.from_string(non_admin_user),
+                # Hack to force some media to have no hash.
+                sha256=cast(str, None),
+            )
+        )
 
         # Quarantine all media by this user
         url = "/_synapse/admin/v1/user/%s/media/quarantine" % urllib.parse.quote(
@@ -244,12 +260,13 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         self.pump(1.0)
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(
-            channel.json_body, {"num_quarantined": 2}, "Expected 2 quarantined items"
+            channel.json_body, {"num_quarantined": 3}, "Expected 3 quarantined items"
         )
 
         # Attempt to access each piece of media
         self._ensure_quarantined(admin_user_tok, server_and_media_id_1)
         self._ensure_quarantined(admin_user_tok, server_and_media_id_2)
+        self._ensure_quarantined(admin_user_tok, server_and_media_id_3)
 
     def test_cannot_quarantine_safe_media(self) -> None:
         self.register_user("user_admin", "pass", admin=True)

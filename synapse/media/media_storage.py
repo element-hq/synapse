@@ -19,6 +19,7 @@
 #
 #
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -70,6 +71,88 @@ logger = logging.getLogger(__name__)
 CRLF = b"\r\n"
 
 
+class SHA256TransparentIOWriter:
+    """Will generate a SHA256 hash from a source stream transparently.
+
+    Args:
+        source: Source stream.
+    """
+
+    def __init__(self, source: BinaryIO):
+        self._hash = hashlib.sha256()
+        self._source = source
+
+    def write(self, buffer: Union[bytes, bytearray]) -> int:
+        """Wrapper for source.write()
+
+        Args:
+            buffer
+
+        Returns:
+            the value of source.write()
+        """
+        res = self._source.write(buffer)
+        self._hash.update(buffer)
+        return res
+
+    def hexdigest(self) -> str:
+        """The digest of the written or read value.
+
+        Returns:
+            The digest in hex formaat.
+        """
+        return self._hash.hexdigest()
+
+    def wrap(self) -> BinaryIO:
+        # This class implements a subset the IO interface and passes through everything else via __getattr__
+        return cast(BinaryIO, self)
+
+    # Passthrough any other calls
+    def __getattr__(self, attr_name: str) -> Any:
+        return getattr(self._source, attr_name)
+
+
+class SHA256TransparentIOReader:
+    """Will generate a SHA256 hash from a source stream transparently.
+
+    Args:
+        source: Source IO stream.
+    """
+
+    def __init__(self, source: IO):
+        self._hash = hashlib.sha256()
+        self._source = source
+
+    def read(self, n: int = -1) -> bytes:
+        """Wrapper for source.read()
+
+        Args:
+            n
+
+        Returns:
+            the value of source.read()
+        """
+        bytes = self._source.read(n)
+        self._hash.update(bytes)
+        return bytes
+
+    def hexdigest(self) -> str:
+        """The digest of the written or read value.
+
+        Returns:
+            The digest in hex formaat.
+        """
+        return self._hash.hexdigest()
+
+    def wrap(self) -> IO:
+        # This class implements a subset the IO interface and passes through everything else via __getattr__
+        return cast(IO, self)
+
+    # Passthrough any other calls
+    def __getattr__(self, attr_name: str) -> Any:
+        return getattr(self._source, attr_name)
+
+
 class MediaStorage:
     """Responsible for storing/fetching files from local sources.
 
@@ -107,7 +190,6 @@ class MediaStorage:
         Returns:
             the file path written to in the primary media store
         """
-
         async with self.store_into_file(file_info) as (f, fname):
             # Write to the main media repository
             await self.write_to_file(source, f)
