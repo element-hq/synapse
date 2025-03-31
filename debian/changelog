@@ -1,3 +1,9 @@
+matrix-synapse-py3 (1.128.0~rc1+nmu1) UNRELEASED; urgency=medium
+
+  * Update Poetry to 2.1.1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Wed, 19 Mar 2025 17:38:49 +0000
+
 matrix-synapse-py3 (1.127.1) stable; urgency=medium
 
   * New Synapse release 1.127.1.
