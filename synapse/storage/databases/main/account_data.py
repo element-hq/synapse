@@ -80,14 +80,14 @@ class InviteRulesConfig:
         self.user_exceptions = {}
         self.server_exceptions = {}
 
-        for user_id, rule in account_data_safe.get("user_exceptions", {}):
+        for user_id, rule in account_data_safe.get("user_exceptions", {}).items():
             if not UserID.is_valid(user_id):
                 continue
             if InviteRule(rule) is None:
                 continue
             self.user_exceptions[UserID.from_string(user_id)] = InviteRule(rule)
 
-        for server_name, rule in account_data_safe.get("server_exceptions", {}):
+        for server_name, rule in account_data_safe.get("server_exceptions", {}).items():
             if not isinstance(server_name, str) or len(server_name) < 1:
                 continue
             if InviteRule(rule) is None:
