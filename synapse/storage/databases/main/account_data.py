@@ -62,6 +62,7 @@ class InviteRule(Enum):
     ALLOW = "allow"
     BLOCK = "block"
 
+
 class InviteRulesConfig:
     default: InviteRule
     user_exceptions: Dict[UserID, InviteRule]

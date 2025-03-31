@@ -1089,6 +1089,7 @@ class FederationHandler:
         if event.state_key == self._server_notices_mxid:
             raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
 
+        # check the invitee's configuration and apply rules
         if self.config.experimental.msc4155_enabled:
             invite_config = await self.store.get_invite_config_for_user(event.state_key)
             if not invite_config.invite_allowed(UserID.from_string(event.sender)):
