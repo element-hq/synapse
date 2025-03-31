@@ -1037,11 +1037,11 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 }
         """
 
+        join_args: Tuple[str, ...] = (user_id,)
+
         if self.hs.config.userdirectory.user_directory_search_all_users:
-            join_args = (user_id,)
             where_clause = "user_id != ?"
         else:
-            join_args = (user_id,)
             where_clause = """
                 (
                     EXISTS (select 1 from users_in_public_rooms WHERE user_id = t.user_id)
@@ -1054,6 +1054,10 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
 
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
+
+        if self.hs.config.userdirectory.user_directory_exclude_remote_users:
+            where_clause += " AND user_id LIKE ?"
+            join_args += (f"%:{self._server_name}",)
 
         # We allow manipulating the ranking algorithm by injecting statements
         # based on config options.
