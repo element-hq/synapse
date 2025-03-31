@@ -748,7 +748,7 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map: Dict[str, RoomSyncConfig] = relevant_room_map
+        relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig] = relevant_room_map
         if relevant_room_map:
             with start_active_span("filter_relevant_rooms_to_send"):
                 if from_token:

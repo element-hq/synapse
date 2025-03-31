@@ -200,7 +200,7 @@ class SlidingSyncResult:
         joined_count: Optional[int]
         invited_count: Optional[int]
         notif_counts: RoomNotifCounts
-        room_receipts: Sequence[ReceiptInRoom]
+        room_receipts: Optional[Sequence[ReceiptInRoom]]
 
         def __bool__(self) -> bool:
             return (
