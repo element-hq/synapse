@@ -1,0 +1,1 @@
+Add an access token introspection cache to make Matrix Authentication Service integration (MSC3861) more efficient.
