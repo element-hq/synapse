@@ -467,6 +467,10 @@ class OidcProvider:
 
         self._sso_handler.register_identity_provider(self)
 
+        self.passthrough_authorization_parameters = (
+            provider.passthrough_authorization_parameters
+        )
+
     def _validate_metadata(self, m: OpenIDProviderMetadata) -> None:
         """Verifies the provider metadata.
 
@@ -1077,11 +1081,13 @@ class OidcProvider:
                     options,
                 )
             )
-        # gather login_hint from query string
-        login_hint = parse_string(request, "login_hint")
 
-        if login_hint:
-            additional_authorization_parameters.update({"login_hint": login_hint})
+        # add passthrough additional authorization parameters
+        passthrough_authorization_parameters = self.passthrough_authorization_parameters
+        for parameter in passthrough_authorization_parameters:
+            parameter_value = parse_string(request, parameter)
+            if parameter_value:
+                additional_authorization_parameters.update({parameter: parameter_value})
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         return prepare_grant_uri(
