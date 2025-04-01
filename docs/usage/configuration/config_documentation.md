@@ -3762,7 +3762,6 @@ Options for each entry include:
 
   You might want to disable this if the `subject_claim` returned by the mapping provider is not `sub`.
 
-
 It is possible to configure Synapse to only allow logins if certain attributes
 match particular values in the OIDC userinfo. The requirements can be listed under
 `attribute_requirements` as shown here:
