@@ -484,7 +484,14 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(code_verifier, "")
         self.assertEqual(redirect, "http://client/redirect")
 
-    @override_config({"oidc_config": {**DEFAULT_CONFIG, "passthrough_authorization_parameters": ["additional_parameter"]}})
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "passthrough_authorization_parameters": ["additional_parameter"],
+            }
+        }
+    )
     def test_passthrough_parameters(self) -> None:
         """The redirect request has additional parameters, one is authorized, one is not"""
         req = Mock(spec=["cookies", "args"])
@@ -498,11 +505,10 @@ class OidcHandlerTestCase(HomeserverTestCase):
                 self.provider.handle_redirect_request(req, b"http://client/redirect")
             )
         )
-        
+
         params = parse_qs(url.query)
         self.assertEqual(params["additional_parameter"], ["a_value"])
         self.assertNotIn("not_authorized_parameters", params)
-
 
     @override_config({"oidc_config": DEFAULT_CONFIG})
     def test_redirect_request_with_code_challenge(self) -> None:

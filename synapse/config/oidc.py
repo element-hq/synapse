@@ -356,7 +356,9 @@ def _parse_oidc_config_dict(
         additional_authorization_parameters=oidc_config.get(
             "additional_authorization_parameters", {}
         ),
-        passthrough_authorization_parameters=oidc_config.get("passthrough_authorization_parameters", []),
+        passthrough_authorization_parameters=oidc_config.get(
+            "passthrough_authorization_parameters", []
+        ),
     )
 
 
