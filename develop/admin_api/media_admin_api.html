@@ -192,6 +192,14 @@ Admin API.</p>
 <p>Quarantining media means that it is marked as inaccessible by users. It applies
 to any local media, and any locally-cached copies of remote media.</p>
 <p>The media file itself (and any thumbnails) is not deleted from the server.</p>
+<p>Since Synapse 1.128.0, hashes of uploaded media are tracked. If this media
+is quarantined, Synapse will:</p>
+<ul>
+<li>Quarantine any media with a matching hash that has already been uploaded.</li>
+<li>Quarantine any future media.</li>
+<li>Quarantine any existing cached remote media.</li>
+<li>Quarantine any future remote media.</li>
+</ul>
 <h2 id="quarantining-media-by-id"><a class="header" href="#quarantining-media-by-id">Quarantining media by ID</a></h2>
 <p>This API quarantines a single piece of local or remote media.</p>
 <p>Request:</p>
