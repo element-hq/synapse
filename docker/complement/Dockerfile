@@ -25,7 +25,7 @@ FROM $FROM
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
 COPY --from=postgres_base /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres_base /usr/share/postgresql /usr/share/postgresql
-RUN mkdir /var/run/postgresql && chown postgres /var/run/postgresql
+COPY --from=postgres_base --chown=postgres /var/run/postgresql /var/run/postgresql
 ENV PATH="${PATH}:/usr/lib/postgresql/13/bin"
 ENV PGDATA=/var/lib/postgresql/data
 
