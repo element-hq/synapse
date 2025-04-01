@@ -3814,7 +3814,6 @@ oidc_providers:
     attribute_requirements:
       - attribute: userGroup
         value: "synapseUsers"
-
 ```
 ---
 ### `cas_config`
