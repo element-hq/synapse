@@ -1,1 +1,1 @@
-Add support for the `login_hint` parameter in OIDC authentication flow to pre-fill user identification.
+Add 'passthrough_authorization_parameters' in oidc configuration to allow to pass parameters to the authorization grant URL
