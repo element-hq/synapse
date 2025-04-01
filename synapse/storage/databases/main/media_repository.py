@@ -999,6 +999,15 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             None if the media_id doesn't exist.
         """
 
+        # If we don't have the index yet, performance tanks, so we return False.
+        # In the background updates, remote_media_cache_sha256_idx is created
+        # after local_media_repository_sha256_idx, which is why we only need to
+        # check for the completion of the former.
+        if not await self.db_pool.updates.has_completed_background_update(
+            "remote_media_cache_sha256_idx"
+        ):
+            return False
+
         def get_matching_media_txn(
             txn: LoggingTransaction, table: str, sha256: str
         ) -> bool:

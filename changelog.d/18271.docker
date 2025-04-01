@@ -1,1 +1,0 @@
-Specify the architecture of installed packages via an APT config option, which is more reliable than appending package names with ":{arch}".

@@ -16,6 +16,13 @@ ALTER TABLE local_media_repository ADD COLUMN sha256 TEXT;
 ALTER TABLE remote_media_cache ADD COLUMN sha256 TEXT;
 
 -- Add a background updates to handle creating the new index.
-INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (9101, 'local_media_repository_sha256_idx', '{}'),
-    (9101, 'remote_media_cache_sha256_idx', '{}');
+--
+-- Note that the ordering of the update is not following the usual scheme. This
+-- is because when upgrading from Synapse 1.127, this index is fairly important
+-- to have up quickly, so that it doesn't tank performance, which is why it is
+-- scheduled before other background updates in the 1.127 -> 1.128 upgrade
+INSERT INTO
+  background_updates (ordering, update_name, progress_json)
+VALUES
+  (8890, 'local_media_repository_sha256_idx', '{}'),
+  (8891, 'remote_media_cache_sha256_idx', '{}');
