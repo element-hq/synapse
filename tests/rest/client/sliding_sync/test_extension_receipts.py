@@ -433,8 +433,11 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
             set(),
             exact=True,
         )
+        # The room should be be in user1's sync because they sent a read receipt...
+        self.assertIn(room_id1, response_body["rooms"])
+        # but there should be no timeline events
         # No events in the timeline since they were sent before the `from_token`
-        self.assertNotIn(room_id1, response_body["rooms"])
+        self.assertNotIn("timeline", response_body["rooms"][room_id1])
 
         # Check room3:
         #
