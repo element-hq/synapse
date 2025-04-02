@@ -994,7 +994,6 @@ class OidcProvider:
           - ``state``: a random string
           - ``nonce``: a random string
           - ``code_challenge``: a RFC7636 code challenge (if PKCE is supported)
-          - ``login_hint``: provide login to avoid re-entering it in the upstream idp
 
         In addition to generating a redirect URL, we are setting a cookie with
         a signed macaroon token containing the state, the nonce, the
