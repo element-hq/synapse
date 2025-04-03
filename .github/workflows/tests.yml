@@ -460,7 +460,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["pypy-3.9"]
+        python-version: ["pypy-3.10"]
         extras: ["all"]
 
     steps:
