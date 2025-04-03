@@ -1117,7 +1117,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             if fed_hostname in room.via:
                 return requested_room_entry, {fed_subroom: child_room}, set()
 
-            return None
+            return None, {}, set()
 
         expected = [
             (fed_space, [fed_subroom]),
@@ -1129,7 +1129,11 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             new=summarize_remote_room_hierarchy,
         ):
             result = self.get_success(
-                self.handler.get_room_hierarchy(create_requester(self.user), fed_space, remote_room_hosts=remote_room_hosts)
+                self.handler.get_room_hierarchy(
+                    create_requester(self.user),
+                    fed_space,
+                    remote_room_hosts=remote_room_hosts,
+                )
             )
         self._assert_hierarchy(result, expected)
 
