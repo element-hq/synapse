@@ -1116,7 +1116,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
             if fed_hostname in room.via:
                 return requested_room_entry, {fed_subroom: child_room}, set()
-            
+
             return None
 
         expected = [
