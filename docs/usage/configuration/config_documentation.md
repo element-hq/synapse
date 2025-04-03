@@ -330,6 +330,18 @@ Example configuration:
 limit_profile_requests_to_users_who_share_rooms: true
 ```
 ---
+### `limit_key_queries_to_users_who_share_rooms`
+
+Use this option to require a user to share a room with another user in order
+to retrieve their published keys. Only checked on Client-Server requests.
+Key queries from other servers should be checked by the requesting server.
+Defaults to false.
+
+Example configuration:
+```yaml
+limit_key_queries_to_users_who_share_rooms: true
+```
+---
 ### `include_profile_data_on_invite`
 
 Use this option to prevent a user's profile data from being retrieved and
