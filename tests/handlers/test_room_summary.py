@@ -1080,7 +1080,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             self.assertEqual(federation_requests, 2)
             self._assert_hierarchy(result, expected)
 
-    def test_fed_remote_room_hosts(self) -> None:   
+    def test_fed_remote_room_hosts(self) -> None:
         """
         Test if requested room is available over federation using via's.
         """
