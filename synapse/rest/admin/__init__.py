@@ -275,7 +275,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     """
     Register all the admin servlets.
     """
-    # Admin servlets aren't registered on workers.
+    # Admin servlets aren't registered on workers
     if hs.config.worker.worker_app is not None:
         return
 
@@ -365,3 +365,16 @@ def register_servlets_for_client_rest_resource(
 
     # don't add more things here: new servlets should only be exposed on
     # /_synapse/admin so should not go here. Instead register them in AdminRestResource.
+
+
+def register_servlets_for_msc3861_delegation(
+    hs: "HomeServer", http_server: HttpServer
+) -> None:
+    """Register servlets needed by MAS when MSC3861 is enabled"""
+    if not hs.config.experimental.msc3861.enabled:
+        return
+
+    UserRestServletV2(hs).register(http_server)
+    UsernameAvailableRestServlet(hs).register(http_server)
+    DeactivateAccountRestServlet(hs).register(http_server)
+    UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
