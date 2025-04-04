@@ -2232,7 +2232,7 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
             txn, self.get_user_deactivated_status, (user_id,)
         )
         self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-        txn.call_after(self.is_guest.invalidate, (user_id,))
+        self._invalidate_cache_and_stream(txn, self.is_guest, (user_id,))
 
     async def set_user_suspended_status(self, user_id: str, suspended: bool) -> None:
         """
