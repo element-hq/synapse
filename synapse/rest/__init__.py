@@ -187,7 +187,6 @@ class ClientRestResource(JsonResource):
                     mutual_rooms.register_servlets,
                     login_token_request.register_servlets,
                     rendezvous.register_servlets,
-                    auth_metadata.register_servlets,
                 ]:
                     continue
 
