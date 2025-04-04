@@ -14,12 +14,13 @@ from http import HTTPStatus
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
-from synapse.api.constants import ReceiptTypes, RelationTypes, EventTypes
 import synapse.rest.admin
+from synapse.api.constants import EventTypes, ReceiptTypes, RelationTypes
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.util import Clock
+
+from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 
 
 class SlidingSyncNotificationCountsTestCase(SlidingSyncBase):
