@@ -1088,7 +1088,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         fed_space = "#fed_space:" + fed_hostname
         fed_subroom = "#fed_sub_room:" + fed_hostname
 
-        remote_room_hosts = [fed_hostname]
+        remote_room_hosts = (fed_hostname)
 
         requested_room_entry = _RoomEntry(
             fed_space,
