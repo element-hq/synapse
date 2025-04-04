@@ -37,7 +37,7 @@ class SlidingSyncNotificationCountsTestCase(SlidingSyncBase):
 
         super().prepare(reactor, clock, hs)
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
 
         self.user1_id = self.register_user("user1", "pass")
