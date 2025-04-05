@@ -118,7 +118,7 @@ class RoomSummaryHandler:
                 Optional[int],
                 Optional[int],
                 Optional[str],
-                Optional[Tuple[str]],
+                Optional[Tuple[str, ...]],
             ]
         ] = ResponseCache(
             hs.get_clock(),
@@ -134,7 +134,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str]] = None,
+        remote_room_hosts: Optional[Tuple[str, ...]] = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy C-S API.
@@ -191,7 +191,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str]] = None,
+        remote_room_hosts: Optional[Tuple[str, ...]] = None,
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
