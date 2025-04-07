@@ -2593,12 +2593,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             Adds the triggers to the `events` table to keep the `event_stats` counts
             up-to-date.
 
-            Also populates the `stop_event_stream_ordering` progress value. This is the
-            point at which we added the triggers, so we can avoid double counting events
-            that are already accounted for in the population step.
+            Also populates the `stop_event_stream_ordering` background update progress
+            value. This marks the point at which we added the triggers, so we can avoid
+            double counting events that are already accounted for in the population
+            step.
 
             Returns:
-                The latest event stream ordering in the `events` table when the triggers
+                The latest event `stream_ordering` in the `events` table when the triggers
                 were added or `None` if the `events` table is empty.
             """
 

@@ -162,6 +162,9 @@ Changes in SCHEMA_VERSION = 89
 Changes in SCHEMA_VERSION = 90
     - Add a column `participant` to `room_memberships` table
     - Add background update to delete unreferenced state groups.
+
+Changes in SCHEMA_VERSION = 91
+    - Add `event_stats` table to store global event statistics like total counts
 """
 
 
