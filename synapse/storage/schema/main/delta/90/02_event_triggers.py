@@ -71,7 +71,11 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
                 SET e2ee_event_count = e2ee_event_count + 1
                 WHERE NEW.type = 'm.room.encrypted' AND NEW.state_key IS NULL;
             END;
+            """
+        )
 
+        cur.execute(
+            """
             CREATE TRIGGER events_delete_trigger
             AFTER DELETE ON events
             BEGIN
