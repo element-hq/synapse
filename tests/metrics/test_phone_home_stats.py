@@ -72,8 +72,8 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         # Force stats reporting to occur
         # initial_stats_dict = {}
         start_phone_stats_home(hs=hs)
-        # This magic number comes from 300 seconds that we wait after startup before we
-        # `generate_user_daily_visits(...)` + a healthy margin (50s).
+        # This magic number comes from the 5 minute (300 second) delay that we wait
+        # after startup before we `phone_stats_home` + a healthy margin (50s).
         self.reactor.advance(350)
 
         # Extract the reported stats from our http client mock
