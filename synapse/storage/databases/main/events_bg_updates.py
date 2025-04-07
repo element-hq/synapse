@@ -2779,6 +2779,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         SUM(CASE WHEN type = 'm.room.encrypted' AND state_key IS NULL THEN 1 ELSE 0 END) AS e2ee_event_count
                     FROM events
                     WHERE stream_ordering > ?
+                    GROUP BY stream_ordering
                     ORDER BY stream_ordering ASC
                     LIMIT ?
                 )
@@ -2786,10 +2787,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 SET
                     total_event_count = total_event_count + (SELECT total_event_count FROM batch),
                     unencrypted_message_count = unencrypted_message_count + (SELECT unencrypted_message_count FROM batch),
-                    e2ee_event_count = e2ee_event_count + (SELECT e2ee_event_count FROM batch);
+                    e2ee_event_count = e2ee_event_count + (SELECT e2ee_event_count FROM batch)
                 RETURNING
-                    total_event_count,
-                    max_stream_ordering
+                    (SELECT total_event_count FROM batch) AS total_event_count,
+                    (SELECT max_stream_ordering FROM batch) AS max_stream_ordering
                 """,
                 (last_event_stream_ordering, batch_size),
             )
