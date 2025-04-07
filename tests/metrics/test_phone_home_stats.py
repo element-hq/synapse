@@ -19,8 +19,8 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
-from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
+from synapse.app.phone_stats_home import PHONE_HOME_INTERVAL_SECONDS
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -66,15 +66,14 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         # `event_stats` table up-to-date.
         self.wait_for_background_updates()
 
-        # Do things to bump the stats
-        self._perform_user_actions()
-
         # Force stats reporting to occur
-        # initial_stats_dict = {}
         start_phone_stats_home(hs=hs)
-        # This magic number comes from the 5 minute (300 second) delay that we wait
-        # after startup before we `phone_stats_home` + a healthy margin (50s).
-        self.reactor.advance(350)
+
+        super().prepare(reactor, clock, hs)
+
+    def _get_latest_phone_home_stats(self) -> None:
+        # Wait for `phone_stats_home` to be called again + a healthy margin (50s).
+        self.reactor.advance(2 * PHONE_HOME_INTERVAL_SECONDS + 50)
 
         # Extract the reported stats from our http client mock
         mock_calls = self.put_json_mock.call_args_list
@@ -82,16 +81,17 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         for call in mock_calls:
             if call.args[0] == TEST_REPORT_STATS_ENDPOINT:
                 report_stats_calls.append(call)
-        self.assertEqual(
+
+        self.assertGreaterEqual(
             (len(report_stats_calls)),
             1,
-            "Expected a single call to the report_stats endpoint",
+            "Expected at-least one call to the report_stats endpoint",
         )
 
         # Extract the phone home stats from the call
-        self.phone_home_stats = report_stats_calls[0].args[1]
+        phone_home_stats = report_stats_calls[0].args[1]
 
-        super().prepare(reactor, clock, hs)
+        return phone_home_stats
 
     def _perform_user_actions(self) -> None:
         """
@@ -190,62 +190,66 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         Test that the phone home stats contain the stats we expect based on
         the scenario carried out in `prepare`
         """
+        # Do things to bump the stats
+        self._perform_user_actions()
+
+        # Wait for the stats to be reported
+        phone_home_stats = self._get_latest_phone_home_stats()
+
         self.assertEqual(
-            self.phone_home_stats["homeserver"], self.hs.config.server.server_name
+            phone_home_stats["homeserver"], self.hs.config.server.server_name
         )
 
-        self.assertTrue(isinstance(self.phone_home_stats["memory_rss"], int))
-        self.assertTrue(isinstance(self.phone_home_stats["cpu_average"], int))
+        self.assertTrue(isinstance(phone_home_stats["memory_rss"], int))
+        self.assertTrue(isinstance(phone_home_stats["cpu_average"], int))
 
-        self.assertEqual(self.phone_home_stats["server_context"], TEST_SERVER_CONTEXT)
+        self.assertEqual(phone_home_stats["server_context"], TEST_SERVER_CONTEXT)
 
-        self.assertTrue(isinstance(self.phone_home_stats["timestamp"], int))
-        self.assertTrue(isinstance(self.phone_home_stats["uptime_seconds"], int))
-        self.assertTrue(isinstance(self.phone_home_stats["python_version"], str))
+        self.assertTrue(isinstance(phone_home_stats["timestamp"], int))
+        self.assertTrue(isinstance(phone_home_stats["uptime_seconds"], int))
+        self.assertTrue(isinstance(phone_home_stats["python_version"], str))
 
         # We expect only our test users to exist on the homeserver
-        self.assertEqual(self.phone_home_stats["total_users"], 3)
-        self.assertEqual(self.phone_home_stats["total_nonbridged_users"], 3)
-        self.assertEqual(self.phone_home_stats["daily_user_type_native"], 2)
-        self.assertEqual(self.phone_home_stats["daily_user_type_guest"], 1)
-        self.assertEqual(self.phone_home_stats["daily_user_type_bridged"], 0)
-        self.assertEqual(self.phone_home_stats["total_room_count"], 1)
-        self.assertEqual(self.phone_home_stats["total_event_count"], 24)
-        self.assertEqual(self.phone_home_stats["total_message_count"], 10)
-        self.assertEqual(self.phone_home_stats["total_e2ee_event_count"], 5)
-        self.assertEqual(self.phone_home_stats["daily_active_users"], 2)
-        self.assertEqual(self.phone_home_stats["monthly_active_users"], 2)
-        self.assertEqual(self.phone_home_stats["daily_active_rooms"], 1)
-        self.assertEqual(self.phone_home_stats["daily_active_e2ee_rooms"], 1)
-        self.assertEqual(self.phone_home_stats["daily_messages"], 10)
-        self.assertEqual(self.phone_home_stats["daily_e2ee_messages"], 5)
-        self.assertEqual(self.phone_home_stats["daily_sent_messages"], 10)
-        self.assertEqual(self.phone_home_stats["daily_sent_e2ee_messages"], 5)
+        self.assertEqual(phone_home_stats["total_users"], 3)
+        self.assertEqual(phone_home_stats["total_nonbridged_users"], 3)
+        self.assertEqual(phone_home_stats["daily_user_type_native"], 2)
+        self.assertEqual(phone_home_stats["daily_user_type_guest"], 1)
+        self.assertEqual(phone_home_stats["daily_user_type_bridged"], 0)
+        self.assertEqual(phone_home_stats["total_room_count"], 1)
+        self.assertEqual(phone_home_stats["total_event_count"], 24)
+        self.assertEqual(phone_home_stats["total_message_count"], 10)
+        self.assertEqual(phone_home_stats["total_e2ee_event_count"], 5)
+        self.assertEqual(phone_home_stats["daily_active_users"], 2)
+        self.assertEqual(phone_home_stats["monthly_active_users"], 2)
+        self.assertEqual(phone_home_stats["daily_active_rooms"], 1)
+        self.assertEqual(phone_home_stats["daily_active_e2ee_rooms"], 1)
+        self.assertEqual(phone_home_stats["daily_messages"], 10)
+        self.assertEqual(phone_home_stats["daily_e2ee_messages"], 5)
+        self.assertEqual(phone_home_stats["daily_sent_messages"], 10)
+        self.assertEqual(phone_home_stats["daily_sent_e2ee_messages"], 5)
 
         # Our users have not been around for >30 days, hence these are all 0.
-        self.assertEqual(self.phone_home_stats["r30v2_users_all"], 0)
-        self.assertEqual(self.phone_home_stats["r30v2_users_android"], 0)
-        self.assertEqual(self.phone_home_stats["r30v2_users_ios"], 0)
-        self.assertEqual(self.phone_home_stats["r30v2_users_electron"], 0)
-        self.assertEqual(self.phone_home_stats["r30v2_users_web"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_all"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_android"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_ios"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_electron"], 0)
+        self.assertEqual(phone_home_stats["r30v2_users_web"], 0)
         self.assertEqual(
-            self.phone_home_stats["cache_factor"], self.hs.config.caches.global_factor
+            phone_home_stats["cache_factor"], self.hs.config.caches.global_factor
         )
         self.assertEqual(
-            self.phone_home_stats["event_cache_size"],
+            phone_home_stats["event_cache_size"],
             self.hs.config.caches.event_cache_size,
         )
         self.assertEqual(
-            self.phone_home_stats["database_engine"],
+            phone_home_stats["database_engine"],
             self.hs.config.database.databases[0].config["name"],
         )
         self.assertEqual(
-            self.phone_home_stats["database_server_version"],
+            phone_home_stats["database_server_version"],
             self.hs.get_datastores().main.database_engine.server_version,
         )
 
         synapse_logger = logging.getLogger("synapse")
         log_level = synapse_logger.getEffectiveLevel()
-        self.assertEqual(
-            self.phone_home_stats["log_level"], logging.getLevelName(log_level)
-        )
+        self.assertEqual(phone_home_stats["log_level"], logging.getLevelName(log_level))
