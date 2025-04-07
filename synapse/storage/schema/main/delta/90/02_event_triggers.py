@@ -49,35 +49,92 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
     )
 
     # Each time an event is inserted into the `events` table, update the stats.
+    #
+    # We're using `AFTER` triggers as we want to count successful inserts/deletes and
+    # not the ones that could potentially fail.
     if isinstance(database_engine, Sqlite3Engine):
         cur.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS event_stats_increment_counts
-            BEFORE INSERT ON events
-            FOR EACH ROW
+            CREATE TRIGGER events_insert_trigger
+            AFTER INSERT ON events
             BEGIN
-                SELECT RAISE(ABORT, 'Incorrect room_id in partial_state_events')
-                WHERE EXISTS (
-                    SELECT 1 FROM events
-                    WHERE events.event_id = NEW.event_id
-                       AND events.room_id != NEW.room_id
-                );
+                -- Always increment total_event_count
+                UPDATE event_stats SET total_event_count = total_event_count + 1;
+
+                -- Increment unencrypted_message_count for m.room.message events
+                UPDATE event_stats
+                SET unencrypted_message_count = unencrypted_message_count + 1
+                WHERE NEW.type = 'm.room.message' AND NEW.state_key IS NULL;
+
+                -- Increment e2ee_event_count for m.room.encrypted events
+                UPDATE event_stats
+                SET e2ee_event_count = e2ee_event_count + 1
+                WHERE NEW.type = 'm.room.encrypted' AND NEW.state_key IS NULL;
+            END;
+
+            CREATE TRIGGER events_delete_trigger
+            AFTER DELETE ON events
+            BEGIN
+                -- Always decrement total_event_count
+                UPDATE event_stats SET total_event_count = total_event_count - 1;
+
+                -- Decrement unencrypted_message_count for m.room.message events
+                UPDATE event_stats
+                SET unencrypted_message_count = unencrypted_message_count - 1
+                WHERE OLD.type = 'm.room.message' AND OLD.state_key IS NULL;
+
+                -- Decrement e2ee_event_count for m.room.encrypted events
+                UPDATE event_stats
+                SET e2ee_event_count = e2ee_event_count - 1
+                WHERE OLD.type = 'm.room.encrypted' AND OLD.state_key IS NULL;
             END;
             """
         )
     elif isinstance(database_engine, PostgresEngine):
         cur.execute(
             """
-            CREATE OR REPLACE FUNCTION check_partial_state_events() RETURNS trigger AS $BODY$
+            CREATE OR REPLACE FUNCTION event_stats_increment_counts() RETURNS trigger AS $BODY$
             BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM events
-                    WHERE events.event_id = NEW.event_id
-                       AND events.room_id != NEW.room_id
-                ) THEN
-                    RAISE EXCEPTION 'Incorrect room_id in partial_state_events';
+                IF TG_OP = 'INSERT' THEN
+                    -- Always increment total_event_count
+                    UPDATE event_stats SET total_event_count = total_event_count + 1;
+
+                    -- Increment unencrypted_message_count for m.room.message events
+                    IF NEW.type = 'm.room.message' AND NEW.state_key IS NULL THEN
+                        UPDATE event_stats SET unencrypted_message_count = unencrypted_message_count + 1;
+                    END IF;
+
+                    -- Increment e2ee_event_count for m.room.encrypted events
+                    IF NEW.type = 'm.room.encrypted' AND NEW.state_key IS NULL THEN
+                        UPDATE event_stats SET e2ee_event_count = e2ee_event_count + 1;
+                    END IF;
+
+                    -- We're not modifying the row being inserted/deleted, so we return it unchanged.
+                    RETURN NEW;
+
+                ELSIF TG_OP = 'DELETE' THEN
+                    -- Always decrement total_event_count
+                    UPDATE event_stats SET total_event_count = total_event_count - 1;
+
+                    -- Decrement unencrypted_message_count for m.room.message events
+                    IF OLD.type = 'm.room.message' AND OLD.state_key IS NULL THEN
+                        UPDATE event_stats SET unencrypted_message_count = unencrypted_message_count - 1;
+                    END IF;
+
+                    -- Decrement e2ee_event_count for m.room.encrypted events
+                    IF OLD.type = 'm.room.encrypted' AND OLD.state_key IS NULL THEN
+                        UPDATE event_stats SET e2ee_event_count = e2ee_event_count - 1;
+                    END IF;
+
+                    -- "The usual idiom in DELETE triggers is to return OLD."
+                    -- (https://www.postgresql.org/docs/current/plpgsql-trigger.html)
+                    RETURN OLD;
+                ELSE
+                    RAISE EXCEPTION 'update_event_stats() was run with unexpected operation (%). '
+                        'This indicates a trigger misconfiguration as this function should only'
+                        'run with INSERT/DELETE operations.', TG_OP;
                 END IF;
-                RETURN NEW;
+
             END;
             $BODY$ LANGUAGE plpgsql;
             """
@@ -85,9 +142,10 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
 
         cur.execute(
             """
-            CREATE TRIGGER check_partial_state_events BEFORE INSERT OR UPDATE ON partial_state_events
+            CREATE TRIGGER event_stats_increment_counts
+            AFTER INSERT OR DELETE ON events
             FOR EACH ROW
-            EXECUTE PROCEDURE check_partial_state_events()
+            EXECUTE PROCEDURE event_stats_increment_counts()
             """
         )
     else:
