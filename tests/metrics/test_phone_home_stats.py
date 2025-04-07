@@ -19,8 +19,8 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
-from synapse.util import Clock
 from synapse.types.storage import _BackgroundUpdates
+from synapse.util import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
