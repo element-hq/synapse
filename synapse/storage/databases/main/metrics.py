@@ -126,24 +126,27 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         return await self.db_pool.runInteraction("count_e2ee_messages", _count_messages)
 
+    async def count_total_events(self) -> int:
+        """
+        Returns the total number of events present on the server.
+        """
+
+        return await self.db_pool.simple_select_one_onecol(
+            table="event_stats",
+            keyvalues={},
+            retcol="total_event_count",
+        )
+
     async def count_total_messages(self) -> int:
         """
         Returns the total number of `m.room.message` events present on the
         server.
         """
 
-        def _count_total_messages(txn: LoggingTransaction) -> int:
-            sql = """
-                SELECT COUNT(*) FROM events
-                WHERE type = 'm.room.message'
-                    AND state_key IS NULL
-            """
-            txn.execute(sql)
-            (count,) = cast(Tuple[int], txn.fetchone())
-            return count
-
-        return await self.db_pool.runInteraction(
-            "count_total_messages", _count_total_messages
+        return await self.db_pool.simple_select_one_onecol(
+            table="event_stats",
+            keyvalues={},
+            retcol="unencrypted_message_count",
         )
 
     async def count_total_e2ee_events(self) -> int:
@@ -152,18 +155,10 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         server.
         """
 
-        def _count_total_e2ee_events(txn: LoggingTransaction) -> int:
-            sql = """
-                SELECT COUNT(*) FROM events
-                WHERE type = 'm.room.encrypted'
-                    AND state_key IS NULL
-            """
-            txn.execute(sql)
-            (count,) = cast(Tuple[int], txn.fetchone())
-            return count
-
-        return await self.db_pool.runInteraction(
-            "count_total_e2ee_events", _count_total_e2ee_events
+        return await self.db_pool.simple_select_one_onecol(
+            table="event_stats",
+            keyvalues={},
+            retcol="e2ee_event_count",
         )
 
     async def count_daily_sent_e2ee_messages(self) -> int:
