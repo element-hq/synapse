@@ -4014,7 +4014,7 @@ This option has a number of sub-options. They are as follows:
 * `include_content`: Clients requesting push notifications can either have the body of
    the message sent in the notification poke along with other details
    like the sender, or just the event ID and room ID (`event_id_only`).
-   If clients choose the to have the body sent, this option controls whether the
+   If clients choose to have the body sent, this option controls whether the
    notification request includes the content of the event (other details
    like the sender are still included). If `event_id_only` is enabled, it
    has no effect.
