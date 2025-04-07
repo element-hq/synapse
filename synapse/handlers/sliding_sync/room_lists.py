@@ -1113,7 +1113,7 @@ class SlidingSyncRoomLists:
         newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
 
         if not from_token:
-            return (), {}
+            return newly_joined_room_ids, newly_left_room_map
 
         changes = await self.store.get_sliding_sync_membership_changes(
             user_id,

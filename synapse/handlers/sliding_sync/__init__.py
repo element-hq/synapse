@@ -275,6 +275,7 @@ class SlidingSyncHandler:
                 from_token=from_token,
                 to_token=to_token,
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
+                newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
@@ -548,6 +549,7 @@ class SlidingSyncHandler:
         from_token: Optional[SlidingSyncStreamToken],
         to_token: StreamToken,
         newly_joined: bool,
+        newly_left: bool,
         is_dm: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
@@ -865,6 +867,17 @@ class SlidingSyncHandler:
 
             # TODO: We need to pull out membership changes if the user isn't in
             # the room, i.e. to deal with rejecting remote invites.
+
+            if newly_left and room_membership_for_user_at_to_token.event_id is not None:
+                membership_changed = True
+                leave_event = await self.store.get_event(
+                    room_membership_for_user_at_to_token.event_id
+                )
+                state_key = leave_event.get_state_key()
+                if state_key is not None:
+                    room_state_delta_id_map[(leave_event.type, state_key)] = (
+                        room_membership_for_user_at_to_token.event_id
+                    )
 
             deltas = await self.get_current_state_deltas_for_room(
                 room_id=room_id,

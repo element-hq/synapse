@@ -21,7 +21,6 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.events import make_event_from_dict
-from synapse.handlers.room import EventContext
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import UserID
@@ -541,7 +540,7 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         user_tok = self.login(user_id, "pass")
 
         room_id = "!room:remote.server"
-        self._create_remote_invite_room_for_user(room_id, user_id)
+        self._create_remote_invite_room_for_user_using_federation_handler(room_id, user_id)
 
         # Make the Sliding Sync request
         sync_body = {
@@ -556,7 +555,6 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user_tok)
 
         self.assertIn(room_id, response_body["rooms"])
-        print(response_body["rooms"][room_id])
 
         self.helper.leave(room_id, user_id, tok=user_tok)
 
@@ -565,9 +563,17 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         print(response_body["rooms"][room_id])
         self.assertIn(room_id, response_body["rooms"])
 
-        raise NotImplementedError()
+        actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][0]
+        self.assertEqual(
+            {
+                f'{actual_requred_state_leave["content"]["membership"]} ("{actual_requred_state_leave["type"]}", "{actual_requred_state_leave["state_key"]}")'
+            },
+            {
+                f'leave ("{EventTypes.Member}", "{user_id}")'
+            },
+        )
 
-    def _create_remote_invite_room_for_user(
+    def _create_remote_invite_room_for_user_using_federation_handler(
         self,
         room_id: str,
         user_id: str,

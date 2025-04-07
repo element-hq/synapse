@@ -1147,14 +1147,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Dict[str, RoomsForUserStateReset]:
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
-            return []
+            return {}
 
         if from_key:
             has_changed = self._membership_stream_cache.has_entity_changed(
                 user_id, int(from_key.stream)
             )
             if not has_changed:
-                return []
+                return {}
 
         room_ids_to_exclude: AbstractSet[str] = set()
         if excluded_room_ids is not None:
@@ -1276,9 +1276,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     if membership is None:
                         membership = Membership.LEAVE
 
-                    # TODO: If we see a JOIN we need to check if the user newly
-                    # joined the room (instead of just changing their display
-                    # name)
+                    if (
+                        membership is Membership.JOIN
+                        and prev_membership is Membership.JOIN
+                    ):
+                        # The user was previously joined so this it not a new join.
+                        # This happens when the user changes their display name.
+                        continue
 
                     membership_change = RoomsForUserStateReset(
                         room_id=room_id,
