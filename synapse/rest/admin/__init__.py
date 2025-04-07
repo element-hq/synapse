@@ -51,6 +51,7 @@ from synapse.rest.admin.background_updates import (
 from synapse.rest.admin.devices import (
     DeleteDevicesRestServlet,
     DeviceRestServlet,
+    DevicesGetRestServlet,
     DevicesRestServlet,
 )
 from synapse.rest.admin.event_reports import (
@@ -378,3 +379,4 @@ def register_servlets_for_msc3861_delegation(
     UsernameAvailableRestServlet(hs).register(http_server)
     DeactivateAccountRestServlet(hs).register(http_server)
     UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
+    DevicesGetRestServlet(hs).register(http_server)
