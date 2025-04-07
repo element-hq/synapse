@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 91  # remember to update the list below when updating
+SCHEMA_VERSION = 92  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -164,6 +164,9 @@ Changes in SCHEMA_VERSION = 90
     - Add background update to delete unreferenced state groups.
 
 Changes in SCHEMA_VERSION = 91
+    - TODO
+
+Changes in SCHEMA_VERSION = 92
     - Add `event_stats` table to store global event statistics like total counts
 """
 

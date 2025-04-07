@@ -20,6 +20,7 @@ from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.util import Clock
+from synapse.types.storage import _BackgroundUpdates
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -58,17 +59,32 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         hs.get_proxied_http_client().put_json = self.put_json_mock  # type: ignore[method-assign]
         return hs
 
-    def prepare(
-        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
-    ) -> None:
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+        # Wait for the background updates to add the database triggers that keep the
+        # `event_stats` table up-to-date.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
         # Do things to bump the stats
         self._perform_user_actions()
 
         # Force stats reporting to occur
         # initial_stats_dict = {}
-        start_phone_stats_home(hs=homeserver)
+        start_phone_stats_home(hs=hs)
+        # This magic number comes from 300 seconds that we wait after startup before we
+        # `generate_user_daily_visits(...)` + a healthy margin (50s).
         self.reactor.advance(350)
-        # self.get_success(phone_stats_home(hs=homeserver, stats=initial_stats_dict))
 
         # Extract the reported stats from our http client mock
         mock_calls = self.put_json_mock.call_args_list
@@ -85,7 +101,7 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         # Extract the phone home stats from the call
         self.phone_home_stats = report_stats_calls[0].args[1]
 
-        super().prepare(reactor, clock, homeserver)
+        super().prepare(reactor, clock, hs)
 
     def _perform_user_actions(self) -> None:
         """

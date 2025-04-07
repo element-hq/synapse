@@ -2782,7 +2782,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     ORDER BY stream_ordering ASC
                     LIMIT ?
                 )
-                UPDATE event_type_count
+                UPDATE event_stats
                 SET
                     total_event_count = total_event_count + (SELECT total_event_count FROM batch),
                     unencrypted_message_count = unencrypted_message_count + (SELECT unencrypted_message_count FROM batch),
