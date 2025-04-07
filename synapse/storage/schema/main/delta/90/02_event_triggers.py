@@ -30,8 +30,8 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
     cur.execute(
         """
         CREATE TABLE event_stats (
-            unencrypted_message_count INTEGER NOT NULL DEFAULT 0
-            e2ee_event_count INTEGER NOT NULL DEFAULT 0
+            unencrypted_message_count INTEGER NOT NULL DEFAULT 0,
+            e2ee_event_count INTEGER NOT NULL DEFAULT 0,
             total_event_count INTEGER NOT NULL DEFAULT 0
         );
         """
@@ -40,10 +40,10 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
     # Insert initial values into the table.
     cur.execute(
         """
-        INSERT INTO event_type_count (
-            unencrypted_messages_count,
-            e2ee_events_count,
-            total_count
+        INSERT INTO event_stats (
+            unencrypted_message_count,
+            e2ee_event_count,
+            total_event_count
         ) VALUES (0, 0, 0);
         """
     )
