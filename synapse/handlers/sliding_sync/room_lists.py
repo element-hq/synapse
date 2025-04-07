@@ -799,6 +799,9 @@ class SlidingSyncRoomLists:
                         )
                     )
                     rooms_should_send.update(rooms_that_have_updates)
+
+                    # Any rooms with receipts should be considered for sending as their
+                    # notification counts may have changed.
                     rooms_should_send.update(receipts.keys())
 
                     relevant_rooms_to_send_map = {
