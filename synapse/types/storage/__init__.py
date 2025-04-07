@@ -49,4 +49,8 @@ class _BackgroundUpdates:
         "sliding_sync_membership_snapshots_fix_forgotten_column_bg_update"
     )
 
+    MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE = (
+        "mark_unreferenced_state_groups_for_deletion_bg_update"
+    )
+
     EVENTS_TRACK_COUNTS_BG_UPDATE = "events_track_counts"

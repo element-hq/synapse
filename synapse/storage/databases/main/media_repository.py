@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
@@ -51,6 +52,8 @@ BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2 = (
     "media_repository_drop_index_wo_method_2"
 )
 
+logger = logging.getLogger(__name__)
+
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class LocalMedia:
@@ -65,6 +68,7 @@ class LocalMedia:
     safe_from_quarantine: bool
     user_id: Optional[str]
     authenticated: Optional[bool]
+    sha256: Optional[str]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -79,6 +83,7 @@ class RemoteMedia:
     last_access_ts: int
     quarantined_by: Optional[str]
     authenticated: Optional[bool]
+    sha256: Optional[str]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -154,6 +159,26 @@ class MediaRepositoryBackgroundUpdateStore(SQLBaseStore):
             unique=True,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="local_media_repository_sha256_idx",
+            index_name="local_media_repository_sha256",
+            table="local_media_repository",
+            where_clause="sha256 IS NOT NULL",
+            columns=[
+                "sha256",
+            ],
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="remote_media_cache_sha256_idx",
+            index_name="remote_media_cache_sha256",
+            table="remote_media_cache",
+            where_clause="sha256 IS NOT NULL",
+            columns=[
+                "sha256",
+            ],
+        )
+
         self.db_pool.updates.register_background_update_handler(
             BG_UPDATE_REMOVE_MEDIA_REPO_INDEX_WITHOUT_METHOD_2,
             self._drop_media_index_without_method,
@@ -221,6 +246,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "safe_from_quarantine",
                 "user_id",
                 "authenticated",
+                "sha256",
             ),
             allow_none=True,
             desc="get_local_media",
@@ -239,6 +265,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             safe_from_quarantine=row[7],
             user_id=row[8],
             authenticated=row[9],
+            sha256=row[10],
         )
 
     async def get_local_media_by_user_paginate(
@@ -295,7 +322,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     quarantined_by,
                     safe_from_quarantine,
                     user_id,
-                    authenticated
+                    authenticated,
+                    sha256
                 FROM local_media_repository
                 WHERE user_id = ?
                 ORDER BY {order_by_column} {order}, media_id ASC
@@ -320,6 +348,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                     safe_from_quarantine=bool(row[8]),
                     user_id=row[9],
                     authenticated=row[10],
+                    sha256=row[11],
                 )
                 for row in txn
             ]
@@ -449,6 +478,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         media_length: int,
         user_id: UserID,
         url_cache: Optional[str] = None,
+        sha256: Optional[str] = None,
+        quarantined_by: Optional[str] = None,
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -466,6 +497,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "user_id": user_id.to_string(),
                 "url_cache": url_cache,
                 "authenticated": authenticated,
+                "sha256": sha256,
+                "quarantined_by": quarantined_by,
             },
             desc="store_local_media",
         )
@@ -477,20 +510,28 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         upload_name: Optional[str],
         media_length: int,
         user_id: UserID,
+        sha256: str,
         url_cache: Optional[str] = None,
+        quarantined_by: Optional[str] = None,
     ) -> None:
+        updatevalues = {
+            "media_type": media_type,
+            "upload_name": upload_name,
+            "media_length": media_length,
+            "url_cache": url_cache,
+            "sha256": sha256,
+        }
+
+        # This should never be un-set by this function.
+        if quarantined_by is not None:
+            updatevalues["quarantined_by"] = quarantined_by
+
         await self.db_pool.simple_update_one(
             "local_media_repository",
             keyvalues={
-                "user_id": user_id.to_string(),
                 "media_id": media_id,
             },
-            updatevalues={
-                "media_type": media_type,
-                "upload_name": upload_name,
-                "media_length": media_length,
-                "url_cache": url_cache,
-            },
+            updatevalues=updatevalues,
             desc="update_local_media",
         )
 
@@ -657,6 +698,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "last_access_ts",
                 "quarantined_by",
                 "authenticated",
+                "sha256",
             ),
             allow_none=True,
             desc="get_cached_remote_media",
@@ -674,6 +716,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             last_access_ts=row[5],
             quarantined_by=row[6],
             authenticated=row[7],
+            sha256=row[8],
         )
 
     async def store_cached_remote_media(
@@ -685,6 +728,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         time_now_ms: int,
         upload_name: Optional[str],
         filesystem_id: str,
+        sha256: Optional[str],
     ) -> None:
         if self.hs.config.media.enable_authenticated_media:
             authenticated = True
@@ -703,6 +747,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 "filesystem_id": filesystem_id,
                 "last_access_ts": time_now_ms,
                 "authenticated": authenticated,
+                "sha256": sha256,
             },
             desc="store_cached_remote_media",
         )
@@ -945,4 +990,47 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
         await self.db_pool.runInteraction(
             "delete_url_cache_media", _delete_url_cache_media_txn
+        )
+
+    async def get_is_hash_quarantined(self, sha256: str) -> bool:
+        """Get whether a specific sha256 hash digest matches any quarantined media.
+
+        Returns:
+            None if the media_id doesn't exist.
+        """
+
+        # If we don't have the index yet, performance tanks, so we return False.
+        # In the background updates, remote_media_cache_sha256_idx is created
+        # after local_media_repository_sha256_idx, which is why we only need to
+        # check for the completion of the former.
+        if not await self.db_pool.updates.has_completed_background_update(
+            "remote_media_cache_sha256_idx"
+        ):
+            return False
+
+        def get_matching_media_txn(
+            txn: LoggingTransaction, table: str, sha256: str
+        ) -> bool:
+            # Return on first match
+            sql = """
+            SELECT 1
+            FROM local_media_repository
+            WHERE sha256 = ? AND quarantined_by IS NOT NULL
+
+            UNION ALL
+
+            SELECT 1
+            FROM remote_media_cache
+            WHERE sha256 = ? AND quarantined_by IS NOT NULL
+            LIMIT 1
+            """
+            txn.execute(sql, (sha256, sha256))
+            row = txn.fetchone()
+            return row is not None
+
+        return await self.db_pool.runInteraction(
+            "get_matching_media_txn",
+            get_matching_media_txn,
+            "local_media_repository",
+            sha256,
         )
