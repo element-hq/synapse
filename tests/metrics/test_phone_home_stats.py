@@ -64,16 +64,6 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
 
         # Wait for the background updates to add the database triggers that keep the
         # `event_stats` table up-to-date.
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
-                    "update_name": _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
-                    "progress_json": "{}",
-                },
-            )
-        )
-        self.store.db_pool.updates._all_done = False
         self.wait_for_background_updates()
 
         # Do things to bump the stats
