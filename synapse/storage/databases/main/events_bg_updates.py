@@ -313,7 +313,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # Add a background update to add triggers which track event counts.
         self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE,
+            _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
             self._event_stats_populate_counts_bg_update,
         )
 
@@ -2728,7 +2728,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (max_stream_ordering,) = row
                 self.db_pool.updates._background_update_progress_txn(
                     txn,
-                    _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE,
+                    _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
                     {"stop_event_stream_ordering": max_stream_ordering},
                 )
                 return max_stream_ordering
@@ -2749,7 +2749,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # in the `events` table and we can end the background update altogether.
             if stop_event_stream_ordering is None:
                 await self.db_pool.updates._end_background_update(
-                    _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE
+                    _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE
                 )
                 return batch_size
 
@@ -2794,7 +2794,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Update the progress
             self.db_pool.updates._background_update_progress_txn(
                 txn,
-                _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE,
+                _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
                 {
                     "last_event_stream_ordering": max_stream_ordering,
                     "stop_event_stream_ordering": stop_event_stream_ordering,
@@ -2811,7 +2811,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # No more rows to process, so our background update is complete.
         if not num_rows_processed:
             await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE
+                _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE
             )
 
         return batch_size

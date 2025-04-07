@@ -53,4 +53,4 @@ class _BackgroundUpdates:
         "mark_unreferenced_state_groups_for_deletion_bg_update"
     )
 
-    EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE = "event_stats_backfill_counts_bg_update"
+    EVENT_STATS_POPULATE_COUNTS_BG_UPDATE = "event_stats_populate_counts_bg_update"
