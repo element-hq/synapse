@@ -2701,10 +2701,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # 14 (https://www.postgresql.org/docs/14/sql-createtrigger.html)
                 txn.execute(
                     """
-                    CREATE TRIGGER event_stats_increment_counts_trigger
-                    AFTER INSERT OR DELETE ON events
-                    FOR EACH ROW
-                    EXECUTE PROCEDURE event_stats_increment_counts()
+                    DO
+                    $$BEGIN
+                        CREATE TRIGGER event_stats_increment_counts_trigger
+                        AFTER INSERT OR DELETE ON events
+                        FOR EACH ROW
+                        EXECUTE PROCEDURE event_stats_increment_counts()
+                    EXCEPTION
+                    -- This acts as a "CREATE TRIGGER IF NOT EXISTS" for Postgres
+                    WHEN duplicate_object THEN
+                        NULL;
+                    END;$$;
                     """
                 )
             else:
