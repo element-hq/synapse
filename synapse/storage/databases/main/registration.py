@@ -760,15 +760,28 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             user_id: complete mxid that it is mapped to
         """
 
-        self.db_pool.simple_insert_txn(
+        existing_id = self.db_pool.simple_select_one_onecol_txn(
             txn,
             table="user_external_ids",
-            values={
-                "auth_provider": auth_provider,
-                "external_id": external_id,
-                "user_id": user_id,
-            },
+            keyvalues={"auth_provider": auth_provider, "user_id": user_id},
+            retcol="external_id",
+            allow_none=True,
         )
+
+        if existing_id is None:
+            self.db_pool.simple_insert_txn(
+                txn,
+                table="user_external_ids",
+                values={
+                    "auth_provider": auth_provider,
+                    "external_id": external_id,
+                    "user_id": user_id,
+                },
+            )
+        elif existing_id != external_id:
+            raise ExternalIDReuseException(
+                f"{user_id!r} has external id {existing_id!r} for {auth_provider} but trying to add {external_id!r}"
+            )
 
     async def remove_user_external_id(
         self, auth_provider: str, external_id: str, user_id: str
