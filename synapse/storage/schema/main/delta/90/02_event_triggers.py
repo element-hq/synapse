@@ -55,7 +55,7 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
     if isinstance(database_engine, Sqlite3Engine):
         cur.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS events_insert_trigger
+            CREATE TRIGGER IF NOT EXISTS event_stats_events_insert_trigger
             AFTER INSERT ON events
             BEGIN
                 -- Always increment total_event_count
@@ -76,7 +76,7 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
 
         cur.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS events_delete_trigger
+            CREATE TRIGGER IF NOT EXISTS event_stats_events_delete_trigger
             AFTER DELETE ON events
             BEGIN
                 -- Always decrement total_event_count
@@ -135,7 +135,7 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
                     RETURN OLD;
                 END IF;
 
-                RAISE EXCEPTION 'update_event_stats() was run with unexpected operation (%). '
+                RAISE EXCEPTION 'update_event_stats() was run with unexpected operation (%%). '
                     'This indicates a trigger misconfiguration as this function should only'
                     'run with INSERT/DELETE operations.', TG_OP;
             END;
@@ -143,9 +143,11 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
             """
         )
 
+        # We could use `CREATE OR REPLACE TRIGGER` but that's only available in Postgres
+        # 14 (https://www.postgresql.org/docs/14/sql-createtrigger.html)
         cur.execute(
             """
-            CREATE TRIGGER IF NOT EXISTS event_stats_increment_counts_trigger
+            CREATE TRIGGER event_stats_increment_counts_trigger
             AFTER INSERT OR DELETE ON events
             FOR EACH ROW
             EXECUTE PROCEDURE event_stats_increment_counts()
