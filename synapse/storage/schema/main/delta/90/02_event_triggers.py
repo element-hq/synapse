@@ -37,14 +37,12 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
         """
     )
 
-    # Insert initial values into the table.
+    # Add a background update to populate the `event_stats` table with the current
+    # counts before the triggers were added.
     cur.execute(
         """
-        INSERT INTO event_stats (
-            unencrypted_message_count,
-            e2ee_event_count,
-            total_event_count
-        ) VALUES (0, 0, 0);
+        INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+            (9002, 'event_stats_backfill_counts_bg_update', '{}');
         """
     )
 

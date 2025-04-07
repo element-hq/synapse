@@ -313,8 +313,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # Add a background update to add triggers which track event counts.
         self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.EVENTS_TRACK_COUNTS_BG_UPDATE,
-            self._events_track_event_counts_bg_update,
+            _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE,
+            self._event_stats_backfill_counts_bg_update,
         )
 
         # We want this to run on the main database at startup before we start processing
@@ -2553,7 +2553,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         return num_rows
 
-    async def _events_track_event_counts_bg_update(
+    async def _event_stats_backfill_counts_bg_update(
         self, progress: JsonDict, batch_size: int
     ) -> int:
         """
@@ -2614,20 +2614,20 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Update the progress
             self.db_pool.updates._background_update_progress_txn(
                 txn,
-                _BackgroundUpdates.EVENTS_TRACK_COUNTS_BG_UPDATE,
+                _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE,
                 {"last_event_stream_ordering": max_stream_ordering},
             )
 
             return total_event_count
 
         num_rows = await self.db_pool.runInteraction(
-            "_events_track_event_counts_bg_update",
+            "_event_stats_backfill_counts_bg_update",
             _txn,
         )
 
         if not num_rows:
             await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.EVENTS_TRACK_COUNTS_BG_UPDATE
+                _BackgroundUpdates.EVENT_STATS_BACKFILL_COUNTS_BG_UPDATE
             )
 
         return batch_size
