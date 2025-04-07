@@ -135,6 +135,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             table="event_stats",
             keyvalues={},
             retcol="total_event_count",
+            desc="count_total_events",
         )
 
     async def count_total_messages(self) -> int:
@@ -147,6 +148,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             table="event_stats",
             keyvalues={},
             retcol="unencrypted_message_count",
+            desc="count_total_messages",
         )
 
     async def count_total_e2ee_events(self) -> int:
@@ -159,6 +161,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             table="event_stats",
             keyvalues={},
             retcol="e2ee_event_count",
+            desc="count_total_e2ee_events",
         )
 
     async def count_daily_sent_e2ee_messages(self) -> int:
