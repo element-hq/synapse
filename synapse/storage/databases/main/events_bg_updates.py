@@ -2707,7 +2707,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         CREATE TRIGGER event_stats_increment_counts_trigger
                         AFTER INSERT OR DELETE ON events
                         FOR EACH ROW
-                        EXECUTE PROCEDURE event_stats_increment_counts()
+                        EXECUTE PROCEDURE event_stats_increment_counts();
                     EXCEPTION
                     -- This acts as a "CREATE TRIGGER IF NOT EXISTS" for Postgres
                     WHEN duplicate_object THEN
