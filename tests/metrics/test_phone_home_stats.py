@@ -16,11 +16,14 @@ from unittest.mock import AsyncMock
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.app.phone_stats_home import start_phone_stats_home
+from synapse.app.phone_stats_home import (
+    PHONE_HOME_INTERVAL_SECONDS,
+    start_phone_stats_home,
+)
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
+from synapse.types import JsonDict
 from synapse.util import Clock
-from synapse.app.phone_stats_home import PHONE_HOME_INTERVAL_SECONDS
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -71,7 +74,7 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
 
         super().prepare(reactor, clock, hs)
 
-    def _get_latest_phone_home_stats(self) -> None:
+    def _get_latest_phone_home_stats(self) -> JsonDict:
         # Wait for `phone_stats_home` to be called again + a healthy margin (50s).
         self.reactor.advance(2 * PHONE_HOME_INTERVAL_SECONDS + 50)
 
