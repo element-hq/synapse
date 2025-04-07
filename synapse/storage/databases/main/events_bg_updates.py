@@ -2564,11 +2564,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         track of the the event counts it sees. Once the full table has been run
         through, it registers TRIGGERs on rows being added/removed from the
         events table, which will keep the event counts continuously updated.
-        
+
         This data is intended to be used by the phone-home stats to keep track
         of total event and message counts. A trigger is preferred to counting
         rows in the `events` table, as said table can grow quite large.
-        
+
         It is also preferable to adding an index on the `events` table, as even
         an index can grow large. And calculating total counts would require
         querying that entire index.
@@ -2613,14 +2613,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (last_event_stream_ordering, batch_size),
             )
 
-            self._stream_id_gen.get_current_token
-
             # Update the progress
             self.db_pool.updates._background_update_progress_txn(
                 txn,
                 _BackgroundUpdates.EVENTS_TRACK_COUNTS_BG_UPDATE,
                 {
-                    "last_event_stream_ordering": last_event_stream_ordering + batch_size,
+                    "last_event_stream_ordering": last_event_stream_ordering
+                    + batch_size,
                 },
             )
 
@@ -2635,7 +2634,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         return batch_size
-
 
 
 def _resolve_stale_data_in_sliding_sync_tables(
