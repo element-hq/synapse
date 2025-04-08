@@ -23,7 +23,6 @@ from synapse.app.phone_stats_home import (
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
 
 from tests import unittest
