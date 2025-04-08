@@ -748,7 +748,7 @@ class SlidingSyncExtensionHandler:
                 # Combine the receipts for a room and add them to
                 # `fetched_receipts`
                 for room_id in initial_receipts.keys() | user_receipts.keys():
-                    if room_id in initial_receipts:
+                    if room_id in initial_rooms:
                         receipt_content = ReceiptInRoom.merge_to_content(
                             list(
                                 itertools.chain(
