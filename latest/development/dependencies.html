@@ -273,6 +273,24 @@ $ poetry shell
 # Install everything again
 $ poetry install --extras all
 </code></pre>
+<p>If you want to go even further and remove the Poetry caches:</p>
+<pre><code class="language-shell"># Find your Poetry cache directory
+# Docs: https://github.com/python-poetry/poetry/blob/main/docs/configuration.md#cache-directory
+$ poetry config cache-dir
+
+# Remove packages from all cached repositories
+$ poetry cache clear --all .
+
+# Go completely nuclear and clear out everything Poetry cache related
+# including the wheel artifacts which is not covered by the above command
+# (see https://github.com/python-poetry/poetry/issues/10304)
+#
+# This is necessary in order to rebuild or fetch new wheels. For example, if you update
+# the `icu` library in on your system, you will need to rebuild the PyICU Python package
+# in order to incorporate the correct dynamically linked library locations otherwise you
+# will run into errors like: `ImportError: libicui18n.so.75: cannot open shared object file: No such file or directory`
+$ rm -rf $(poetry config cache-dir)
+</code></pre>
 <h2 id="run-a-command-in-the-poetry-virtualenv"><a class="header" href="#run-a-command-in-the-poetry-virtualenv">...run a command in the <code>poetry</code> virtualenv?</a></h2>
 <p>Use <code>poetry run cmd args</code> when you need the python virtualenv context.
 To avoid typing <code>poetry run</code> all the time, you can run  <code>poetry shell</code>
@@ -301,7 +319,7 @@ useful.</p>
 <h2 id="add-a-new-dependency"><a class="header" href="#add-a-new-dependency">...add a new dependency?</a></h2>
 <p>Either:</p>
 <ul>
-<li>manually update <code>pyproject.toml</code>; then <code>poetry lock --no-update</code>; or else</li>
+<li>manually update <code>pyproject.toml</code>; then <code>poetry lock</code>; or else</li>
 <li><code>poetry add packagename</code>. See <code>poetry add --help</code>; note the <code>--dev</code>,
 <code>--extras</code> and <code>--optional</code> flags in particular.</li>
 </ul>
@@ -311,10 +329,10 @@ useful.</p>
 <pre><code class="language-shell">poetry remove packagename
 </code></pre>
 <p>ought to do the trick. Alternatively, manually update <code>pyproject.toml</code> and
-<code>poetry lock --no-update</code>. Include the updated <code>pyproject.toml</code> and <code>poetry.lock</code>
+<code>poetry lock</code>. Include the updated <code>pyproject.toml</code> and <code>poetry.lock</code>
 files in your commit.</p>
 <h2 id="update-the-version-range-for-an-existing-dependency"><a class="header" href="#update-the-version-range-for-an-existing-dependency">...update the version range for an existing dependency?</a></h2>
-<p>Best done by manually editing <code>pyproject.toml</code>, then <code>poetry lock --no-update</code>.
+<p>Best done by manually editing <code>pyproject.toml</code>, then <code>poetry lock</code>.
 Include the updated <code>pyproject.toml</code> and <code>poetry.lock</code> in your commit.</p>
 <h2 id="update-a-dependency-in-the-locked-environment"><a class="header" href="#update-a-dependency-in-the-locked-environment">...update a dependency in the locked environment?</a></h2>
 <p>Use</p>
@@ -332,7 +350,7 @@ affecting the broad dependencies listed in the wheel.</p>
 
 # Get poetry to recompute the content-hash of pyproject.toml without changing
 # the locked package versions.
-poetry lock --no-update
+poetry lock
 </code></pre>
 <p>Either way, include the updated <code>poetry.lock</code> file in your commit.</p>
 <h2 id="export-a-requirementstxt-file"><a class="header" href="#export-a-requirementstxt-file">...export a <code>requirements.txt</code> file?</a></h2>

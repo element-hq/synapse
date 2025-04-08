@@ -1869,7 +1869,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.127.1</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.128.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -9300,7 +9300,7 @@ URLs are all things that can be mapped from talking to a SSO service.</p>
 to turn that into a displayname when creating a Matrix user for this individual.
 It may choose <code>John Smith</code>, or <code>Smith, John [Example.com]</code> or any number of
 variations. As each Synapse configuration may want something different, this is
-where SAML mapping providers come into play.</p>
+where SSO mapping providers come into play.</p>
 <p>SSO mapping providers are currently supported for OpenID and SAML SSO
 configurations. Please see the details below for how to implement your own.</p>
 <p>It is up to the mapping provider whether the user should be assigned a predefined
@@ -13097,6 +13097,14 @@ Admin API.</p>
 <p>Quarantining media means that it is marked as inaccessible by users. It applies
 to any local media, and any locally-cached copies of remote media.</p>
 <p>The media file itself (and any thumbnails) is not deleted from the server.</p>
+<p>Since Synapse 1.128.0, hashes of uploaded media are tracked. If this media
+is quarantined, Synapse will:</p>
+<ul>
+<li>Quarantine any media with a matching hash that has already been uploaded.</li>
+<li>Quarantine any future media.</li>
+<li>Quarantine any existing cached remote media.</li>
+<li>Quarantine any future remote media.</li>
+</ul>
 <h2 id="quarantining-media-by-id"><a class="header" href="#quarantining-media-by-id">Quarantining media by ID</a></h2>
 <p>This API quarantines a single piece of local or remote media.</p>
 <p>Request:</p>
@@ -17150,7 +17158,7 @@ so in this case it makes sense to start with a clean database.
 <p>Using the following curl command:</p>
 <pre><code class="language-console">curl -H 'Authorization: Bearer &lt;access-token&gt;' -X DELETE https://matrix.org/_matrix/client/r0/directory/room/&lt;room-alias&gt;
 </code></pre>
-<p><code>&lt;access-token&gt;</code> - can be obtained in riot by looking in the riot settings, down the bottom is:
+<p><code>&lt;access-token&gt;</code> - can be obtained in element by looking in All settings, clicking Help &amp; About and down the bottom is:
 Access Token:&lt;click to reveal&gt;</p>
 <p><code>&lt;room-alias&gt;</code> - the room alias, eg. #my_room:matrix.org this possibly needs to be URL encoded also, for example  %23my_room%3Amatrix.org</p>
 <h2 id="how-can-i-find-the-lines-corresponding-to-a-given-http-request-in-my-homeserver-log"><a class="header" href="#how-can-i-find-the-lines-corresponding-to-a-given-http-request-in-my-homeserver-log">How can I find the lines corresponding to a given HTTP request in my homeserver log?</a></h2>
@@ -18190,7 +18198,7 @@ by a unique name, the current status (stored in JSON), and some dependency infor
 <li>Whether the update requires a previous update to be complete.</li>
 <li>A rough ordering for which to complete updates.</li>
 </ul>
-<p>A new background updates needs to be added to the <code>background_updates</code> table:</p>
+<p>A new background update needs to be added to the <code>background_updates</code> table:</p>
 <pre><code class="language-sql">INSERT INTO background_updates (ordering, update_name, depends_on, progress_json) VALUES
   (7706, 'my_background_update', 'a_previous_background_update' '{}');
 </code></pre>
@@ -18533,6 +18541,24 @@ $ poetry shell
 # Install everything again
 $ poetry install --extras all
 </code></pre>
+<p>If you want to go even further and remove the Poetry caches:</p>
+<pre><code class="language-shell"># Find your Poetry cache directory
+# Docs: https://github.com/python-poetry/poetry/blob/main/docs/configuration.md#cache-directory
+$ poetry config cache-dir
+
+# Remove packages from all cached repositories
+$ poetry cache clear --all .
+
+# Go completely nuclear and clear out everything Poetry cache related
+# including the wheel artifacts which is not covered by the above command
+# (see https://github.com/python-poetry/poetry/issues/10304)
+#
+# This is necessary in order to rebuild or fetch new wheels. For example, if you update
+# the `icu` library in on your system, you will need to rebuild the PyICU Python package
+# in order to incorporate the correct dynamically linked library locations otherwise you
+# will run into errors like: `ImportError: libicui18n.so.75: cannot open shared object file: No such file or directory`
+$ rm -rf $(poetry config cache-dir)
+</code></pre>
 <h2 id="run-a-command-in-the-poetry-virtualenv"><a class="header" href="#run-a-command-in-the-poetry-virtualenv">...run a command in the <code>poetry</code> virtualenv?</a></h2>
 <p>Use <code>poetry run cmd args</code> when you need the python virtualenv context.
 To avoid typing <code>poetry run</code> all the time, you can run  <code>poetry shell</code>
@@ -18561,7 +18587,7 @@ useful.</p>
 <h2 id="add-a-new-dependency"><a class="header" href="#add-a-new-dependency">...add a new dependency?</a></h2>
 <p>Either:</p>
 <ul>
-<li>manually update <code>pyproject.toml</code>; then <code>poetry lock --no-update</code>; or else</li>
+<li>manually update <code>pyproject.toml</code>; then <code>poetry lock</code>; or else</li>
 <li><code>poetry add packagename</code>. See <code>poetry add --help</code>; note the <code>--dev</code>,
 <code>--extras</code> and <code>--optional</code> flags in particular.</li>
 </ul>
@@ -18571,10 +18597,10 @@ useful.</p>
 <pre><code class="language-shell">poetry remove packagename
 </code></pre>
 <p>ought to do the trick. Alternatively, manually update <code>pyproject.toml</code> and
-<code>poetry lock --no-update</code>. Include the updated <code>pyproject.toml</code> and <code>poetry.lock</code>
+<code>poetry lock</code>. Include the updated <code>pyproject.toml</code> and <code>poetry.lock</code>
 files in your commit.</p>
 <h2 id="update-the-version-range-for-an-existing-dependency"><a class="header" href="#update-the-version-range-for-an-existing-dependency">...update the version range for an existing dependency?</a></h2>
-<p>Best done by manually editing <code>pyproject.toml</code>, then <code>poetry lock --no-update</code>.
+<p>Best done by manually editing <code>pyproject.toml</code>, then <code>poetry lock</code>.
 Include the updated <code>pyproject.toml</code> and <code>poetry.lock</code> in your commit.</p>
 <h2 id="update-a-dependency-in-the-locked-environment"><a class="header" href="#update-a-dependency-in-the-locked-environment">...update a dependency in the locked environment?</a></h2>
 <p>Use</p>
@@ -18592,7 +18618,7 @@ affecting the broad dependencies listed in the wheel.</p>
 
 # Get poetry to recompute the content-hash of pyproject.toml without changing
 # the locked package versions.
-poetry lock --no-update
+poetry lock
 </code></pre>
 <p>Either way, include the updated <code>poetry.lock</code> file in your commit.</p>
 <h2 id="export-a-requirementstxt-file"><a class="header" href="#export-a-requirementstxt-file">...export a <code>requirements.txt</code> file?</a></h2>
