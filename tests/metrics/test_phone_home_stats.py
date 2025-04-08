@@ -23,8 +23,8 @@ from synapse.app.phone_stats_home import (
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
 from synapse.types.storage import _BackgroundUpdates
+from synapse.util import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -257,38 +257,3 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         synapse_logger = logging.getLogger("synapse")
         log_level = synapse_logger.getEffectiveLevel()
         self.assertEqual(phone_home_stats["log_level"], logging.getLevelName(log_level))
-
-    def test_asdf_background_update(self) -> None:
-        """
-        TODO
-        """
-        # Do things to bump the stats
-        self._perform_user_actions()
-
-        # Wait for the stats to be reported
-        phone_home_stats_before = self._get_latest_phone_home_stats()
-
-        self.assertEqual(phone_home_stats_before["total_event_count"], 24)
-        self.assertEqual(phone_home_stats_before["total_message_count"], 10)
-        self.assertEqual(phone_home_stats_before["total_e2ee_event_count"], 5)
-
-        # Run the background update again
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
-                    "update_name": _BackgroundUpdates.EVENT_STATS_POPULATE_COUNTS_BG_UPDATE,
-                    "progress_json": "{}",
-                },
-            )
-        )
-        self.store.db_pool.updates._all_done = False
-        self.wait_for_background_updates()
-
-        # Wait for the stats to be reported
-        phone_home_stats_after = self._get_latest_phone_home_stats()
-
-        # We expect these values to double as the background update is being run *again*
-        self.assertEqual(phone_home_stats_after["total_event_count"], 48)
-        self.assertEqual(phone_home_stats_after["total_message_count"], 20)
-        self.assertEqual(phone_home_stats_after["total_e2ee_event_count"], 10)
