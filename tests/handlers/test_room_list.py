@@ -6,6 +6,7 @@ from synapse.rest.client import directory, login, room
 from synapse.types import JsonDict
 
 from tests import unittest
+from tests.utils import default_config
 
 
 class RoomListHandlerTestCase(unittest.HomeserverTestCase):
@@ -29,6 +30,11 @@ class RoomListHandlerTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == HTTPStatus.OK, f"couldn't publish room: {channel.result}"
         return room_id
+
+    def default_config(self) -> JsonDict:
+        config = default_config("test")
+        config["room_list_publication_rules"] = [{"action": "allow"}]
+        return config
 
     def test_acls_applied_to_room_directory_results(self) -> None:
         """

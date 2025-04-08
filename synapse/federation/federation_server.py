@@ -69,7 +69,7 @@ from synapse.federation.federation_base import (
     event_from_pdu_json,
 )
 from synapse.federation.persistence import TransactionActions
-from synapse.federation.units import Edu, Transaction
+from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import (
@@ -660,8 +660,8 @@ class FederationServer(FederationBase):
         )
 
         return {
-            "pdus": [pdu.get_pdu_json() for pdu in pdus],
-            "auth_chain": [pdu.get_pdu_json() for pdu in auth_chain],
+            "pdus": serialize_and_filter_pdus(pdus),
+            "auth_chain": serialize_and_filter_pdus(auth_chain),
         }
 
     async def on_pdu_request(
@@ -785,8 +785,8 @@ class FederationServer(FederationBase):
         event_json = event.get_pdu_json(time_now)
         resp = {
             "event": event_json,
-            "state": [p.get_pdu_json(time_now) for p in state_events],
-            "auth_chain": [p.get_pdu_json(time_now) for p in auth_chain_events],
+            "state": serialize_and_filter_pdus(state_events, time_now),
+            "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
 
@@ -1029,7 +1029,7 @@ class FederationServer(FederationBase):
 
             time_now = self._clock.time_msec()
             auth_pdus = await self.handler.on_event_auth(event_id)
-            res = {"auth_chain": [a.get_pdu_json(time_now) for a in auth_pdus]}
+            res = {"auth_chain": serialize_and_filter_pdus(auth_pdus, time_now)}
         return 200, res
 
     async def on_query_client_keys(
@@ -1114,7 +1114,7 @@ class FederationServer(FederationBase):
 
             time_now = self._clock.time_msec()
 
-        return {"events": [ev.get_pdu_json(time_now) for ev in missing_events]}
+        return {"events": serialize_and_filter_pdus(missing_events, time_now)}
 
     async def on_openid_userinfo(self, token: str) -> Optional[str]:
         ts_now_ms = self._clock.time_msec()

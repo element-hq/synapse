@@ -3,13 +3,13 @@
 # (https://github.com/matrix-org/complement) Matrix homeserver test suites are also
 # installed automatically.
 #
-# You must have already installed Nix (https://nixos.org) on your system to use this.
-# Nix can be installed on Linux or MacOS; NixOS is not required. Windows is not
-# directly supported, but Nix can be installed inside of WSL2 or even Docker
+# You must have already installed Nix (https://nixos.org/download/) on your system to use this.
+# Nix can be installed on any Linux distribiution or MacOS; NixOS is not required.
+# Windows is not directly supported, but Nix can be installed inside of WSL2 or even Docker
 # containers. Please refer to https://nixos.org/download for details.
 #
 # You must also enable support for flakes in Nix. See the following for how to
-# do so permanently: https://nixos.wiki/wiki/Flakes#Enable_flakes
+# do so permanently: https://wiki.nixos.org/wiki/Flakes#Other_Distros,_without_Home-Manager
 #
 # Be warned: you'll need over 3.75 GB of free space to download all the dependencies.
 #
@@ -20,7 +20,7 @@
 # locally from "services", such as PostgreSQL and Redis.
 #
 # You should now be dropped into a new shell with all programs and dependencies
-# availabile to you!
+# available to you!
 #
 # You can start up pre-configured local Synapse, PostgreSQL and Redis instances by
 # running: `devenv up`. To stop them, use Ctrl-C.
@@ -39,9 +39,9 @@
 
 {
   inputs = {
-    # Use the master/unstable branch of nixpkgs. Used to fetch the latest
+    # Use the rolling/unstable branch of nixpkgs. Used to fetch the latest
     # available versions of packages.
-    nixpkgs.url = "github:NixOS/nixpkgs/master";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     # Output a development shell for x86_64/aarch64 Linux/Darwin (MacOS).
     systems.url = "github:nix-systems/default";
     # A development environment manager built on Nix. See https://devenv.sh.
@@ -50,7 +50,7 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, devenv, systems, rust-overlay, ... } @ inputs:
+  outputs = { nixpkgs, devenv, systems, rust-overlay, ... } @ inputs:
     let
       forEachSystem = nixpkgs.lib.genAttrs (import systems);
     in {
@@ -82,7 +82,7 @@
                   #
                   # NOTE: We currently need to set the Rust version unnecessarily high
                   # in order to work around https://github.com/matrix-org/synapse/issues/15939
-                  (rust-bin.stable."1.71.1".default.override {
+                  (rust-bin.stable."1.82.0".default.override {
                     # Additionally install the "rust-src" extension to allow diving into the
                     # Rust source code in an IDE (rust-analyzer will also make use of it).
                     extensions = [ "rust-src" ];
@@ -126,7 +126,7 @@
                 # Automatically activate the poetry virtualenv upon entering the shell.
                 languages.python.poetry.activate.enable = true;
                 # Install all extra Python dependencies; this is needed to run the unit
-                # tests and utilitise all Synapse features.
+                # tests and utilise all Synapse features.
                 languages.python.poetry.install.arguments = ["--extras all"];
                 # Install the 'matrix-synapse' package from the local checkout.
                 languages.python.poetry.install.installRootPackage = true;
@@ -163,8 +163,8 @@
                 # Create a postgres user called 'synapse_user' which has ownership
                 # over the 'synapse' database.
                 services.postgres.initialScript = ''
-                CREATE USER synapse_user;
-                ALTER DATABASE synapse OWNER TO synapse_user;
+                  CREATE USER synapse_user;
+                  ALTER DATABASE synapse OWNER TO synapse_user;
                 '';
 
                 # Redis is needed in order to run Synapse in worker mode.
@@ -205,7 +205,7 @@
                 # corresponding Nix packages on https://search.nixos.org/packages.
                 #
                 # This was done until `./install-deps.pl --dryrun` produced no output.
-                env.PERL5LIB = "${with pkgs.perl536Packages; makePerlPath [
+                env.PERL5LIB = "${with pkgs.perl538Packages; makePerlPath [
                   DBI
                   ClassMethodModifiers
                   CryptEd25519

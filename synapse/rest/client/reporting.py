@@ -105,18 +105,17 @@ class ReportEventRestServlet(RestServlet):
 class ReportRoomRestServlet(RestServlet):
     """This endpoint lets clients report a room for abuse.
 
-    Whilst MSC4151 is not yet merged, this unstable endpoint is enabled on matrix.org
-    for content moderation purposes, and therefore backwards compatibility should be
-    carefully considered when changing anything on this endpoint.
-
-    More details on the MSC: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
+    Introduced by MSC4151: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
     """
 
-    PATTERNS = client_patterns(
-        "/org.matrix.msc4151/rooms/(?P<room_id>[^/]*)/report$",
-        releases=[],
-        v1=False,
-        unstable=True,
+    # Cast the Iterable to a list so that we can `append` below.
+    PATTERNS = list(
+        client_patterns(
+            "/rooms/(?P<room_id>[^/]*)/report$",
+            releases=("v3",),
+            unstable=False,
+            v1=False,
+        )
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -153,6 +152,4 @@ class ReportRoomRestServlet(RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
-
-    if hs.config.experimental.msc4151_enabled:
-        ReportRoomRestServlet(hs).register(http_server)
+    ReportRoomRestServlet(hs).register(http_server)

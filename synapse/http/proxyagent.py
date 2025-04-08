@@ -21,7 +21,7 @@
 import logging
 import random
 import re
-from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 from urllib.request import (  # type: ignore[attr-defined]
     getproxies_environment,
@@ -150,6 +150,12 @@ class ProxyAgent(_AgentBase):
             http_proxy = proxies["http"].encode() if "http" in proxies else None
             https_proxy = proxies["https"].encode() if "https" in proxies else None
             no_proxy = proxies["no"] if "no" in proxies else None
+            logger.debug(
+                "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
+                http_proxy,
+                https_proxy,
+                no_proxy,
+            )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
             http_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
@@ -351,7 +357,9 @@ def http_proxy_endpoint(
     proxy: Optional[bytes],
     reactor: IReactorCore,
     tls_options_factory: Optional[IPolicyForHTTPS],
-    **kwargs: object,
+    timeout: float = 30,
+    bindAddress: Optional[Union[bytes, str, tuple[Union[bytes, str], int]]] = None,
+    attemptDelay: Optional[float] = None,
 ) -> Tuple[Optional[IStreamClientEndpoint], Optional[ProxyCredentials]]:
     """Parses an http proxy setting and returns an endpoint for the proxy
 
@@ -382,12 +390,15 @@ def http_proxy_endpoint(
     # 3.9+) on scheme-less proxies, e.g. host:port.
     scheme, host, port, credentials = parse_proxy(proxy)
 
-    proxy_endpoint = HostnameEndpoint(reactor, host, port, **kwargs)
+    proxy_endpoint = HostnameEndpoint(
+        reactor, host, port, timeout, bindAddress, attemptDelay
+    )
 
     if scheme == b"https":
         if tls_options_factory:
             tls_options = tls_options_factory.creatorForNetloc(host, port)
-            proxy_endpoint = wrapClientTLS(tls_options, proxy_endpoint)
+            wrapped_proxy_endpoint = wrapClientTLS(tls_options, proxy_endpoint)
+            return wrapped_proxy_endpoint, credentials
         else:
             raise RuntimeError(
                 f"No TLS options for a https connection via proxy {proxy!s}"

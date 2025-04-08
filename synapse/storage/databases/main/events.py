@@ -35,12 +35,12 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypedDict,
     cast,
 )
 
 import attr
 from prometheus_client import Counter
-from typing_extensions import TypedDict
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -1605,7 +1605,13 @@ class PersistEventsStore:
             room_id
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
-            stream_id: TODO
+            stream_id: This is expected to be the minimum `stream_ordering` for the
+                batch of events that we are persisting; which means we do not end up in a
+                situation where workers see events before the `current_state_delta` updates.
+                FIXME: However, this function also gets called with next upcoming
+                `stream_ordering` when we re-sync the state of a partial stated room (see
+                `update_current_state(...)`) which may be "correct" but it would be good to
+                nail down what exactly is the expected value here.
             sliding_sync_table_changes: Changes to the
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
@@ -1686,7 +1692,7 @@ class PersistEventsStore:
                 """
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         stream_id,
                         self._instance_name,
@@ -1699,17 +1705,17 @@ class PersistEventsStore:
                         state_key,
                     )
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
             # Now we actually update the current_state_events table
 
             txn.execute_batch(
                 "DELETE FROM current_state_events"
                 " WHERE room_id = ? AND type = ? AND state_key = ?",
-                (
+                [
                     (room_id, etype, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
 
             # We include the membership in the current state table, hence we do
@@ -1799,11 +1805,11 @@ class PersistEventsStore:
             txn.execute_batch(
                 "DELETE FROM local_current_membership"
                 " WHERE room_id = ? AND user_id = ?",
-                (
+                [
                     (room_id, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
                     if etype == EventTypes.Member and self.is_mine_id(state_key)
-                ),
+                ],
             )
 
         if to_insert:
@@ -1907,6 +1913,13 @@ class PersistEventsStore:
             room_id,
             stream_id,
         )
+
+        for user_id in members_to_cache_bust:
+            txn.call_after(
+                self.store._membership_stream_cache.entity_has_changed,
+                user_id,
+                stream_id,
+            )
 
         # Invalidate the various caches
         self.store._invalidate_state_caches_and_stream(
@@ -3208,7 +3221,7 @@ class PersistEventsStore:
         if notifiable_events:
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         event.room_id,
                         event.internal_metadata.stream_ordering,
@@ -3216,18 +3229,18 @@ class PersistEventsStore:
                         event.event_id,
                     )
                     for event in notifiable_events
-                ),
+                ],
             )
 
         # Now we delete the staging area for *all* events that were being
         # persisted.
         txn.execute_batch(
             "DELETE FROM event_push_actions_staging WHERE event_id = ?",
-            (
+            [
                 (event.event_id,)
                 for event, _ in all_events_and_contexts
                 if event.internal_metadata.is_notifiable()
-            ),
+            ],
         )
 
     def _remove_push_actions_for_event_id_txn(

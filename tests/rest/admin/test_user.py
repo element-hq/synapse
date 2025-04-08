@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
@@ -44,6 +45,7 @@ from synapse.rest.client import (
     devices,
     login,
     logout,
+    media,
     profile,
     register,
     room,
@@ -56,7 +58,9 @@ from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 
 from tests import unittest
+from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.test_utils import SMALL_PNG
+from tests.test_utils.event_injection import inject_event
 from tests.unittest import override_config
 
 
@@ -717,7 +721,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             "GET",
             self.url + "?order_by=bar",
@@ -3219,6 +3223,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertIn("consent_ts", content)
         self.assertIn("external_ids", content)
         self.assertIn("last_seen_ts", content)
+        self.assertIn("suspended", content)
 
         # This key was removed intentionally. Ensure it is not accidentally re-included.
         self.assertNotIn("password_hash", content)
@@ -3515,6 +3520,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        media.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -3694,7 +3700,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     @parameterized.expand(["GET", "DELETE"])
     def test_invalid_parameter(self, method: str) -> None:
         """If parameters are invalid, an error is returned."""
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             method,
             self.url + "?order_by=bar",
@@ -4021,7 +4027,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         # Try to access a media and to create `last_access_ts`
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=user_token,
         )
@@ -5026,7 +5032,6 @@ class UserSuspensionTestCase(unittest.HomeserverTestCase):
 
         self.store = hs.get_datastores().main
 
-    @override_config({"experimental_features": {"msc3823_account_suspension": True}})
     def test_suspend_user(self) -> None:
         # test that suspending user works
         channel = self.make_request(
@@ -5127,7 +5132,6 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         """
         Test that request to redact events in all rooms user is member of is successful
         """
-
         # join rooms, send some messages
         originals = []
         for rm in [self.rm1, self.rm2, self.rm3]:
@@ -5404,3 +5408,407 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     matches.append((event_id, event))
         # we redacted 6 messages
         self.assertEqual(len(matches), 6)
+
+    def test_redactions_for_remote_user_succeed_with_admin_priv_in_room(self) -> None:
+        """
+        Test that if the admin requester has privileges in a room, redaction requests
+        succeed for a remote user
+        """
+
+        # inject some messages from remote user and collect event ids
+        original_message_ids = []
+        for i in range(5):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=self.rm1,
+                    type="m.room.message",
+                    sender="@remote:remote_server",
+                    content={"msgtype": "m.text", "body": f"nefarious_chatter{i}"},
+                )
+            )
+            original_message_ids.append(event.event_id)
+
+        # send a request to redact a remote user's messages in a room.
+        # the server admin created this room and has admin privilege in room
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/user/@remote:remote_server/redact",
+            content={"rooms": [self.rm1]},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        id = channel.json_body.get("redact_id")
+
+        # check that there were no failed redactions
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("status"), "complete")
+        failed_redactions = channel.json_body.get("failed_redactions")
+        self.assertEqual(failed_redactions, {})
+
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.rm1}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        for event in channel.json_body["chunk"]:
+            for event_id in original_message_ids:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    original_message_ids.remove(event_id)
+                    break
+        # we originally sent 5 messages so 5 should be redacted
+        self.assertEqual(len(original_message_ids), 0)
+
+
+class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+        # create rooms - room versions 11+ store the `redacts` key in content while
+        # earlier ones don't so we use a mix of room versions
+        self.rm1 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        self.rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+        self.rm3 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="11"
+        )
+
+    @override_config({"run_background_tasks_on": "worker1"})
+    def test_redact_messages_all_rooms(self) -> None:
+        """
+        Test that redact task successfully runs when `run_background_tasks_on` is specified
+        """
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            extra_config={
+                "worker_name": "worker1",
+                "run_background_tasks_on": "worker1",
+                "redis": {"enabled": True},
+            },
+        )
+
+        # join rooms, send some messages
+        original_event_ids = set()
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            original_event_ids.add(join["event_id"])
+            for i in range(15):
+                event = {"body": f"hello{i}", "msgtype": "m.text"}
+                res = self.helper.send_event(
+                    rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
+                )
+                original_event_ids.add(res["event_id"])
+
+        # redact all events in all rooms
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": []},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        id = channel.json_body.get("redact_id")
+
+        timeout_s = 10
+        start_time = time.time()
+        redact_result = ""
+        while redact_result != "complete":
+            if start_time + timeout_s < time.time():
+                self.fail("Timed out waiting for redactions.")
+
+            channel2 = self.make_request(
+                "GET",
+                f"/_synapse/admin/v1/user/redact_status/{id}",
+                access_token=self.admin_tok,
+            )
+            redact_result = channel2.json_body["status"]
+            if redact_result == "failed":
+                self.fail("Redaction task failed.")
+
+        redaction_ids = set()
+        for rm in [self.rm1, self.rm2, self.rm3]:
+            filter = json.dumps({"types": [EventTypes.Redaction]})
+            channel = self.make_request(
+                "GET",
+                f"rooms/{rm}/messages?filter={filter}&limit=50",
+                access_token=self.admin_tok,
+            )
+            self.assertEqual(channel.code, 200)
+
+            for event in channel.json_body["chunk"]:
+                if event["type"] == "m.room.redaction":
+                    redaction_ids.add(event["redacts"])
+
+        self.assertIncludes(redaction_ids, original_event_ids, exact=True)
+
+
+class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+        self.random_users = []
+        for i in range(4):
+            self.random_users.append(self.register_user(f"user{i}", f"pass{i}"))
+
+        self.room1 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.room2 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.room3 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+
+    @unittest.override_config(
+        {"rc_invites": {"per_issuer": {"per_second": 1000, "burst_count": 1000}}}
+    )
+    def test_get_user_invite_count_new_invites_test_case(self) -> None:
+        """
+        Test that new invites that arrive after a provided timestamp are counted
+        """
+        # grab a current timestamp
+        before_invites_sent_ts = self.hs.get_clock().time_msec()
+
+        # bad user sends some invites
+        for room_id in [self.room1, self.room2]:
+            for user in self.random_users:
+                self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
+
+        # fetch using timestamp, all should be returned
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 8)
+
+        # send some more invites, they should show up in addition to original 8 using same timestamp
+        for user in self.random_users:
+            self.helper.invite(
+                self.room3, src=self.bad_user, targ=user, tok=self.bad_user_tok
+            )
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 12)
+
+    def test_get_user_invite_count_invites_before_ts_test_case(self) -> None:
+        """
+        Test that invites sent before provided ts are not counted
+        """
+        # bad user sends some invites
+        for room_id in [self.room1, self.room2]:
+            for user in self.random_users:
+                self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
+
+        # add a msec between last invite and ts
+        after_invites_sent_ts = self.hs.get_clock().time_msec() + 1
+
+        # fetch invites with timestamp, none should be returned
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={after_invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 0)
+
+    def test_user_invite_count_kick_ban_not_counted(self) -> None:
+        """
+        Test that kicks and bans are not counted in invite count
+        """
+        to_kick_user_id = self.register_user("kick_me", "pass")
+        to_kick_tok = self.login("kick_me", "pass")
+
+        self.helper.join(self.room1, to_kick_user_id, tok=to_kick_tok)
+
+        # grab a current timestamp
+        before_invites_sent_ts = self.hs.get_clock().time_msec()
+
+        # bad user sends some invites (8)
+        for room_id in [self.room1, self.room2]:
+            for user in self.random_users:
+                self.helper.invite(
+                    room_id, src=self.bad_user, targ=user, tok=self.bad_user_tok
+                )
+
+        # fetch using timestamp, all invites sent should be counted
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 8)
+
+        # send a kick and some bans and make sure these aren't counted against invite total
+        for user in self.random_users:
+            self.helper.ban(
+                self.room1, src=self.bad_user, targ=user, tok=self.bad_user_tok
+            )
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{self.room1}/kick",
+            content={"user_id": to_kick_user_id},
+            access_token=self.bad_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 8)
+
+
+class GetCumulativeJoinedRoomCountForUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+    def test_user_cumulative_joined_room_count(self) -> None:
+        """
+        Tests proper count returned from /cumulative_joined_room_count endpoint
+        """
+        # Create rooms and join, grab timestamp before room creation
+        before_room_creation_timestamp = self.hs.get_clock().time_msec()
+
+        joined_rooms = []
+        for _ in range(3):
+            room = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+            self.helper.join(
+                room, user=self.bad_user, expect_code=200, tok=self.bad_user_tok
+            )
+            joined_rooms.append(room)
+
+        # get a timestamp after room creation and join, add a msec between last join and ts
+        after_room_creation = self.hs.get_clock().time_msec() + 1
+
+        # Get rooms using this timestamp, there should be none since all rooms were created and joined
+        # before provided timestamp
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(after_room_creation)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, channel.json_body["cumulative_joined_room_count"])
+
+        # fetch rooms with the older timestamp before they were created and joined, this should
+        # return the rooms
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(before_room_creation_timestamp)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            len(joined_rooms), channel.json_body["cumulative_joined_room_count"]
+        )
+
+    def test_user_joined_room_count_includes_left_and_banned_rooms(self) -> None:
+        """
+        Tests proper count returned from /joined_room_count endpoint when user has left
+        or been banned from joined rooms
+        """
+        # Create rooms and join, grab timestamp before room creation
+        before_room_creation_timestamp = self.hs.get_clock().time_msec()
+
+        joined_rooms = []
+        for _ in range(3):
+            room = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+            self.helper.join(
+                room, user=self.bad_user, expect_code=200, tok=self.bad_user_tok
+            )
+            joined_rooms.append(room)
+
+        # fetch rooms with the older timestamp before they were created and joined
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(before_room_creation_timestamp)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            len(joined_rooms), channel.json_body["cumulative_joined_room_count"]
+        )
+
+        # have the user banned from/leave the joined rooms
+        self.helper.ban(
+            joined_rooms[0],
+            src=self.admin,
+            targ=self.bad_user,
+            expect_code=200,
+            tok=self.admin_tok,
+        )
+        self.helper.change_membership(
+            joined_rooms[1],
+            src=self.bad_user,
+            targ=self.bad_user,
+            membership="leave",
+            expect_code=200,
+            tok=self.bad_user_tok,
+        )
+        self.helper.ban(
+            joined_rooms[2],
+            src=self.admin,
+            targ=self.bad_user,
+            expect_code=200,
+            tok=self.admin_tok,
+        )
+
+        # fetch the joined room count again, the number should remain the same as the collected joined rooms
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(before_room_creation_timestamp)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            len(joined_rooms), channel.json_body["cumulative_joined_room_count"]
+        )

@@ -39,6 +39,7 @@ from typing import (
     List,
     Optional,
     Pattern,
+    Protocol,
     Tuple,
     Union,
 )
@@ -46,7 +47,6 @@ from typing import (
 import attr
 import jinja2
 from canonicaljson import encode_canonical_json
-from typing_extensions import Protocol
 from zope.interface import implementer
 
 from twisted.internet import defer, interfaces
@@ -920,15 +920,6 @@ def set_cors_headers(request: "SynapseRequest") -> None:
         request.setHeader(
             b"Access-Control-Expose-Headers",
             b"Synapse-Trace-Id, Server, ETag",
-        )
-    elif request.experimental_cors_msc3886:
-        request.setHeader(
-            b"Access-Control-Allow-Headers",
-            b"X-Requested-With, Content-Type, Authorization, Date, If-Match, If-None-Match",
-        )
-        request.setHeader(
-            b"Access-Control-Expose-Headers",
-            b"ETag, Location, X-Max-Bytes",
         )
     else:
         request.setHeader(

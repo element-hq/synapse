@@ -22,7 +22,6 @@
 
 import abc
 import collections.abc
-import os
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -30,6 +29,7 @@ from typing import (
     Generic,
     Iterable,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -39,30 +39,29 @@ from typing import (
 )
 
 import attr
-from typing_extensions import Literal
 from unpaddedbase64 import encode_base64
 
-from synapse.api.constants import RelationTypes
+from synapse.api.constants import EventTypes, RelationTypes
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches import intern_dict
 from synapse.util.frozenutils import freeze
-from synapse.util.stringutils import strtobool
 
 if TYPE_CHECKING:
     from synapse.events.builder import EventBuilder
 
-# Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
-# bugs where we accidentally share e.g. signature dicts. However, converting a
-# dict to frozen_dicts is expensive.
-#
-# NOTE: This is overridden by the configuration by the Synapse worker apps, but
-# for the sake of tests, it is set here while it cannot be configured on the
-# homeserver object itself.
 
-USE_FROZEN_DICTS = strtobool(os.environ.get("SYNAPSE_USE_FROZEN_DICTS", "0"))
+USE_FROZEN_DICTS = False
+"""
+Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
+bugs where we accidentally share e.g. signature dicts. However, converting a
+dict to frozen_dicts is expensive.
 
+NOTE: This is overridden by the configuration by the Synapse worker apps, but
+for the sake of tests, it is set here because it cannot be configured on the
+homeserver object itself.
+"""
 
 T = TypeVar("T")
 
@@ -325,12 +324,17 @@ class EventBase(metaclass=abc.ABCMeta):
     def __repr__(self) -> str:
         rejection = f"REJECTED={self.rejected_reason}, " if self.rejected_reason else ""
 
+        conditional_membership_string = ""
+        if self.get("type") == EventTypes.Member:
+            conditional_membership_string = f"membership={self.membership}, "
+
         return (
             f"<{self.__class__.__name__} "
             f"{rejection}"
             f"event_id={self.event_id}, "
             f"type={self.get('type')}, "
             f"state_key={self.get('state_key')}, "
+            f"{conditional_membership_string}"
             f"outlier={self.internal_metadata.is_outlier()}"
             ">"
         )

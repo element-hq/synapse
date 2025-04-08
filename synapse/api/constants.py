@@ -29,8 +29,13 @@ from typing import Final
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
 
-# the "depth" field on events is limited to 2**63 - 1
-MAX_DEPTH = 2**63 - 1
+# Max/min size of ints in canonical JSON
+CANONICALJSON_MAX_INT = (2**53) - 1
+CANONICALJSON_MIN_INT = -CANONICALJSON_MAX_INT
+
+# the "depth" field on events is limited to the same as what
+# canonicaljson accepts
+MAX_DEPTH = CANONICALJSON_MAX_INT
 
 # the maximum length for a room alias is 255 characters
 MAX_ALIAS_LENGTH = 255
@@ -231,6 +236,8 @@ class EventContentFields:
     ROOM_NAME: Final = "name"
 
     MEMBERSHIP: Final = "membership"
+    MEMBERSHIP_DISPLAYNAME: Final = "displayname"
+    MEMBERSHIP_AVATAR_URL: Final = "avatar_url"
 
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
@@ -318,3 +325,8 @@ class ApprovalNoticeMedium:
 class Direction(enum.Enum):
     BACKWARDS = "b"
     FORWARDS = "f"
+
+
+class ProfileFields:
+    DISPLAYNAME: Final = "displayname"
+    AVATAR_URL: Final = "avatar_url"

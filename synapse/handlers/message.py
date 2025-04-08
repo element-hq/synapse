@@ -196,7 +196,9 @@ class MessageHandler:
             AuthError (403) if the user doesn't have permission to view
             members of this room.
         """
-        state_filter = state_filter or StateFilter.all()
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         user_id = requester.user.to_string()
 
         if at_token:
@@ -642,11 +644,33 @@ class EventCreationHandler:
         """
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
-        if event_dict["type"] == EventTypes.Message:
-            requester_suspended = await self.store.get_user_suspended_status(
-                requester.user.to_string()
-            )
-            if requester_suspended:
+        requester_suspended = await self.store.get_user_suspended_status(
+            requester.user.to_string()
+        )
+        if requester_suspended:
+            # We want to allow suspended users to perform "corrective" actions
+            # asked of them by server admins, such as redact their messages and
+            # leave rooms.
+            if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
+                if event_dict["type"] == "m.room.redaction":
+                    event = await self.store.get_event(
+                        event_dict["content"]["redacts"], allow_none=True
+                    )
+                    if event:
+                        if event.sender != requester.user.to_string():
+                            raise SynapseError(
+                                403,
+                                "You can only redact your own events while account is suspended.",
+                                Codes.USER_ACCOUNT_SUSPENDED,
+                            )
+                if event_dict["type"] == "m.room.member":
+                    if event_dict["content"]["membership"] != "leave":
+                        raise SynapseError(
+                            403,
+                            "Changing membership while account is suspended is not allowed.",
+                            Codes.USER_ACCOUNT_SUSPENDED,
+                        )
+            else:
                 raise SynapseError(
                     403,
                     "Sending messages while account is suspended is not allowed.",
@@ -1437,6 +1461,12 @@ class EventCreationHandler:
                         prev_event.event_id,
                     )
                     return prev_event
+
+            if not event.is_state() and event.type in [
+                EventTypes.Message,
+                EventTypes.Encrypted,
+            ]:
+                await self.store.set_room_participation(event.user_id, event.room_id)
 
             if event.internal_metadata.is_out_of_band_membership():
                 # the only sort of out-of-band-membership events we expect to see here are

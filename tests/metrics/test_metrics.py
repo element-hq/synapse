@@ -19,12 +19,11 @@
 #
 #
 from importlib import metadata
-from typing import Dict, Tuple
+from typing import Dict, Protocol, Tuple
 from unittest.mock import patch
 
 from pkg_resources import parse_version
 from prometheus_client.core import Sample
-from typing_extensions import Protocol
 
 from synapse.app._base import _set_prometheus_client_use_created_metrics
 from synapse.metrics import REGISTRY, InFlightGauge, generate_latest

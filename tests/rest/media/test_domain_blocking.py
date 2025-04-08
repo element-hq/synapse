@@ -61,6 +61,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
 
@@ -91,7 +92,8 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         {
             # Disable downloads from a domain we won't be requesting downloads from.
             # This proves we haven't broken anything.
-            "prevent_media_downloads_from": ["not-listed.com"]
+            "prevent_media_downloads_from": ["not-listed.com"],
+            "enable_authenticated_media": False,
         }
     )
     def test_remote_media_normally_unblocked(self) -> None:
@@ -132,6 +134,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
             # This proves we haven't broken anything.
             "prevent_media_downloads_from": ["not-listed.com"],
             "dynamic_thumbnails": True,
+            "enable_authenticated_media": False,
         }
     )
     def test_remote_media_thumbnail_normally_unblocked(self) -> None:

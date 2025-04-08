@@ -43,6 +43,7 @@ from synapse.api.errors import (
     OAuthInsufficientScopeError,
     SynapseError,
 )
+from synapse.appservice import ApplicationService
 from synapse.http.site import SynapseRequest
 from synapse.rest import admin
 from synapse.rest.client import account, devices, keys, login, logout, register
@@ -379,6 +380,44 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         )
         self.assertEqual(requester.device_id, DEVICE)
 
+    def test_active_user_with_device_explicit_device_id(self) -> None:
+        """The handler should return a requester with normal user rights and a device ID, given explicitly, as supported by MAS 0.15+"""
+
+        self.http_client.request = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join([MATRIX_USER_SCOPE]),
+                    "device_id": DEVICE,
+                    "username": USERNAME,
+                },
+            )
+        )
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_user_by_req(request))
+        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
+        self.http_client.request.assert_called_once_with(
+            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        )
+        # It should have called with the 'X-MAS-Supports-Device-Id: 1' header
+        self.assertEqual(
+            self.http_client.request.call_args[1]["headers"].getRawHeaders(
+                b"X-MAS-Supports-Device-Id",
+            ),
+            [b"1"],
+        )
+        self._assertParams()
+        self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
+        self.assertEqual(requester.is_guest, False)
+        self.assertEqual(
+            get_awaitable_result(self.auth.is_server_admin(requester)), False
+        )
+        self.assertEqual(requester.device_id, DEVICE)
+
     def test_multiple_devices(self) -> None:
         """The handler should raise an error if multiple devices are found in the scope."""
 
@@ -500,6 +539,44 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
         self.assertEqual(error.value.code, 503)
 
+    def test_cached_expired_introspection(self) -> None:
+        """The handler should raise an error if the introspection response gives
+        an expiry time, the introspection response is cached and then the entry is
+        re-requested after it has expired."""
+
+        self.http_client.request = introspection_mock = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join(
+                        [
+                            MATRIX_USER_SCOPE,
+                            f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
+                        ]
+                    ),
+                    "username": USERNAME,
+                    "expires_in": 60,
+                },
+            )
+        )
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+
+        # The first CS-API request causes a successful introspection
+        self.get_success(self.auth.get_user_by_req(request))
+        self.assertEqual(introspection_mock.call_count, 1)
+
+        # Sleep for 60 seconds so the token expires.
+        self.reactor.advance(60.0)
+
+        # Now the CS-API request fails because the token expired
+        self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
+        # Ensure another introspection request was not sent
+        self.assertEqual(introspection_mock.call_count, 1)
+
     def make_device_keys(self, user_id: str, device_id: str) -> JsonDict:
         # We only generate a master key to simplify the test.
         master_signing_key = generate_signing_key(device_id)
@@ -560,13 +637,29 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         self.assertEqual(channel.code, 401, channel.json_body)
 
     def expect_unrecognized(
-        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+        self,
+        method: str,
+        path: str,
+        content: Union[bytes, str, JsonDict] = "",
+        auth: bool = False,
     ) -> None:
-        channel = self.make_request(method, path, content)
+        channel = self.make_request(
+            method, path, content, access_token="token" if auth else None
+        )
 
         self.assertEqual(channel.code, 404, channel.json_body)
         self.assertEqual(
             channel.json_body["errcode"], Codes.UNRECOGNIZED, channel.json_body
+        )
+
+    def expect_forbidden(
+        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+    ) -> None:
+        channel = self.make_request(method, path, content)
+
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
         )
 
     def test_uia_endpoints(self) -> None:
@@ -623,11 +716,35 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
     def test_registration_endpoints_removed(self) -> None:
         """Test that registration endpoints that were removed in MSC2964 are no longer available."""
+        appservice = ApplicationService(
+            token="i_am_an_app_service",
+            id="1234",
+            namespaces={"users": [{"regex": r"@alice:.+", "exclusive": True}]},
+            sender="@as_main:test",
+        )
+
+        self.hs.get_datastores().main.services_cache = [appservice]
         self.expect_unrecognized(
             "GET", "/_matrix/client/v1/register/m.login.registration_token/validity"
         )
+
+        # Registration is disabled
+        self.expect_forbidden(
+            "POST",
+            "/_matrix/client/v3/register",
+            {"username": "alice", "password": "hunter2"},
+        )
+
         # This is still available for AS registrations
-        # self.expect_unrecognized("POST", "/_matrix/client/v3/register")
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/register",
+            {"username": "alice", "type": "m.login.application_service"},
+            shorthand=False,
+            access_token="i_am_an_app_service",
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
         self.expect_unrecognized("GET", "/_matrix/client/v3/register/available")
         self.expect_unrecognized(
             "POST", "/_matrix/client/v3/register/email/requestToken"
@@ -648,8 +765,25 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
     def test_device_management_endpoints_removed(self) -> None:
         """Test that device management endpoints that were removed in MSC2964 are no longer available."""
-        self.expect_unrecognized("POST", "/_matrix/client/v3/delete_devices")
-        self.expect_unrecognized("DELETE", "/_matrix/client/v3/devices/{DEVICE}")
+
+        # Because we still support those endpoints with ASes, it checks the
+        # access token before returning 404
+        self.http_client.request = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                    "username": USERNAME,
+                },
+            )
+        )
+
+        self.expect_unrecognized("POST", "/_matrix/client/v3/delete_devices", auth=True)
+        self.expect_unrecognized(
+            "DELETE", "/_matrix/client/v3/devices/{DEVICE}", auth=True
+        )
 
     def test_openid_endpoints_removed(self) -> None:
         """Test that OpenID id_token endpoints that were removed in MSC2964 are no longer available."""
@@ -772,7 +906,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         req = SynapseRequest(channel, self.site)  # type: ignore[arg-type]
         req.client.host = MAS_IPV4_ADDR
         req.requestHeaders.addRawHeader(
-            "Authorization", f"Bearer {self.auth._admin_token}"
+            "Authorization", f"Bearer {self.auth._admin_token()}"
         )
         req.requestHeaders.addRawHeader("User-Agent", MAS_USER_AGENT)
         req.content = BytesIO(b"")
