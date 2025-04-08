@@ -328,6 +328,7 @@ class SlidingSyncHandler:
             actual_room_response_map=rooms,
             from_token=from_token,
             to_token=to_token,
+            user_receipts=receipts,
         )
 
         if has_lists or has_room_subscriptions:
