@@ -28,7 +28,7 @@ from parameterized import parameterized
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import NotFoundError, FederationError
+from synapse.api.errors import FederationError, NotFoundError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import EventBase, make_event_from_dict
