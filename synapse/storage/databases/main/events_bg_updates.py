@@ -2564,8 +2564,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         which will keep the event counts continuously updated. We also mark the stopping
         point for the main population step so we don't double count events.
 
-        The update will iterate through the `events` table in batches and keep
-        track of the the event counts it sees.
+        Then we will iterate through the `events` table in batches and update event
+        counts until we reach the stopping point.
 
         This data is intended to be used by the phone-home stats to keep track
         of total event and message counts. A trigger is preferred to counting
@@ -2746,7 +2746,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # First, add the triggers to keep the `event_stats` values up-to-date.
         #
         # If we don't have a `stop_event_stream_ordering` yet, we need to add the
-        # triggers to the `events` table and
+        # triggers to the `events` table and set the stopping point so we don't
+        # double count `events` later.
         if stop_event_stream_ordering is None:
             stop_event_stream_ordering = await self.db_pool.runInteraction(
                 "_event_stats_populate_counts_bg_update_add_triggers",
