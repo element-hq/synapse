@@ -2771,33 +2771,42 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Increment the counts based on the events present in this batch.
             txn.execute(
                 """
-                WITH batch AS (
-                    SELECT
-                        MAX(stream_ordering) AS max_stream_ordering,
-                        COUNT(*) AS total_event_count,
-                        SUM(CASE WHEN type = 'm.room.message' AND state_key IS NULL THEN 1 ELSE 0 END) AS unencrypted_message_count,
-                        SUM(CASE WHEN type = 'm.room.encrypted' AND state_key IS NULL THEN 1 ELSE 0 END) AS e2ee_event_count
+                WITH event_batch AS (
+                    SELECT *
                     FROM events
-                    WHERE stream_ordering > ?
-                    GROUP BY stream_ordering
+                    WHERE stream_ordering > ? AND stream_ordering <= ?
                     ORDER BY stream_ordering ASC
                     LIMIT ?
+                ),
+                batch_stats AS (
+                    SELECT
+                        MAX(stream_ordering) AS max_stream_ordering,
+                        COALESCE(COUNT(*), 0) AS total_event_count,
+                        COALESCE(SUM(CASE WHEN type = 'm.room.message' AND state_key IS NULL THEN 1 ELSE 0 END), 0) AS unencrypted_message_count,
+                        COALESCE(SUM(CASE WHEN type = 'm.room.encrypted' AND state_key IS NULL THEN 1 ELSE 0 END), 0) AS e2ee_event_count
+                    FROM event_batch
+
+                    UNION ALL
+
+                    SELECT null, 0, 0, 0
+                    WHERE NOT EXISTS (SELECT 1 FROM event_batch)
+                    LIMIT 1
                 )
                 UPDATE event_stats
                 SET
-                    total_event_count = total_event_count + (SELECT total_event_count FROM batch),
-                    unencrypted_message_count = unencrypted_message_count + (SELECT unencrypted_message_count FROM batch),
-                    e2ee_event_count = e2ee_event_count + (SELECT e2ee_event_count FROM batch)
+                    total_event_count = total_event_count + (SELECT total_event_count FROM batch_stats),
+                    unencrypted_message_count = unencrypted_message_count + (SELECT unencrypted_message_count FROM batch_stats),
+                    e2ee_event_count = e2ee_event_count + (SELECT e2ee_event_count FROM batch_stats)
                 RETURNING
-                    (SELECT total_event_count FROM batch) AS total_event_count,
-                    (SELECT max_stream_ordering FROM batch) AS max_stream_ordering
+                    (SELECT total_event_count FROM batch_stats) AS total_event_count,
+                    (SELECT max_stream_ordering FROM batch_stats) AS max_stream_ordering
                 """,
-                (last_event_stream_ordering, batch_size),
+                (last_event_stream_ordering, stop_event_stream_ordering, batch_size),
             )
 
             # Get the results of the update
             (total_event_count, max_stream_ordering) = cast(
-                Tuple[int, int], txn.fetchone()
+                Tuple[int, Optional[int]], txn.fetchone()
             )
 
             # Update the progress
