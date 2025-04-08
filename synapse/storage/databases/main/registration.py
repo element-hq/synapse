@@ -767,7 +767,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         # in a new snapshot where we can check for a genuine conflict.
         was_inserted = self.db_pool.simple_upsert_txn(
             txn,
-            table="user_external_id",
+            table="user_external_ids",
             keyvalues={"auth_provider": auth_provider, "external_id": external_id},
             values={},
             insertion_values={"user_id": user_id},
