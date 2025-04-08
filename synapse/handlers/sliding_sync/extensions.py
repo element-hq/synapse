@@ -748,22 +748,23 @@ class SlidingSyncExtensionHandler:
                 # Combine the receipts for a room and add them to
                 # `fetched_receipts`
                 for room_id in initial_receipts.keys() | user_receipts.keys():
-                    receipt_content = ReceiptInRoom.merge_to_content(
-                        list(
-                            itertools.chain(
-                                initial_receipts.get(room_id, []),
-                                user_receipts.get(room_id, []),
+                    if room_id in initial_receipts:
+                        receipt_content = ReceiptInRoom.merge_to_content(
+                            list(
+                                itertools.chain(
+                                    initial_receipts.get(room_id, []),
+                                    user_receipts.get(room_id, []),
+                                )
                             )
                         )
-                    )
 
-                    fetched_receipts.append(
-                        {
-                            "room_id": room_id,
-                            "type": EduTypes.RECEIPT,
-                            "content": receipt_content,
-                        }
-                    )
+                        fetched_receipts.append(
+                            {
+                                "room_id": room_id,
+                                "type": EduTypes.RECEIPT,
+                                "content": receipt_content,
+                            }
+                        )
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
                 fetched_receipts, sync_config.user.to_string()
