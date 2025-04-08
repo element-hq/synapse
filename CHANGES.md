@@ -1,3 +1,10 @@
+# Synapse 1.128.0 (2025-04-08)
+
+No significant changes since 1.128.0rc1.
+
+
+
+
 # Synapse 1.128.0rc1 (2025-04-01)
 
 ### Features
