@@ -1,0 +1,1 @@
+Set `user_directory.exclude_remote_users` to `True` to exclude remote users from user directory search results.
