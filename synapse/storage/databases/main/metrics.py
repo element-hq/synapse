@@ -126,6 +126,44 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         return await self.db_pool.runInteraction("count_e2ee_messages", _count_messages)
 
+    async def count_total_events(self) -> int:
+        """
+        Returns the total number of events present on the server.
+        """
+
+        return await self.db_pool.simple_select_one_onecol(
+            table="event_stats",
+            keyvalues={},
+            retcol="total_event_count",
+            desc="count_total_events",
+        )
+
+    async def count_total_messages(self) -> int:
+        """
+        Returns the total number of `m.room.message` events present on the
+        server.
+        """
+
+        return await self.db_pool.simple_select_one_onecol(
+            table="event_stats",
+            keyvalues={},
+            retcol="unencrypted_message_count",
+            desc="count_total_messages",
+        )
+
+    async def count_total_e2ee_events(self) -> int:
+        """
+        Returns the total number of `m.room.encrypted` events present on the
+        server.
+        """
+
+        return await self.db_pool.simple_select_one_onecol(
+            table="event_stats",
+            keyvalues={},
+            retcol="e2ee_event_count",
+            desc="count_total_e2ee_events",
+        )
+
     async def count_daily_sent_e2ee_messages(self) -> int:
         def _count_messages(txn: LoggingTransaction) -> int:
             # This is good enough as if you have silly characters in your own
