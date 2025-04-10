@@ -1095,6 +1095,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             {
                 "room_id": fed_space,
                 "world_readable": True,
+                "join_rule": "public",
                 "room_type": RoomTypes.SPACE,
             },
             [
@@ -1109,15 +1110,13 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         child_room = {
             "room_id": fed_subroom,
             "world_readable": True,
+            "join_rule": "public",
         }
 
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
         ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
-            if fed_hostname in room.via:
-                return requested_room_entry, {fed_subroom: child_room}, set()
-
-            return None, {}, set()
+            return requested_room_entry, {fed_subroom: child_room}, set()
 
         expected = [
             (fed_space, [fed_subroom]),
