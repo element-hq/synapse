@@ -40,6 +40,8 @@ import attr
 from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
+from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -163,10 +165,10 @@ class SlidingSyncResult:
                 own user ID. (same as sync `v2 m.joined_member_count`)
             invited_count: The number of users with membership of invite. (same as sync v2
                 `m.invited_member_count`)
-            notification_count: The total number of unread notifications for this room. (same
-                as sync v2)
-            highlight_count: The number of unread notifications for this room with the highlight
-                flag set. (same as sync v2)
+            notif_counts: An object containing the number of unread notifications for both
+                the main thread and any other threads.
+            room_receipts: A sequence of any read receipts from the user in question in
+                the room, used to calculate whether the notif_counts could have changed
         """
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -197,8 +199,8 @@ class SlidingSyncResult:
         bump_stamp: Optional[int]
         joined_count: Optional[int]
         invited_count: Optional[int]
-        notification_count: int
-        highlight_count: int
+        notif_counts: RoomNotifCounts
+        room_receipts: Optional[Sequence[ReceiptInRoom]]
 
         def __bool__(self) -> bool:
             return (
@@ -215,6 +217,7 @@ class SlidingSyncResult:
                 or bool(self.required_state)
                 or bool(self.timeline_events)
                 or bool(self.stripped_state)
+                or bool(self.room_receipts)
             )
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
