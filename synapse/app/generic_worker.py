@@ -52,7 +52,10 @@ from synapse.logging.context import LoggingContext
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource
-from synapse.rest.admin import register_servlets_for_media_repo
+from synapse.rest.admin import (
+    register_servlets_for_media_repo,
+    register_servlets_for_msc3861_delegation,
+)
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
@@ -176,8 +179,13 @@ class GenericWorkerServer(HomeServer):
     def _listen_http(self, listener_config: ListenerConfig) -> None:
         assert listener_config.http_options is not None
 
-        # We always include a health resource.
-        resources: Dict[str, Resource] = {"/health": HealthResource()}
+        # We always include an admin resource that we populate with servlets as needed
+        admin_resource = JsonResource(self, canonical_json=False)
+        resources: Dict[str, Resource] = {
+            # We always include a health resource.
+            "/health": HealthResource(),
+            "/_synapse/admin": admin_resource,
+        }
 
         for res in listener_config.http_options.resources:
             for name in res.names:
@@ -191,6 +199,9 @@ class GenericWorkerServer(HomeServer):
                     resources.update(build_synapse_client_resource_tree(self))
                     resources["/.well-known"] = well_known_resource(self)
 
+                    if self.config.experimental.msc3861.enabled:
+                        register_servlets_for_msc3861_delegation(self, admin_resource)
+
                 elif name == "federation":
                     resources[FEDERATION_PREFIX] = TransportLayerServer(self)
                 elif name == "media":
@@ -199,7 +210,6 @@ class GenericWorkerServer(HomeServer):
 
                         # We need to serve the admin servlets for media on the
                         # worker.
-                        admin_resource = JsonResource(self, canonical_json=False)
                         register_servlets_for_media_repo(self, admin_resource)
 
                         resources.update(
@@ -207,7 +217,6 @@ class GenericWorkerServer(HomeServer):
                                 MEDIA_R0_PREFIX: media_repo,
                                 MEDIA_V3_PREFIX: media_repo,
                                 LEGACY_MEDIA_PREFIX: media_repo,
-                                "/_synapse/admin": admin_resource,
                             }
                         )
 

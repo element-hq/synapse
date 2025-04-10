@@ -2090,6 +2090,136 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             func=is_user_approved_txn,
         )
 
+    async def set_user_deactivated_status(
+        self, user_id: str, deactivated: bool
+    ) -> None:
+        """Set the `deactivated` property for the provided user to the provided value.
+
+        Args:
+            user_id: The ID of the user to set the status for.
+            deactivated: The value to set for `deactivated`.
+        """
+
+        await self.db_pool.runInteraction(
+            "set_user_deactivated_status",
+            self.set_user_deactivated_status_txn,
+            user_id,
+            deactivated,
+        )
+
+    def set_user_deactivated_status_txn(
+        self, txn: LoggingTransaction, user_id: str, deactivated: bool
+    ) -> None:
+        self.db_pool.simple_update_one_txn(
+            txn=txn,
+            table="users",
+            keyvalues={"name": user_id},
+            updatevalues={"deactivated": 1 if deactivated else 0},
+        )
+        self._invalidate_cache_and_stream(
+            txn, self.get_user_deactivated_status, (user_id,)
+        )
+        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+        self._invalidate_cache_and_stream(txn, self.is_guest, (user_id,))
+
+    async def set_user_suspended_status(self, user_id: str, suspended: bool) -> None:
+        """
+        Set whether the user's account is suspended in the `users` table.
+
+        Args:
+            user_id: The user ID of the user in question
+            suspended: True if the user is suspended, false if not
+        """
+        await self.db_pool.runInteraction(
+            "set_user_suspended_status",
+            self.set_user_suspended_status_txn,
+            user_id,
+            suspended,
+        )
+
+    def set_user_suspended_status_txn(
+        self, txn: LoggingTransaction, user_id: str, suspended: bool
+    ) -> None:
+        self.db_pool.simple_update_one_txn(
+            txn=txn,
+            table="users",
+            keyvalues={"name": user_id},
+            updatevalues={"suspended": suspended},
+        )
+        self._invalidate_cache_and_stream(
+            txn, self.get_user_suspended_status, (user_id,)
+        )
+        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+
+    async def set_user_locked_status(self, user_id: str, locked: bool) -> None:
+        """Set the `locked` property for the provided user to the provided value.
+
+        Args:
+            user_id: The ID of the user to set the status for.
+            locked: The value to set for `locked`.
+        """
+
+        await self.db_pool.runInteraction(
+            "set_user_locked_status",
+            self.set_user_locked_status_txn,
+            user_id,
+            locked,
+        )
+
+    def set_user_locked_status_txn(
+        self, txn: LoggingTransaction, user_id: str, locked: bool
+    ) -> None:
+        self.db_pool.simple_update_one_txn(
+            txn=txn,
+            table="users",
+            keyvalues={"name": user_id},
+            updatevalues={"locked": locked},
+        )
+        self._invalidate_cache_and_stream(txn, self.get_user_locked_status, (user_id,))
+        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+
+    async def update_user_approval_status(
+        self, user_id: UserID, approved: bool
+    ) -> None:
+        """Set the user's 'approved' flag to the given value.
+
+        The boolean will be turned into an int (in update_user_approval_status_txn)
+        because the column is a smallint.
+
+        Args:
+            user_id: the user to update the flag for.
+            approved: the value to set the flag to.
+        """
+        await self.db_pool.runInteraction(
+            "update_user_approval_status",
+            self.update_user_approval_status_txn,
+            user_id.to_string(),
+            approved,
+        )
+
+    def update_user_approval_status_txn(
+        self, txn: LoggingTransaction, user_id: str, approved: bool
+    ) -> None:
+        """Set the user's 'approved' flag to the given value.
+
+        The boolean is turned into an int because the column is a smallint.
+
+        Args:
+            txn: the current database transaction.
+            user_id: the user to update the flag for.
+            approved: the value to set the flag to.
+        """
+        self.db_pool.simple_update_one_txn(
+            txn=txn,
+            table="users",
+            keyvalues={"name": user_id},
+            updatevalues={"approved": approved},
+        )
+
+        # Invalidate the caches of methods that read the value of the 'approved' flag.
+        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+        self._invalidate_cache_and_stream(txn, self.is_user_approved, (user_id,))
+
 
 class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
     def __init__(
@@ -2201,117 +2331,6 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
             )
 
         return nb_processed
-
-    async def set_user_deactivated_status(
-        self, user_id: str, deactivated: bool
-    ) -> None:
-        """Set the `deactivated` property for the provided user to the provided value.
-
-        Args:
-            user_id: The ID of the user to set the status for.
-            deactivated: The value to set for `deactivated`.
-        """
-
-        await self.db_pool.runInteraction(
-            "set_user_deactivated_status",
-            self.set_user_deactivated_status_txn,
-            user_id,
-            deactivated,
-        )
-
-    def set_user_deactivated_status_txn(
-        self, txn: LoggingTransaction, user_id: str, deactivated: bool
-    ) -> None:
-        self.db_pool.simple_update_one_txn(
-            txn=txn,
-            table="users",
-            keyvalues={"name": user_id},
-            updatevalues={"deactivated": 1 if deactivated else 0},
-        )
-        self._invalidate_cache_and_stream(
-            txn, self.get_user_deactivated_status, (user_id,)
-        )
-        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-        txn.call_after(self.is_guest.invalidate, (user_id,))
-
-    async def set_user_suspended_status(self, user_id: str, suspended: bool) -> None:
-        """
-        Set whether the user's account is suspended in the `users` table.
-
-        Args:
-            user_id: The user ID of the user in question
-            suspended: True if the user is suspended, false if not
-        """
-        await self.db_pool.runInteraction(
-            "set_user_suspended_status",
-            self.set_user_suspended_status_txn,
-            user_id,
-            suspended,
-        )
-
-    def set_user_suspended_status_txn(
-        self, txn: LoggingTransaction, user_id: str, suspended: bool
-    ) -> None:
-        self.db_pool.simple_update_one_txn(
-            txn=txn,
-            table="users",
-            keyvalues={"name": user_id},
-            updatevalues={"suspended": suspended},
-        )
-        self._invalidate_cache_and_stream(
-            txn, self.get_user_suspended_status, (user_id,)
-        )
-        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-    async def set_user_locked_status(self, user_id: str, locked: bool) -> None:
-        """Set the `locked` property for the provided user to the provided value.
-
-        Args:
-            user_id: The ID of the user to set the status for.
-            locked: The value to set for `locked`.
-        """
-
-        await self.db_pool.runInteraction(
-            "set_user_locked_status",
-            self.set_user_locked_status_txn,
-            user_id,
-            locked,
-        )
-
-    def set_user_locked_status_txn(
-        self, txn: LoggingTransaction, user_id: str, locked: bool
-    ) -> None:
-        self.db_pool.simple_update_one_txn(
-            txn=txn,
-            table="users",
-            keyvalues={"name": user_id},
-            updatevalues={"locked": locked},
-        )
-        self._invalidate_cache_and_stream(txn, self.get_user_locked_status, (user_id,))
-        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-    def update_user_approval_status_txn(
-        self, txn: LoggingTransaction, user_id: str, approved: bool
-    ) -> None:
-        """Set the user's 'approved' flag to the given value.
-
-        The boolean is turned into an int because the column is a smallint.
-
-        Args:
-            txn: the current database transaction.
-            user_id: the user to update the flag for.
-            approved: the value to set the flag to.
-        """
-        self.db_pool.simple_update_one_txn(
-            txn=txn,
-            table="users",
-            keyvalues={"name": user_id},
-            updatevalues={"approved": approved},
-        )
-
-        # Invalidate the caches of methods that read the value of the 'approved' flag.
-        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-        self._invalidate_cache_and_stream(txn, self.is_user_approved, (user_id,))
 
 
 class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
@@ -2939,25 +2958,6 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
         await self.db_pool.runInteraction(
             "start_or_continue_validation_session",
             start_or_continue_validation_session_txn,
-        )
-
-    async def update_user_approval_status(
-        self, user_id: UserID, approved: bool
-    ) -> None:
-        """Set the user's 'approved' flag to the given value.
-
-        The boolean will be turned into an int (in update_user_approval_status_txn)
-        because the column is a smallint.
-
-        Args:
-            user_id: the user to update the flag for.
-            approved: the value to set the flag to.
-        """
-        await self.db_pool.runInteraction(
-            "update_user_approval_status",
-            self.update_user_approval_status_txn,
-            user_id.to_string(),
-            approved,
         )
 
     @wrap_as_background_process("delete_expired_login_tokens")
