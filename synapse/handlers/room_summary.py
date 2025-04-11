@@ -686,7 +686,7 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
             ):
-                allowed_rooms = (
+                allowed_rooms, _ = (
                     await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
                 )
                 if await self._event_auth_handler.is_user_in_rooms(
@@ -708,7 +708,7 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 state_ids, room_version
             ):
-                allowed_rooms = (
+                allowed_rooms, _ = (
                     await self._event_auth_handler.get_rooms_that_allow_join(state_ids)
                 )
                 for space_id in allowed_rooms:
@@ -819,7 +819,7 @@ class RoomSummaryHandler:
             if await self._event_auth_handler.has_restricted_join_rules(
                 current_state_ids, room_version
             ):
-                allowed_rooms = (
+                allowed_rooms, _ = (
                     await self._event_auth_handler.get_rooms_that_allow_join(
                         current_state_ids
                     )

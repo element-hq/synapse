@@ -61,6 +61,10 @@ USER_MAY_JOIN_ROOM_CALLBACK = Callable[
     [str, str, bool],
     Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
+ACCEPT_MAKE_JOIN_CALLBACK = Callable[
+    [str, str],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict]],
+]
 USER_MAY_INVITE_CALLBACK = Callable[
     [str, str, str],
     Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
@@ -246,6 +250,7 @@ class SpamCheckerModuleApiCallbacks:
             SHOULD_DROP_FEDERATED_EVENT_CALLBACK
         ] = []
         self._user_may_join_room_callbacks: list[USER_MAY_JOIN_ROOM_CALLBACK] = []
+        self._accept_make_join_callbacks: list[ACCEPT_MAKE_JOIN_CALLBACK] = []
         self._user_may_invite_callbacks: list[USER_MAY_INVITE_CALLBACK] = []
         self._federated_user_may_invite_callbacks: list[
             FEDERATED_USER_MAY_INVITE_CALLBACK
@@ -277,6 +282,7 @@ class SpamCheckerModuleApiCallbacks:
         check_event_for_spam: CHECK_EVENT_FOR_SPAM_CALLBACK | None = None,
         should_drop_federated_event: SHOULD_DROP_FEDERATED_EVENT_CALLBACK | None = None,
         user_may_join_room: USER_MAY_JOIN_ROOM_CALLBACK | None = None,
+        accept_make_join: ACCEPT_MAKE_JOIN_CALLBACK | None = None,
         user_may_invite: USER_MAY_INVITE_CALLBACK | None = None,
         federated_user_may_invite: FEDERATED_USER_MAY_INVITE_CALLBACK | None = None,
         user_may_send_3pid_invite: USER_MAY_SEND_3PID_INVITE_CALLBACK | None = None,
@@ -300,6 +306,9 @@ class SpamCheckerModuleApiCallbacks:
 
         if user_may_join_room is not None:
             self._user_may_join_room_callbacks.append(user_may_join_room)
+
+        if accept_make_join is not None:
+            self._accept_make_join_callbacks.append(accept_make_join)
 
         if user_may_invite is not None:
             self._user_may_invite_callbacks.append(user_may_invite)
@@ -456,6 +465,39 @@ class SpamCheckerModuleApiCallbacks:
                 server_name=self.server_name,
             ):
                 res = await delay_cancellation(callback(user_id, room_id, is_invited))
+                # Normalize return values to `Codes` or `"NOT_SPAM"`.
+                if res is True or res is self.NOT_SPAM:
+                    continue
+                elif res is False:
+                    return synapse.api.errors.Codes.FORBIDDEN, {}
+                elif isinstance(res, synapse.api.errors.Codes):
+                    return res, {}
+                elif (
+                    isinstance(res, tuple)
+                    and len(res) == 2
+                    and isinstance(res[0], synapse.api.errors.Codes)
+                    and isinstance(res[1], dict)
+                ):
+                    return res
+                else:
+                    logger.warning(
+                        "Module returned invalid value, rejecting join as spam"
+                    )
+                    return synapse.api.errors.Codes.FORBIDDEN, {}
+
+        # No spam-checker has rejected the request, let it pass.
+        return self.NOT_SPAM
+
+    async def accept_make_join_callback(
+        self, user_id: str, room_id: str
+    ) -> tuple[Codes, JsonDict] | Literal["NOT_SPAM"]:
+        for callback in self._accept_make_join_callbacks:
+            with Measure(
+                self.clock,
+                name=f"{callback.__module__}.{callback.__qualname__}",
+                server_name=self.server_name,
+            ):
+                res = await delay_cancellation(callback(user_id, room_id))
                 # Normalize return values to `Codes` or `"NOT_SPAM"`.
                 if res is True or res is self.NOT_SPAM:
                     continue

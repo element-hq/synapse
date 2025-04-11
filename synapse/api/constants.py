@@ -101,6 +101,8 @@ class RestrictedJoinRuleTypes:
 
     ROOM_MEMBERSHIP: Final = "m.room_membership"
 
+    MAU_SPAM_CHECKER: Final = "fi.mau.spam_checker"
+
 
 class LoginType:
     PASSWORD: Final = "m.login.password"

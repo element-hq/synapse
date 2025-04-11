@@ -57,6 +57,7 @@ class EventAuthHandler:
         self._state_storage_controller = hs.get_storage_controllers().state
         self._server_name = hs.hostname
         self._is_mine_id = hs.is_mine_id
+        self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
     async def check_auth_rules_from_context(
         self,
@@ -237,6 +238,7 @@ class EventAuthHandler:
         room_version: RoomVersion,
         user_id: str,
         prev_membership: str | None,
+        room_id: str,
     ) -> None:
         """
         Check whether a user can join a room without an invite due to restricted join rules.
@@ -268,8 +270,27 @@ class EventAuthHandler:
 
         # Get the rooms which allow access to this room and check if the user is
         # in any of them.
-        allowed_rooms = await self.get_rooms_that_allow_join(state_ids)
-        if not await self.is_user_in_rooms(allowed_rooms, user_id):
+        allowed_rooms, ask_spam_checker = await self.get_rooms_that_allow_join(
+            state_ids
+        )
+
+        if await self.is_user_in_rooms(allowed_rooms, user_id):
+            # If the user is in allowed rooms, allow the join without asking the spam checker
+            pass
+        elif ask_spam_checker:
+            spam_check = (
+                await self._spam_checker_module_callbacks.accept_make_join_callback(
+                    user_id, room_id
+                )
+            )
+            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                raise AuthError(
+                    403,
+                    "The spam checker rejected your join",
+                    errcode=spam_check[0],
+                    additional_fields=spam_check[1],
+                )
+        else:
             # If this is a remote request, the user might be in an allowed room
             # that we do not know about.
             if not self._is_mine_id(user_id):
@@ -323,7 +344,7 @@ class EventAuthHandler:
 
     async def get_rooms_that_allow_join(
         self, state_ids: StateMap[str]
-    ) -> StrCollection:
+    ) -> tuple[StrCollection, bool]:
         """
         Generate a list of rooms in which membership allows access to a room.
 
@@ -336,7 +357,7 @@ class EventAuthHandler:
         # If there's no join rule, then it defaults to invite (so this doesn't apply).
         join_rules_event_id = state_ids.get((EventTypes.JoinRules, ""), None)
         if not join_rules_event_id:
-            return ()
+            return (), False
 
         # If the join rule is not restricted, this doesn't apply.
         join_rules_event = await self._store.get_event(join_rules_event_id)
@@ -344,12 +365,17 @@ class EventAuthHandler:
         # If allowed is of the wrong form, then only allow invited users.
         allow_list = join_rules_event.content.get("allow", [])
         if not isinstance(allow_list, list):
-            return ()
+            return (), False
 
         # Pull out the other room IDs, invalid data gets filtered.
         result = []
+        ask_spam_checker = False
         for allow in allow_list:
             if not isinstance(allow, dict):
+                continue
+
+            if allow.get("type") == RestrictedJoinRuleTypes.MAU_SPAM_CHECKER:
+                ask_spam_checker = True
                 continue
 
             # If the type is unexpected, skip it.
@@ -362,7 +388,7 @@ class EventAuthHandler:
 
             result.append(room_id)
 
-        return result
+        return result, ask_spam_checker
 
     async def is_user_in_rooms(self, room_ids: StrCollection, user_id: str) -> bool:
         """

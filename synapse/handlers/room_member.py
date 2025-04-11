@@ -1351,7 +1351,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         # Ensure the member should be allowed access via membership in a room.
         await self.event_auth_handler.check_restricted_join_rules(
-            state_before_join, room_version, user_id, previous_membership
+            state_before_join, room_version, user_id, previous_membership, room_id
         )
 
         # If this is going to be a local join, additional information must
