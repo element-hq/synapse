@@ -139,6 +139,8 @@ SMALL_PNG = unhexlify(
     b"0000001f15c4890000000a49444154789c63000100000500010d"
     b"0a2db40000000049454e44ae426082"
 )
+# The SHA256 hexdigest for the above bytes.
+SMALL_PNG_SHA256 = "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
 
 # A small CMYK-encoded JPEG image used in some tests.
 #

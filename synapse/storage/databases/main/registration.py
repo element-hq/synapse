@@ -759,6 +759,9 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             external_id: id on that system
             user_id: complete mxid that it is mapped to
         """
+        self._invalidate_cache_and_stream(
+            txn, self.get_user_by_external_id, (auth_provider, external_id)
+        )
 
         self.db_pool.simple_insert_txn(
             txn,
@@ -789,6 +792,9 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             },
             desc="remove_user_external_id",
         )
+        await self.invalidate_cache_and_stream(
+            "get_user_by_external_id", (auth_provider, external_id)
+        )
 
     async def replace_user_external_id(
         self,
@@ -809,29 +815,20 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             ExternalIDReuseException if the new external_id could not be mapped.
         """
 
-        def _remove_user_external_ids_txn(
+        def _replace_user_external_id_txn(
             txn: LoggingTransaction,
-            user_id: str,
         ) -> None:
-            """Remove all mappings from external user ids to a mxid
-            If these mappings are not found, this method does nothing.
-
-            Args:
-                user_id: complete mxid that it is mapped to
-            """
-
             self.db_pool.simple_delete_txn(
                 txn,
                 table="user_external_ids",
                 keyvalues={"user_id": user_id},
             )
 
-        def _replace_user_external_id_txn(
-            txn: LoggingTransaction,
-        ) -> None:
-            _remove_user_external_ids_txn(txn, user_id)
-
             for auth_provider, external_id in record_external_ids:
+                self._invalidate_cache_and_stream(
+                    txn, self.get_user_by_external_id, (auth_provider, external_id)
+                )
+
                 self._record_user_external_id_txn(
                     txn,
                     auth_provider,
@@ -847,6 +844,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         except self.database_engine.module.IntegrityError:
             raise ExternalIDReuseException()
 
+    @cached()
     async def get_user_by_external_id(
         self, auth_provider: str, external_id: str
     ) -> Optional[str]:
@@ -1510,15 +1508,14 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             # Override type because the return type is only optional if
             # allow_none is True, and we don't want mypy throwing errors
             # about None not being indexable.
-            pending, completed = cast(
-                Tuple[int, int],
-                self.db_pool.simple_select_one_txn(
-                    txn,
-                    "registration_tokens",
-                    keyvalues={"token": token},
-                    retcols=["pending", "completed"],
-                ),
+            row = self.db_pool.simple_select_one_txn(
+                txn,
+                "registration_tokens",
+                keyvalues={"token": token},
+                retcols=("pending", "completed"),
             )
+            pending = int(row[0])
+            completed = int(row[1])
 
             # Decrement pending and increment completed
             self.db_pool.simple_update_one_txn(

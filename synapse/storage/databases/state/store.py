@@ -48,6 +48,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import MutableStateMap, StateKey, StateMap
@@ -829,7 +830,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             [(sg,) for sg in state_groups_to_delete],
         )
         txn.execute_batch(
+            "DELETE FROM state_group_edges WHERE state_group = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+        txn.execute_batch(
             "DELETE FROM state_groups WHERE id = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+        txn.execute_batch(
+            "DELETE FROM state_groups_pending_deletion WHERE state_group = ?",
             [(sg,) for sg in state_groups_to_delete],
         )
 
@@ -906,6 +915,12 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     ) -> None:
         # Delete all edges that reference a state group linked to room_id
         logger.info("[purge] removing %s from state_group_edges", room_id)
+
+        if isinstance(self.database_engine, PostgresEngine):
+            # Disable statement timeouts for this transaction; purging rooms can
+            # take a while!
+            txn.execute("SET LOCAL statement_timeout = 0")
+
         txn.execute(
             """
             DELETE FROM state_group_edges AS sge WHERE sge.state_group IN (

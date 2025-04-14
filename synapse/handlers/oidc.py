@@ -31,6 +31,7 @@ from typing import (
     List,
     Optional,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -52,7 +53,6 @@ from pymacaroons.exceptions import (
     MacaroonInitException,
     MacaroonInvalidSignatureException,
 )
-from typing_extensions import TypedDict
 
 from twisted.web.client import readBody
 from twisted.web.http_headers import Headers
@@ -382,7 +382,12 @@ class OidcProvider:
         self._macaroon_generaton = macaroon_generator
 
         self._config = provider
-        self._callback_url: str = hs.config.oidc.oidc_callback_url
+
+        self._callback_url: str
+        if provider.redirect_uri is not None:
+            self._callback_url = provider.redirect_uri
+        else:
+            self._callback_url = hs.config.oidc.oidc_callback_url
 
         # Calculate the prefix for OIDC callback paths based on the public_baseurl.
         # We'll insert this into the Path= parameter of any session cookies we set.
@@ -461,6 +466,10 @@ class OidcProvider:
         self._device_handler = hs.get_device_handler()
 
         self._sso_handler.register_identity_provider(self)
+
+        self.passthrough_authorization_parameters = (
+            provider.passthrough_authorization_parameters
+        )
 
     def _validate_metadata(self, m: OpenIDProviderMetadata) -> None:
         """Verifies the provider metadata.
@@ -639,6 +648,11 @@ class OidcProvider:
             metadata["code_challenge_methods_supported"] = ["S256"]
         elif self._config.pkce_method == "never":
             metadata.pop("code_challenge_methods_supported", None)
+
+        if self._config.id_token_signing_alg_values_supported:
+            metadata["id_token_signing_alg_values_supported"] = (
+                self._config.id_token_signing_alg_values_supported
+            )
 
         self._validate_metadata(metadata)
 
@@ -995,7 +1009,6 @@ class OidcProvider:
                 when everything is done (or None for UI Auth)
             ui_auth_session_id: The session ID of the ongoing UI Auth (or
                 None if this is a login).
-
         Returns:
             The redirect URL to the authorization endpoint.
 
@@ -1067,6 +1080,13 @@ class OidcProvider:
                     options,
                 )
             )
+
+        # add passthrough additional authorization parameters
+        passthrough_authorization_parameters = self.passthrough_authorization_parameters
+        for parameter in passthrough_authorization_parameters:
+            parameter_value = parse_string(request, parameter)
+            if parameter_value:
+                additional_authorization_parameters.update({parameter: parameter_value})
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         return prepare_grant_uri(

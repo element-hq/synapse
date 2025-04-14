@@ -147,6 +147,45 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
 
+    def test_federation_etag(self) -> None:
+        """Test that federation ETags work"""
+
+        content = io.BytesIO(b"file_to_stream")
+        content_uri = self.get_success(
+            self.media_repo.create_content(
+                "text/plain",
+                "test_upload",
+                content,
+                46,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+        )
+        self.pump()
+        self.assertEqual(200, channel.code)
+
+        # We expect exactly one ETag header.
+        etags = channel.headers.getRawHeaders("ETag")
+        self.assertIsNotNone(etags)
+        assert etags is not None  # For mypy
+        self.assertEqual(len(etags), 1)
+        etag = etags[0]
+
+        # Refetching with the etag should result in 304 and empty body.
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+            custom_headers=[("If-None-Match", etag)],
+        )
+        self.pump()
+        self.assertEqual(channel.code, 304)
+        self.assertEqual(channel.is_finished(), True)
+        self.assertNotIn("body", channel.result)
+
 
 class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

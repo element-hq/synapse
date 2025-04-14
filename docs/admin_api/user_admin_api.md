@@ -414,6 +414,32 @@ The following actions are **NOT** performed. The list may be incomplete.
 - Remove from monthly active users
 - Remove user's consent information (consent version and timestamp)
 
+## Suspend/Unsuspend Account
+
+This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is 
+prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own. 
+
+The api is:
+
+```
+PUT /_synapse/admin/v1/suspend/<user_id>
+```
+
+with a body of:
+
+```json
+{
+    "suspend": true
+}
+```
+
+To unsuspend a user, use the same endpoint with a body of:
+```json
+{
+  "suspend": false
+}
+```
+
 ## Reset password
 
 **Note:** This API is disabled when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
@@ -1468,12 +1494,12 @@ The following JSON body parameter must be provided:
 -  `rooms` - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
   the user is a member of will be redacted
 
-_Added in Synapse 1.116.0._
-
 The following JSON body parameters are optional:
 
 - `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in each redaction event, and be visible to users.
 - `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
+
+_Added in Synapse 1.116.0._
 
 
 ## Check the status of a redaction process

@@ -155,6 +155,52 @@ Example configuration:
 pid_file: DATADIR/homeserver.pid
 ```
 ---
+### `daemonize`
+
+*(boolean)* Specifies whether Synapse should be started as a daemon process. If Synapse is being managed by [systemd](../../systemd-with-workers/), this option must be omitted or set to `false`.
+
+This can also be set by the `--daemonize` (`-D`) argument when starting Synapse.
+
+See `worker_daemonize` for more information on daemonizing workers.
+
+Defaults to `false`.
+
+Example configuration:
+```yaml
+daemonize: true
+```
+---
+### `print_pidfile`
+
+*(boolean)* Print the path to the pidfile just before daemonizing.
+
+This can also be set by the `--print-pidfile` argument when starting Synapse.
+
+Defaults to `false`.
+
+Example configuration:
+```yaml
+print_pidfile: true
+```
+---
+### `user_agent_suffix`
+
+*(string|null)* A suffix that is appended to the Synapse user-agent (ex. `Synapse/v1.123.0`). Defaults to `null`.
+
+Example configuration:
+```yaml
+user_agent_suffix: ' (I''m a teapot; Linux x86_64)'
+```
+---
+### `use_frozen_dicts`
+
+*(boolean)* Determines whether we should freeze the internal dict object in `FrozenEvent`. Freezing prevents bugs where we accidentally share e.g. signature dicts. However, freezing a dict is expensive. Defaults to `false`.
+
+Example configuration:
+```yaml
+use_frozen_dicts: true
+```
+---
 ### `web_client_location`
 
 *(string|null)* The absolute URL to the web client which `/` will redirect to. Defaults to `null`.
@@ -526,6 +572,19 @@ listeners:
   - names:
     - client
     - federation
+```
+---
+### `manhole`
+
+*(integer|null)* Turn on the Twisted telnet manhole service on the given port.
+
+This can also be set by the `--manhole` argument when starting Synapse.
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+manhole: 1234
 ```
 ---
 ### `manhole_settings`
@@ -1825,7 +1884,38 @@ Example configuration:
 rc_presence:
   per_user:
     per_second: 0.05
-    burst_count: 0.5
+    burst_count: 1.0
+```
+---
+### `rc_delayed_event_mgmt`
+
+*(object)* Ratelimiting settings for delayed event management.
+
+This is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.
+
+Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
+
+Setting this to a high value allows clients to make delayed event management requests often (such as repeatedly restarting a delayed event with a short timeout, or restarting several different delayed events all at once) without the risk of being ratelimited.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_delayed_event_mgmt:
+  per_user:
+    per_second: 1.0
+    burst_count: 5.0
+```
+
+Example configuration:
+```yaml
+rc_delayed_event_mgmt:
+  per_second: 2.0
+  burst_count: 20.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -2422,6 +2512,10 @@ registration_requires_token: true
 
 This is primarily intended for use with the `register_new_matrix_user` script (see [Registering a user](../../setup/installation.md#registering-a-user)); however, the interface is [documented](../../admin_api/register_api.html).
 
+Replacing an existing `registration_shared_secret` with a new one requires users of the [Shared-Secret Registration API](../../admin_api/register_api.html) to start using the new secret for requesting any further one-time nonces.
+
+> ⚠️ **Warning** – The additional consequences of replacing [`macaroon_secret_key`](#macaroon_secret_key) will apply in case it delegates to `registration_shared_secret`.
+
 See also [`registration_shared_secret_path`](#registration_shared_secret_path).
 
 Defaults to `null`.
@@ -2922,6 +3016,8 @@ use_appservice_legacy_authorization: true
 
 If none is specified, the `registration_shared_secret` is used, if one is given; otherwise, a secret key is derived from the signing key.
 
+> ⚠️ **Warning** – Replacing an existing `macaroon_secret_key` with a new one will lead to invalidation of access tokens for all guest users. It will also break unsubscribe links in emails sent before the change. An unlucky user might encounter a broken SSO login flow and would have to start again.
+
 Defaults to `null`.
 
 Example configuration:
@@ -2946,11 +3042,30 @@ macaroon_secret_key_path: /path/to/secrets/file
 ---
 ### `form_secret`
 
-*(string|null)* A secret which is used to calculate HMACs for form values, to stop falsification of values. Must be specified for the User Consent forms to work. Defaults to `null`.
+*(string|null)* A secret which is used to calculate HMACs for form values, to stop falsification of values. Must be specified for the User Consent forms to work.
+
+Replacing an existing `form_secret` with a new one might break the user consent page for an unlucky user and require them to reopen the page from a new link.
+
+Defaults to `null`.
 
 Example configuration:
 ```yaml
 form_secret: <PRIVATE STRING>
+```
+---
+### `form_secret_path`
+
+*(string|null)* An alternative to [`form_secret`](#form_secret): allows the secret to be specified in an external file.
+
+The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
+
+_Added in Synapse 1.126.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+form_secret_path: /path/to/secrets/file
 ```
 ---
 ## Signing Keys
@@ -3105,13 +3220,15 @@ This setting has the following sub-options:
 
 * `grandfathered_mxid_source_attribute` (string): In previous versions of synapse, the mapping from SAML attribute to MXID was always calculated dynamically rather than stored in a table. For backwards-compatibility, we will look for `user_ids` matching such a pattern before creating a new account. This setting controls the SAML attribute which will be used for this backwards-compatibility lookup. Typically it should be "uid", but if the attribute maps are changed, it may be necessary to change it. Defaults to `"uid"`.
 
-* `attribute_requirements` (array): It is possible to configure Synapse to only allow logins if SAML attributes match particular values. The requirements can be listed under `attribute_requirements` as shown in the example. All of the listed attributes must match for the login to be permitted.
+* `attribute_requirements` (array): It is possible to configure Synapse to only allow logins if SAML attributes match particular values. The requirements can be listed under `attribute_requirements` as shown in the example. All of the listed attributes must match for the login to be permitted. Values can be specified in a `one_of` list to allow multiple values for an attribute.
 
   Options for each entry include:
 
   * `attribute` (string): SAML attribute for which to allow logins.
 
   * `value` (string): Value the SAML attribute must match.
+
+  * `one_of` (array): List of values the SAML attribute must all match.
 
 * `idp_entityid` (string|null): If the metadata XML contains multiple IdP entities then the `idp_entityid` option must be set to the entity to redirect users to. Most deployments only have a single IdP entity and so should omit this option. Defaults to `null`.
 
@@ -3180,7 +3297,9 @@ saml2_config:
   - attribute: userGroup
     value: staff
   - attribute: department
-    value: sales
+    one_of:
+    - sales
+    - admins
   idp_entityid: https://our_idp/entityid
 ```
 ---
@@ -3246,6 +3365,14 @@ Options for each entry include:
 
 * `pkce_method` (string|null): Whether to use proof key for code exchange when requesting and exchanging the token. Valid values are: `auto`, `always`, or `never`. Defaults to `auto`, which uses PKCE if supported during metadata discovery. Set to `always` to force enable PKCE or `never` to force disable PKCE.
 
+* `id_token_signing_alg_values_supported` (array): List of the JWS signing algorithms (`alg` values) that are supported for signing the `id_token`.
+
+  This is *not* required if `discovery` is disabled. We default to supporting `RS256` in the downstream usage if no algorithms are configured here or in the discovery document.
+
+  According to the spec, the algorithm `"RS256"` MUST be included. The absolute rigid approach would be to reject this provider as non-compliant if it's not included but we simply allow whatever and see what happens (you're the one that configured the value and cooperating with the identity provider).
+
+  The `alg` value `"none"` MAY be supported but can only be used if the Authorization Endpoint does not include `id_token` in the `response_type` (ex. `/authorize?response_type=code` where `none` can apply, `/authorize?response_type=code%20id_token` where `none` can't apply) (such as when using the Authorization Code Flow).
+
 * `scopes` (array|null): List of scopes to request. This should normally include the "openid" scope. Defaults to `["openid"]`.
 
 * `authorization_endpoint` (string): The OAuth2 authorization endpoint. Required if provider discovery is disabled.
@@ -3260,7 +3387,11 @@ Options for each entry include:
 
 * `user_profile_method` (string|null): Whether to fetch the user profile from the userinfo endpoint, or to rely on the data returned in the id_token from the `token_endpoint`. Valid values are: `auto` or `userinfo_endpoint`. Defaults to `auto`, which uses the userinfo endpoint if `openid` is not included in `scopes`. Set to `userinfo_endpoint` to always use the userinfo endpoint.
 
+* `redirect_uri` (string|null): An optional string, that if set will override the `redirect_uri` parameter sent in the requests to the authorization and token endpoints. Useful if you want to redirect the client to another endpoint as part of the OIDC login. Be aware that the client must then call Synapse's OIDC callback URL (`<public_baseurl>/_synapse/client/oidc/callback`) manually afterwards. Must be a valid URL including scheme and path.
+
 * `additional_authorization_parameters` (object): String to string dictionary that will be passed as additional parameters to the authorization grant URL.
+
+* `passthrough_authorization_parameters` (array): List of parameters that will be passed through from the redirect endpoint to the authorization grant URL.
 
 * `allow_existing_users` (boolean): Set to true to allow a user logging in via OIDC to match a pre-existing account instead of failing. This could be used if switching from password logins to OIDC. Defaults to false.
 
@@ -3334,6 +3465,8 @@ oidc_providers:
   jwks_uri: https://accounts.example.com/.well-known/jwks.json
   additional_authorization_parameters:
     acr_values: 2fa
+  passthrough_authorization_parameters:
+  - login_hint
   skip_verification: true
   enable_registration: true
   user_mapping_provider:
@@ -3764,7 +3897,7 @@ alias_creation_rules:
 
 *(array|null)* The `room_list_publication_rules` option allows server admins to prevent unwanted entries from being published in the public room list.
 
-The format of this option is the same as that for [`alias_creation_rules`](#alias_creation_rules): an optional list of 0 or more rules. By default, no list is provided, meaning that all rooms may be published to the room list.
+The format of this option is the same as that for [`alias_creation_rules`](#alias_creation_rules): an optional list of 0 or more rules. By default, no list is provided, meaning that no one may publish to the room list (except server admins).
 
 Otherwise, requests to publish a room are matched against each rule in order. The first rule that matches decides if the request is allowed or denied. If no rule matches, the request is denied. In particular, this means that configuring an empty list of rules will deny every alias creation request.
 
@@ -3773,6 +3906,8 @@ Requests to create a public (public as in published to the room directory) room 
 Each of the glob patterns is optional, defaulting to `*` ("match anything"). Note that the patterns match against fully qualified IDs, e.g. against `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead of `alice`, `room` and `abcedgghijk`.
 
 Each rule is a YAML object containing four fields, each of which is an optional string.
+
+_Changed in Synapse 1.126.0: The default was changed to deny publishing to the room list by default_
 
 Defaults to `null`.
 
@@ -3953,11 +4088,28 @@ For guidance on setting up workers, see the [worker documentation](../../workers
 
 If unset or null, traffic between the workers and the main process is not authenticated.
 
+Replacing an existing `worker_replication_secret` with a new one will break communication with all workers that have not yet updated their secret.
+
 Defaults to `null`.
 
 Example configuration:
 ```yaml
 worker_replication_secret: secret_secret
+```
+---
+### `worker_replication_secret_path`
+
+*(string|null)* An alternative to [`worker_replication_secret`](#worker_replication_secret): allows the secret to be specified in an external file.
+
+The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
+
+_Added in Synapse 1.126.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+worker_replication_secret_path: /path/to/secrets/file
 ```
 ---
 ### `start_pushers`

@@ -150,6 +150,12 @@ class ProxyAgent(_AgentBase):
             http_proxy = proxies["http"].encode() if "http" in proxies else None
             https_proxy = proxies["https"].encode() if "https" in proxies else None
             no_proxy = proxies["no"] if "no" in proxies else None
+            logger.debug(
+                "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
+                http_proxy,
+                https_proxy,
+                no_proxy,
+            )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
             http_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
