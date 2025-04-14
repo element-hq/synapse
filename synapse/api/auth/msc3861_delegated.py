@@ -178,6 +178,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
         self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
+        self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
         # # Token Introspection Cache
         # This remembers what users/devices are represented by which access tokens,
