@@ -276,7 +276,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         return metadata.get("introspection_endpoint")
 
     async def _introspect_token(
-        self, token: str, cache_context: ResponseCacheContext[(str,)]
+        self, token: str, cache_context: ResponseCacheContext[str]
     ) -> IntrospectionResult:
         """
         Send a token to the introspection endpoint and returns the introspection response
