@@ -29,5 +29,5 @@ INSERT INTO event_stats (
 -- Add a background update to populate the `event_stats` table with the current counts
 -- from the `events` table and add triggers to keep this count up-to-date.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (9101, 'event_stats_populate_counts_bg_update', '{}');
+    (9201, 'event_stats_populate_counts_bg_update', '{}');
 
