@@ -2,7 +2,7 @@
 
 ### Features
 
-- Add `passthrough_authorization_parameters` in OIDC configuration to allow to pass parameters to the authorization grant URL. ([\#18232](https://github.com/element-hq/synapse/issues/18232))
+- Add `passthrough_authorization_parameters` in OIDC configuration to allow passing parameters to the authorization grant URL. ([\#18232](https://github.com/element-hq/synapse/issues/18232))
 - Add `total_event_count`, `total_message_count`, and `total_e2ee_event_count` fields to the homeserver usage statistics. ([\#18260](https://github.com/element-hq/synapse/issues/18260))
 
 ### Bugfixes
