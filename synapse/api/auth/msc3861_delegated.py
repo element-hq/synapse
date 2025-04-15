@@ -49,7 +49,7 @@ from synapse.logging.opentracing import active_span, force_tracing, start_active
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
-from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
@@ -279,7 +279,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         metadata = await self._issuer_metadata.get()
         return metadata.get("introspection_endpoint")
 
-    async def _introspect_token(self, token: str) -> IntrospectionResult:
+    async def _introspect_token(
+        self, token: str, cache_context: ResponseCacheContext[str]
+    ) -> IntrospectionResult:
         """
         Send a token to the introspection endpoint and returns the introspection response
 
@@ -295,6 +297,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         Returns:
             The introspection response
         """
+        # By default, we shouldn't cache the result unless we know it's valid
+        cache_context.should_cache = False
         introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -352,6 +356,8 @@ class MSC3861DelegatedAuth(BaseAuth):
                 "The introspection endpoint returned an invalid JSON response."
             )
 
+        # We had a valid response, so we can cache it
+        cache_context.should_cache = True
         return IntrospectionResult(
             IntrospectionToken(**resp), retrieved_at_ms=self._clock.time_msec()
         )
@@ -482,7 +488,7 @@ class MSC3861DelegatedAuth(BaseAuth):
 
         try:
             introspection_result = await self._introspection_cache.wrap(
-                token, self._introspect_token, token
+                token, self._introspect_token, token, cache_context=True
             )
         except Exception:
             logger.exception("Failed to introspect token")
