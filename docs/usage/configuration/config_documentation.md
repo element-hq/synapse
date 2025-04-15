@@ -4330,7 +4330,6 @@ Example configuration:
 
 ```yaml
 # No rule list specified. Anyone may publish any room to the public list.
-# This is the default behaviour.
 room_list_publication_rules:
 ```
 
@@ -4343,6 +4342,7 @@ room_list_publication_rules:
 
 ```yaml
 # An empty list of rules. No-one may publish to the room list.
+# This is the default behaviour.
 room_list_publication_rules: []
 ```
 
