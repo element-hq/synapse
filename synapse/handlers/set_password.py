@@ -55,9 +55,11 @@ class SetPasswordHandler:
         logout_devices: bool,
         requester: Optional[Requester] = None,
     ) -> None:
-        # If the device_handler is None, then password changing is disabled.
-        if self._device_handler is None:
+        if self._auth_handler.can_change_password():
             raise SynapseError(403, "Password change disabled", errcode=Codes.FORBIDDEN)
+
+        # We should have this available only if password changing is enabled.
+        assert self._device_handler is not None
 
         try:
             await self.store.user_set_password_hash(user_id, password_hash)
