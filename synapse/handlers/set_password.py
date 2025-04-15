@@ -55,7 +55,7 @@ class SetPasswordHandler:
         logout_devices: bool,
         requester: Optional[Requester] = None,
     ) -> None:
-        if self._auth_handler.can_change_password():
+        if not self._auth_handler.can_change_password():
             raise SynapseError(403, "Password change disabled", errcode=Codes.FORBIDDEN)
 
         # We should have this available only if password changing is enabled.
