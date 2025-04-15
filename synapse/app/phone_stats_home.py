@@ -34,6 +34,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("synapse.app.homeserver")
 
+ONE_MINUTE_SECONDS = 60
+ONE_HOUR_SECONDS = 60 * ONE_MINUTE_SECONDS
+
+MILLISECONDS_PER_SECOND = 1000
+
+INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS = 5 * ONE_MINUTE_SECONDS
+"""
+We wait 5 minutes to send the first set of stats as the server can be quite busy the
+first few minutes
+"""
+
+PHONE_HOME_INTERVAL_SECONDS = 3 * ONE_HOUR_SECONDS
+"""
+Phone home stats are sent every 3 hours
+"""
+
 # Contains the list of processes we will be monitoring
 # currently either 0 or 1
 _stats_process: List[Tuple[int, "resource.struct_rusage"]] = []
@@ -121,6 +137,9 @@ async def phone_stats_home(
 
     room_count = await store.get_room_count()
     stats["total_room_count"] = room_count
+    stats["total_event_count"] = await store.count_total_events()
+    stats["total_message_count"] = await store.count_total_messages()
+    stats["total_e2ee_event_count"] = await store.count_total_e2ee_events()
 
     stats["daily_active_users"] = common_metrics.daily_active_users
     stats["monthly_active_users"] = await store.count_monthly_users()
@@ -185,12 +204,14 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # If you increase the loop period, the accuracy of user_daily_visits
     # table will decrease
     clock.looping_call(
-        hs.get_datastores().main.generate_user_daily_visits, 5 * 60 * 1000
+        hs.get_datastores().main.generate_user_daily_visits,
+        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
-        hs.get_datastores().main.reap_monthly_active_users, 1000 * 60 * 60
+        hs.get_datastores().main.reap_monthly_active_users,
+        ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
@@ -216,12 +237,20 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000)
+        clock.looping_call(
+            generate_monthly_active_users,
+            5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
+        )
     # End of monthly active user settings
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
-        clock.looping_call(phone_stats_home, 3 * 60 * 60 * 1000, hs, stats)
+        clock.looping_call(
+            phone_stats_home,
+            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+            hs,
+            stats,
+        )
 
         # We need to defer this init for the cases that we daemonize
         # otherwise the process ID we get is that of the non-daemon process
@@ -229,4 +258,6 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
-        clock.call_later(5 * 60, phone_stats_home, hs, stats)
+        clock.call_later(
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS, phone_stats_home, hs, stats
+        )
