@@ -201,6 +201,8 @@ class MSC3861DelegatedAuth(BaseAuth):
             self._clock,
             "token_introspection",
             timeout_ms=120_000,
+            # don't log because the keys are access tokens
+            enable_logging=False,
         )
 
         self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
