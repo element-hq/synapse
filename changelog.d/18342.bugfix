@@ -1,1 +1,0 @@
-Fix `ExternalIDReuse` exception after migrating to MAS on workers with a high traffic.
