@@ -1276,8 +1276,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         membership = Membership.LEAVE
 
                     if (
-                        membership is Membership.JOIN
-                        and prev_membership is Membership.JOIN
+                        membership == Membership.JOIN
+                        and prev_membership == Membership.JOIN
                     ):
                         # The user was previously joined so this it not a new join.
                         # This happens when the user changes their display name.
