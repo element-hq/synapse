@@ -23,6 +23,7 @@ such as [Github][github-idp].
 [auth0]: https://auth0.com/
 [authentik]: https://goauthentik.io/
 [lemonldap]: https://lemonldap-ng.org/
+[pocket-id]: https://pocket-id.org/
 [okta]: https://www.okta.com/
 [dex-idp]: https://github.com/dexidp/dex
 [keycloak-idp]: https://www.keycloak.org/docs/latest/server_admin/#sso-protocols
@@ -623,6 +624,32 @@ oidc_providers:
 ```
 
 Note that the fields `client_id` and `client_secret` are taken from the CURL response above.
+
+### Pocket ID
+
+[Pocket ID][pocket-id] is a simple OIDC provider that allows users to authenticate with their passkeys.
+1. Go to `OIDC Clients`
+2. Click on `Add OIDC Client`
+3. Add a name, for example `Synapse`
+4. Add `"https://auth.example.org/_synapse/client/oidc/callback` to `Callback URLs`  # Replace `auth.example.org` with your domain
+5. Click on `Save`
+6. Note down your `Client ID` and `Client secret`, these will be used later
+
+Synapse config:
+
+```yaml
+oidc_providers:
+  - idp_id: pocket_id
+    idp_name: Pocket ID
+    issuer: "https://auth.example.org/" # Replace with your domain
+    client_id: "your-client-id" # Replace with the "Client ID" you noted down before
+    client_secret: "your-client-secret" # Replace with the "Client secret" you noted down before
+    scopes: ["openid", "profile"]
+    user_mapping_provider:
+      config:
+        localpart_template: "{{ user.preferred_username }}"
+        display_name_template: "{{ user.name }}"
+```
 
 ### Shibboleth with OIDC Plugin
 
