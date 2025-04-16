@@ -1198,15 +1198,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
                     SELECT
                         s.room_id,
-                        e.event_id,
+                        NULL AS event_id,
                         s.instance_name,
                         s.stream_id,
-                        m.membership,
-                        e.sender,
+                        NULL AS membership,
+                        NULL AS sender,
                         m_prev.membership AS prev_membership
                     FROM current_state_delta_stream AS s
-                        LEFT JOIN events AS e ON e.event_id = s.event_id
-                        LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
                         LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
                     WHERE
                         s.type = ?
