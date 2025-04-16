@@ -1270,6 +1270,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         continue
 
                     if membership_event_id is None and room_id in membership_changes:
+                        # SUSPICIOUS: if we join a room and get state reset out of it
+                        # in the same queried window,
+                        # won't this ignore the 'state reset out of it' part?
                         continue
 
                     if membership is None:
