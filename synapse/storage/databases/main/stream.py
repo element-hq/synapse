@@ -1194,7 +1194,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         null AS prev_membership
                     FROM sliding_sync_membership_snapshots
 
-                    UNION
+                    UNION ALL
 
                     SELECT
                         s.room_id,
