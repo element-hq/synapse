@@ -1622,14 +1622,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             sql = """
                 UPDATE room_memberships
                 SET participant = true
-                WHERE (user_id, room_id) IN (
-                    SELECT user_id, room_id
-                    FROM room_memberships
-                    WHERE user_id = ?
-                    AND room_id = ?
-                    ORDER BY event_stream_ordering DESC
-                    LIMIT 1
+                WHERE event_id IN (
+                    SELECT event_id FROM local_current_membership
+                    WHERE user_id = ? AND room_id = ?
                 )
+                AND NOT participant
             """
             txn.execute(sql, (user_id, room_id))
 
@@ -1651,11 +1648,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         ) -> bool:
             sql = """
                 SELECT participant
-                FROM room_memberships
-                WHERE user_id = ?
-                AND room_id = ?
-                ORDER BY event_stream_ordering DESC
-                LIMIT 1
+                FROM local_current_membership AS l
+                INNER JOIN room_memberships AS r USING (event_id)
+                WHERE l.user_id = ?
+                AND l.room_id = ?
             """
             txn.execute(sql, (user_id, room_id))
             res = txn.fetchone()
