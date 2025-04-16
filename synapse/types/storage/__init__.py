@@ -52,5 +52,3 @@ class _BackgroundUpdates:
     MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE = (
         "mark_unreferenced_state_groups_for_deletion_bg_update"
     )
-
-    EVENT_STATS_POPULATE_COUNTS_BG_UPDATE = "event_stats_populate_counts_bg_update"
