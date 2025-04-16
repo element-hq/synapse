@@ -1172,6 +1172,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # case in `current_state_delta_stream`.
             #
             # TODO: Add an index a better index on sliding_sync_membership_snapshots
+            # probably want:
+            # - sliding_sync_membership_snapshots (user_id, event_stream_ordering)
+            #   replacing the existing index on only (user_id)
+            # - MAYBE current_state_delta_stream(state_key, stream_id) WHERE type = 'm.room.member' AND event_id IS NULL
             sql = """
                 SELECT
                     room_id,
