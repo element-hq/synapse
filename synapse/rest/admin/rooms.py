@@ -150,6 +150,7 @@ class RoomRestV2Servlet(RestServlet):
 def _convert_delete_task_to_response(task: ScheduledTask) -> JsonDict:
     return {
         "delete_id": task.id,
+        "room_id": task.resource_id,
         "status": task.status,
         "shutdown_room": task.result,
     }
