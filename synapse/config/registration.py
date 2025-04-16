@@ -162,6 +162,10 @@ class RegistrationConfig(Config):
             "disable_msisdn_registration", False
         )
 
+        self.allow_underscore_prefixed_localpart = config.get(
+            "allow_underscore_prefixed_localpart", False
+        )
+
         session_lifetime = config.get("session_lifetime")
         if session_lifetime is not None:
             session_lifetime = self.parse_duration(session_lifetime)
