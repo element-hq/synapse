@@ -30,9 +30,6 @@ from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
 from prometheus_client import Histogram
 
-from twisted.web.client import readBody
-from twisted.web.http_headers import Headers
-
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,
@@ -44,8 +41,9 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import make_deferred_yieldable
+from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import active_span, force_tracing, start_active_span
+from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
@@ -163,6 +161,8 @@ class MSC3861DelegatedAuth(BaseAuth):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+
+        self._rust_http_client = HttpClient()
 
         self._config = hs.config.experimental.msc3861
         auth_method = MSC3861DelegatedAuth.AUTH_METHODS.get(
@@ -316,38 +316,26 @@ class MSC3861DelegatedAuth(BaseAuth):
         uri, raw_headers, body = self._client_auth.prepare(
             method="POST", uri=introspection_endpoint, headers=raw_headers, body=body
         )
-        headers = Headers({k: [v] for (k, v) in raw_headers.items()})
 
         # Do the actual request
-        # We're not using the SimpleHttpClient util methods as we don't want to
-        # check the HTTP status code, and we do the body encoding ourselves.
 
         start_time = self._clock.time()
         try:
-            response = await self._http_client.request(
-                method="POST",
-                uri=uri,
-                data=body.encode("utf-8"),
-                headers=headers,
-            )
-
-            resp_body = await make_deferred_yieldable(readBody(response))
+            with PreserveLoggingContext():
+                resp_body = await self._rust_http_client.post(
+                    uri, 1 * 1024 * 1024, raw_headers, body
+                )
+        except HttpResponseException as e:
+            end_time = self._clock.time()
+            introspection_response_timer.labels(e.code).observe(end_time - start_time)
+            raise
         except Exception:
             end_time = self._clock.time()
             introspection_response_timer.labels("ERR").observe(end_time - start_time)
             raise
 
         end_time = self._clock.time()
-        introspection_response_timer.labels(response.code).observe(
-            end_time - start_time
-        )
-
-        if response.code < 200 or response.code >= 300:
-            raise HttpResponseException(
-                response.code,
-                response.phrase.decode("ascii", errors="replace"),
-                resp_body,
-            )
+        introspection_response_timer.labels(200).observe(end_time - start_time)
 
         resp = json_decoder.decode(resp_body.decode("utf-8"))
 
