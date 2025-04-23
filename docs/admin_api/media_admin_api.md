@@ -46,6 +46,14 @@ to any local media, and any locally-cached copies of remote media.
 
 The media file itself (and any thumbnails) is not deleted from the server.
 
+Since Synapse 1.128.0, hashes of uploaded media are tracked. If this media
+is quarantined, Synapse will:
+
+ - Quarantine any media with a matching hash that has already been uploaded.
+ - Quarantine any future media.
+ - Quarantine any existing cached remote media.
+ - Quarantine any future remote media.
+
 ## Quarantining media by ID
 
 This API quarantines a single piece of local or remote media.

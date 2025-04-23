@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Sequence
 
 from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
@@ -29,6 +29,7 @@ from synapse.crypto.event_signing import check_event_content_hash
 from synapse.crypto.keyring import Keyring
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.utils import prune_event, validate_canonicaljson
+from synapse.federation.units import filter_pdus_for_valid_depth
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.opentracing import log_kv, trace
 from synapse.types import JsonDict, get_domain_from_id
@@ -265,6 +266,15 @@ def _is_invite_via_3pid(event: EventBase) -> bool:
         and event.membership == Membership.INVITE
         and "third_party_invite" in event.content
     )
+
+
+def parse_events_from_pdu_json(
+    pdus_json: Sequence[JsonDict], room_version: RoomVersion
+) -> List[EventBase]:
+    return [
+        event_from_pdu_json(pdu_json, room_version)
+        for pdu_json in filter_pdus_for_valid_depth(pdus_json)
+    ]
 
 
 def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventBase:
