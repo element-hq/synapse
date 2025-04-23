@@ -319,12 +319,14 @@ class MSC3861DelegatedAuth(BaseAuth):
 
         # Do the actual request
 
+        logger.debug("Fetching token from MAS")
         start_time = self._clock.time()
         try:
-            with PreserveLoggingContext():
-                resp_body = await self._rust_http_client.post(
-                    uri, 1 * 1024 * 1024, raw_headers, body
-                )
+            with start_active_span("mas-introspect-token"):
+                with PreserveLoggingContext():
+                    resp_body = await self._rust_http_client.post(
+                        uri, 1 * 1024 * 1024, raw_headers, body
+                    )
         except HttpResponseException as e:
             end_time = self._clock.time()
             introspection_response_timer.labels(e.code).observe(end_time - start_time)
@@ -333,6 +335,8 @@ class MSC3861DelegatedAuth(BaseAuth):
             end_time = self._clock.time()
             introspection_response_timer.labels("ERR").observe(end_time - start_time)
             raise
+
+        logger.debug("Fetched token from MAS")
 
         end_time = self._clock.time()
         introspection_response_timer.labels(200).observe(end_time - start_time)
