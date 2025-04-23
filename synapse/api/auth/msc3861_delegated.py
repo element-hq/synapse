@@ -42,7 +42,12 @@ from synapse.api.errors import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import PreserveLoggingContext
-from synapse.logging.opentracing import active_span, force_tracing, start_active_span
+from synapse.logging.opentracing import (
+    active_span,
+    force_tracing,
+    inject_request_headers,
+    start_active_span,
+)
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
@@ -323,6 +328,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         start_time = self._clock.time()
         try:
             with start_active_span("mas-introspect-token"):
+                inject_request_headers(raw_headers)
                 with PreserveLoggingContext():
                     resp_body = await self._rust_http_client.post(
                         uri, 1 * 1024 * 1024, raw_headers, body
