@@ -53,13 +53,12 @@ static TWISTED_REACTOR: LazyLock<Py<PyModule>> = LazyLock::new(|| {
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module: Bound<'_, PyModule> = PyModule::new(py, "http_client")?;
+    child_module.add_class::<HttpClient>()?;
+
     // Make sure we fail early if we can't build the lazy statics.
     LazyLock::force(&RUNTIME);
     LazyLock::force(&DEFERRED_CLASS);
-    LazyLock::force(&TWISTED_REACTOR);
-
-    let child_module: Bound<'_, PyModule> = PyModule::new(py, "http_client")?;
-    child_module.add_class::<HttpClient>()?;
 
     m.add_submodule(&child_module)?;
 
@@ -82,6 +81,12 @@ struct HttpClient {
 impl HttpClient {
     #[new]
     pub fn py_new(user_agent: &str) -> PyResult<HttpClient> {
+        // The twisted reactor can only be imported after Synapse has been
+        // imported, to allow Synapse to change the twisted reactor. If we try
+        // and import the reactor too early twisted installs a default reactor,
+        // which can't be replaced.
+        LazyLock::force(&TWISTED_REACTOR);
+
         Ok(HttpClient {
             client: reqwest::Client::builder()
                 .user_agent(user_agent)
