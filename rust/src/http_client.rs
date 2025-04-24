@@ -42,11 +42,21 @@ static DEFERRED_CLASS: LazyLock<PyObject> = LazyLock::new(|| {
     })
 });
 
+/// A reference to the twisted `reactor`.
+static TWISTED_REACTOR: LazyLock<Py<PyModule>> = LazyLock::new(|| {
+    Python::with_gil(|py| {
+        py.import("twisted.internet.reactor")
+            .expect("module 'twisted.internet.reactor' should be importable")
+            .unbind()
+    })
+});
+
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Make sure we fail early if we can't build the lazy statics.
     LazyLock::force(&RUNTIME);
     LazyLock::force(&DEFERRED_CLASS);
+    LazyLock::force(&TWISTED_REACTOR);
 
     let child_module: Bound<'_, PyModule> = PyModule::new(py, "http_client")?;
     child_module.add_class::<HttpClient>()?;
@@ -153,8 +163,6 @@ where
     let deferred_callback = deferred.getattr("callback")?.unbind();
     let deferred_errback = deferred.getattr("errback")?.unbind();
 
-    let reactor = py.import("twisted.internet")?.getattr("reactor")?.unbind();
-
     RUNTIME.spawn(async move {
         // TODO: Is it safe to assert unwind safety here? I think so, as we
         // don't use anything that could be tainted by the panic afterwards.
@@ -176,12 +184,12 @@ where
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
             match res {
                 Ok(obj) => {
-                    reactor
+                    TWISTED_REACTOR
                         .call_method(py, "callFromThread", (deferred_callback, obj), None)
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
                 Err(err) => {
-                    reactor
+                    TWISTED_REACTOR
                         .call_method(py, "callFromThread", (deferred_errback, err), None)
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
