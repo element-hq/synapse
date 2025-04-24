@@ -44,6 +44,10 @@ static DEFERRED_CLASS: LazyLock<PyObject> = LazyLock::new(|| {
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Make sure we fail early if we can't build the lazy statics.
+    LazyLock::force(&RUNTIME);
+    LazyLock::force(&DEFERRED_CLASS);
+
     let child_module: Bound<'_, PyModule> = PyModule::new(py, "http_client")?;
     child_module.add_class::<HttpClient>()?;
 
@@ -67,14 +71,13 @@ struct HttpClient {
 #[pymethods]
 impl HttpClient {
     #[new]
-    pub fn py_new() -> HttpClient {
-        // Make sure we fail early if we can't build the lazy statics.
-        LazyLock::force(&RUNTIME);
-        LazyLock::force(&DEFERRED_CLASS);
-
-        HttpClient {
-            client: reqwest::Client::new(),
-        }
+    pub fn py_new(user_agent: &str) -> PyResult<HttpClient> {
+        Ok(HttpClient {
+            client: reqwest::Client::builder()
+                .user_agent(user_agent)
+                .build()
+                .context("building reqwest client")?,
+        })
     }
 
     pub fn get<'a>(

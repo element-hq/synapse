@@ -167,8 +167,6 @@ class MSC3861DelegatedAuth(BaseAuth):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        self._rust_http_client = HttpClient()
-
         self._config = hs.config.experimental.msc3861
         auth_method = MSC3861DelegatedAuth.AUTH_METHODS.get(
             self._config.client_auth_method.value, None
@@ -184,6 +182,10 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._hostname = hs.hostname
         self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
+
+        self._rust_http_client = HttpClient(
+            user_agent=self._http_client.user_agent.decode("utf8")
+        )
 
         # # Token Introspection Cache
         # This remembers what users/devices are represented by which access tokens,
@@ -307,7 +309,6 @@ class MSC3861DelegatedAuth(BaseAuth):
         introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": str(self._http_client.user_agent, "utf-8"),
             "Accept": "application/json",
             # Tell MAS that we support reading the device ID as an explicit
             # value, not encoded in the scope. This is supported by MAS 0.15+
