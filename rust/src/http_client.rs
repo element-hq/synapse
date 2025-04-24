@@ -12,33 +12,35 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future, panic::AssertUnwindSafe};
+use std::{collections::HashMap, future::Future, panic::AssertUnwindSafe, sync::LazyLock};
 
 use anyhow::Context;
 use futures::{FutureExt, TryStreamExt};
-use lazy_static::lazy_static;
 use pyo3::{exceptions::PyException, prelude::*, types::PyString};
 use reqwest::RequestBuilder;
 use tokio::runtime::Runtime;
 
 use crate::errors::HttpResponseException;
 
-lazy_static! {
-    static ref RUNTIME: Runtime = tokio::runtime::Builder::new_multi_thread()
+/// The tokio runtime that we're using to run async Rust libs.
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
         .enable_all()
         .build()
-        .unwrap();
-    static ref DEFERRED_CLASS: PyObject = {
-        Python::with_gil(|py| {
-            py.import("twisted.internet.defer")
-                .expect("module 'twisted.internet.defer' should be importable")
-                .getattr("Deferred")
-                .expect("module 'twisted.internet.defer' should have a 'Deferred' class")
-                .unbind()
-        })
-    };
-}
+        .unwrap()
+});
+
+/// A reference to the `Deferred` python class.
+static DEFERRED_CLASS: LazyLock<PyObject> = LazyLock::new(|| {
+    Python::with_gil(|py| {
+        py.import("twisted.internet.defer")
+            .expect("module 'twisted.internet.defer' should be importable")
+            .getattr("Deferred")
+            .expect("module 'twisted.internet.defer' should have a 'Deferred' class")
+            .unbind()
+    })
+});
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -66,6 +68,10 @@ struct HttpClient {
 impl HttpClient {
     #[new]
     pub fn py_new() -> HttpClient {
+        // Make sure we fail early if we can't build the lazy statics.
+        LazyLock::force(&RUNTIME);
+        LazyLock::force(&DEFERRED_CLASS);
+
         HttpClient {
             client: reqwest::Client::new(),
         }
@@ -183,7 +189,7 @@ where
     Ok(deferred)
 }
 
-/// Try and get the panic message out of the
+/// Try and get the panic message out of the panic
 fn get_panic_message<'a>(panic_err: &'a (dyn std::any::Any + Send + 'static)) -> &'a str {
     // Apparently this is how you extract the panic message from a panic
     if let Some(str_slice) = panic_err.downcast_ref::<&str>() {

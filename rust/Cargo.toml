@@ -27,7 +27,6 @@ base64 = "0.21.7"
 bytes = "1.6.0"
 headers = "0.4.0"
 http = "1.1.0"
-lazy_static = "1.4.0"
 log = "0.4.17"
 mime = "0.3.17"
 pyo3 = { version = "0.24.2", features = [
