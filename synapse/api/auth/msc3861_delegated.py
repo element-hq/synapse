@@ -331,7 +331,10 @@ class MSC3861DelegatedAuth(BaseAuth):
                 inject_request_headers(raw_headers)
                 with PreserveLoggingContext():
                     resp_body = await self._rust_http_client.post(
-                        uri, 1 * 1024 * 1024, raw_headers, body
+                        url=uri,
+                        response_limit=1 * 1024 * 1024,
+                        headers=raw_headers,
+                        request_body=body,
                     )
         except HttpResponseException as e:
             end_time = self._clock.time()
