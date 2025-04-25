@@ -143,11 +143,11 @@ class DeviceRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
         self.device_handler = handler
         self.auth_handler = hs.get_auth_handler()
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+        self._is_main_process = hs.config.worker.worker_app is None
 
     async def on_GET(
         self, request: SynapseRequest, device_id: str
@@ -179,6 +179,14 @@ class DeviceRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
+        # Can only be run on main process, as changes to device lists must
+        # happen on main.
+        if not self._is_main_process:
+            error_message = "DELETE on /devices/ must be routed to main process"
+            logger.error(error_message)
+            raise SynapseError(500, error_message)
+        assert isinstance(self.device_handler, DeviceHandler)
+
         requester = await self.auth.get_user_by_req(request)
 
         try:
@@ -223,6 +231,14 @@ class DeviceRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
+        # Can only be run on main process, as changes to device lists must
+        # happen on main.
+        if not self._is_main_process:
+            error_message = "PUT on /devices/ must be routed to main process"
+            logger.error(error_message)
+            raise SynapseError(500, error_message)
+        assert isinstance(self.device_handler, DeviceHandler)
+
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
@@ -585,9 +601,9 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ):
         DeleteDevicesRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)
+    DeviceRestServlet(hs).register(http_server)
 
     if hs.config.worker.worker_app is None:
-        DeviceRestServlet(hs).register(http_server)
         if hs.config.experimental.msc2697_enabled:
             DehydratedDeviceServlet(hs).register(http_server)
             ClaimDehydratedDeviceServlet(hs).register(http_server)
