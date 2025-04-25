@@ -181,8 +181,9 @@ class DeviceRestServlet(RestServlet):
     ) -> Tuple[int, JsonDict]:
         # Can only be run on main process
         if not self._is_main_process:
-            logger.error("DELETE on /devices/ must be routed to main process")
-            raise SynapseError(500, "Server misconfigured")
+            error_message = "DELETE on /devices/ must be routed to main process"
+            logger.error(error_message)
+            raise SynapseError(500, error_message)
         assert isinstance(self.device_handler, DeviceHandler)
 
         requester = await self.auth.get_user_by_req(request)
