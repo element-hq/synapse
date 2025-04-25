@@ -179,7 +179,8 @@ class DeviceRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
-        # Can only be run on main process
+        # Can only be run on main process, as changes to device lists must
+        # happen on main.
         if not self._is_main_process:
             error_message = "DELETE on /devices/ must be routed to main process"
             logger.error(error_message)
@@ -230,10 +231,12 @@ class DeviceRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
-        # Can only be run on main process
+        # Can only be run on main process, as changes to device lists must
+        # happen on main.
         if not self._is_main_process:
-            logger.error("PUT on /devices/ must be routed to main process")
-            raise SynapseError(500, "Server misconfigured")
+            error_message = "PUT on /devices/ must be routed to main process"
+            logger.error(error_message)
+            raise SynapseError(500, error_message)
         assert isinstance(self.device_handler, DeviceHandler)
 
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
