@@ -1,0 +1,1 @@
+Allow `/rooms/` admin API to be run on workers.
