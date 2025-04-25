@@ -52,7 +52,7 @@ from synapse.logging.context import LoggingContext
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource
-from synapse.rest.admin import register_servlets_for_media_repo
+from synapse.rest.admin import AdminRestResource, register_servlets_for_media_repo
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
@@ -190,6 +190,7 @@ class GenericWorkerServer(HomeServer):
 
                     resources.update(build_synapse_client_resource_tree(self))
                     resources["/.well-known"] = well_known_resource(self)
+                    resources["/_synapse/admin"] = AdminRestResource(self)
 
                 elif name == "federation":
                     resources[FEDERATION_PREFIX] = TransportLayerServer(self)
