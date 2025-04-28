@@ -1197,6 +1197,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         sender,
                         null AS prev_membership
                     FROM sliding_sync_membership_snapshots
+                    WHERE user_id = ?
 
                     UNION ALL
 
@@ -1222,7 +1223,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             txn.execute(
                 sql,
-                (EventTypes.Member, user_id, min_from_id, max_to_id),
+                (user_id, EventTypes.Member, user_id, min_from_id, max_to_id),
             )
 
             membership_changes: Dict[str, RoomsForUserStateReset] = {}
