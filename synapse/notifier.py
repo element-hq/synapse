@@ -562,9 +562,10 @@ class Notifier:
         # We resolve all these deferreds in one go so that we only need to
         # call `PreserveLoggingContext` once, as it has a bunch of overhead
         # (to calculate performance stats)
-        with PreserveLoggingContext():
-            for listener in listeners:
-                listener.callback(current_token)
+        if listeners:
+            with PreserveLoggingContext():
+                for listener in listeners:
+                    listener.callback(current_token)
 
         users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
 
