@@ -66,7 +66,6 @@ from synapse.types import (
 from synapse.util.async_helpers import (
     timeout_deferred,
 )
-from synapse.util.metrics import Measure
 from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_events_for_client
 
@@ -533,41 +532,47 @@ class Notifier:
             }
         )
 
-        for user in users:
-            user_stream = self.user_to_user_stream.get(str(user))
-            if user_stream is not None:
-                user_streams.add(user_stream)
+        # Only calculate which user streams to wake up if there are, in fact,
+        # any user streams registered.
+        if self.user_to_user_stream or self.room_to_user_streams:
+            for user in users:
+                user_stream = self.user_to_user_stream.get(str(user))
+                if user_stream is not None:
+                    user_streams.add(user_stream)
 
-        for room in rooms:
-            user_streams |= self.room_to_user_streams.get(room, set())
+            for room in rooms:
+                user_streams |= self.room_to_user_streams.get(room, set())
 
-        if stream_key == StreamKeyType.TO_DEVICE:
-            issue9533_logger.debug(
-                "to-device messages stream id %s, awaking streams for %s",
-                new_token,
-                users,
-            )
-
-        time_now_ms = self.clock.time_msec()
-        current_token = self.event_sources.get_current_token()
-        listeners: List["Deferred[StreamToken]"] = []
-        for user_stream in user_streams:
-            try:
-                listeners.extend(
-                    user_stream.update_and_fetch_deferreds(current_token, time_now_ms)
+            if stream_key == StreamKeyType.TO_DEVICE:
+                issue9533_logger.debug(
+                    "to-device messages stream id %s, awaking streams for %s",
+                    new_token,
+                    users,
                 )
-            except Exception:
-                logger.exception("Failed to notify listener")
 
-        # We resolve all these deferreds in one go so that we only need to
-        # call `PreserveLoggingContext` once, as it has a bunch of overhead
-        # (to calculate performance stats)
-        if listeners:
-            with PreserveLoggingContext():
-                for listener in listeners:
-                    listener.callback(current_token)
+            time_now_ms = self.clock.time_msec()
+            current_token = self.event_sources.get_current_token()
+            listeners: List["Deferred[StreamToken]"] = []
+            for user_stream in user_streams:
+                try:
+                    listeners.extend(
+                        user_stream.update_and_fetch_deferreds(
+                            current_token, time_now_ms
+                        )
+                    )
+                except Exception:
+                    logger.exception("Failed to notify listener")
 
-        users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
+            # We resolve all these deferreds in one go so that we only need to
+            # call `PreserveLoggingContext` once, as it has a bunch of overhead
+            # (to calculate performance stats)
+            if listeners:
+                with PreserveLoggingContext():
+                    for listener in listeners:
+                        listener.callback(current_token)
+
+            if user_streams:
+                users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
 
         self.notify_replication()
 
