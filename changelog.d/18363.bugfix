@@ -1,0 +1,1 @@
+Fix longstanding bug where Synapse would retry a failing push endpoint when a new event is received, ignoring the backoff timers.
