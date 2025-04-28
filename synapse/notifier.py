@@ -520,70 +520,65 @@ class Notifier:
         users = users or []
         rooms = rooms or []
 
-        with Measure(self.clock, "on_new_event"):
-            user_streams: Set[_NotifierUserStream] = set()
+        user_streams: Set[_NotifierUserStream] = set()
 
-            log_kv(
-                {
-                    "waking_up_explicit_users": len(users),
-                    "waking_up_explicit_rooms": len(rooms),
-                    "users": shortstr(users),
-                    "rooms": shortstr(rooms),
-                    "stream": stream_key,
-                    "stream_id": new_token,
-                }
+        log_kv(
+            {
+                "waking_up_explicit_users": len(users),
+                "waking_up_explicit_rooms": len(rooms),
+                "users": shortstr(users),
+                "rooms": shortstr(rooms),
+                "stream": stream_key,
+                "stream_id": new_token,
+            }
+        )
+
+        for user in users:
+            user_stream = self.user_to_user_stream.get(str(user))
+            if user_stream is not None:
+                user_streams.add(user_stream)
+
+        for room in rooms:
+            user_streams |= self.room_to_user_streams.get(room, set())
+
+        if stream_key == StreamKeyType.TO_DEVICE:
+            issue9533_logger.debug(
+                "to-device messages stream id %s, awaking streams for %s",
+                new_token,
+                users,
             )
 
-            for user in users:
-                user_stream = self.user_to_user_stream.get(str(user))
-                if user_stream is not None:
-                    user_streams.add(user_stream)
-
-            for room in rooms:
-                user_streams |= self.room_to_user_streams.get(room, set())
-
-            if stream_key == StreamKeyType.TO_DEVICE:
-                issue9533_logger.debug(
-                    "to-device messages stream id %s, awaking streams for %s",
-                    new_token,
-                    users,
-                )
-
-            time_now_ms = self.clock.time_msec()
-            current_token = self.event_sources.get_current_token()
-            listeners: List["Deferred[StreamToken]"] = []
-            for user_stream in user_streams:
-                try:
-                    listeners.extend(
-                        user_stream.update_and_fetch_deferreds(
-                            current_token, time_now_ms
-                        )
-                    )
-                except Exception:
-                    logger.exception("Failed to notify listener")
-
-            # We resolve all these deferreds in one go so that we only need to
-            # call `PreserveLoggingContext` once, as it has a bunch of overhead
-            # (to calculate performance stats)
-            with PreserveLoggingContext():
-                for listener in listeners:
-                    listener.callback(current_token)
-
-            users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
-
-            self.notify_replication()
-
-            # Notify appservices.
+        time_now_ms = self.clock.time_msec()
+        current_token = self.event_sources.get_current_token()
+        listeners: List["Deferred[StreamToken]"] = []
+        for user_stream in user_streams:
             try:
-                self.appservice_handler.notify_interested_services_ephemeral(
-                    stream_key,
-                    new_token,
-                    users,
+                listeners.extend(
+                    user_stream.update_and_fetch_deferreds(current_token, time_now_ms)
                 )
             except Exception:
-                logger.exception(
-                    "Error notifying application services of ephemeral events"
-                )
+                logger.exception("Failed to notify listener")
+
+        # We resolve all these deferreds in one go so that we only need to
+        # call `PreserveLoggingContext` once, as it has a bunch of overhead
+        # (to calculate performance stats)
+        with PreserveLoggingContext():
+            for listener in listeners:
+                listener.callback(current_token)
+
+        users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
+
+        self.notify_replication()
+
+        # Notify appservices.
+        try:
+            self.appservice_handler.notify_interested_services_ephemeral(
+                stream_key,
+                new_token,
+                users,
+            )
+        except Exception:
+            logger.exception("Error notifying application services of ephemeral events")
 
     def on_new_replication_data(self) -> None:
         """Used to inform replication listeners that something has happened
