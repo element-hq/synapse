@@ -1189,32 +1189,35 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 FROM
                 (
                     SELECT
-                        room_id,
-                        membership_event_id,
-                        event_instance_name,
-                        event_stream_ordering,
-                        membership,
-                        sender,
-                        null AS prev_membership
-                    FROM sliding_sync_membership_snapshots
-                    WHERE user_id = ?
+                        s.room_id,
+                        s.membership_event_id,
+                        s.event_instance_name,
+                        s.event_stream_ordering,
+                        s.membership,
+                        s.sender,
+                        m_prev.membership AS prev_membership
+                    FROM sliding_sync_membership_snapshots as s
+                        LEFT JOIN event_edges AS e ON e.event_id = s.membership_event_id
+                        LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = e.prev_event_id
+                    WHERE s.user_id = ?
 
-                    UNION ALL
+                    UNION
 
                     SELECT
                         s.room_id,
-                        NULL AS event_id,
+                        e.event_id,
                         s.instance_name,
                         s.stream_id,
-                        NULL AS membership,
-                        NULL AS sender,
+                        m.membership,
+                        e.sender,
                         m_prev.membership AS prev_membership
                     FROM current_state_delta_stream AS s
+                        LEFT JOIN events AS e ON e.event_id = s.event_id
+                        LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
                         LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
                     WHERE
                         s.type = ?
                         AND s.state_key = ?
-                        AND s.event_id IS NULL
                 ) AS c
                 INNER JOIN rooms USING (room_id)
                 WHERE event_stream_ordering > ? AND event_stream_ordering <= ?
@@ -1243,7 +1246,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 if room_id in room_ids_to_exclude:
                     continue
 
-                print(
+                logger.warning(
+                    "%s %s %s %s %s %s %s %s",
                     room_id,
                     membership_event_id,
                     event_instance_name,

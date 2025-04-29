@@ -540,7 +540,9 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         user_tok = self.login(user_id, "pass")
 
         room_id = "!room:remote.server"
-        self._create_remote_invite_room_for_user_using_federation_handler(room_id, user_id)
+        self._create_remote_invite_room_for_user_using_federation_handler(
+            room_id, user_id
+        )
 
         # Make the Sliding Sync request
         sync_body = {
@@ -563,14 +565,14 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
         print(response_body["rooms"][room_id])
         self.assertIn(room_id, response_body["rooms"])
 
-        actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][0]
+        actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][
+            0
+        ]
         self.assertEqual(
             {
                 f'{actual_requred_state_leave["content"]["membership"]} ("{actual_requred_state_leave["type"]}", "{actual_requred_state_leave["state_key"]}")'
             },
-            {
-                f'leave ("{EventTypes.Member}", "{user_id}")'
-            },
+            {f'leave ("{EventTypes.Member}", "{user_id}")'},
         )
 
     def _create_remote_invite_room_for_user_using_federation_handler(
