@@ -1201,7 +1201,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = e.prev_event_id
                     WHERE s.user_id = ?
 
-                    UNION
+                    UNION ALL
 
                     SELECT
                         s.room_id,
