@@ -24,7 +24,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
-from synapse.api.errors import Codes, LimitExceededError, StoreError, SynapseError
+from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
@@ -248,9 +248,8 @@ class SyncRestServlet(RestServlet):
         await self._server_notices_sender.on_user_syncing(user.to_string())
 
         # ignore the presence update if the ratelimit is exceeded but do not pause the request
-        try:
-            await self._presence_per_user_limiter.ratelimit(requester, pause=0.0)
-        except LimitExceededError:
+        allowed, _ = await self._presence_per_user_limiter.can_do_action(requester)
+        if not allowed:
             affect_presence = False
             logger.debug("User set_presence ratelimit exceeded; ignoring it.")
         else:
