@@ -957,9 +957,16 @@ class OidcProvider:
             "nonce": nonce,
             "client_id": self._client_auth.client_id,
         }
-        if "access_token" in token:
+        if self._uses_userinfo and "access_token" in token:
             # If we got an `access_token`, there should be an `at_hash` claim
-            # in the `id_token` that we can check against.
+            # in the `id_token` that we can check against. Setting this
+            # instructs authlib to check the value of `at_hash` in the
+            # ID token.
+            #
+            # We only need to verify the access token if we actually make
+            # use of it. Which currently only happens when we need to fetch
+            # the user's information from the userinfo_endpoint. Thus, this
+            # check is also gated on self._uses_userinfo.
             claims_params["access_token"] = token["access_token"]
 
         claims_options = {"iss": {"values": [metadata["issuer"]]}}
