@@ -410,7 +410,6 @@ class PersistEventsStore:
         Returns:
             SlidingSyncTableChanges
         """
-        print("Changes:", delta_state)
         to_insert = delta_state.to_insert
         to_delete = delta_state.to_delete
 

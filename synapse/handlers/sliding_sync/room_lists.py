@@ -299,8 +299,6 @@ class SlidingSyncRoomLists:
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
-        print("newly left:", newly_left_room_map)
-
         # Add back `newly_left` rooms (rooms left in the from -> to token range).
         #
         # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include

@@ -1246,18 +1246,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 if room_id in room_ids_to_exclude:
                     continue
 
-                logger.warning(
-                    "%s %s %s %s %s %s %s %s",
-                    room_id,
-                    membership_event_id,
-                    event_instance_name,
-                    event_stream_ordering,
-                    membership,
-                    sender,
-                    prev_membership,
-                    room_version_id,
-                )
-
                 if _filter_results_by_stream(
                     from_key,
                     to_key,
