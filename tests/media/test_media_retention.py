@@ -31,6 +31,9 @@ from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.types import UserID
 from synapse.util import Clock
+from synapse.util.stringutils import (
+    random_string,
+)
 
 from tests import unittest
 from tests.unittest import override_config
@@ -65,7 +68,6 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
         # quarantined media) into both the local store and the remote cache, plus
         # one additional local media that is marked as protected from quarantine.
         media_repository = hs.get_media_repository()
-        test_media_content = b"example string"
 
         def _create_media_and_set_attributes(
             last_accessed_ms: Optional[int],
@@ -73,12 +75,14 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
             is_protected: Optional[bool] = False,
         ) -> MXCUri:
             # "Upload" some media to the local media store
+            # If the meda
+            random_content = bytes(random_string(24), "utf-8")
             mxc_uri: MXCUri = self.get_success(
                 media_repository.create_content(
                     media_type="text/plain",
                     upload_name=None,
-                    content=io.BytesIO(test_media_content),
-                    content_length=len(test_media_content),
+                    content=io.BytesIO(random_content),
+                    content_length=len(random_content),
                     auth_user=UserID.from_string(test_user_id),
                 )
             )
@@ -129,6 +133,7 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
                     time_now_ms=clock.time_msec(),
                     upload_name="testfile.txt",
                     filesystem_id="abcdefg12345",
+                    sha256=random_string(24),
                 )
             )
 

@@ -20,8 +20,7 @@
 #
 #
 
-from collections import OrderedDict
-from typing import Hashable, Optional, Tuple
+from typing import Dict, Hashable, Optional, Tuple
 
 from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import RatelimitSettings
@@ -80,12 +79,14 @@ class Ratelimiter:
         self.store = store
         self._limiter_name = cfg.key
 
-        # An ordered dictionary representing the token buckets tracked by this rate
+        # A dictionary representing the token buckets tracked by this rate
         # limiter. Each entry maps a key of arbitrary type to a tuple representing:
         #   * The number of tokens currently in the bucket,
         #   * The time point when the bucket was last completely empty, and
         #   * The rate_hz (leak rate) of this particular bucket.
-        self.actions: OrderedDict[Hashable, Tuple[float, float, float]] = OrderedDict()
+        self.actions: Dict[Hashable, Tuple[float, float, float]] = {}
+
+        self.clock.looping_call(self._prune_message_counts, 60 * 1000)
 
     def _get_key(
         self, requester: Optional[Requester], key: Optional[Hashable]
@@ -169,9 +170,6 @@ class Ratelimiter:
         rate_hz = rate_hz if rate_hz is not None else self.rate_hz
         burst_count = burst_count if burst_count is not None else self.burst_count
 
-        # Remove any expired entries
-        self._prune_message_counts(time_now_s)
-
         # Check if there is an existing count entry for this key
         action_count, time_start, _ = self._get_action_counts(key, time_now_s)
 
@@ -246,13 +244,12 @@ class Ratelimiter:
         action_count, time_start, rate_hz = self._get_action_counts(key, time_now_s)
         self.actions[key] = (action_count + n_actions, time_start, rate_hz)
 
-    def _prune_message_counts(self, time_now_s: float) -> None:
+    def _prune_message_counts(self) -> None:
         """Remove message count entries that have not exceeded their defined
         rate_hz limit
-
-        Args:
-            time_now_s: The current time
         """
+        time_now_s = self.clock.time()
+
         # We create a copy of the key list here as the dictionary is modified during
         # the loop
         for key in list(self.actions.keys()):

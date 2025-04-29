@@ -1,0 +1,1 @@
+Fix `force_tracing_for_users` config when using delegated auth.
