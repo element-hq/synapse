@@ -562,7 +562,6 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
 
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user_tok)
 
-        print(response_body["rooms"][room_id])
         self.assertIn(room_id, response_body["rooms"])
 
         actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][

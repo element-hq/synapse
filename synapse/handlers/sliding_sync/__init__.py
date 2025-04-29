@@ -245,15 +245,11 @@ class SlidingSyncHandler:
             to_token=to_token,
         )
 
-        print("interested_rooms:", interested_rooms)
-
         lists = interested_rooms.lists
         relevant_room_map = interested_rooms.relevant_room_map
         all_rooms = interested_rooms.all_rooms
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
         relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
-
-        print("relevant_rooms_to_send_map:", relevant_rooms_to_send_map)
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
@@ -278,8 +274,6 @@ class SlidingSyncHandler:
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
-
-            print("room_sync_result:", room_id, room_sync_result)
 
             # Filter out empty room results during incremental sync
             if room_sync_result or not from_token:
@@ -567,6 +561,7 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
             newly_joined: If the user has newly joined the room
+            newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
         """
         user = sync_config.user
@@ -864,9 +859,6 @@ class SlidingSyncHandler:
             # TODO: Limit the number of state events we're about to send down
             # the room, if its too many we should change this to an
             # `initial=True`?
-
-            # TODO: We need to pull out membership changes if the user isn't in
-            # the room, i.e. to deal with rejecting remote invites.
 
             if newly_left and room_membership_for_user_at_to_token.event_id is not None:
                 membership_changed = True
