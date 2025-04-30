@@ -2567,6 +2567,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         Then we will iterate through the `events` table in batches and update event
         counts until we reach the stopping point.
 
+        It's safe to run this background update multiple times (start with an empty
+        `progress_json`).
+
         This data is intended to be used by the phone-home stats to keep track
         of total event and message counts. A trigger is preferred to counting
         rows in the `events` table, as said table can grow quite large.
@@ -2603,6 +2606,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 The latest event `stream_ordering` in the `events` table when the triggers
                 were added or `None` if the `events` table is empty.
             """
+            # Clear the `event_stats` table so we can start fresh (the background update
+            # may have been run before)
+            txn.execute(
+                """
+                UPDATE event_stats
+                SET
+                    total_event_count = 0,
+                    unencrypted_message_count = 0,
+                    e2ee_event_count = 0
+                """
+            )
 
             # Each time an event is inserted into the `events` table, update the stats.
             #

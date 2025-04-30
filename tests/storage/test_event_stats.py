@@ -49,6 +49,12 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
     def _perform_user_actions(self) -> None:
         """
         Perform some actions on the homeserver that would bump the event counts.
+
+        This creates a few users, a room, and sends some messages. Expected number of
+        events:
+         - 10 unencrypted messages
+         - 5 encrypted messages
+         - 24 total events (including room state, etc)
         """
         # Create some users
         user_1_mxid = self.register_user(
@@ -144,12 +150,26 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
         # Do things to bump the stats
         self._perform_user_actions()
 
-        # Keep in mind: These are already populated as the background update has already
-        # ran once when Synapse started and added the database triggers which are
-        # incrementing things as new events come in.
-        self.assertEqual(self.get_success(self.store.count_total_events()), 24)
-        self.assertEqual(self.get_success(self.store.count_total_messages()), 10)
-        self.assertEqual(self.get_success(self.store.count_total_e2ee_events()), 5)
+        # Since the background update has already run once when Synapse started, let's
+        # manually reset the database `event_stats` back to 0 to ensure this test is
+        # starting from a clean slate. We want to be able to detect 0 -> 24 instead of
+        # 24 -> 24 as it's not possible to prove that any work was actually done if the
+        # number doesn't change.
+        self.get_success(
+            self.store.db_pool.simple_update_one(
+                table="event_stats",
+                keyvalues={},
+                updatevalues={
+                    "total_event_count": 0,
+                    "unencrypted_message_count": 0,
+                    "e2ee_event_count": 0,
+                },
+                desc="reset event_stats in test preparation",
+            )
+        )
+        self.assertEqual(self.get_success(self.store.count_total_events()), 0)
+        self.assertEqual(self.get_success(self.store.count_total_messages()), 0)
+        self.assertEqual(self.get_success(self.store.count_total_e2ee_events()), 0)
 
         # Run the background update again
         self.get_success(
@@ -164,11 +184,10 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
         self.store.db_pool.updates._all_done = False
         self.wait_for_background_updates()
 
-        # We expect these values to double as the background update is being run *again*
-        # and will double-count the `events`.
-        self.assertEqual(self.get_success(self.store.count_total_events()), 48)
-        self.assertEqual(self.get_success(self.store.count_total_messages()), 20)
-        self.assertEqual(self.get_success(self.store.count_total_e2ee_events()), 10)
+        # Expect our `event_stats` table to be populated with the correct values
+        self.assertEqual(self.get_success(self.store.count_total_events()), 24)
+        self.assertEqual(self.get_success(self.store.count_total_messages()), 10)
+        self.assertEqual(self.get_success(self.store.count_total_e2ee_events()), 5)
 
     def test_background_update_without_events(self) -> None:
         """
