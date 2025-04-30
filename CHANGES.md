@@ -1,5 +1,7 @@
 # Synapse 1.129.0rc2 (2025-04-30)
 
+Synapse 1.129.0rc1 was never formally released due to regressions discovered during the release process. 1.129.0rc2 fixes those regressions by reverting the affected PRs.
+
 ### Internal Changes
 
 - Revert the slow background update introduced by [\#18068](https://github.com/element-hq/synapse/issues/18068) in v1.128.0. ([\#18372](https://github.com/element-hq/synapse/issues/18372))
