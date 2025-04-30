@@ -11,6 +11,7 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a column `participant` to `room_memberships` table to track whether a room member has sent
--- a `m.room.message` or `m.room.encrypted` event into a room they are a member of
-ALTER TABLE room_memberships ADD COLUMN participant BOOLEAN DEFAULT FALSE;
+-- Remove the background update if it was scheduled, as it is not rollback-safe
+-- See https://github.com/element-hq/synapse/issues/18356 for context
+DELETE FROM background_updates
+WHERE update_name = 'populate_participant_bg_update';
