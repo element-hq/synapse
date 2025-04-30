@@ -256,7 +256,7 @@ Copyright and Licensing
 | Copyright 2014-2017 OpenMarket Ltd
 | Copyright 2017 Vector Creations Ltd
 | Copyright 2017-2025 New Vector Ltd
-
+|
 This software is dual-licensed by New Vector Ltd (Element). It can be used either:
 
 (1) for free under the terms of the GNU Affero General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
