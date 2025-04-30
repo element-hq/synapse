@@ -21,7 +21,7 @@
 #
 import logging
 import sys
-from typing import Dict, List
+from typing import Dict, List, cast
 
 from twisted.web.resource import Resource
 
@@ -51,7 +51,7 @@ from synapse.http.server import JsonResource, OptionsResource
 from synapse.logging.context import LoggingContext
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
-from synapse.rest import ClientRestResource
+from synapse.rest import ClientRestResource, admin
 from synapse.rest.admin import AdminRestResource, register_servlets_for_media_repo
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
@@ -190,8 +190,11 @@ class GenericWorkerServer(HomeServer):
 
                     resources.update(build_synapse_client_resource_tree(self))
                     resources["/.well-known"] = well_known_resource(self)
-                    resources["/_synapse/admin"] = AdminRestResource(self)
-
+                    admin_res = resources.get("/_synapse/admin")
+                    if admin_res is not None:
+                        admin.register_servlets(self, cast(JsonResource, admin_res))
+                    else:
+                        resources["/_synapse/admin"] = AdminRestResource(self)
                 elif name == "federation":
                     resources[FEDERATION_PREFIX] = TransportLayerServer(self)
                 elif name == "media":
@@ -200,15 +203,21 @@ class GenericWorkerServer(HomeServer):
 
                         # We need to serve the admin servlets for media on the
                         # worker.
-                        admin_resource = JsonResource(self, canonical_json=False)
-                        register_servlets_for_media_repo(self, admin_resource)
+                        admin_res = resources.get("/_synapse/admin")
+                        if admin_res is not None:
+                            register_servlets_for_media_repo(
+                                self, cast(JsonResource, admin_res)
+                            )
+                        else:
+                            admin_resource = JsonResource(self, canonical_json=False)
+                            register_servlets_for_media_repo(self, admin_resource)
+                            resources["/_synapse/admin"] = admin_resource
 
                         resources.update(
                             {
                                 MEDIA_R0_PREFIX: media_repo,
                                 MEDIA_V3_PREFIX: media_repo,
                                 LEGACY_MEDIA_PREFIX: media_repo,
-                                "/_synapse/admin": admin_resource,
                             }
                         )
 
