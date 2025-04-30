@@ -101,8 +101,8 @@ class PhoneHomeStatsTestCase(unittest.HomeserverTestCase):
         Perform some actions on the homeserver that would bump the phone home
         stats.
 
-        This creates a few users, a room, and sends some messages. Expected number of
-        events:
+        This creates a few users (including a guest), a room, and sends some messages.
+        Expected number of events:
          - 10 unencrypted messages
          - 5 encrypted messages
          - 24 total events (including room state, etc)

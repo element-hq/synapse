@@ -65,18 +65,6 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
             username="test_user_2",
             password="test",
         )
-        # Note: `self.register_user` does not support guest registration, and updating the
-        # Admin API it calls to add a new parameter would cause the `mac` parameter to fail
-        # in a backwards-incompatible manner. Hence, we make a manual request here.
-        _guest_user_mxid = self.make_request(
-            method="POST",
-            path="/_matrix/client/v3/register?kind=guest",
-            content={
-                "username": "guest_user",
-                "password": "test",
-            },
-            shorthand=False,
-        )
 
         # Log in to each user
         user_1_token = self.login(username=user_1_mxid, password="test")
