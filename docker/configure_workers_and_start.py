@@ -202,6 +202,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["federation"],
         "endpoint_patterns": [
+            "^/_matrix/federation/v1/version$",
             "^/_matrix/federation/(v1|v2)/event/",
             "^/_matrix/federation/(v1|v2)/state/",
             "^/_matrix/federation/(v1|v2)/state_ids/",
