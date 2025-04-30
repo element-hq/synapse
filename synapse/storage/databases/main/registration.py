@@ -759,16 +759,36 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             external_id: id on that system
             user_id: complete mxid that it is mapped to
         """
+        self._invalidate_cache_and_stream(
+            txn, self.get_user_by_external_id, (auth_provider, external_id)
+        )
 
-        self.db_pool.simple_insert_txn(
+        # This INSERT ... ON CONFLICT DO NOTHING statement will cause a
+        # 'could not serialize access due to concurrent update'
+        # if the row is added concurrently by another transaction.
+        # This is exactly what we want, as it makes the transaction get retried
+        # in a new snapshot where we can check for a genuine conflict.
+        was_inserted = self.db_pool.simple_upsert_txn(
             txn,
             table="user_external_ids",
-            values={
-                "auth_provider": auth_provider,
-                "external_id": external_id,
-                "user_id": user_id,
-            },
+            keyvalues={"auth_provider": auth_provider, "external_id": external_id},
+            values={},
+            insertion_values={"user_id": user_id},
         )
+
+        if not was_inserted:
+            existing_id = self.db_pool.simple_select_one_onecol_txn(
+                txn,
+                table="user_external_ids",
+                keyvalues={"auth_provider": auth_provider, "user_id": user_id},
+                retcol="external_id",
+                allow_none=True,
+            )
+
+            if existing_id != external_id:
+                raise ExternalIDReuseException(
+                    f"{user_id!r} has external id {existing_id!r} for {auth_provider} but trying to add {external_id!r}"
+                )
 
     async def remove_user_external_id(
         self, auth_provider: str, external_id: str, user_id: str
@@ -788,6 +808,9 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
                 "user_id": user_id,
             },
             desc="remove_user_external_id",
+        )
+        await self.invalidate_cache_and_stream(
+            "get_user_by_external_id", (auth_provider, external_id)
         )
 
     async def replace_user_external_id(
@@ -809,29 +832,20 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             ExternalIDReuseException if the new external_id could not be mapped.
         """
 
-        def _remove_user_external_ids_txn(
+        def _replace_user_external_id_txn(
             txn: LoggingTransaction,
-            user_id: str,
         ) -> None:
-            """Remove all mappings from external user ids to a mxid
-            If these mappings are not found, this method does nothing.
-
-            Args:
-                user_id: complete mxid that it is mapped to
-            """
-
             self.db_pool.simple_delete_txn(
                 txn,
                 table="user_external_ids",
                 keyvalues={"user_id": user_id},
             )
 
-        def _replace_user_external_id_txn(
-            txn: LoggingTransaction,
-        ) -> None:
-            _remove_user_external_ids_txn(txn, user_id)
-
             for auth_provider, external_id in record_external_ids:
+                self._invalidate_cache_and_stream(
+                    txn, self.get_user_by_external_id, (auth_provider, external_id)
+                )
+
                 self._record_user_external_id_txn(
                     txn,
                     auth_provider,
@@ -847,6 +861,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         except self.database_engine.module.IntegrityError:
             raise ExternalIDReuseException()
 
+    @cached()
     async def get_user_by_external_id(
         self, auth_provider: str, external_id: str
     ) -> Optional[str]:

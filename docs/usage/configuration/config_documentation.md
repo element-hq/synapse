@@ -3672,6 +3672,9 @@ Options for each entry include:
 * `additional_authorization_parameters`: String to string dictionary that will be passed as
    additional parameters to the authorization grant URL.
 
+* `passthrough_authorization_parameters`: List of parameters that will be passed through from the redirect endpoint 
+   to the authorization grant URL.
+
 * `allow_existing_users`: set to true to allow a user logging in via OIDC to
    match a pre-existing account instead of failing. This could be used if
    switching from password logins to OIDC. Defaults to false.
@@ -3798,6 +3801,7 @@ oidc_providers:
     jwks_uri: "https://accounts.example.com/.well-known/jwks.json"
     additional_authorization_parameters:
       acr_values: 2fa
+    passthrough_authorization_parameters: ["login_hint"]
     skip_verification: true
     enable_registration: true
     user_mapping_provider:
@@ -4014,7 +4018,7 @@ This option has a number of sub-options. They are as follows:
 * `include_content`: Clients requesting push notifications can either have the body of
    the message sent in the notification poke along with other details
    like the sender, or just the event ID and room ID (`event_id_only`).
-   If clients choose the to have the body sent, this option controls whether the
+   If clients choose to have the body sent, this option controls whether the
    notification request includes the content of the event (other details
    like the sender are still included). If `event_id_only` is enabled, it
    has no effect.
