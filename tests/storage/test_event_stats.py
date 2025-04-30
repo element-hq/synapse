@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 import logging
 import time
+from unittest.mock import patch
 
 from twisted.internet.defer import ensureDeferred
 from twisted.test.proto_helpers import MemoryReactor
@@ -21,10 +22,12 @@ from synapse.server import HomeServer
 from synapse.storage.database import (
     LoggingTransaction,
 )
+from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
 
 from tests import unittest
+from tests.replication._base import BaseMultiWorkerStreamTestCase
 
 logger = logging.getLogger(__name__)
 
@@ -180,18 +183,23 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
             # We need to return something, so we return None.
             return None
 
+        def asdf() -> None:
+            self.get_success(self.store.db_pool.runInteraction("test", _todo_txn))
+
         # Start a transaction that is interacting with the `event_stats` table
-        wait_for_txn = ensureDeferred(
-            self.store.db_pool.runInteraction("test", _todo_txn)
-        )
+        start_txn = defer_to_thread(self.reactor, asdf)
 
         logger.info("asdf1")
-        _event_response = self.helper.send(room_id1, "activity", tok=user1_tok)
+        _event_response = self.get_success(
+            defer_to_thread(
+                self.reactor, self.helper.send, room_id1, "activity", tok=user1_tok
+            )
+        )
         logger.info("asdf2")
 
         block = False
 
-        self.get_success(wait_for_txn)
+        self.get_success(start_txn)
         # self.pump(0.1)
 
     def test_background_update_with_events(self) -> None:
@@ -306,3 +314,223 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(self.get_success(self.store.count_total_events()), 24 + 7)
         self.assertEqual(self.get_success(self.store.count_total_messages()), 16)
         self.assertEqual(self.get_success(self.store.count_total_e2ee_events()), 6)
+
+
+class EventStatsConcurrentEventsTestCase(BaseMultiWorkerStreamTestCase):
+    """
+    Test `event_stats` when events are being inserted/deleted concurrently with sharded
+    event stream_writers enabled ("event_persisters").
+    """
+
+    servlets = [
+        admin.register_servlets_for_client_rest_resource,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> dict:
+        config = super().default_config()
+
+        # Enable shared event stream_writers
+        config["stream_writers"] = {"events": ["worker1", "worker2", "worker3"]}
+        config["instance_map"] = {
+            "main": {"host": "testserv", "port": 8765},
+            "worker1": {"host": "testserv", "port": 1001},
+            "worker2": {"host": "testserv", "port": 1002},
+            "worker3": {"host": "testserv", "port": 1003},
+        }
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+    def _create_room(self, room_id: str, user_id: str, tok: str) -> None:
+        """
+        Create a room with a specific room_id. We use this so that that we have a
+        consistent room_id across test runs that hashes to the same value and will be
+        sharded to a known worker in the tests.
+        """
+
+        # We control the room ID generation by patching out the
+        # `_generate_room_id` method
+        with patch(
+            "synapse.handlers.room.RoomCreationHandler._generate_room_id"
+        ) as mock:
+            mock.side_effect = lambda: room_id
+            self.helper.create_room_as(user_id, tok=tok)
+
+    def test_concurrent_event_insert(self) -> None:
+        """
+        TODO
+
+        Normally, the `events` stream is covered by a single "event_perister" worker but
+        it does experimentally support multiple workers, where load is sharded
+        between them by room ID.
+
+        If we don't pay special attention to this, we will see errors like the following:
+        ```
+        psycopg2.errors.SerializationFailure: could not serialize access due to concurrent update
+        CONTEXT:  SQL statement "UPDATE event_stats SET total_event_count = total_event_count + 1"
+        ```
+
+        This is a regression test for https://github.com/element-hq/synapse/issues/18349
+        """
+        worker_hs1 = self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "worker1"},
+        )
+
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "worker2"},
+        )
+
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "worker3"},
+        )
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            is_public=False,
+            tok=user1_tok,
+        )
+
+        block = True
+
+        # Create a transaction that interacts with the `event_stats` table
+        def _todo_txn(
+            txn: LoggingTransaction,
+        ) -> None:
+            nonlocal block
+            while block:
+                logger.info("qwer")
+                # txn.execute(
+                #     "UPDATE event_stats SET total_event_count = total_event_count + 1",
+                # )
+                time.sleep(0.1)
+            logger.info("qwer done")
+
+            # We need to return something, so we return None.
+            return None
+
+        def asdf() -> None:
+            worker1_store = worker_hs1.get_datastores().main
+            self.get_success(worker1_store.db_pool.runInteraction("test", _todo_txn))
+
+        # Start a transaction that is interacting with the `event_stats` table
+        start_txn = defer_to_thread(self.reactor, asdf)
+
+        logger.info("asdf1")
+        _event_response = self.get_success(
+            defer_to_thread(
+                self.reactor, self.helper.send, room_id1, "activity", tok=user1_tok
+            )
+        )
+        logger.info("asdf2")
+
+        block = False
+
+        self.get_success(start_txn)
+        # self.pump(0.1)
+
+    def test_sharded_event_persisters(self) -> None:
+        """
+        TODO
+
+        The test creates three event persister workers and a room that is sharded to
+        each worker.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "worker1"},
+        )
+
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "worker2"},
+        )
+
+        self.make_worker_hs(
+            "synapse.app.generic_worker",
+            {"worker_name": "worker3"},
+        )
+
+        # Specially crafted room IDs that get persisted on different workers.
+        #
+        # Sharded to worker1
+        room_id1 = "!fooo:test"
+        # Sharded to worker2
+        room_id2 = "!bar:test"
+        # Sharded to worker3
+        room_id3 = "!quux:test"
+
+        # Create rooms on the different workers.
+        self._create_room(room_id1, user1_id, user1_tok)
+        self._create_room(room_id2, user1_id, user1_tok)
+        self._create_room(room_id3, user1_id, user1_tok)
+
+        # Ensure that the events were sharded to different workers.
+        pos1 = self.get_success(
+            self.store.get_position_for_event(
+                self.get_success(
+                    self.store.get_create_event_for_room(room_id1)
+                ).event_id
+            )
+        )
+        self.assertEqual(pos1.instance_name, "worker1")
+        pos2 = self.get_success(
+            self.store.get_position_for_event(
+                self.get_success(
+                    self.store.get_create_event_for_room(room_id2)
+                ).event_id
+            )
+        )
+        self.assertEqual(pos2.instance_name, "worker2")
+        pos3 = self.get_success(
+            self.store.get_position_for_event(
+                self.get_success(
+                    self.store.get_create_event_for_room(room_id3)
+                ).event_id
+            )
+        )
+        self.assertEqual(pos3.instance_name, "worker3")
+
+        def send_events_in_room_id(room_id: str) -> None:
+            for i in range(
+                2
+                # 10
+            ):
+                logger.info("Sending event %s in %s", i, room_id)
+                # self.helper.send(room_id1, f"activity{i}", tok=user1_tok)
+                defer_to_thread(
+                    self.reactor,
+                    self.helper.send,
+                    room_id,
+                    f"activity{i}",
+                    tok=user1_tok,
+                )
+
+        # Start creating events in the room at the same time.
+        wait_send_events_in_room1 = defer_to_thread(
+            self.reactor, send_events_in_room_id, room_id1
+        )
+        wait_send_events_in_room2 = defer_to_thread(
+            self.reactor, send_events_in_room_id, room_id2
+        )
+        wait_send_events_in_room3 = defer_to_thread(
+            self.reactor, send_events_in_room_id, room_id3
+        )
+
+        # self.pump(0.1)
+
+        # Wait for the events to be sent
+        self.get_success(wait_send_events_in_room1)
+        self.get_success(wait_send_events_in_room2)
+        self.get_success(wait_send_events_in_room3)

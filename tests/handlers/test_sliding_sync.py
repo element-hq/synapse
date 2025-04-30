@@ -2378,7 +2378,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCase):
     """
     Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it works with
-    sharded event stream_writers enabled
+    sharded event stream_writers enabled ("event_persisters").
     """
 
     servlets = [

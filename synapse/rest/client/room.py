@@ -378,6 +378,8 @@ class RoomSendEventRestServlet(TransactionRestServlet):
     ) -> Tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
+        logger.info("asdf event send in %s (%s)", room_id, content)
+
         origin_server_ts = None
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
@@ -418,6 +420,8 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             event_id = event.event_id
         except ShadowBanError:
             event_id = generate_fake_event_id()
+
+        logger.info("asdf event send DONE in %s (%s) -> %s", room_id, content, event_id)
 
         set_tag("event_id", event_id)
         return 200, {"event_id": event_id}
