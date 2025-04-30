@@ -24,10 +24,12 @@ server protocol.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 import attr
 
+from synapse.api.constants import CANONICALJSON_MAX_INT, CANONICALJSON_MIN_INT
+from synapse.events import EventBase
 from synapse.types import JsonDict
 
 logger = logging.getLogger(__name__)
@@ -104,8 +106,28 @@ class Transaction:
         result = {
             "origin": self.origin,
             "origin_server_ts": self.origin_server_ts,
-            "pdus": self.pdus,
+            "pdus": filter_pdus_for_valid_depth(self.pdus),
         }
         if self.edus:
             result["edus"] = self.edus
         return result
+
+
+def filter_pdus_for_valid_depth(pdus: Sequence[JsonDict]) -> List[JsonDict]:
+    filtered_pdus = []
+    for pdu in pdus:
+        # Drop PDUs that have a depth that is outside of the range allowed
+        # by canonical json.
+        if (
+            "depth" in pdu
+            and CANONICALJSON_MIN_INT <= pdu["depth"] <= CANONICALJSON_MAX_INT
+        ):
+            filtered_pdus.append(pdu)
+
+    return filtered_pdus
+
+
+def serialize_and_filter_pdus(
+    pdus: Sequence[EventBase], time_now: Optional[int] = None
+) -> List[JsonDict]:
+    return filter_pdus_for_valid_depth([pdu.get_pdu_json(time_now) for pdu in pdus])

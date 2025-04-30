@@ -467,6 +467,10 @@ class OidcProvider:
 
         self._sso_handler.register_identity_provider(self)
 
+        self.passthrough_authorization_parameters = (
+            provider.passthrough_authorization_parameters
+        )
+
     def _validate_metadata(self, m: OpenIDProviderMetadata) -> None:
         """Verifies the provider metadata.
 
@@ -1005,7 +1009,6 @@ class OidcProvider:
                 when everything is done (or None for UI Auth)
             ui_auth_session_id: The session ID of the ongoing UI Auth (or
                 None if this is a login).
-
         Returns:
             The redirect URL to the authorization endpoint.
 
@@ -1077,6 +1080,13 @@ class OidcProvider:
                     options,
                 )
             )
+
+        # add passthrough additional authorization parameters
+        passthrough_authorization_parameters = self.passthrough_authorization_parameters
+        for parameter in passthrough_authorization_parameters:
+            parameter_value = parse_string(request, parameter)
+            if parameter_value:
+                additional_authorization_parameters.update({parameter: parameter_value})
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         return prepare_grant_uri(
