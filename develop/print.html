@@ -9181,6 +9181,29 @@ This can be optionally enabled by setting <code>backchannel_logout_enabled</code
         display_name_template: &quot;{{ user.display_name }}&quot;
 </code></pre>
 <p>Note that the fields <code>client_id</code> and <code>client_secret</code> are taken from the CURL response above.</p>
+<h3 id="pocket-id"><a class="header" href="#pocket-id">Pocket ID</a></h3>
+<p><a href="https://pocket-id.org/">Pocket ID</a> is a simple OIDC provider that allows users to authenticate with their passkeys.</p>
+<ol>
+<li>Go to <code>OIDC Clients</code></li>
+<li>Click on <code>Add OIDC Client</code></li>
+<li>Add a name, for example <code>Synapse</code></li>
+<li>Add <code>&quot;https://auth.example.org/_synapse/client/oidc/callback</code> to <code>Callback URLs</code>  # Replace <code>auth.example.org</code> with your domain</li>
+<li>Click on <code>Save</code></li>
+<li>Note down your <code>Client ID</code> and <code>Client secret</code>, these will be used later</li>
+</ol>
+<p>Synapse config:</p>
+<pre><code class="language-yaml">oidc_providers:
+  - idp_id: pocket_id
+    idp_name: Pocket ID
+    issuer: &quot;https://auth.example.org/&quot; # Replace with your domain
+    client_id: &quot;your-client-id&quot; # Replace with the &quot;Client ID&quot; you noted down before
+    client_secret: &quot;your-client-secret&quot; # Replace with the &quot;Client secret&quot; you noted down before
+    scopes: [&quot;openid&quot;, &quot;profile&quot;]
+    user_mapping_provider:
+      config:
+        localpart_template: &quot;{{ user.preferred_username }}&quot;
+        display_name_template: &quot;{{ user.name }}&quot;
+</code></pre>
 <h3 id="shibboleth-with-oidc-plugin"><a class="header" href="#shibboleth-with-oidc-plugin">Shibboleth with OIDC Plugin</a></h3>
 <p><a href="https://www.shibboleth.net/">Shibboleth</a> is an open Standard IdP solution widely used by Universities.</p>
 <ol>
