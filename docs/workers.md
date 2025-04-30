@@ -200,6 +200,7 @@ information.
     ^/_matrix/client/(api/v1|r0|v3)/rooms/[^/]+/initialSync$
 
     # Federation requests
+    ^/_matrix/federation/v1/version$
     ^/_matrix/federation/v1/event/
     ^/_matrix/federation/v1/state/
     ^/_matrix/federation/v1/state_ids/
