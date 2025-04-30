@@ -1,3 +1,13 @@
+# Synapse 1.129.0rc2 (2025-04-30)
+
+### Internal Changes
+
+- Revert the slow background update introduced by [\#18068](https://github.com/element-hq/synapse/issues/18068) in v1.128.0. ([\#18372](https://github.com/element-hq/synapse/issues/18372))
+- Revert "Add total event, unencrypted message, and e2ee event counts to stats reporting", added in v1.129.0rc1. ([\#18373](https://github.com/element-hq/synapse/issues/18373))
+
+
+
+
 # Synapse 1.129.0rc1 (2025-04-15)
 
 ### Features
