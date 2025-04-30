@@ -10,16 +10,23 @@
 #
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
+import logging
+import time
 
-
+from twisted.internet.defer import ensureDeferred
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.rest import admin, login, register, room
 from synapse.server import HomeServer
+from synapse.storage.database import (
+    LoggingTransaction,
+)
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
 
 from tests import unittest
+
+logger = logging.getLogger(__name__)
 
 
 class EventStatsTestCase(unittest.HomeserverTestCase):
@@ -35,6 +42,7 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.hs = hs
         self.store = hs.get_datastores().main
 
         # Wait for the background updates to add the database triggers that keep the
@@ -129,6 +137,62 @@ class EventStatsTestCase(unittest.HomeserverTestCase):
                 },
                 tok=user_2_token,
             )
+
+    def test_concurrent_event_insert(self) -> None:
+        """
+        TODO
+
+        Normally, the `events` stream is covered by a single "event_perister" worker but
+        it does experimentally support multiple workers, where load is sharded
+        between them by room ID.
+
+        If we don't pay special attention to this, we will see errors like the following:
+        ```
+        psycopg2.errors.SerializationFailure: could not serialize access due to concurrent update
+        CONTEXT:  SQL statement "UPDATE event_stats SET total_event_count = total_event_count + 1"
+        ```
+
+        This is a regression test for https://github.com/element-hq/synapse/issues/18349
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            is_public=False,
+            tok=user1_tok,
+        )
+
+        block = True
+
+        # Create a transaction that interacts with the `event_stats` table
+        def _todo_txn(
+            txn: LoggingTransaction,
+        ) -> None:
+            nonlocal block
+            while block:
+                logger.info("qwer")
+                # txn.execute(
+                #     "UPDATE event_stats SET total_event_count = total_event_count + 1",
+                # )
+                time.sleep(0.1)
+            logger.info("qwer done")
+
+            # We need to return something, so we return None.
+            return None
+
+        # Start a transaction that is interacting with the `event_stats` table
+        wait_for_txn = ensureDeferred(
+            self.store.db_pool.runInteraction("test", _todo_txn)
+        )
+
+        logger.info("asdf1")
+        _event_response = self.helper.send(room_id1, "activity", tok=user1_tok)
+        logger.info("asdf2")
+
+        block = False
+
+        self.get_success(wait_for_txn)
+        # self.pump(0.1)
 
     def test_background_update_with_events(self) -> None:
         """
