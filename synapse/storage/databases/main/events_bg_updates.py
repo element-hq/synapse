@@ -2576,7 +2576,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         querying that entire index.
         """
         # The last event `stream_ordering` we processed (starting place of this next
-        # batch).
+        # batch). Since we're processing things in `stream_ordering` ascending order,
+        # this should be the maximum `stream_ordering` we processed.
         last_event_stream_ordering = progress.get(
             "last_event_stream_ordering", -(1 << 31)
         )
@@ -2770,8 +2771,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             """
 
             # Increment the counts based on the events present in this batch.
-            txn.execute(
-                """
+            update_event_stats_sql = """
                 WITH event_batch AS (
                     SELECT *
                     FROM events
@@ -2798,12 +2798,37 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     total_event_count = total_event_count + (SELECT total_event_count FROM batch_stats),
                     unencrypted_message_count = unencrypted_message_count + (SELECT unencrypted_message_count FROM batch_stats),
                     e2ee_event_count = e2ee_event_count + (SELECT e2ee_event_count FROM batch_stats)
-                RETURNING
-                    (SELECT total_event_count FROM batch_stats) AS total_event_count,
-                    (SELECT max_stream_ordering FROM batch_stats) AS max_stream_ordering
-                """,
-                (last_event_stream_ordering, stop_event_stream_ordering, batch_size),
-            )
+                """
+            if self.db_pool.engine.supports_returning:
+                txn.execute(
+                    f"""
+                    {update_event_stats_sql}
+                    RETURNING
+                        (SELECT total_event_count FROM batch_stats) AS total_event_count,
+                        (SELECT max_stream_ordering FROM batch_stats) AS max_stream_ordering
+                    """,
+                    (
+                        last_event_stream_ordering,
+                        stop_event_stream_ordering,
+                        batch_size,
+                    ),
+                )
+            else:
+                txn.execute(update_event_stats_sql)
+                txn.execute(
+                    """
+                    SELECT COUNT(*), MAX(stream_ordering)
+                    FROM events
+                    WHERE stream_ordering > ? AND stream_ordering <= ?
+                    ORDER BY stream_ordering ASC
+                    LIMIT ?
+                    """,
+                    (
+                        last_event_stream_ordering,
+                        stop_event_stream_ordering,
+                        batch_size,
+                    ),
+                )
 
             # Get the results of the update
             (total_event_count, max_stream_ordering) = cast(
