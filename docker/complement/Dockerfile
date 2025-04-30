@@ -58,4 +58,4 @@ ENTRYPOINT ["/start_for_complement.sh"]
 
 # Update the healthcheck to have a shorter check interval
 HEALTHCHECK --start-period=5s --interval=1s --timeout=1s \
-    CMD /bin/sh /healthcheck.sh
+    CMD ["/healthcheck.sh"]
