@@ -1,1 +1,1 @@
-Add an Admin API endpoint to fetch scheduled tasks.
+Add an Admin API endpoint `GET /_synapse/admin/v1/scheduled_tasks`  to fetch scheduled tasks.

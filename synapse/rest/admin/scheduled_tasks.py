@@ -11,10 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-# Originally licensed under the Apache License, Version 2.0:
-# <http://www.apache.org/licenses/LICENSE-2.0>.
-#
-# [This file includes modifications made by New Vector Limited]
 #
 #
 from typing import TYPE_CHECKING, Tuple
@@ -64,7 +60,7 @@ class ScheduledTasksRestServlet(RestServlet):
                 "id": task.id,
                 "action": task.action,
                 "status": task.status,
-                "timestamp": task.timestamp,
+                "timestamp_ms": task.timestamp,
                 "resource_id": task.resource_id,
                 "result": task.result,
                 "error": task.error,

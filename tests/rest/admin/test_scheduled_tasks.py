@@ -11,10 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-# Originally licensed under the Apache License, Version 2.0:
-# <http://www.apache.org/licenses/LICENSE-2.0>.
-#
-# [This file includes modifications made by New Vector Limited]
 #
 #
 from typing import Mapping, Optional, Tuple
@@ -31,7 +27,7 @@ from synapse.util import Clock
 from tests import unittest
 
 
-class ScheduledTasksTestCase(unittest.HomeserverTestCase):
+class ScheduledTasksAdminApiTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
