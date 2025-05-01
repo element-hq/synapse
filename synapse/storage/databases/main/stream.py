@@ -1271,8 +1271,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         # won't this ignore the 'state reset out of it' part?
                         continue
 
-                    if membership is None:
-                        membership = Membership.LEAVE
+                    # When `s.event_id = null`, we won't be able to get respective
+                    # `room_membership` but can assume the user has left the room
+                    # because this only happens when the server leaves a room
+                    # (meaning everyone locally left) or a state reset which removed
+                    # the person from the room.
+                    membership = (
+                        membership if membership is not None else Membership.LEAVE
+                    )
 
                     if (
                         membership == Membership.JOIN
