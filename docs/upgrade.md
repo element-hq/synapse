@@ -119,7 +119,7 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.130.0
 
-## Documented endpoint which can delegated to a federation worker
+## Documented endpoint which can be delegated to a federation worker
 
 The endpoint `^/_matrix/federation/v1/version$` can be delegated to a federation
 worker. This is not new behaviour, but had not been documented yet. The 
