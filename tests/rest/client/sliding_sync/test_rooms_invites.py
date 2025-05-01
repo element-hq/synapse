@@ -64,7 +64,6 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
-        self.federation_handler = hs.get_federation_handler()
 
         super().prepare(reactor, clock, hs)
 
