@@ -11,6 +11,5 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a background update to delete any unreferenced state groups
-INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8902, 'delete_unreferenced_state_groups_bg_update', '{}');
+-- Remove the old unreferenced state group deletion background update if it exists
+DELETE FROM background_updates WHERE update_name = 'delete_unreferenced_state_groups_bg_update';

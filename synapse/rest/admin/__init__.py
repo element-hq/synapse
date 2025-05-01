@@ -276,7 +276,9 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     """
     Register all the admin servlets.
     """
-    # Admin servlets aren't registered on workers.
+    RoomRestServlet(hs).register(http_server)
+
+    # Admin servlets below may not work on workers.
     if hs.config.worker.worker_app is not None:
         return
 
@@ -284,7 +286,6 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     BlockRoomRestServlet(hs).register(http_server)
     ListRoomRestServlet(hs).register(http_server)
     RoomStateRestServlet(hs).register(http_server)
-    RoomRestServlet(hs).register(http_server)
     RoomRestV2Servlet(hs).register(http_server)
     RoomMembersRestServlet(hs).register(http_server)
     DeleteRoomStatusByDeleteIdRestServlet(hs).register(http_server)
