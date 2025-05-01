@@ -1145,6 +1145,36 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         to_key: RoomStreamToken,
         excluded_room_ids: Optional[AbstractSet[str]] = None,
     ) -> Dict[str, RoomsForUserStateReset]:
+        """
+        Fetch membership events that result in a meaningful membership change for a
+        given user.
+
+        A meaningful membership changes is one where the `membership` value actually
+        changes. This means memberships changes from `join` to `join` will be filtered
+        out since they result in no meaningful change.
+
+        Note: This function only works with "live" tokens with `stream_ordering` only.
+
+        We're looking for membership changes in the token range (> `from_key` and <=
+        `to_key`).
+
+        Args:
+            user_id: The user ID to fetch membership events for.
+            from_key: The point in the stream to sync from (fetching events > this point).
+            to_key: The token to fetch rooms up to (fetching events <= this point).
+            excluded_room_ids: Optional list of room IDs to exclude from the results.
+
+        Returns:
+            All meaningful membership changes to the current state in the token range.
+            Events are sorted by `stream_ordering` ascending.
+
+            `event_id`/`sender` can be `None` when the server leaves a room (meaning
+            everyone locally left) or a state reset which removed the person from the
+            room. We can't tell the difference between the two cases with what's
+            available in the `current_state_delta_stream` table. To actually check for a
+            state reset, you need to check if a membership still exists in the room.
+        """
+
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
             return {}
