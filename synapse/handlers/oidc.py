@@ -587,6 +587,23 @@ class OidcProvider:
         )
 
     @property
+    def _uses_access_token(self) -> bool:
+        """Return True if the `access_token` should be used.
+
+        This is useful to determine whether the access token
+        returned by the identity provider, and
+        any related metadata (such as the `at_hash` field in
+        the ID token), should be validated.
+        """
+        # Currently Synapse only uses the access token to fetch
+        # user metadata from the userinfo endpoint. So we need
+        # only decide based on whether we're using the userinfo
+        # endpoint. This may change in the future if we use the
+        # access token given to us by the IdP for more things,
+        # such as accessing Resource Server APIs.
+        return self._uses_userinfo
+
+    @property
     def issuer(self) -> str:
         """The issuer identifying this provider."""
         return self._config.issuer
@@ -957,7 +974,7 @@ class OidcProvider:
             "nonce": nonce,
             "client_id": self._client_auth.client_id,
         }
-        if self._uses_userinfo and "access_token" in token:
+        if self._uses_access_token and "access_token" in token:
             # If we got an `access_token`, there should be an `at_hash` claim
             # in the `id_token` that we can check against. Setting this
             # instructs authlib to check the value of `at_hash` in the
