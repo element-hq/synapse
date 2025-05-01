@@ -790,6 +790,48 @@ class SlidingSyncTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_reject_remote_invite(self) -> None:
+        """Test that rejecting a remote invite gets sent down sliding sync"""
+
+        user_id = self.register_user("user1", "pass")
+        user_tok = self.login(user_id, "pass")
+
+        # Create a remote room invite (out-of-band membership)
+        room_id = "!room:remote.server"
+        self._create_remote_invite_room_for_user(user_id, None, room_id)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [(EventTypes.Member, StateValues.ME)],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user_tok)
+        self.assertIn(room_id, response_body["rooms"])
+
+        # Reject the remote room invite
+        self.helper.leave(room_id, user_id, tok=user_tok)
+
+        # Sync again after rejecting the invite
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user_tok)
+
+        # We should see the leave for the room so clients don't end up with stuck
+        # invites
+        self.assertIn(room_id, response_body["rooms"])
+        actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][
+            0
+        ]
+        self.assertEqual(
+            {
+                f'{actual_requred_state_leave["content"]["membership"]} ("{actual_requred_state_leave["type"]}", "{actual_requred_state_leave["state_key"]}")'
+            },
+            {f'leave ("{EventTypes.Member}", "{user_id}")'},
+        )
+
     def test_ignored_user_invites_initial_sync(self) -> None:
         """
         Make sure we ignore invites if they are from one of the `m.ignored_user_list` on

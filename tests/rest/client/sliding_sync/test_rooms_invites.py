@@ -18,17 +18,13 @@ from parameterized import parameterized_class
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, HistoryVisibility, Membership
-from synapse.api.room_versions import RoomVersions
-from synapse.events import make_event_from_dict
+from synapse.api.constants import EventTypes, HistoryVisibility
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.types.handlers.sliding_sync import StateValues
 from synapse.util import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
-from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 
@@ -530,76 +526,4 @@ class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
                 },
             ],
             response_body["rooms"][room_id1]["invite_state"],
-        )
-
-    @override_config({"federation_domain_whitelist": []})
-    def test_reject_invite(self) -> None:
-        """Test that rejecting an invite gets sent down sliding sync"""
-
-        user_id = self.register_user("user1", "pass")
-        user_tok = self.login(user_id, "pass")
-
-        room_id = "!room:remote.server"
-        self._create_remote_invite_room_for_user_using_federation_handler(
-            room_id, user_id
-        )
-
-        # Make the Sliding Sync request
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [(EventTypes.Member, StateValues.ME)],
-                    "timeline_limit": 3,
-                }
-            }
-        }
-        response_body, from_token = self.do_sync(sync_body, tok=user_tok)
-
-        self.assertIn(room_id, response_body["rooms"])
-
-        self.helper.leave(room_id, user_id, tok=user_tok)
-
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user_tok)
-
-        self.assertIn(room_id, response_body["rooms"])
-
-        actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][
-            0
-        ]
-        self.assertEqual(
-            {
-                f'{actual_requred_state_leave["content"]["membership"]} ("{actual_requred_state_leave["type"]}", "{actual_requred_state_leave["state_key"]}")'
-            },
-            {f'leave ("{EventTypes.Member}", "{user_id}")'},
-        )
-
-    def _create_remote_invite_room_for_user_using_federation_handler(
-        self,
-        room_id: str,
-        user_id: str,
-    ) -> None:
-        invite_event_dict = {
-            "room_id": room_id,
-            "sender": "@inviter:remote.server",
-            "state_key": user_id,
-            "depth": 1,
-            "origin_server_ts": 1,
-            "type": EventTypes.Member,
-            "content": {"membership": Membership.INVITE},
-            "auth_events": [],
-            "prev_events": [],
-        }
-
-        invite_event = make_event_from_dict(
-            invite_event_dict,
-            room_version=RoomVersions.V10,
-        )
-
-        self.get_success(
-            self.federation_handler.on_invite_request(
-                "remote.server",
-                invite_event,
-                room_version=invite_event.room_version,
-            )
         )

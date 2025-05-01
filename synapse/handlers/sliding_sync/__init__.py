@@ -860,7 +860,6 @@ class SlidingSyncHandler:
             # the room, if its too many we should change this to an
             # `initial=True`?
 
-
             # For the case of rejecting remote invites, the leave event won't be
             # returned by `get_current_state_deltas_for_room`. This is due to the current
             # state only being filled out for rooms the server is in, and so doesn't pick
