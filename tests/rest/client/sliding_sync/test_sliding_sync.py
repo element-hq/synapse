@@ -791,7 +791,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
 
     def test_reject_remote_invite(self) -> None:
-        """Test that rejecting a remote invite gets sent down sliding sync"""
+        """Test that rejecting a remote invite comes down incremental sync"""
 
         user_id = self.register_user("user1", "pass")
         user_tok = self.login(user_id, "pass")
@@ -811,7 +811,12 @@ class SlidingSyncTestCase(SlidingSyncBase):
             }
         }
         response_body, from_token = self.do_sync(sync_body, tok=user_tok)
-        self.assertIn(room_id, response_body["rooms"])
+        # We should see the room (like normal)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
 
         # Reject the remote room invite
         self.helper.leave(room_id, user_id, tok=user_tok)
@@ -819,17 +824,25 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # Sync again after rejecting the invite
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user_tok)
 
-        # We should see the leave for the room so clients don't end up with stuck
+        # We should see the newly_left room
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+        # We should see the leave state for the room so clients don't end up with stuck
         # invites
-        self.assertIn(room_id, response_body["rooms"])
-        actual_requred_state_leave = response_body["rooms"][room_id]["required_state"][
-            0
-        ]
-        self.assertEqual(
+        self.assertIncludes(
             {
-                f'{actual_requred_state_leave["content"]["membership"]} ("{actual_requred_state_leave["type"]}", "{actual_requred_state_leave["state_key"]}")'
+                (
+                    state["type"],
+                    state["state_key"],
+                    state["content"].get("membership"),
+                )
+                for state in response_body["rooms"][room_id]["required_state"]
             },
-            {f'leave ("{EventTypes.Member}", "{user_id}")'},
+            {(EventTypes.Member, user_id, Membership.LEAVE)},
+            exact=True,
         )
 
     def test_ignored_user_invites_initial_sync(self) -> None:
