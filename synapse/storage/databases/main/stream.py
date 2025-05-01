@@ -1280,12 +1280,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         membership if membership is not None else Membership.LEAVE
                     )
 
-                    if (
-                        membership == Membership.JOIN
-                        and prev_membership == Membership.JOIN
-                    ):
-                        # The user was previously joined so this it not a new join.
-                        # This happens when the user changes their display name.
+                    if membership == prev_membership:
+                        # If `membership` and `prev_membership` are the same then this
+                        # is not a meaningful change so we can skip it.
+                        # An example of this happening is when the user changes their display name.
                         continue
 
                     membership_change = RoomsForUserStateReset(
