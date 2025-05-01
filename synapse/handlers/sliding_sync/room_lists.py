@@ -1118,7 +1118,7 @@ class SlidingSyncRoomLists:
             user_id,
             from_key=from_token.room_key,
             to_key=to_token.room_key,
-            excluded_room_ids=self.rooms_to_exclude_globally,
+            excluded_room_ids=set(self.rooms_to_exclude_globally),
         )
 
         for room_id, entry in changes.items():

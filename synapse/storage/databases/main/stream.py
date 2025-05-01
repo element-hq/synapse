@@ -1143,7 +1143,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         user_id: str,
         from_key: RoomStreamToken,
         to_key: RoomStreamToken,
-        excluded_room_ids: Optional[List[str]] = None,
+        excluded_room_ids: Optional[AbstractSet[str]] = None,
     ) -> Dict[str, RoomsForUserStateReset]:
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
@@ -1158,7 +1158,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         room_ids_to_exclude: AbstractSet[str] = set()
         if excluded_room_ids is not None:
-            room_ids_to_exclude = set(excluded_room_ids)
+            room_ids_to_exclude = excluded_room_ids
 
         def f(txn: LoggingTransaction) -> Dict[str, RoomsForUserStateReset]:
             # To handle tokens with a non-empty instance_map we fetch more
