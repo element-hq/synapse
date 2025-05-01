@@ -86,6 +86,7 @@ from synapse.rest.admin.rooms import (
     RoomStateRestServlet,
     RoomTimestampToEventRestServlet,
 )
+from synapse.rest.admin.scheduled_tasks import ScheduledTasksRestServlet
 from synapse.rest.admin.server_notice_servlet import SendServerNoticeServlet
 from synapse.rest.admin.statistics import (
     LargestRoomsStatistics,
@@ -338,6 +339,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     BackgroundUpdateStartJobRestServlet(hs).register(http_server)
     ExperimentalFeaturesRestServlet(hs).register(http_server)
     SuspendAccountRestServlet(hs).register(http_server)
+    ScheduledTasksRestServlet(hs).register(http_server)
 
 
 def register_servlets_for_client_rest_resource(
