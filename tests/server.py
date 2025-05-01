@@ -486,7 +486,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
     """
 
     def __init__(self) -> None:
-        self.threadpool = ThreadPool(self)
+        self.threadpool = ThreadlessThreadPool(self)
 
         self._tcp_callbacks: Dict[Tuple[str, int], Callable] = {}
         self._udp: List[udp.Port] = []
@@ -733,12 +733,12 @@ def make_fake_db_pool(
     pool.runWithConnection = runWithConnection  # type: ignore[method-assign]
     pool.runInteraction = runInteraction  # type: ignore[assignment]
     # Replace the thread pool with a threadless 'thread' pool
-    pool.threadpool = ThreadPool(reactor)
+    pool.threadpool = ThreadlessThreadPool(reactor)
     pool.running = True
     return pool
 
 
-class ThreadPool:
+class ThreadlessThreadPool:
     """
     Threadless thread pool.
 
