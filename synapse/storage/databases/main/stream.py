@@ -1167,8 +1167,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             max_to_id = to_key.get_max_stream_pos()
 
             # This query looks at membership changes in
-            # `sliding_sync_membership_snapshots`. These will not include where
-            # users get state reset out of rooms, so we need to look for that
+            # `sliding_sync_membership_snapshots` which will not include users
+            # that were state reset out of rooms; so we need to look for that
             # case in `current_state_delta_stream`.
             #
             # TODO: Add an index a better index on sliding_sync_membership_snapshots
