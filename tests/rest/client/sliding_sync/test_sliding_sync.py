@@ -824,26 +824,29 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # Sync again after rejecting the invite
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user_tok)
 
-        # We should see the newly_left room
-        self.assertIncludes(
-            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
-            {room_id},
-            exact=True,
-        )
-        # We should see the leave state for the room so clients don't end up with stuck
-        # invites
-        self.assertIncludes(
-            {
-                (
-                    state["type"],
-                    state["state_key"],
-                    state["content"].get("membership"),
-                )
-                for state in response_body["rooms"][room_id]["required_state"]
-            },
-            {(EventTypes.Member, user_id, Membership.LEAVE)},
-            exact=True,
-        )
+        # The fix to add the leave event to incremental sync when rejecting a remote
+        # invite relies on the new tables to work.
+        if self.use_new_tables:
+            # We should see the newly_left room
+            self.assertIncludes(
+                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                {room_id},
+                exact=True,
+            )
+            # We should see the leave state for the room so clients don't end up with stuck
+            # invites
+            self.assertIncludes(
+                {
+                    (
+                        state["type"],
+                        state["state_key"],
+                        state["content"].get("membership"),
+                    )
+                    for state in response_body["rooms"][room_id]["required_state"]
+                },
+                {(EventTypes.Member, user_id, Membership.LEAVE)},
+                exact=True,
+            )
 
     def test_ignored_user_invites_initial_sync(self) -> None:
         """

@@ -1040,7 +1040,7 @@ class SlidingSyncRoomLists:
         (
             newly_joined_room_ids,
             newly_left_room_map,
-        ) = await self._get_newly_joined_and_left_rooms(
+        ) = await self._get_newly_joined_and_left_rooms_fallback(
             user_id, to_token=to_token, from_token=from_token
         )
 
@@ -1126,6 +1126,140 @@ class SlidingSyncRoomLists:
                 newly_joined_room_ids.add(room_id)
             elif entry.membership == Membership.LEAVE:
                 newly_left_room_map[room_id] = entry
+
+        return newly_joined_room_ids, newly_left_room_map
+
+    @trace
+    async def _get_newly_joined_and_left_rooms_fallback(
+        self,
+        user_id: str,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
+        """Fetch the sets of rooms that the user newly joined or left in the
+        given token range.
+        Note: there may be rooms in the newly left rooms where the user was
+        "state reset" out of the room, and so that room would not be part of the
+        "current memberships" of the user.
+        Returns:
+            A 2-tuple of newly joined room IDs and a map of newly_left room
+            IDs to the `RoomsForUserStateReset` entry.
+            We're using `RoomsForUserStateReset` but that doesn't necessarily mean the
+            user was state reset of the rooms. It's just that the `event_id`/`sender`
+            are optional and we can't tell the difference between the server leaving the
+            room when the user was the last person participating in the room and left or
+            was state reset out of the room. To actually check for a state reset, you
+            need to check if a membership still exists in the room.
+        """
+        newly_joined_room_ids: Set[str] = set()
+        newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
+
+        # We need to figure out the
+        #
+        # - 1) Figure out which rooms are `newly_left` rooms (> `from_token` and <= `to_token`)
+        # - 2) Figure out which rooms are `newly_joined` (> `from_token` and <= `to_token`)
+
+        # 1) Fetch membership changes that fall in the range from `from_token` up to `to_token`
+        current_state_delta_membership_changes_in_from_to_range = []
+        if from_token:
+            current_state_delta_membership_changes_in_from_to_range = (
+                await self.store.get_current_state_delta_membership_changes_for_user(
+                    user_id,
+                    from_key=from_token.room_key,
+                    to_key=to_token.room_key,
+                    excluded_room_ids=self.rooms_to_exclude_globally,
+                )
+            )
+
+        # 1) Assemble a list of the last membership events in some given ranges. Someone
+        # could have left and joined multiple times during the given range but we only
+        # care about end-result so we grab the last one.
+        last_membership_change_by_room_id_in_from_to_range: Dict[
+            str, CurrentStateDeltaMembership
+        ] = {}
+        # We also want to assemble a list of the first membership events during the token
+        # range so we can step backward to the previous membership that would apply to
+        # before the token range to see if we have `newly_joined` the room.
+        first_membership_change_by_room_id_in_from_to_range: Dict[
+            str, CurrentStateDeltaMembership
+        ] = {}
+        # Keep track if the room has a non-join event in the token range so we can later
+        # tell if it was a `newly_joined` room. If the last membership event in the
+        # token range is a join and there is also some non-join in the range, we know
+        # they `newly_joined`.
+        has_non_join_event_by_room_id_in_from_to_range: Dict[str, bool] = {}
+        for (
+            membership_change
+        ) in current_state_delta_membership_changes_in_from_to_range:
+            room_id = membership_change.room_id
+
+            last_membership_change_by_room_id_in_from_to_range[room_id] = (
+                membership_change
+            )
+            # Only set if we haven't already set it
+            first_membership_change_by_room_id_in_from_to_range.setdefault(
+                room_id, membership_change
+            )
+
+            if membership_change.membership != Membership.JOIN:
+                has_non_join_event_by_room_id_in_from_to_range[room_id] = True
+
+        # 1) Fixup
+        #
+        # 2) We also want to assemble a list of possibly newly joined rooms. Someone
+        # could have left and joined multiple times during the given range but we only
+        # care about whether they are joined at the end of the token range so we are
+        # working with the last membership even in the token range.
+        possibly_newly_joined_room_ids = set()
+        for (
+            last_membership_change_in_from_to_range
+        ) in last_membership_change_by_room_id_in_from_to_range.values():
+            room_id = last_membership_change_in_from_to_range.room_id
+
+            # 2)
+            if last_membership_change_in_from_to_range.membership == Membership.JOIN:
+                possibly_newly_joined_room_ids.add(room_id)
+
+            # 1) Figure out newly_left rooms (> `from_token` and <= `to_token`).
+            if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
+                # 1) Mark this room as `newly_left`
+                newly_left_room_map[room_id] = RoomsForUserStateReset(
+                    room_id=room_id,
+                    sender=last_membership_change_in_from_to_range.sender,
+                    membership=Membership.LEAVE,
+                    event_id=last_membership_change_in_from_to_range.event_id,
+                    event_pos=last_membership_change_in_from_to_range.event_pos,
+                    room_version_id=await self.store.get_room_version_id(room_id),
+                )
+
+        # 2) Figure out `newly_joined`
+        for room_id in possibly_newly_joined_room_ids:
+            has_non_join_in_from_to_range = (
+                has_non_join_event_by_room_id_in_from_to_range.get(room_id, False)
+            )
+            # If the last membership event in the token range is a join and there is
+            # also some non-join in the range, we know they `newly_joined`.
+            if has_non_join_in_from_to_range:
+                # We found a `newly_joined` room (we left and joined within the token range)
+                newly_joined_room_ids.add(room_id)
+            else:
+                prev_event_id = first_membership_change_by_room_id_in_from_to_range[
+                    room_id
+                ].prev_event_id
+                prev_membership = first_membership_change_by_room_id_in_from_to_range[
+                    room_id
+                ].prev_membership
+
+                if prev_event_id is None:
+                    # We found a `newly_joined` room (we are joining the room for the
+                    # first time within the token range)
+                    newly_joined_room_ids.add(room_id)
+                # Last resort, we need to step back to the previous membership event
+                # just before the token range to see if we're joined then or not.
+                elif prev_membership != Membership.JOIN:
+                    # We found a `newly_joined` room (we left before the token range
+                    # and joined within the token range)
+                    newly_joined_room_ids.add(room_id)
 
         return newly_joined_room_ids, newly_left_room_map
 
