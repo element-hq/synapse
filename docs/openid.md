@@ -742,11 +742,11 @@ oidc_providers:
     user_profile_method: "userinfo_endpoint"
     issuer: "https://login.infomaniak.com/"
     client_id: "YOUR_CLIENT_ID"
-    client_secret: "YOUR-CLIENT-SECRECT-FROM-YOUR-IDP"
+    client_secret: "YOUR_CLIENT_SECRET"
     authorization_endpoint: "https://login.infomaniak.com/authorize"
     token_endpoint: "https://login.infomaniak.com/token"
     userinfo_endpoint: "https://login.infomaniak.com/oauth2/userinfo"
-    redirect_uri: "https://YOUR-DOMAIN.FR/_synapse/client/oidc/callback"
+    redirect_uri: "https://YOUR_DOMAIN.FR/_synapse/client/oidc/callback"
     scopes: ["openid","profile","email"]
     enable_registration: false
     allow_existing_users: true
@@ -765,7 +765,7 @@ oidc_providers:
 |-----|-------------|
 | `YOUR_CLIENT_ID` | From Infomaniak's OAuth2 app dashboard |
 | `YOUR_CLIENT_SECRET` | Same as above |
-| `YOUR-DOMAIN.TLD` | Your Matrix domain, e.g. `matrix.example.com` |
+| `YOUR_DOMAIN.FR` | Your Matrix domain, e.g. `matrix.example.com` |
 
 
 ### Twitch
