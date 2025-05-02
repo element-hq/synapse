@@ -992,6 +992,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             available in the `current_state_delta_stream` table. To actually check for a
             state reset, you need to check if a membership still exists in the room.
         """
+
+        assert from_key.topological is None
+        assert to_key.topological is None
+
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
             return []
@@ -1174,6 +1178,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             available in the `current_state_delta_stream` table. To actually check for a
             state reset, you need to check if a membership still exists in the room.
         """
+
+        assert from_key.topological is None
+        assert to_key.topological is None
 
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
