@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from typing import Optional
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -277,7 +278,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(rows), 0)
 
     def _assert_status(
-        self, response_status: int, data: JsonDict, user_id=None
+        self, response_status: int, data: JsonDict, user_id: Optional[str] = None
     ) -> None:
         if user_id is None:
             user_id = self.target_user_id
