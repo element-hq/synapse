@@ -40,7 +40,7 @@ It returns a JSON body like the following:
 ```
 
 To paginate, check for `next_token` and if present, call the endpoint again with `from`
-set to the value of `next_token`. This will return a new page.
+set to the value of `next_token` and the same `limit`. This will return a new page.
 
 If the endpoint does not return a `next_token` then there are no more reports to
 paginate through.
