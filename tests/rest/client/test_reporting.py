@@ -276,7 +276,9 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(len(rows), 0)
 
-    def _assert_status(self, response_status: int, data: JsonDict, user_id=None) -> None:
+    def _assert_status(
+        self, response_status: int, data: JsonDict, user_id=None
+    ) -> None:
         if user_id is None:
             user_id = self.target_user_id
         channel = self.make_request(

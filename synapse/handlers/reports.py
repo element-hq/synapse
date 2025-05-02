@@ -17,7 +17,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
-from synapse.api.errors import SynapseError, Codes
+from synapse.api.errors import Codes, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.types import (
     Requester,
@@ -43,7 +43,9 @@ class ReportsHandler:
             cfg=hs.config.ratelimiting.rc_reports,
         )
 
-    async def report_user(self, requester: Requester, target_user_id: str, reason: str) -> None:
+    async def report_user(
+        self, requester: Requester, target_user_id: str, reason: str
+    ) -> None:
         await self._check_limits(requester)
 
         if len(reason) > 1000:
