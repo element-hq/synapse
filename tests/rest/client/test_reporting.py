@@ -244,7 +244,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         data = {"reason": None}
         self._assert_status(400, data)
 
-    def test_cannot_report_nonlcoal_user(self) -> None:
+    def test_cannot_report_nonlocal_user(self) -> None:
         """
         Tests that we don't accept event reports for users which aren't local users.
         """

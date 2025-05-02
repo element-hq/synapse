@@ -2560,7 +2560,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
             reason: Description that the user specifies.
             received_ts: Time when the user submitted the report (milliseconds).
         Returns:
-            Id of the room report.
+            ID of the room report.
         """
         next_id = self._user_reports_id_gen.get_next()
         await self.db_pool.simple_insert(
