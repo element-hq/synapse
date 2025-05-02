@@ -183,9 +183,9 @@ class ReportUserRestServlet(RestServlet):
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
-        # We can't deal with non-local users.
+        # Treat non-local users as though they don't exist.
         if not self.hs.is_mine_id(target_user_id):
-            raise NotFoundError("User does not belong to this server")
+            return 200, {}
 
         user = await self.store.get_user_by_id(target_user_id)
         if user is None:
