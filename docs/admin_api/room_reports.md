@@ -45,7 +45,7 @@ set to the value of `next_token`. This will return a new page.
 If the endpoint does not return a `next_token` then there are no more reports to
 paginate through.
 
-**URL parameters:**
+**Query parameters:**
 
 * `limit`: integer - Is optional but is used for pagination, denoting the maximum number
   of items to return in this call. Defaults to `100`.

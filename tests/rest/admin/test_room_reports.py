@@ -11,12 +11,6 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-# Originally licensed under the Apache License, Version 2.0:
-# <http://www.apache.org/licenses/LICENSE-2.0>.
-#
-# [This file includes modifications made by New Vector Limited]
-#
-#
 from typing import List
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -366,7 +360,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         """Report a room"""
         channel = self.make_request(
             "POST",
-            "rooms/%s/report" % room_id,
+            f"/_matrix/client/v3/rooms/{room_id}/report",
             {"reason": "this makes me sad"},
             access_token=user_tok,
         )
@@ -376,7 +370,7 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
         """Report a room, but omit reason"""
         channel = self.make_request(
             "POST",
-            "rooms/%s/report" % room_id,
+            f"/_matrix/client/v3/rooms/{room_id}/report",
             {},
             access_token=user_tok,
         )
@@ -392,6 +386,8 @@ class RoomReportsTestCase(unittest.HomeserverTestCase):
             self.assertIn("canonical_alias", c)
             self.assertIn("name", c)
             self.assertIn("reason", c)
+
+        self.assertEqual(len(c.keys()), 7)
 
     def test_count_correct_despite_table_deletions(self) -> None:
         """
