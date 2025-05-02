@@ -1138,12 +1138,15 @@ class SlidingSyncRoomLists:
     ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
         """Fetch the sets of rooms that the user newly joined or left in the
         given token range.
+
         Note: there may be rooms in the newly left rooms where the user was
         "state reset" out of the room, and so that room would not be part of the
         "current memberships" of the user.
+
         Returns:
             A 2-tuple of newly joined room IDs and a map of newly_left room
             IDs to the `RoomsForUserStateReset` entry.
+
             We're using `RoomsForUserStateReset` but that doesn't necessarily mean the
             user was state reset of the rooms. It's just that the `event_id`/`sender`
             are optional and we can't tell the difference between the server leaving the
