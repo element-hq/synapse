@@ -599,7 +599,7 @@ class OidcProvider:
         # from the userinfo endpoint. Therefore we only have a single criteria
         # to check right now but this may change in the future and this function
         # should be updated if more usages are introduced.
-        # 
+        #
         # For example, if we start to use the access_token given to us by the
         # IdP for more things, such as accessing Resource Server APIs.
         return self._uses_userinfo
