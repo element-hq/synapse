@@ -13,21 +13,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # master (rust 1.85.1)
         with:
           # We use nightly so that `fmt` correctly groups together imports, and
           # clippy correctly fixes up the benchmarks.
           toolchain: nightly-2022-12-01
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
 
       - name: Setup Poetry
-        uses: matrix-org/setup-python-poetry@v1
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
           install-project: "false"
+          poetry-version: "2.1.1"
 
       - name: Run ruff check
         continue-on-error: true
@@ -43,6 +44,6 @@ jobs:
       - run: cargo fmt
         continue-on-error: true
 
-      - uses: stefanzweifel/git-auto-commit-action@v5
+      - uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403 # v5.2.0
         with:
           commit_message: "Attempt to fix linting"

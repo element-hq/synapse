@@ -147,6 +147,16 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         return hs
 
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        # Provision the user and the device we use in the tests.
+        store = homeserver.get_datastores().main
+        self.get_success(store.register_user(USER_ID))
+        self.get_success(
+            store.store_device(USER_ID, DEVICE, initial_device_display_name=None)
+        )
+
     def _assertParams(self) -> None:
         """Assert that the request parameters are correct."""
         params = parse_qs(self.http_client.request.call_args[1]["data"].decode("utf-8"))
@@ -538,6 +548,44 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         )
         error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
         self.assertEqual(error.value.code, 503)
+
+    def test_cached_expired_introspection(self) -> None:
+        """The handler should raise an error if the introspection response gives
+        an expiry time, the introspection response is cached and then the entry is
+        re-requested after it has expired."""
+
+        self.http_client.request = introspection_mock = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join(
+                        [
+                            MATRIX_USER_SCOPE,
+                            f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
+                        ]
+                    ),
+                    "username": USERNAME,
+                    "expires_in": 60,
+                },
+            )
+        )
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+
+        # The first CS-API request causes a successful introspection
+        self.get_success(self.auth.get_user_by_req(request))
+        self.assertEqual(introspection_mock.call_count, 1)
+
+        # Sleep for 60 seconds so the token expires.
+        self.reactor.advance(60.0)
+
+        # Now the CS-API request fails because the token expired
+        self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
+        # Ensure another introspection request was not sent
+        self.assertEqual(introspection_mock.call_count, 1)
 
     def make_device_keys(self, user_id: str, device_id: str) -> JsonDict:
         # We only generate a master key to simplify the test.

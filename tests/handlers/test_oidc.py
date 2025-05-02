@@ -484,6 +484,32 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(code_verifier, "")
         self.assertEqual(redirect, "http://client/redirect")
 
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "passthrough_authorization_parameters": ["additional_parameter"],
+            }
+        }
+    )
+    def test_passthrough_parameters(self) -> None:
+        """The redirect request has additional parameters, one is authorized, one is not"""
+        req = Mock(spec=["cookies", "args"])
+        req.cookies = []
+        req.args = {}
+        req.args[b"additional_parameter"] = ["a_value".encode("utf-8")]
+        req.args[b"not_authorized_parameter"] = ["any".encode("utf-8")]
+
+        url = urlparse(
+            self.get_success(
+                self.provider.handle_redirect_request(req, b"http://client/redirect")
+            )
+        )
+
+        params = parse_qs(url.query)
+        self.assertEqual(params["additional_parameter"], ["a_value"])
+        self.assertNotIn("not_authorized_parameters", params)
+
     @override_config({"oidc_config": DEFAULT_CONFIG})
     def test_redirect_request_with_code_challenge(self) -> None:
         """The redirect request has the right arguments & generates a valid session cookie."""
@@ -1002,6 +1028,50 @@ class OidcHandlerTestCase(HomeserverTestCase):
         kwargs = self.fake_server.request.call_args[1]
         args = parse_qs(kwargs["data"].decode("utf-8"))
         self.assertEqual(args["redirect_uri"], [TEST_REDIRECT_URI])
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "redirect_uri": TEST_REDIRECT_URI,
+            }
+        }
+    )
+    def test_code_exchange_ignores_access_token(self) -> None:
+        """
+        Code exchange completes successfully and doesn't validate the `at_hash`
+        (access token hash) field of an ID token when the access token isn't
+        going to be used.
+
+        The access token won't be used in this test because Synapse (currently)
+        only needs it to fetch a user's metadata if it isn't included in the ID
+        token itself.
+
+        Because we have included "openid" in the requested scopes for this IdP
+        (see `SCOPES`), user metadata is be included in the ID token. Thus the
+        access token isn't needed, and it's unnecessary for Synapse to validate
+        the access token.
+
+        This is a regression test for a situation where an upstream identity
+        provider was providing an invalid `at_hash` value, which Synapse errored
+        on, yet Synapse wasn't using the access token for anything.
+        """
+        # Exchange the code against the fake IdP.
+        userinfo = {
+            "sub": "foo",
+            "username": "foo",
+            "phone": "1234567",
+        }
+        with self.fake_server.id_token_override(
+            {
+                "at_hash": "invalid-hash",
+            }
+        ):
+            request, _ = self.start_authorization(userinfo)
+            self.get_success(self.handler.handle_oidc_callback(request))
+
+        # If no error was rendered, then we have success.
+        self.render_error.assert_not_called()
 
     @override_config(
         {
