@@ -274,7 +274,9 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     # Admin servlets below may not work on workers.
     if hs.config.worker.worker_app is not None:
         # Some admin servlets can be mounted on workers when MSC3861 is enabled.
-        register_servlets_for_msc3861_delegation(hs, http_server)
+        if hs.config.experimental.msc3861.enabled:
+            register_servlets_for_msc3861_delegation(hs, http_server)
+
         return
 
     register_servlets_for_client_rest_resource(hs, http_server)
@@ -369,8 +371,7 @@ def register_servlets_for_msc3861_delegation(
     hs: "HomeServer", http_server: HttpServer
 ) -> None:
     """Register servlets needed by MAS when MSC3861 is enabled"""
-    if not hs.config.experimental.msc3861.enabled:
-        return
+    assert hs.config.experimental.msc3861.enabled
 
     UserRestServletV2(hs).register(http_server)
     UsernameAvailableRestServlet(hs).register(http_server)
