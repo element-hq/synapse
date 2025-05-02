@@ -578,6 +578,12 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
     the correct list of rooms IDs.
     """
 
+    # FIXME: We should refactor these tests to run against `compute_interested_rooms(...)`
+    # instead of just `get_room_membership_for_user_at_to_token(...)` which is only used
+    # in the fallback path (`_compute_interested_rooms_fallback(...)`). These scenarios do
+    # well to stress that logic and we shouldn't remove them just because we're removing
+    # the fallback path (tracked by https://github.com/element-hq/synapse/issues/17623).
+
     servlets = [
         admin.register_servlets,
         knock.register_servlets,
@@ -2380,6 +2386,12 @@ class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCa
     Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it works with
     sharded event stream_writers enabled
     """
+
+    # FIXME: We should refactor these tests to run against `compute_interested_rooms(...)`
+    # instead of just `get_room_membership_for_user_at_to_token(...)` which is only used
+    # in the fallback path (`_compute_interested_rooms_fallback(...)`). These scenarios do
+    # well to stress that logic and we shouldn't remove them just because we're removing
+    # the fallback path (tracked by https://github.com/element-hq/synapse/issues/17623).
 
     servlets = [
         admin.register_servlets_for_client_rest_resource,
