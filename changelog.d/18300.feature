@@ -1,1 +1,1 @@
-Set `user_directory.exclude_remote_users` to `True` to exclude remote users from user directory search results.
+Add config option `user_directory.exclude_remote_users` which, when enabled, excludes remote users from user directory search results.
