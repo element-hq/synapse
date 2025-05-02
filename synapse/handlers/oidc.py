@@ -588,18 +588,16 @@ class OidcProvider:
 
     @property
     def _uses_access_token(self) -> bool:
-        """Return True if the `access_token` should be used.
+        """Return True if the `access_token` will be used during the login process.
 
         This is useful to determine whether the access token
         returned by the identity provider, and
         any related metadata (such as the `at_hash` field in
         the ID token), should be validated.
         """
-        # Currently Synapse only uses the access token to fetch
-        # user metadata from the userinfo endpoint. So we need
-        # only decide based on whether we're using the userinfo
-        # endpoint. This may change in the future if we use the
-        # access token given to us by the IdP for more things,
+        # Currently, Synapse only uses the access_token to fetch
+        # user metadata from the userinfo endpoint. Therefore we only have a single criteria to check right now but this may change in the future and this function should be updated if more usages are introduced. For example, if we start to use the
+        # access_token given to us by the IdP for more things,
         # such as accessing Resource Server APIs.
         return self._uses_userinfo
 
