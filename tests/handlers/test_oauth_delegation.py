@@ -147,6 +147,16 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         return hs
 
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        # Provision the user and the device we use in the tests.
+        store = homeserver.get_datastores().main
+        self.get_success(store.register_user(USER_ID))
+        self.get_success(
+            store.store_device(USER_ID, DEVICE, initial_device_display_name=None)
+        )
+
     def _assertParams(self) -> None:
         """Assert that the request parameters are correct."""
         params = parse_qs(self.http_client.request.call_args[1]["data"].decode("utf-8"))

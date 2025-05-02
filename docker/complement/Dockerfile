@@ -25,7 +25,7 @@ FROM $FROM
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
 COPY --from=postgres_base /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres_base /usr/share/postgresql /usr/share/postgresql
-RUN mkdir /var/run/postgresql && chown postgres /var/run/postgresql
+COPY --from=postgres_base --chown=postgres /var/run/postgresql /var/run/postgresql
 ENV PATH="${PATH}:/usr/lib/postgresql/13/bin"
 ENV PGDATA=/var/lib/postgresql/data
 
@@ -58,4 +58,4 @@ ENTRYPOINT ["/start_for_complement.sh"]
 
 # Update the healthcheck to have a shorter check interval
 HEALTHCHECK --start-period=5s --interval=1s --timeout=1s \
-    CMD /bin/sh /healthcheck.sh
+    CMD ["/healthcheck.sh"]

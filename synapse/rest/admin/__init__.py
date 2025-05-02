@@ -86,6 +86,7 @@ from synapse.rest.admin.rooms import (
     RoomStateRestServlet,
     RoomTimestampToEventRestServlet,
 )
+from synapse.rest.admin.scheduled_tasks import ScheduledTasksRestServlet
 from synapse.rest.admin.server_notice_servlet import SendServerNoticeServlet
 from synapse.rest.admin.statistics import (
     LargestRoomsStatistics,
@@ -275,7 +276,9 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     """
     Register all the admin servlets.
     """
-    # Admin servlets aren't registered on workers.
+    RoomRestServlet(hs).register(http_server)
+
+    # Admin servlets below may not work on workers.
     if hs.config.worker.worker_app is not None:
         return
 
@@ -283,7 +286,6 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     BlockRoomRestServlet(hs).register(http_server)
     ListRoomRestServlet(hs).register(http_server)
     RoomStateRestServlet(hs).register(http_server)
-    RoomRestServlet(hs).register(http_server)
     RoomRestV2Servlet(hs).register(http_server)
     RoomMembersRestServlet(hs).register(http_server)
     DeleteRoomStatusByDeleteIdRestServlet(hs).register(http_server)
@@ -337,6 +339,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     BackgroundUpdateStartJobRestServlet(hs).register(http_server)
     ExperimentalFeaturesRestServlet(hs).register(http_server)
     SuspendAccountRestServlet(hs).register(http_server)
+    ScheduledTasksRestServlet(hs).register(http_server)
 
 
 def register_servlets_for_client_rest_resource(
