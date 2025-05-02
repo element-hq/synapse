@@ -469,6 +469,7 @@ doing.</strong></p>
 callback returns <code>False</code>, Synapse falls through to the next one. The value of the first
 callback that does not return <code>False</code> will be used. If this happens, Synapse will not call
 any of the subsequent implementations of this callback.</p>
+<p>Note that this check is applied to federation invites as of Synapse v1.130.0.</p>
 <h3 id="check_login_for_spam"><a class="header" href="#check_login_for_spam"><code>check_login_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.87.0</em></p>
 <pre><code class="language-python">async def check_login_for_spam(
