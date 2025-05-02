@@ -163,6 +163,8 @@ class DeviceWorkerHandler:
             raise errors.NotFoundError()
 
         ips = await self.store.get_last_client_ip_by_device(user_id, device_id)
+
+        device = dict(device)
         _update_device_from_client_ips(device, ips)
 
         set_tag("device", str(device))

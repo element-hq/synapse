@@ -200,6 +200,7 @@ information.
     ^/_matrix/client/(api/v1|r0|v3)/rooms/[^/]+/initialSync$
 
     # Federation requests
+    ^/_matrix/federation/v1/version$
     ^/_matrix/federation/v1/event/
     ^/_matrix/federation/v1/state/
     ^/_matrix/federation/v1/state_ids/
@@ -249,6 +250,7 @@ information.
     ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
     ^/_matrix/client/(r0|v3|unstable)/capabilities$
     ^/_matrix/client/(r0|v3|unstable)/notifications$
+    ^/_synapse/admin/v1/rooms/
 
     # Encryption requests
     ^/_matrix/client/(r0|v3|unstable)/keys/query$
@@ -280,6 +282,7 @@ Additionally, the following REST endpoints can be handled for GET requests:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
 
     # Account data requests
     ^/_matrix/client/(r0|v3|unstable)/.*/tags

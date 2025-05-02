@@ -356,6 +356,9 @@ def _parse_oidc_config_dict(
         additional_authorization_parameters=oidc_config.get(
             "additional_authorization_parameters", {}
         ),
+        passthrough_authorization_parameters=oidc_config.get(
+            "passthrough_authorization_parameters", []
+        ),
     )
 
 
@@ -501,3 +504,6 @@ class OidcProviderConfig:
 
     # Additional parameters that will be passed to the authorization grant URL
     additional_authorization_parameters: Mapping[str, str]
+
+    # Allow query parameters to the redirect endpoint that will be passed to the authorization grant URL
+    passthrough_authorization_parameters: Collection[str]
