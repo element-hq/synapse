@@ -7384,6 +7384,9 @@ If set to true, local users are more likely to appear above remote users when se
 user directory. Defaults to false.</p>
 </li>
 <li>
+<p><code>exclude_remote_users</code>: If set to true, the search will only return local users. Defaults to false.</p>
+</li>
+<li>
 <p><code>show_locked_users</code>: Defines whether to show locked users in search query results. Defaults to false.</p>
 </li>
 </ul>
@@ -7392,6 +7395,7 @@ user directory. Defaults to false.</p>
     enabled: false
     search_all_users: true
     prefer_local_users: true
+    exclude_remote_users: false
     show_locked_users: true
 </code></pre>
 <hr />
