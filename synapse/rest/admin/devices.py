@@ -117,7 +117,8 @@ class DevicesGetRestServlet(RestServlet):
     """
     Retrieve the given user's devices
 
-    This can be mounted on workers
+    This can be mounted on workers as it is read-only, as opposed
+    to `DevicesRestServlet`.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/devices$", "v2")
