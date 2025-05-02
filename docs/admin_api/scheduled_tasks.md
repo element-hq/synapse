@@ -19,7 +19,7 @@ It returns a JSON body like the following:
             "id": "GSA124oegf1",
             "action": "shutdown_room",
             "status": "complete",
-            "timestamp": 23423523,
+            "timestamp_ms": 23423523,
             "resource_id": "!roomid",
             "result": "some result",
             "error": null
