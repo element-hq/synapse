@@ -718,6 +718,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReceiptsHandler(self)
 
     @cache_in_self
+    def get_reports_handler(self) -> ReportsHandler:
+        return ReportsHandler(self)
+
+    @cache_in_self
     def get_read_marker_handler(self) -> ReadMarkerHandler:
         return ReadMarkerHandler(self)
 

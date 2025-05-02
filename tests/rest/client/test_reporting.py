@@ -216,7 +216,6 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         self.other_user_tok = self.login("user", "pass")
 
         self.target_user_id = self.register_user("target_user", "pass")
-        self.report_path = f"/_matrix/client/v3/users/{self.target_user_id}/report"
 
     def test_reason_str(self) -> None:
         data = {"reason": "this makes me sad"}
@@ -244,52 +243,45 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         data = {"reason": None}
         self._assert_status(400, data)
 
+    def test_reason_long(self) -> None:
+        data = {"reason": "x" * 1001}
+        self._assert_status(400, data)
+
     def test_cannot_report_nonlocal_user(self) -> None:
         """
-        Tests that we don't accept event reports for users which aren't local users.
+        Tests that we ignore reports for nonlocal users.
         """
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/v3/users/@bloop:example.org/report",
-            {"reason": "i am very sad"},
-            access_token=self.other_user_tok,
-            shorthand=False,
-        )
-        self.assertEqual(404, channel.code, msg=channel.result["body"])
-        self.assertEqual(
-            "User does not belong to this server",
-            channel.json_body["error"],
-            msg=channel.result["body"],
-        )
+        target_user_id = "@bloop:example.org"
+        data = {"reason": "i am very sad"}
+        self._assert_status(200, data, target_user_id)
+        self._assert_no_reports_for_user(target_user_id)
 
     def test_can_report_nonexistent_user(self) -> None:
         """
         Tests that we ignore reports for nonexistent users.
         """
         target_user_id = f"@bloop:{self.hs.hostname}"
-        channel = self.make_request(
-            "POST",
-            f"/_matrix/client/v3/users/{target_user_id}/report",
-            {"reason": "i am very sad"},
-            access_token=self.other_user_tok,
-            shorthand=False,
-        )
-        self.assertEqual(200, channel.code, msg=channel.result["body"])
+        data = {"reason": "i am very sad"}
+        self._assert_status(200, data, target_user_id)
+        self._assert_no_reports_for_user(target_user_id)
 
+    def _assert_no_reports_for_user(self, target_user_id: str) -> None:
         rows = self.get_success(
             self.hs.get_datastores().main.db_pool.simple_select_onecol(
                 table="user_reports",
-                keyvalues={"target_user_id": self.target_user_id},
+                keyvalues={"target_user_id": target_user_id},
                 retcol="id",
                 desc="get_user_report_ids",
             )
         )
         self.assertEqual(len(rows), 0)
 
-    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+    def _assert_status(self, response_status: int, data: JsonDict, user_id=None) -> None:
+        if user_id is None:
+            user_id = self.target_user_id
         channel = self.make_request(
             "POST",
-            self.report_path,
+            f"/_matrix/client/v3/users/{user_id}/report",
             data,
             access_token=self.other_user_tok,
             shorthand=False,

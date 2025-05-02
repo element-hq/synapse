@@ -171,6 +171,7 @@ class ReportUserRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self.handler = hs.get_reports_handler()
 
     class PostBody(RequestBodyModel):
         reason: StrictStr
@@ -179,25 +180,9 @@ class ReportUserRestServlet(RestServlet):
         self, request: SynapseRequest, target_user_id: str
     ) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        user_id = requester.user.to_string()
-
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
-        # Treat non-local users as though they don't exist.
-        if not self.hs.is_mine_id(target_user_id):
-            return 200, {}
-
-        user = await self.store.get_user_by_id(target_user_id)
-        if user is None:
-            # raise NotFoundError("User does not exist")
-            return 200, {}  # hide existence
-
-        await self.store.add_user_report(
-            target_user_id=target_user_id,
-            user_id=user_id,
-            reason=body.reason,
-            received_ts=self.clock.time_msec(),
-        )
+        await self.handler.report_user(requester, target_user_id, body.reason)
 
         return 200, {}
 
