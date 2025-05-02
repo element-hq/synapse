@@ -992,13 +992,19 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         [self.assertIn(user, local_users) for user in received_user_id_ordering[:3]]
         [self.assertIn(user, remote_users) for user in received_user_id_ordering[3:]]
 
+    @override_config(
+        {
+            "user_directory": {
+                "enabled": True,
+                "search_all_users": True,
+                "exclude_remote_users": True,
+            }
+        }
+    )
     def test_exclude_remote_users(self) -> None:
         """Tests that only local users are returned when
         user_directory.exclude_remote_users is True.
         """
-
-        self.hs.config.userdirectory.user_directory_exclude_remote_users = True
-        self.hs.config.userdirectory.user_directory_search_all_users = True
 
         # Create a room and few users to test the directory with
         searching_user = self.register_user("searcher", "password")

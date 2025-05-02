@@ -1055,9 +1055,13 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
 
+        # Adjust the JOIN type based on the exclude_remote_users flag (the users
+        # table only contains local users so an inner join is a good way to
+        # to exclude remote users)
         if self.hs.config.userdirectory.user_directory_exclude_remote_users:
-            where_clause += " AND user_id LIKE ?"
-            join_args += (f"%:{self._server_name}",)
+            join_type = "JOIN"
+        else:
+            join_type = "LEFT JOIN"
 
         # We allow manipulating the ranking algorithm by injecting statements
         # based on config options.
@@ -1090,7 +1094,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM matching_users as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                 ORDER BY
@@ -1119,6 +1123,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_case_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = (
                 (full_query,)
@@ -1146,7 +1151,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM user_directory_search as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                     AND value MATCH ?
@@ -1159,6 +1164,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = join_args + (search_query,) + ordering_arguments + (limit + 1,)
         else:
