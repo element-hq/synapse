@@ -1150,8 +1150,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         given user.
 
         A meaningful membership changes is one where the `membership` value actually
-        changes. This means memberships changes from `join` to `join` will be filtered
-        out since they result in no meaningful change.
+        changes. This means memberships changes from `join` to `join` (like a display
+        name change) will be filtered out since they result in no meaningful change.
 
         Note: This function only works with "live" tokens with `stream_ordering` only.
 
