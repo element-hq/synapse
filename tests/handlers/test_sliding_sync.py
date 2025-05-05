@@ -2835,11 +2835,11 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
     num,
     params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
 )
-class GetRoomMembershipForUserAtToTokenShardTestCase(
+class ComputeInterestedRoomsShardTestCase(
     BaseMultiWorkerStreamTestCase, SlidingSyncBase
 ):
     """
-    Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it works with
+    Tests Sliding Sync handler `compute_interested_rooms()` to make sure it works with
     sharded event stream_writers enabled
     """
 
