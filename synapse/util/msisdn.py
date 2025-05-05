@@ -21,7 +21,7 @@
 
 import phonenumbers
 
-from synapse.api.errors import SynapseError
+from synapse.api.errors import Codes, SynapseError
 
 
 def phone_number_to_msisdn(country: str, number: str) -> str:
@@ -45,7 +45,7 @@ def phone_number_to_msisdn(country: str, number: str) -> str:
     try:
         phoneNumber = phonenumbers.parse(number, country)
     except phonenumbers.NumberParseException:
-        raise SynapseError(400, "Unable to parse phone number")
+        raise SynapseError(400, "Unable to parse phone number", Codes.INVALID_PARAM)
     return phonenumbers.format_number(phoneNumber, phonenumbers.PhoneNumberFormat.E164)[
         1:
     ]
