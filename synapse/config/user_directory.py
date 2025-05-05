@@ -38,6 +38,9 @@ class UserDirectoryConfig(Config):
         self.user_directory_search_all_users = user_directory_config.get(
             "search_all_users", False
         )
+        self.user_directory_exclude_remote_users = user_directory_config.get(
+            "exclude_remote_users", False
+        )
         self.user_directory_search_prefer_local_users = user_directory_config.get(
             "prefer_local_users", False
         )

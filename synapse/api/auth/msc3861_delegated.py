@@ -39,7 +39,6 @@ from synapse.api.errors import (
     HttpResponseException,
     InvalidClientTokenError,
     OAuthInsufficientScopeError,
-    StoreError,
     SynapseError,
     UnrecognizedRequestError,
 )
@@ -512,7 +511,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             raise InvalidClientTokenError("No scope in token granting user rights")
 
         # Match via the sub claim
-        sub: Optional[str] = introspection_result.get_sub()
+        sub = introspection_result.get_sub()
         if sub is None:
             raise InvalidClientTokenError(
                 "Invalid sub claim in the introspection result"
@@ -525,29 +524,20 @@ class MSC3861DelegatedAuth(BaseAuth):
             # If we could not find a user via the external_id, it either does not exist,
             # or the external_id was never recorded
 
-            # TODO: claim mapping should be configurable
-            username: Optional[str] = introspection_result.get_username()
-            if username is None or not isinstance(username, str):
+            username = introspection_result.get_username()
+            if username is None:
                 raise AuthError(
                     500,
                     "Invalid username claim in the introspection result",
                 )
             user_id = UserID(username, self._hostname)
 
-            # First try to find a user from the username claim
+            # Try to find a user from the username claim
             user_info = await self.store.get_user_by_id(user_id=user_id.to_string())
             if user_info is None:
-                # If the user does not exist, we should create it on the fly
-                # TODO: we could use SCIM to provision users ahead of time and listen
-                # for SCIM SET events if those ever become standard:
-                # https://datatracker.ietf.org/doc/html/draft-hunt-scim-notify-00
-
-                # TODO: claim mapping should be configurable
-                # If present, use the name claim as the displayname
-                name: Optional[str] = introspection_result.get_name()
-
-                await self.store.register_user(
-                    user_id=user_id.to_string(), create_profile_with_displayname=name
+                raise AuthError(
+                    500,
+                    "User not found",
                 )
 
             # And record the sub as external_id
@@ -587,17 +577,10 @@ class MSC3861DelegatedAuth(BaseAuth):
                     "Invalid device ID in introspection result",
                 )
 
-            # Create the device on the fly if it does not exist
-            try:
-                await self.store.get_device(
-                    user_id=user_id.to_string(), device_id=device_id
-                )
-            except StoreError:
-                await self.store.store_device(
-                    user_id=user_id.to_string(),
-                    device_id=device_id,
-                    initial_device_display_name="OIDC-native client",
-                )
+            # Make sure the device exists
+            await self.store.get_device(
+                user_id=user_id.to_string(), device_id=device_id
+            )
 
         # TODO: there is a few things missing in the requester here, which still need
         # to be figured out, like:
