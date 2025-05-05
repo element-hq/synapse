@@ -22,7 +22,7 @@ from typing import AbstractSet, Dict, Mapping, Optional, Set, Tuple
 from unittest.mock import patch
 
 import attr
-from parameterized import parameterized
+from parameterized import parameterized, parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -43,13 +43,14 @@ from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, StateMap, StreamToken, UserID
-from synapse.types.handlers.sliding_sync import SlidingSyncConfig
+from synapse.types import JsonDict, StateMap, StreamToken, UserID, create_requester
+from synapse.types.handlers.sliding_sync import PerConnectionState, SlidingSyncConfig
 from synapse.types.state import StateFilter
 from synapse.util import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.unittest import HomeserverTestCase, TestCase
 
 logger = logging.getLogger(__name__)
@@ -572,9 +573,23 @@ class RoomSyncConfigTestCase(TestCase):
         self._assert_room_config_equal(combined_config, expected, "A into B")
 
 
-class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
+class ComputeInterestedRoomsTestCase(SlidingSyncBase):
     """
-    Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it returns
+    Tests Sliding Sync handler `compute_interested_rooms()` to make sure it returns
     the correct list of rooms IDs.
     """
 
@@ -597,6 +612,8 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
 
+        super().prepare(reactor, clock, hs)
+
     def test_no_rooms(self) -> None:
         """
         Test when the user has never joined any rooms before
@@ -606,13 +623,26 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         now_token = self.event_sources.get_current_token()
 
-        room_id_results, _, _ = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=now_token,
                 to_token=now_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
 
         self.assertEqual(room_id_results.keys(), set())
 
@@ -633,13 +663,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room_token,
                 to_token=after_room_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(room_id_results.keys(), {room_id})
         # It should be pointing to the join event (latest membership event in the
@@ -668,13 +713,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room_token,
                 to_token=after_room_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(room_id_results.keys(), {room_id})
         # It should be pointing to the join event (latest membership event in the
@@ -742,13 +802,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room_token,
                 to_token=after_room_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Ensure that the invited, ban, and knock rooms show up
         self.assertEqual(
@@ -814,13 +889,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_kick_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # The kicked room should show up
         self.assertEqual(room_id_results.keys(), {kick_room_id})
@@ -907,13 +997,26 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room_forgets,
                 to_token=before_room_forgets,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
 
         # We shouldn't see the room because it was forgotten
         self.assertEqual(room_id_results.keys(), set())
@@ -937,13 +1040,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_room2_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room2_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
 
@@ -987,13 +1105,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(room_id_results.keys(), {room_id1})
         # It should be pointing to the latest membership event in the from/to range
@@ -1027,13 +1160,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Leave the room after we already have our tokens
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # We should still see the room because we were joined during the
         # from_token/to_token time period.
@@ -1074,13 +1222,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Leave the room after we already have our tokens
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # We should still see the room because we were joined before the `from_token`
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1138,13 +1301,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         join_response2 = self.helper.join(kick_room_id, user1_id, tok=user1_tok)
         leave_response = self.helper.leave(kick_room_id, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # We shouldn't see the room because it was forgotten
         self.assertEqual(room_id_results.keys(), {kick_room_id})
@@ -1194,13 +1372,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response2 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should still show up because it's newly_left during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1249,13 +1442,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Join the room after we already have our tokens
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should still show up because it's newly_left during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1308,13 +1516,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Join the room2 after we already have our tokens
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=None,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Only rooms we were joined to before the `to_token` should show up
         self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
@@ -1390,13 +1613,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Join the room4 after we already have our tokens
         self.helper.join(room_id4, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=from_token,
                 to_token=to_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # In the "current" state snapshot, we're joined to all of the rooms but in the
         # from/to token range...
@@ -1463,13 +1701,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(room_id_results.keys(), {room_id1})
         # It should be pointing to the latest membership event in the from/to range
@@ -1506,13 +1759,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Join the room after we already have our tokens
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(room_id_results.keys(), {room_id1})
         # It should be pointing to the latest membership event in the from/to range
@@ -1556,13 +1824,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         join_response3 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because it was newly_left and joined during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1618,13 +1901,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         join_response3 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined before the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1677,13 +1975,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         join_respsonse = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were invited before the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1751,13 +2064,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1816,13 +2144,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_change1_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_change1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1888,13 +2231,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined before the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -1970,13 +2328,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Leave after the token
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -2038,13 +2411,26 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
 
         # Room shouldn't show up because we joined after the from/to range
         self.assertEqual(room_id_results.keys(), set())
@@ -2074,13 +2460,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_more_changes_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=after_room1_token,
                 to_token=after_more_changes_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -2139,13 +2540,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         after_room1_token = self.event_sources.get_current_token()
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because it was newly_left and joined during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1})
@@ -2215,13 +2631,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         # Leave room3
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
 
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_room3_token,
                 to_token=after_room3_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(
             room_id_results.keys(),
@@ -2351,13 +2782,28 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_reset_token = self.event_sources.get_current_token()
 
         # The function under test
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_reset_token,
                 to_token=after_reset_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         # Room1 should show up because it was `newly_left` via state reset during the from/to range
         self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
@@ -2375,7 +2821,23 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.assertTrue(room_id1 in newly_left)
 
 
-class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCase):
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
+class GetRoomMembershipForUserAtToTokenShardTestCase(
+    BaseMultiWorkerStreamTestCase, SlidingSyncBase
+):
     """
     Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it works with
     sharded event stream_writers enabled
@@ -2565,13 +3027,28 @@ class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCa
         self.get_success(actx.__aexit__(None, None, None))
 
         # The function under test
-        room_id_results, newly_joined, newly_left = self.get_success(
-            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
                 from_token=before_stuck_activity_token,
                 to_token=stuck_activity_token,
             )
         )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(
             room_id_results.keys(),
