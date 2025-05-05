@@ -118,7 +118,7 @@ class RoomSummaryHandler:
                 Optional[int],
                 Optional[int],
                 Optional[str],
-                Optional[Tuple[str, ...]],
+                Optional[List[str]],
             ]
         ] = ResponseCache(
             hs.get_clock(),
@@ -134,7 +134,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str, ...]] = None,
+        remote_room_hosts: Optional[List[str]] = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy C-S API.
@@ -191,7 +191,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str, ...]] = None,
+        remote_room_hosts: Optional[List[str]] = None,
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
@@ -211,7 +211,7 @@ class RoomSummaryHandler:
 
         if not local_room:
             room_hierarchy = await self._summarize_remote_room_hierarchy(
-                _RoomQueueEntry(requested_room_id, remote_room_hosts or ()),
+                _RoomQueueEntry(requested_room_id, remote_room_hosts or []),
                 False,
             )
             root_room_entry = room_hierarchy[0]
@@ -252,7 +252,7 @@ class RoomSummaryHandler:
             processed_rooms = set(pagination_session["processed_rooms"])
         else:
             # The queue of rooms to process, the next room is last on the stack.
-            room_queue = [_RoomQueueEntry(requested_room_id, remote_room_hosts or ())]
+            room_queue = [_RoomQueueEntry(requested_room_id, remote_room_hosts or [])]
 
             # Rooms we have already processed.
             processed_rooms = set()
