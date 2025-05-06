@@ -241,20 +241,44 @@ class SlidingSyncRoomLists:
         # include rooms that are outside the list ranges.
         all_rooms: Set[str] = set()
 
-        # Note: this won't include rooms the user has left themselves (for the most
-        # part). We add back `newly_left` rooms below. This is more efficient than
-        # fetching all rooms and then filtering out the old left rooms.
+        # Note: this won't include rooms the user has left themselves. We add back
+        # `newly_left` rooms below. This is more efficient than fetching all rooms and
+        # then filtering out the old left rooms.
         room_membership_for_user_map = (
             await self.store.get_sliding_sync_rooms_for_user_from_membership_snapshots(
+                user_id
+            )
+        )
+        # FIXME: It would be nice to avoid this copy but since
+        # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
+        # can't return a mutable value like a `dict`. We make the copy to get a mutable
+        # dict that we can change.
+        room_membership_for_user_map = dict(room_membership_for_user_map)
+        # To play nice with the rewind logic below, we need to go fetch the rooms the
+        # user has left themselves but only if it changed after the `to_token`.
+        #
+        # If a leave happens *after* the token range, we may have still been joined (or
+        # any non-self-leave which is relevant to sync) to the room before so we need to
+        # include it in the list of potentially relevant rooms and apply our rewind
+        # logic (outside of this function) to see if it's actually relevant.
+        #
+        # We do this separately from
+        # `get_sliding_sync_rooms_for_user_from_membership_snapshots` as those results
+        # are cached and the `to_token` isn't very cache friendly (people are constantly
+        # requesting with new tokens) so we separate it out here.
+        room_membership_for_user_map.update(
+            await self.store.get_sliding_sync_self_leave_rooms_after_to_token(
                 user_id, to_token
             )
+        )
+
+        logger.info(
+            "asdf room_membership_for_user_map: %s", room_membership_for_user_map
         )
 
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
         if ignored_users:
-            # TODO: It would be nice to avoid these copies
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             # Make a copy so we don't run into an error: `dictionary changed size during
             # iteration`, when we remove items
             for room_id in list(room_membership_for_user_map.keys()):
@@ -275,9 +299,8 @@ class SlidingSyncRoomLists:
         changes = await self._get_rewind_changes_to_current_membership_to_token(
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
+        logger.info("asdf rewind changes: %s", changes)
         if changes:
-            # TODO: It would be nice to avoid these copies
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
                     # Remove rooms that the user joined after the `to_token`
@@ -319,8 +342,6 @@ class SlidingSyncRoomLists:
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
         if missing_newly_left_rooms:
-            # TODO: It would be nice to avoid these copies
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 newly_left_room_for_user = newly_left_room_map[room_id]
                 # This should be a given
@@ -527,9 +548,6 @@ class SlidingSyncRoomLists:
 
         if sync_config.room_subscriptions:
             with start_active_span("assemble_room_subscriptions"):
-                # TODO: It would be nice to avoid these copies
-                room_membership_for_user_map = dict(room_membership_for_user_map)
-
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
                 partial_state_rooms = await self.store.get_partial_rooms()

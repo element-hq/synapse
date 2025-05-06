@@ -453,6 +453,8 @@ def _filter_results_by_stream(
     stream_ordering falls between the two tokens (taking a None
     token to mean unbounded).
 
+    The token range is defined by > `lower_token` and <= `upper_token`.
+
     Used to filter results from fetching events in the DB against the given
     tokens. This is necessary to handle the case where the tokens include
     position maps, which we handle by fetching more than necessary from the DB
