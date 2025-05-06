@@ -1,0 +1,1 @@
+Allow adjusting the batch size for the `populate_participant_bg_update` background update.
