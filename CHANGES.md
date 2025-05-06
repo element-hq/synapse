@@ -1,3 +1,10 @@
+# Synapse 1.129.0 (2025-05-06)
+
+No significant changes since 1.129.0rc2.
+
+
+
+
 # Synapse 1.129.0rc2 (2025-04-30)
 
 Synapse 1.129.0rc1 was never formally released due to regressions discovered during the release process. 1.129.0rc2 fixes those regressions by reverting the affected PRs.
