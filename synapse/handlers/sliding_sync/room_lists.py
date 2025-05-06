@@ -334,6 +334,10 @@ class SlidingSyncRoomLists:
                 newly_left_room_for_user_sliding_sync = (
                     await self.store.get_sliding_sync_room_for_user(user_id, room_id)
                 )
+                logger.info(
+                    "asdf newly_left_room_for_user_sliding_sync: %s",
+                    newly_left_room_for_user_sliding_sync,
+                )
                 # If the membership exists, it's just a normal user left the room on
                 # their own
                 if newly_left_room_for_user_sliding_sync is not None:
@@ -342,11 +346,6 @@ class SlidingSyncRoomLists:
                     )
 
                     change = changes.get(room_id)
-                    logger.info(
-                        "asdf newly_left_room_for_user_sliding_sync: %s change %s",
-                        newly_left_room_for_user_sliding_sync,
-                        change,
-                    )
                     if change is not None:
                         # Update room membership events to the point in time of the `to_token`
                         room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
