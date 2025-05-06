@@ -2411,7 +2411,7 @@ Example configuration:
 recaptcha_public_key_path: /path/to/key/file
 ```
 
-_Added in Synapse 1.121.0._
+_Added in Synapse 1.130.0._
 
 ---
 ### `recaptcha_private_key`
@@ -2438,7 +2438,7 @@ Example configuration:
 recaptcha_private_key_path: /path/to/key/file
 ```
 
-_Added in Synapse 1.121.0._
+_Added in Synapse 1.130.0._
 
 ---
 ### `enable_registration_captcha`
