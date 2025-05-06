@@ -251,8 +251,6 @@ class SlidingSyncRoomLists:
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
         if ignored_users:
-            # TODO: It would be nice to avoid these copies
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             # Make a copy so we don't run into an error: `dictionary changed size during
             # iteration`, when we remove items
             for room_id in list(room_membership_for_user_map.keys()):
@@ -267,8 +265,6 @@ class SlidingSyncRoomLists:
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
         if changes:
-            # TODO: It would be nice to avoid these copies
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
                     # Remove rooms that the user joined after the `to_token`
@@ -286,6 +282,11 @@ class SlidingSyncRoomLists:
                         event_pos=change.event_pos,
                         room_version_id=change.room_version_id,
                         # We keep the state of the room though
+                        #
+                        # TODO: Seems slightly flawed to use the state of the room that
+                        # may be after our `to_token` but I guess we're assuming that
+                        # the `is_encrypted` status of the room doesn't change that
+                        # often and `room_type` never changes.
                         has_known_state=existing_room.has_known_state,
                         room_type=existing_room.room_type,
                         is_encrypted=existing_room.is_encrypted,
@@ -310,8 +311,6 @@ class SlidingSyncRoomLists:
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
         if missing_newly_left_rooms:
-            # TODO: It would be nice to avoid these copies
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 newly_left_room_for_user = newly_left_room_map[room_id]
                 # This should be a given
@@ -342,6 +341,11 @@ class SlidingSyncRoomLists:
                             event_pos=change.event_pos,
                             room_version_id=change.room_version_id,
                             # We keep the state of the room though
+                            #
+                            # TODO: Seems slightly flawed to use the state of the room that
+                            # may be after our `to_token` but I guess we're assuming that
+                            # the `is_encrypted` status of the room doesn't change that
+                            # often and `room_type` never changes.
                             has_known_state=newly_left_room_for_user_sliding_sync.has_known_state,
                             room_type=newly_left_room_for_user_sliding_sync.room_type,
                             is_encrypted=newly_left_room_for_user_sliding_sync.is_encrypted,
@@ -493,9 +497,6 @@ class SlidingSyncRoomLists:
 
         if sync_config.room_subscriptions:
             with start_active_span("assemble_room_subscriptions"):
-                # TODO: It would be nice to avoid these copies
-                room_membership_for_user_map = dict(room_membership_for_user_map)
-
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
                 partial_state_rooms = await self.store.get_partial_rooms()
