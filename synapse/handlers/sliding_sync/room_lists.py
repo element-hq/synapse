@@ -269,9 +269,17 @@ class SlidingSyncRoomLists:
             "asdf room_membership_for_user_map %s", room_membership_for_user_map
         )
 
+        (
+            newly_joined_room_ids,
+            newly_left_room_map,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, from_token=from_token, to_token=to_token
+        )
+
         changes = await self._get_rewind_changes_to_current_membership_to_token(
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
+        logger.info("asdf rewind changes %s", changes)
         if changes:
             # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
@@ -284,7 +292,7 @@ class SlidingSyncRoomLists:
                 existing_room = room_membership_for_user_map.get(room_id)
                 if existing_room is not None:
                     # Update room membership events to the point in time of the `to_token`
-                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                    room_for_user = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=change.sender,
                         membership=change.membership,
@@ -296,14 +304,14 @@ class SlidingSyncRoomLists:
                         room_type=existing_room.room_type,
                         is_encrypted=existing_room.is_encrypted,
                     )
-
-        (
-            newly_joined_room_ids,
-            newly_left_room_map,
-        ) = await self._get_newly_joined_and_left_rooms(
-            user_id, from_token=from_token, to_token=to_token
-        )
-        dm_room_ids = await self._get_dm_rooms_for_user(user_id)
+                    if filter_membership_for_sync(
+                        user_id=user_id,
+                        room_membership_for_user=room_for_user,
+                        newly_left=room_id in newly_left_room_map,
+                    ):
+                        room_membership_for_user_map[room_id] = room_for_user
+                    else:
+                        room_membership_for_user_map.pop(room_id, None)
 
         logger.info("asdf newly_joined_room_ids: %s", newly_joined_room_ids)
         logger.info("asdf newly_left_room_map: %s", newly_left_room_map)
@@ -341,14 +349,21 @@ class SlidingSyncRoomLists:
                 # If the membership exists, it's just a normal user left the room on
                 # their own
                 if newly_left_room_for_user_sliding_sync is not None:
-                    room_membership_for_user_map[room_id] = (
-                        newly_left_room_for_user_sliding_sync
-                    )
+                    if filter_membership_for_sync(
+                        user_id=user_id,
+                        room_membership_for_user=newly_left_room_for_user_sliding_sync,
+                        newly_left=room_id in newly_left_room_map,
+                    ):
+                        room_membership_for_user_map[room_id] = (
+                            newly_left_room_for_user_sliding_sync
+                        )
+                    else:
+                        room_membership_for_user_map.pop(room_id, None)
 
                     change = changes.get(room_id)
                     if change is not None:
                         # Update room membership events to the point in time of the `to_token`
-                        room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                        room_for_user = RoomsForUserSlidingSync(
                             room_id=room_id,
                             sender=change.sender,
                             membership=change.membership,
@@ -360,6 +375,14 @@ class SlidingSyncRoomLists:
                             room_type=newly_left_room_for_user_sliding_sync.room_type,
                             is_encrypted=newly_left_room_for_user_sliding_sync.is_encrypted,
                         )
+                        if filter_membership_for_sync(
+                            user_id=user_id,
+                            room_membership_for_user=room_for_user,
+                            newly_left=room_id in newly_left_room_map,
+                        ):
+                            room_membership_for_user_map[room_id] = room_for_user
+                        else:
+                            room_membership_for_user_map.pop(room_id, None)
 
                 # If we are `newly_left` from the room but can't find any membership,
                 # then we have been "state reset" out of the room
@@ -381,7 +404,7 @@ class SlidingSyncRoomLists:
                         newly_left_room_for_user.event_pos.to_room_stream_token(),
                     )
 
-                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                    room_for_user = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=newly_left_room_for_user.sender,
                         membership=newly_left_room_for_user.membership,
@@ -392,6 +415,16 @@ class SlidingSyncRoomLists:
                         room_type=room_type,
                         is_encrypted=is_encrypted,
                     )
+                    if filter_membership_for_sync(
+                        user_id=user_id,
+                        room_membership_for_user=room_for_user,
+                        newly_left=room_id in newly_left_room_map,
+                    ):
+                        room_membership_for_user_map[room_id] = room_for_user
+                    else:
+                        room_membership_for_user_map.pop(room_id, None)
+
+        dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
         if sync_config.lists:
             sync_room_map = room_membership_for_user_map
@@ -426,6 +459,9 @@ class SlidingSyncRoomLists:
                             if room_id not in partial_state_rooms
                         }
 
+                    logger.info(
+                        "asdf filtered_sync_room_map %s", filtered_sync_room_map
+                    )
                     all_rooms.update(filtered_sync_room_map)
 
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []

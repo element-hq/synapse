@@ -1563,7 +1563,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
 
         # Join and leave the room2 before the `to_token`
         self.helper.join(room_id2, user1_id, tok=user1_tok)
-        leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        _leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1594,7 +1594,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         newly_left = interested_rooms.newly_left_rooms
 
         # Only rooms we were joined to before the `to_token` should show up
-        self.assertIncludes(room_id_results, {room_id1, room_id2}, exact=True)
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
 
         # Room1
         # It should be pointing to the latest membership event in the from/to range
@@ -1610,21 +1610,6 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # `from_token` to define a "live" range to compare against
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
-
-        # Room2
-        # It should be pointing to the latest membership event in the from/to range
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id2].event_id,
-            leave_response2["event_id"],
-        )
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id2].membership,
-            Membership.LEAVE,
-        )
-        # We should *NOT* be `newly_joined`/`newly_left` because there is no
-        # `from_token` to define a "live" range to compare against
-        self.assertTrue(room_id2 not in newly_joined)
-        self.assertTrue(room_id2 not in newly_left)
 
     def test_from_token_ahead_of_to_token(self) -> None:
         """
@@ -1821,7 +1806,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         # Join and leave the room before the from/to range
         self.helper.join(room_id1, user1_id, tok=user1_tok)
-        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1848,23 +1833,8 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
             )
         )
         room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
-        newly_joined = interested_rooms.newly_joined_rooms
-        newly_left = interested_rooms.newly_left_rooms
 
-        self.assertIncludes(room_id_results, {room_id1}, exact=True)
-        # It should be pointing to the latest membership event in the from/to range
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id1].event_id,
-            leave_response["event_id"],
-        )
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id1].membership,
-            Membership.LEAVE,
-        )
-        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
-        # `room1` before either of the tokens
-        self.assertTrue(room_id1 not in newly_joined)
-        self.assertTrue(room_id1 not in newly_left)
+        self.assertIncludes(room_id_results, set(), exact=True)
 
     def test_join_leave_multiple_times_during_range_and_after_to_token(
         self,
