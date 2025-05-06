@@ -241,11 +241,13 @@ class SlidingSyncRoomLists:
         # include rooms that are outside the list ranges.
         all_rooms: Set[str] = set()
 
-        # Note: this won't include rooms the user has left themselves. We add back
-        # `newly_left` rooms below. This is more efficient than fetching all rooms and
-        # then filtering out the old left rooms.
-        room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
-            user_id, to_token
+        # Note: this won't include rooms the user has left themselves (for the most
+        # part). We add back `newly_left` rooms below. This is more efficient than
+        # fetching all rooms and then filtering out the old left rooms.
+        room_membership_for_user_map = (
+            await self.store.get_sliding_sync_rooms_for_user_from_membership_snapshots(
+                user_id, to_token
+            )
         )
 
         # Remove invites from ignored users
@@ -308,7 +310,7 @@ class SlidingSyncRoomLists:
 
         # Add back `newly_left` rooms (rooms left in the from -> to token range).
         #
-        # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include
+        # We do this because `get_sliding_sync_rooms_for_user_from_membership_snapshots(...)` doesn't include
         # rooms that the user left themselves as it's more efficient to add them back
         # here than to fetch all rooms and then filter out the old left rooms. The user
         # only leaves a room once in a blue moon so this barely needs to run.

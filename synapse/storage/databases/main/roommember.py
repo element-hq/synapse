@@ -1390,7 +1390,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 txn, self.get_forgotten_rooms_for_user, (user_id,)
             )
             self._invalidate_cache_and_stream(
-                txn, self.get_sliding_sync_rooms_for_user, (user_id,)
+                txn,
+                self.get_sliding_sync_rooms_for_user_from_membership_snapshots,
+                (user_id,),
             )
 
         await self.db_pool.runInteraction("forget_membership", f)
@@ -1422,29 +1424,47 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
     @cached(iterable=True, max_entries=10000)
-    async def get_sliding_sync_rooms_for_user(
+    async def get_sliding_sync_rooms_for_user_from_membership_snapshots(
         self,
         user_id: str,
-        to_token: StreamToken,
+        to_token_self_leave_hint: StreamToken,
     ) -> Mapping[str, RoomsForUserSlidingSync]:
-        """Get all the rooms for a user to handle a sliding sync request.
+        """
+        Get all the rooms for a user to handle a sliding sync request from the
+        `sliding_sync_membership_snapshots` table. These will be current memberships and
+        need to be rewound to the token range.
 
-        Ignores forgotten rooms. Also ignores rooms that the user has left themselves
-        unless the user left *after* the token range
-        (the token range is > `from_token` and <= `to_token`).
+        Ignores forgotten rooms.
 
+        Also ignores rooms that the user has left themselves unless [1] as it's more
+        efficient to add them back here than to fetch all rooms and then filter out the
+        old left rooms.
+
+        [1]: We ignore rooms that the user has left themselves unless the user left
+        *after* the token range (the token range is > `from_token` and <= `to_token`).
+        If a leave happens after the token range, we may have still been joined (or any
+        non-self-leave which is relevant to sync) to the room before so we need to
+        include it in the list of potentially relevant rooms to return here and apply
+        our rewind logic (outside of this function).
+
+        Args:
+            user_id: The user ID to get the rooms for.
+            to_token_self_leave_hint: This should be the `to_token` from the sync
+                requests. We do not filter out or rewind results to this token. It's simply
+                a hint, to return any self-leave membership if they're after this token (see
+                why above).
 
         Returns:
             Map from room ID to membership info
         """
 
-        def get_sliding_sync_rooms_for_user_txn(
+        def _txn(
             txn: LoggingTransaction,
         ) -> Dict[str, RoomsForUserSlidingSync]:
             # XXX: If you use any new columns that can change (like from
             # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
-            # `get_sliding_sync_rooms_for_user` cache in the appropriate places (and add
-            # tests).
+            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` cache in the
+            # appropriate places (and add tests).
 
             sql = """
             SELECT * FROM sliding_sync_membership_snapshots
@@ -1471,7 +1491,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                         OR (m.event_stream_ordering > ?)
                     )
             """
-            logger.info("asdf to_token %s", to_token)
+            logger.info("asdf to_token %s", to_token_self_leave_hint)
             # If a leave happens after the token range, we may have still been joined
             # (or any non-self-leave which is relevant to sync) to the room before so we
             # need to include it in the list of potentially relevant rooms to return
@@ -1482,7 +1502,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # that are within the token range but then they are relevant to sync anyway
             # from being with in the token range so we don't need to to any
             # post-filtering after we get the results back from the database.
-            min_to_token_position = to_token.room_key.stream
+            min_to_token_position = to_token_self_leave_hint.room_key.stream
             txn.execute(sql, (user_id, min_to_token_position))
 
             return {
@@ -1505,8 +1525,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             }
 
         return await self.db_pool.runInteraction(
-            "get_sliding_sync_rooms_for_user",
-            get_sliding_sync_rooms_for_user_txn,
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+            _txn,
         )
 
     async def get_sliding_sync_room_for_user(

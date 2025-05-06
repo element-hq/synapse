@@ -2824,7 +2824,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Join another room so we don't hit the short-circuit and return early if they
         # have no room membership
         room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         before_reset_token = self.event_sources.get_current_token()
 
@@ -2917,6 +2917,12 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         self.assertEqual(
             room_id_results[room_id1].event_id,
             None,
+            "Corresponding map to disambiguate the opaque event IDs: "
+            + str(
+                {
+                    "join_response1": join_response1["event_id"],
+                }
+            ),
         )
         # State reset caused us to leave the room and there is no corresponding leave event
         self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
