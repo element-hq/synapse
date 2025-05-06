@@ -594,6 +594,11 @@ class SlidingSyncRoomLists:
         ) = await self.get_room_membership_for_user_at_to_token(
             sync_config.user, to_token, from_token
         )
+        logger.info(
+            "asdf room_membership_for_user_map: %s", room_membership_for_user_map
+        )
+        logger.info("asdf newly_joined_room_ids: %s", newly_joined_room_ids)
+        logger.info("asdf newly_left_room_ids: %s", newly_left_room_ids)
 
         dm_room_ids = await self._get_dm_rooms_for_user(sync_config.user.to_string())
 
