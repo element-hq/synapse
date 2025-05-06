@@ -1420,9 +1420,9 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         """Retry to resync device lists that are out of sync, except if another retry is
         in progress.
         """
-        if self._resync_retry_lock.locked():
+        if not self._resync_retry_lock.acquire(blocking=False):
             return
-        with self._resync_retry_lock:
+        try:
             # Get all of the users that need resyncing.
             need_resync = await self.store.get_user_ids_requiring_device_list_resync()
 
@@ -1462,6 +1462,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                         user_id,
                         e,
                     )
+        finally:
+            self._resync_retry_lock.release()
 
     async def multi_user_device_resync(
         self, user_ids: List[str], mark_failed_as_stale: bool = True
