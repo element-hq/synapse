@@ -1465,15 +1465,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
             # `get_sliding_sync_rooms_for_user_from_membership_snapshots` cache in the
             # appropriate places (and add tests).
-
-            sql = """
-            SELECT * FROM sliding_sync_membership_snapshots
-            WHERE user_id = ?
-                AND forgotten = 0
-            """
-            txn.execute(sql, (user_id,))
-            logger.info("asdf raw sliding_sync_membership_snapshots %s", txn.fetchall())
-
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -1491,7 +1482,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                         OR (m.event_stream_ordering > ?)
                     )
             """
-            logger.info("asdf to_token %s", to_token_self_leave_hint)
             # If a leave happens after the token range, we may have still been joined
             # (or any non-self-leave which is relevant to sync) to the room before so we
             # need to include it in the list of potentially relevant rooms to return
