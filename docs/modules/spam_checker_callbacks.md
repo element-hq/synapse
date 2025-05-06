@@ -353,6 +353,8 @@ callback returns `False`, Synapse falls through to the next one. The value of th
 callback that does not return `False` will be used. If this happens, Synapse will not call
 any of the subsequent implementations of this callback.
 
+Note that this check is applied to federation invites as of Synapse v1.130.0.
+
 
 ### `check_login_for_spam`
 

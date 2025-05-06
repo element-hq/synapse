@@ -1622,14 +1622,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             sql = """
                 UPDATE room_memberships
                 SET participant = true
-                WHERE (user_id, room_id) IN (
-                    SELECT user_id, room_id
-                    FROM room_memberships
-                    WHERE user_id = ?
-                    AND room_id = ?
-                    ORDER BY event_stream_ordering DESC
-                    LIMIT 1
+                WHERE event_id IN (
+                    SELECT event_id FROM local_current_membership
+                    WHERE user_id = ? AND room_id = ?
                 )
+                AND NOT participant
             """
             txn.execute(sql, (user_id, room_id))
 
@@ -1651,11 +1648,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         ) -> bool:
             sql = """
                 SELECT participant
-                FROM room_memberships
-                WHERE user_id = ?
-                AND room_id = ?
-                ORDER BY event_stream_ordering DESC
-                LIMIT 1
+                FROM local_current_membership AS l
+                INNER JOIN room_memberships AS r USING (event_id)
+                WHERE l.user_id = ?
+                AND l.room_id = ?
             """
             txn.execute(sql, (user_id, room_id))
             res = txn.fetchone()
@@ -1696,93 +1692,6 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             table="room_memberships",
             columns=["user_id", "room_id"],
         )
-
-        self.db_pool.updates.register_background_update_handler(
-            "populate_participant_bg_update", self._populate_participant
-        )
-
-    async def _populate_participant(self, progress: JsonDict, batch_size: int) -> int:
-        """
-        Background update to populate column `participant` on `room_memberships` table
-
-        A 'participant' is someone who is currently joined to a room and has sent at least
-        one `m.room.message` or `m.room.encrypted` event.
-
-        This background update will set the `participant` column across all rows in
-        `room_memberships` based on the user's *current* join status, and if
-        they've *ever* sent a message or encrypted event. Therefore one should
-        never assume the `participant` column's value is based solely on whether
-        the user participated in a previous "session" (where a "session" is defined
-        as a period between the user joining and leaving). See
-        https://github.com/element-hq/synapse/pull/18068#discussion_r1931070291
-        for further detail.
-        """
-        stream_token = progress.get("last_stream_token", None)
-
-        def _get_max_stream_token_txn(txn: LoggingTransaction) -> int:
-            sql = """
-                SELECT event_stream_ordering from room_memberships
-                ORDER BY event_stream_ordering DESC
-                LIMIT 1;
-            """
-            txn.execute(sql)
-            res = txn.fetchone()
-            if not res or not res[0]:
-                return 0
-            return res[0]
-
-        def _background_populate_participant_txn(
-            txn: LoggingTransaction, stream_token: str
-        ) -> None:
-            sql = """
-                UPDATE room_memberships
-                SET participant = True
-                FROM (
-                    SELECT DISTINCT c.state_key, e.room_id
-                    FROM current_state_events AS c
-                    INNER JOIN events AS e ON c.room_id = e.room_id
-                    WHERE c.membership = 'join'
-                        AND c.state_key = e.sender
-                        AND (
-                            e.type = 'm.room.message'
-                            OR e.type = 'm.room.encrypted'
-                        )
-                ) AS subquery
-                WHERE room_memberships.user_id = subquery.state_key
-                    AND room_memberships.room_id = subquery.room_id
-                    AND room_memberships.event_stream_ordering <= ?
-                    AND room_memberships.event_stream_ordering > ?;
-            """
-            batch = int(stream_token) - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-            txn.execute(sql, (stream_token, batch))
-
-        if stream_token is None:
-            stream_token = await self.db_pool.runInteraction(
-                "_get_max_stream_token", _get_max_stream_token_txn
-            )
-
-        if stream_token < 0:
-            await self.db_pool.updates._end_background_update(
-                "populate_participant_bg_update"
-            )
-            return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-
-        await self.db_pool.runInteraction(
-            "_background_populate_participant_txn",
-            _background_populate_participant_txn,
-            stream_token,
-        )
-
-        progress["last_stream_token"] = (
-            stream_token - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-        )
-        await self.db_pool.runInteraction(
-            "populate_participant_bg_update",
-            self.db_pool.updates._background_update_progress_txn,
-            "populate_participant_bg_update",
-            progress,
-        )
-        return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
 
     async def _background_add_membership_profile(
         self, progress: JsonDict, batch_size: int

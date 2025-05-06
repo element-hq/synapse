@@ -4642,6 +4642,10 @@ properties:
           to true, local users are more likely to appear above remote users when
           searching the user directory.
         default: false
+      exclude_remote_users:
+        type: boolean
+        description: If set to true, the search will only return local users.
+        default: false
       show_locked_users:
         type: boolean
         description: Defines whether to show locked users in search query results.
@@ -4650,6 +4654,7 @@ properties:
       - enabled: false
         search_all_users: true
         prefer_local_users: true
+        exclude_remote_users: false
         show_locked_users: true
   user_consent:
     type: object

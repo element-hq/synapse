@@ -1033,6 +1033,50 @@ class OidcHandlerTestCase(HomeserverTestCase):
         {
             "oidc_config": {
                 **DEFAULT_CONFIG,
+                "redirect_uri": TEST_REDIRECT_URI,
+            }
+        }
+    )
+    def test_code_exchange_ignores_access_token(self) -> None:
+        """
+        Code exchange completes successfully and doesn't validate the `at_hash`
+        (access token hash) field of an ID token when the access token isn't
+        going to be used.
+
+        The access token won't be used in this test because Synapse (currently)
+        only needs it to fetch a user's metadata if it isn't included in the ID
+        token itself.
+
+        Because we have included "openid" in the requested scopes for this IdP
+        (see `SCOPES`), user metadata is be included in the ID token. Thus the
+        access token isn't needed, and it's unnecessary for Synapse to validate
+        the access token.
+
+        This is a regression test for a situation where an upstream identity
+        provider was providing an invalid `at_hash` value, which Synapse errored
+        on, yet Synapse wasn't using the access token for anything.
+        """
+        # Exchange the code against the fake IdP.
+        userinfo = {
+            "sub": "foo",
+            "username": "foo",
+            "phone": "1234567",
+        }
+        with self.fake_server.id_token_override(
+            {
+                "at_hash": "invalid-hash",
+            }
+        ):
+            request, _ = self.start_authorization(userinfo)
+            self.get_success(self.handler.handle_oidc_callback(request))
+
+        # If no error was rendered, then we have success.
+        self.render_error.assert_not_called()
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
                 "user_mapping_provider": {
                     "module": __name__ + ".TestMappingProviderExtra"
                 },
