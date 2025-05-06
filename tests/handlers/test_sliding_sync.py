@@ -1688,14 +1688,23 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
             {
                 # Included because we were joined before both tokens
                 room_id1,
-                # Included because we had membership before the to_token
-                room_id2,
+                # Excluded because we left before the `from_token` and `to_token`
+                # room_id2,
                 # Excluded because we joined after the `to_token`
                 # room_id3,
                 # Excluded because we joined after the `to_token`
                 # room_id4,
             },
             exact=True,
+            message="Corresponding map to disambiguate the opaque room IDs: "
+            + str(
+                {
+                    "room_id1": room_id1,
+                    "room_id2": room_id2,
+                    "room_id3": room_id3,
+                    "room_id4": room_id4,
+                }
+            ),
         )
 
         # Room1
@@ -1713,21 +1722,6 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
 
-        # Room2
-        # It should be pointing to the latest membership event in the from/to range
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id2].event_id,
-            leave_room2_response1["event_id"],
-        )
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id2].membership,
-            Membership.LEAVE,
-        )
-        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
-        # `room1` before either of the tokens
-        self.assertTrue(room_id2 not in newly_joined)
-        self.assertTrue(room_id2 not in newly_left)
-
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
         Test old left rooms. But we're also testing that joining and leaving after the
@@ -1744,7 +1738,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         # Join and leave the room before the from/to range
         self.helper.join(room_id1, user1_id, tok=user1_tok)
-        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1772,23 +1766,8 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
             )
         )
         room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
-        newly_joined = interested_rooms.newly_joined_rooms
-        newly_left = interested_rooms.newly_left_rooms
 
-        self.assertIncludes(room_id_results, {room_id1}, exact=True)
-        # It should be pointing to the latest membership event in the from/to range
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id1].event_id,
-            leave_response["event_id"],
-        )
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id1].membership,
-            Membership.LEAVE,
-        )
-        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
-        # `room1` before either of the tokens
-        self.assertTrue(room_id1 not in newly_joined)
-        self.assertTrue(room_id1 not in newly_left)
+        self.assertIncludes(room_id_results, set(), exact=True)
 
     def test_leave_before_range_and_join_after_to_token(self) -> None:
         """
@@ -2829,32 +2808,18 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(
+        self.assertIncludes(
             room_id_results,
             {
-                # Left before the from/to range
-                room_id1,
+                #  Excluded because we left before the from/to range
+                # room_id1,
                 # Invited before the from/to range
                 room_id2,
                 # `newly_left` during the from/to range
                 room_id3,
             },
+            exact=True,
         )
-
-        # Room1
-        # It should be pointing to the latest membership event in the from/to range
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id1].event_id,
-            leave_room1_response["event_id"],
-        )
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id1].membership,
-            Membership.LEAVE,
-        )
-        # We should *NOT* be `newly_joined`/`newly_left` because we were invited and left
-        # before the token range
-        self.assertTrue(room_id1 not in newly_joined)
-        self.assertTrue(room_id1 not in newly_left)
 
         # Room2
         # It should be pointing to the latest membership event in the from/to range
