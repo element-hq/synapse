@@ -1633,7 +1633,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
 
         # Join and leave the room2 before `to_token`
         _join_room2_response1 = self.helper.join(room_id2, user1_id, tok=user1_tok)
-        leave_room2_response1 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        _leave_room2_response1 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         # Note: These are purposely swapped. The `from_token` should come after
         # the `to_token` in this test
@@ -2762,7 +2762,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
 
         # Invited and left the room before the token
         self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
-        leave_room1_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        _leave_room1_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
         # Invited to room2
         invite_room2_response = self.helper.invite(
             room_id2, src=user2_id, targ=user1_id, tok=user2_tok
@@ -3069,7 +3069,7 @@ class ComputeInterestedRoomsShardTestCase(
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # Leave room2
-        leave_room2_response = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        _leave_room2_response = self.helper.leave(room_id2, user1_id, tok=user1_tok)
         join_response3 = self.helper.join(room_id3, user1_id, tok=user1_tok)
         # Leave room3
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
@@ -3182,13 +3182,25 @@ class ComputeInterestedRoomsShardTestCase(
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(
+        self.assertIncludes(
             room_id_results,
             {
                 room_id1,
-                room_id2,
+                # Excluded because we left before the from/to range and the second join
+                # event happened while worker2 was stuck and technically occurs after
+                # the `stuck_activity_token`.
+                # room_id2,
                 room_id3,
             },
+            exact=True,
+            message="Corresponding map to disambiguate the opaque room IDs: "
+            + str(
+                {
+                    "room_id1": room_id1,
+                    "room_id2": room_id2,
+                    "room_id3": room_id3,
+                }
+            ),
         )
 
         # Room1
@@ -3204,25 +3216,6 @@ class ComputeInterestedRoomsShardTestCase(
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
-
-        # Room2
-        # It should be pointing to the latest membership event in the from/to range
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id2].event_id,
-            leave_room2_response["event_id"],
-        )
-        self.assertEqual(
-            interested_rooms.room_membership_for_user_map[room_id2].membership,
-            Membership.LEAVE,
-        )
-        # room_id2 should *NOT* be considered `newly_left` because we left before the
-        # from/to range and the join event during the range happened while worker2 was
-        # stuck. This means that from the perspective of the master, where the
-        # `stuck_activity_token` is generated, the stream position for worker2 wasn't
-        # advanced to the join yet. Looking at the `instance_map`, the join technically
-        # comes after `stuck_activity_token`.
-        self.assertTrue(room_id2 not in newly_joined)
-        self.assertTrue(room_id2 not in newly_left)
 
         # Room3
         # It should be pointing to the latest membership event in the from/to range
