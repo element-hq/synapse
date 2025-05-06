@@ -1569,7 +1569,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 # We filter out unknown room versions proactively. They shouldn't go
                 # down sync and their metadata may be in a broken state (causing
                 # errors).
-                if row[4] in KNOWN_ROOM_VERSIONS:
+                if row[4] not in KNOWN_ROOM_VERSIONS:
                     continue
 
                 # We only want to include the self-leave membership if it happened after
@@ -1577,7 +1577,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 #
                 # Since the database pulls out more than necessary, we need to filter it
                 # down here.
-                if not _filter_results_by_stream(
+                if _filter_results_by_stream(
                     lower_token=None,
                     upper_token=to_token.room_key,
                     instance_name=room_for_user.event_pos.instance_name,
