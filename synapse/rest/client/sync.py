@@ -27,6 +27,7 @@ from synapse.api.constants import AccountDataTypes, EduTypes, Membership, Presen
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
@@ -124,6 +125,13 @@ class SyncRestServlet(RestServlet):
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
             cache_name="sync_valid_filter",
+        )
+
+        # Ratelimiter for presence updates, keyed by requester.
+        self._presence_per_user_limiter = Ratelimiter(
+            store=self.store,
+            clock=self.clock,
+            cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -239,7 +247,13 @@ class SyncRestServlet(RestServlet):
         # send any outstanding server notices to the user.
         await self._server_notices_sender.on_user_syncing(user.to_string())
 
-        affect_presence = set_presence != PresenceState.OFFLINE
+        # ignore the presence update if the ratelimit is exceeded but do not pause the request
+        allowed, _ = await self._presence_per_user_limiter.can_do_action(requester)
+        if not allowed:
+            affect_presence = False
+            logger.debug("User set_presence ratelimit exceeded; ignoring it.")
+        else:
+            affect_presence = set_presence != PresenceState.OFFLINE
 
         context = await self.presence_handler.user_syncing(
             user.to_string(),

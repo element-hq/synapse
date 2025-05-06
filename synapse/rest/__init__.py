@@ -29,7 +29,7 @@ from synapse.rest.client import (
     account_validity,
     appservice_ping,
     auth,
-    auth_issuer,
+    auth_metadata,
     capabilities,
     delayed_events,
     devices,
@@ -121,7 +121,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     mutual_rooms.register_servlets,
     login_token_request.register_servlets,
     rendezvous.register_servlets,
-    auth_issuer.register_servlets,
+    auth_metadata.register_servlets,
 )
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
@@ -187,7 +187,6 @@ class ClientRestResource(JsonResource):
                     mutual_rooms.register_servlets,
                     login_token_request.register_servlets,
                     rendezvous.register_servlets,
-                    auth_issuer.register_servlets,
                 ]:
                     continue
 

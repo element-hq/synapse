@@ -789,7 +789,7 @@ class BackgroundUpdater:
                 # we may already have a half-built index. Let's just drop it
                 # before trying to create it again.
 
-                sql = "DROP INDEX IF EXISTS %s" % (index_name,)
+                sql = "DROP INDEX CONCURRENTLY IF EXISTS %s" % (index_name,)
                 logger.debug("[SQL] %s", sql)
                 c.execute(sql)
 
@@ -814,7 +814,7 @@ class BackgroundUpdater:
 
                 if replaces_index is not None:
                     # We drop the old index as the new index has now been created.
-                    sql = f"DROP INDEX IF EXISTS {replaces_index}"
+                    sql = f"DROP INDEX CONCURRENTLY IF EXISTS {replaces_index}"
                     logger.debug("[SQL] %s", sql)
                     c.execute(sql)
             finally:

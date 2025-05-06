@@ -375,7 +375,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         In this test, we pretend we are processing a "pulled" event via
         backfill. The pulled event succesfully processes and the backward
-        extremeties are updated along with clearing out any failed pull attempts
+        extremities are updated along with clearing out any failed pull attempts
         for those old extremities.
 
         We check that we correctly cleared failed pull attempts of the
@@ -807,6 +807,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         OTHER_USER = f"@user:{self.OTHER_SERVER_NAME}"
         main_store = self.hs.get_datastores().main
+        state_deletion_store = self.hs.get_datastores().state_deletion
 
         # Create the room.
         kermit_user_id = self.register_user("kermit", "test")
@@ -958,7 +959,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         bert_member_event.event_id: bert_member_event,
                         rejected_kick_event.event_id: rejected_kick_event,
                     },
-                    state_res_store=StateResolutionStore(main_store),
+                    state_res_store=StateResolutionStore(
+                        main_store, state_deletion_store
+                    ),
                 )
             ),
             [bert_member_event.event_id, rejected_kick_event.event_id],
@@ -1003,7 +1006,9 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
                         rejected_power_levels_event.event_id,
                     ],
                     event_map={},
-                    state_res_store=StateResolutionStore(main_store),
+                    state_res_store=StateResolutionStore(
+                        main_store, state_deletion_store
+                    ),
                     full_conflicted_set=set(),
                 )
             ),

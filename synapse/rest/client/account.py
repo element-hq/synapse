@@ -21,11 +21,10 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import attr
-from typing_extensions import Literal
 
 from twisted.web.server import Request
 
@@ -351,6 +350,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400,
                 "Adding an email to your account is disabled on this server",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
             )
 
         body = parse_and_validate_json_object_from_request(
@@ -457,6 +457,7 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
             raise SynapseError(
                 400,
                 "Adding phone numbers to user account is not supported by this homeserver",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
             )
 
         ret = await self.identity_handler.requestMsisdnToken(
@@ -499,7 +500,9 @@ class AddThreepidEmailSubmitTokenServlet(RestServlet):
                 "Adding emails have been disabled due to lack of an email config"
             )
             raise SynapseError(
-                400, "Adding an email to your account is disabled on this server"
+                400,
+                "Adding an email to your account is disabled on this server",
+                Codes.THREEPID_MEDIUM_NOT_SUPPORTED,
             )
 
         sid = parse_string(request, "sid", required=True)

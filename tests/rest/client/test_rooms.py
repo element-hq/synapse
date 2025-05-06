@@ -25,12 +25,11 @@
 
 import json
 from http import HTTPStatus
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple, Union
 from unittest.mock import AsyncMock, Mock, call, patch
 from urllib import parse as urlparse
 
 from parameterized import param, parameterized
-from typing_extensions import Literal
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -68,6 +67,7 @@ from tests.http.server._base import make_request_with_cancellation_test
 from tests.storage.test_stream import PaginationTestCase
 from tests.test_utils.event_injection import create_event
 from tests.unittest import override_config
+from tests.utils import default_config
 
 PATH_PREFIX = b"/_matrix/client/api/v1"
 
@@ -742,7 +742,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(33, channel.resource_usage.db_txn_count)
+        self.assertEqual(35, channel.resource_usage.db_txn_count)
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -755,7 +755,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(35, channel.resource_usage.db_txn_count)
+        self.assertEqual(37, channel.resource_usage.db_txn_count)
 
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
@@ -1371,6 +1371,23 @@ class RoomJoinTestCase(RoomBase):
             content={"user_id": self.user2},
         )
         self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
+
+    def test_suspended_user_can_leave_room(self) -> None:
+        channel = self.make_request(
+            "POST", f"/join/{self.room1}", access_token=self.tok1
+        )
+        self.assertEqual(channel.code, 200)
+
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # leave room
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room1}/leave",
+            access_token=self.tok1,
+        )
+        self.assertEqual(channel.code, 200)
 
 
 class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
@@ -2382,6 +2399,41 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "rc_message": {"per_second": 1, "burst_count": 2},
+        }
+    )
+    def test_add_delayed_event_ratelimit(self) -> None:
+        """Test that requests to schedule new delayed events are ratelimited by a RateLimiter,
+        which ratelimits them correctly, including by not limiting when the requester is
+        exempt from ratelimiting.
+        """
+
+        # Test that new delayed events are correctly ratelimited.
+        args = (
+            "POST",
+            (
+                "rooms/%s/send/m.room.message?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
+
+        # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
+        self.get_success(
+            self.hs.get_datastores().main.set_ratelimit_for_user(self.user_id, 0, 0)
+        )
+
+        # Test that the new delayed events aren't ratelimited anymore.
+        channel = self.make_request(*args)
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -2548,6 +2600,11 @@ class PublicRoomsRoomTypeFilterTestCase(unittest.HomeserverTestCase):
             },
             tok=self.token,
         )
+
+    def default_config(self) -> JsonDict:
+        config = default_config("test")
+        config["room_list_publication_rules"] = [{"action": "allow"}]
+        return config
 
     def make_public_rooms_request(
         self,
@@ -3990,10 +4047,25 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
         self.user2 = self.register_user("teresa", "hackme")
         self.tok2 = self.login("teresa", "hackme")
 
-        self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+        self.admin = self.register_user("admin", "pass", True)
+        self.admin_tok = self.login("admin", "pass")
+
+        self.room1 = self.helper.create_room_as(
+            room_creator=self.user1, tok=self.tok1, room_version="11"
+        )
         self.store = hs.get_datastores().main
 
-    def test_suspended_user_cannot_send_message_to_room(self) -> None:
+        self.room2 = self.helper.create_room_as(
+            room_creator=self.user1, is_public=False, tok=self.tok1
+        )
+        self.helper.send_state(
+            self.room2,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=self.tok1,
+        )
+
+    def test_suspended_user_cannot_send_message_to_public_room(self) -> None:
         # set the user as suspended
         self.get_success(self.store.set_user_suspended_status(self.user1, True))
 
@@ -4002,6 +4074,24 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             f"/rooms/{self.room1}/send/m.room.message/1",
             access_token=self.tok1,
             content={"body": "hello", "msgtype": "m.text"},
+        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
+
+    def test_suspended_user_cannot_send_message_to_encrypted_room(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.user1}",
+            {"suspend": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {f"user_{self.user1}_suspended": True})
+
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{self.room2}/send/m.room.encrypted/1",
+            access_token=self.tok1,
+            content={},
         )
         self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
@@ -4070,3 +4160,244 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(channel.code, 200)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/send/m.room.redaction/3456346",
+            access_token=self.tok1,
+            content={"reason": "bogus", "redacts": event_id},
+            shorthand=False,
+        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/send/m.room.redaction/3456346",
+            access_token=self.tok1,
+            content={"reason": "bogus", "redacts": event_id2},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+
+    def test_suspended_user_cannot_ban_others(self) -> None:
+        # user to ban joins room user1 created
+        self.make_request("POST", f"/rooms/{self.room1}/join", access_token=self.tok2)
+
+        # suspend user1
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # user1 tries to ban other user while suspended
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{self.room1}/ban",
+            access_token=self.tok1,
+            content={"reason": "spite", "user_id": self.user2},
+            shorthand=False,
+        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
+
+        # un-suspend user1
+        self.get_success(self.store.set_user_suspended_status(self.user1, False))
+
+        # ban now goes through
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{self.room1}/ban",
+            access_token=self.tok1,
+            content={"reason": "spite", "user_id": self.user2},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+
+
+class RoomParticipantTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        room.register_servlets,
+        profile.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user1 = self.register_user("thomas", "hackme")
+        self.tok1 = self.login("thomas", "hackme")
+
+        self.user2 = self.register_user("teresa", "hackme")
+        self.tok2 = self.login("teresa", "hackme")
+
+        self.room1 = self.helper.create_room_as(
+            room_creator=self.user1,
+            tok=self.tok1,
+            # Allow user2 to send state events into the room.
+            extra_content={
+                "power_level_content_override": {
+                    "state_default": 0,
+                },
+            },
+        )
+        self.store = hs.get_datastores().main
+
+    @parameterized.expand(
+        [
+            # Should record participation.
+            param(
+                is_state=False,
+                event_type="m.room.message",
+                event_content={
+                    "msgtype": "m.text",
+                    "body": "I am engaging in this room",
+                },
+                record_participation=True,
+            ),
+            param(
+                is_state=False,
+                event_type="m.room.encrypted",
+                event_content={
+                    "algorithm": "m.megolm.v1.aes-sha2",
+                    "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                    "device_id": "RJYKSTBOIE",
+                    "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                    "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
+                },
+                record_participation=True,
+            ),
+            # Should not record participation.
+            param(
+                is_state=False,
+                event_type="m.sticker",
+                event_content={
+                    "body": "My great sticker",
+                    "info": {},
+                    "url": "mxc://unused/mxcurl",
+                },
+                record_participation=False,
+            ),
+            # An invalid **state event** with type `m.room.message`
+            param(
+                is_state=True,
+                event_type="m.room.message",
+                event_content={
+                    "msgtype": "m.text",
+                    "body": "I am engaging in this room",
+                },
+                record_participation=False,
+            ),
+            # An invalid **state event** with type `m.room.encrypted`
+            # Note: this may become valid in the future with encrypted state, though we
+            # still may not want to consider it grounds for marking a user as participating.
+            param(
+                is_state=True,
+                event_type="m.room.encrypted",
+                event_content={
+                    "algorithm": "m.megolm.v1.aes-sha2",
+                    "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                    "device_id": "RJYKSTBOIE",
+                    "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                    "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
+                },
+                record_participation=False,
+            ),
+        ]
+    )
+    def test_sending_message_records_participation(
+        self,
+        is_state: bool,
+        event_type: str,
+        event_content: JsonDict,
+        record_participation: bool,
+    ) -> None:
+        """
+        Test that sending an various events into a room causes the user to
+        appropriately marked or not marked as a participant in that room.
+        """
+        self.helper.join(self.room1, self.user2, tok=self.tok2)
+
+        # user has not sent any messages, so should not be a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertFalse(participant)
+
+        # send an event into the room
+        if is_state:
+            # send a state event
+            self.helper.send_state(
+                self.room1,
+                event_type,
+                body=event_content,
+                tok=self.tok2,
+            )
+        else:
+            # send a non-state event
+            self.helper.send_event(
+                self.room1,
+                event_type,
+                content=event_content,
+                tok=self.tok2,
+            )
+
+        # check whether the user has been marked as a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertEqual(participant, record_participation)
+
+    @parameterized.expand(
+        [
+            param(
+                event_type="m.room.message",
+                event_content={
+                    "msgtype": "m.text",
+                    "body": "I am engaging in this room",
+                },
+            ),
+            param(
+                event_type="m.room.encrypted",
+                event_content={
+                    "algorithm": "m.megolm.v1.aes-sha2",
+                    "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                    "device_id": "RJYKSTBOIE",
+                    "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                    "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
+                },
+            ),
+        ]
+    )
+    def test_sending_event_and_leaving_does_not_record_participation(
+        self,
+        event_type: str,
+        event_content: JsonDict,
+    ) -> None:
+        """
+        Test that sending an event into a room that should mark a user as a
+        participant, but then leaving the room, results in the user no longer
+        be marked as a participant in that room.
+        """
+        self.helper.join(self.room1, self.user2, tok=self.tok2)
+
+        # user has not sent any messages, so should not be a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertFalse(participant)
+
+        # sending a message should now mark user as participant
+        self.helper.send_event(
+            self.room1,
+            event_type,
+            content=event_content,
+            tok=self.tok2,
+        )
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertTrue(participant)
+
+        # leave the room
+        self.helper.leave(self.room1, self.user2, tok=self.tok2)
+
+        # user should no longer be considered a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.user2, self.room1)
+        )
+        self.assertFalse(participant)

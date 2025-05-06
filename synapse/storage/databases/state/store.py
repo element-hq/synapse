@@ -22,10 +22,10 @@
 import logging
 from typing import (
     TYPE_CHECKING,
-    Collection,
     Dict,
     Iterable,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -36,7 +36,10 @@ import attr
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
-from synapse.events.snapshot import UnpersistedEventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    UnpersistedEventContext,
+    UnpersistedEventContextBase,
+)
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -45,6 +48,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import MutableStateMap, StateKey, StateMap
@@ -55,6 +59,7 @@ from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+    from synapse.storage.databases.state.deletion import StateDeletionDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +88,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         database: DatabasePool,
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
+        state_deletion_store: "StateDeletionDataStore",
     ):
         super().__init__(database, db_conn, hs)
+        self._state_deletion_store = state_deletion_store
 
         # Originally the state store used a single DictionaryCache to cache the
         # event IDs for the state types in a given state group to avoid hammering
@@ -467,14 +474,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             Returns:
                 A list of state groups
             """
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
-                txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = (
+                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -546,6 +554,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                     for key, state_id in context.state_delta_due_to_event.items()
                 ],
             )
+
             return events_and_context
 
         return await self.db_pool.runInteraction(
@@ -601,14 +610,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 The state group if successfully created, or None if the state
                 needs to be persisted as a full state.
             """
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
-                txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = (
+                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -726,8 +736,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         )
 
     async def purge_unreferenced_state_groups(
-        self, room_id: str, state_groups_to_delete: Collection[int]
-    ) -> None:
+        self,
+        room_id: str,
+        state_groups_to_sequence_numbers: Mapping[int, int],
+    ) -> bool:
         """Deletes no longer referenced state groups and de-deltas any state
         groups that reference them.
 
@@ -735,21 +747,31 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             room_id: The room the state groups belong to (must all be in the
                 same room).
             state_groups_to_delete: Set of all state groups to delete.
+
+        Returns:
+            Whether any state groups were actually deleted.
         """
 
-        await self.db_pool.runInteraction(
+        return await self.db_pool.runInteraction(
             "purge_unreferenced_state_groups",
             self._purge_unreferenced_state_groups,
             room_id,
-            state_groups_to_delete,
+            state_groups_to_sequence_numbers,
         )
 
     def _purge_unreferenced_state_groups(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_groups_to_delete: Collection[int],
-    ) -> None:
+        state_groups_to_sequence_numbers: Mapping[int, int],
+    ) -> bool:
+        state_groups_to_delete = self._state_deletion_store.get_state_groups_ready_for_potential_deletion_txn(
+            txn, state_groups_to_sequence_numbers
+        )
+
+        if not state_groups_to_delete:
+            return False
+
         logger.info(
             "[purge] found %i state groups to delete", len(state_groups_to_delete)
         )
@@ -808,9 +830,19 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             [(sg,) for sg in state_groups_to_delete],
         )
         txn.execute_batch(
+            "DELETE FROM state_group_edges WHERE state_group = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+        txn.execute_batch(
             "DELETE FROM state_groups WHERE id = ?",
             [(sg,) for sg in state_groups_to_delete],
         )
+        txn.execute_batch(
+            "DELETE FROM state_groups_pending_deletion WHERE state_group = ?",
+            [(sg,) for sg in state_groups_to_delete],
+        )
+
+        return True
 
     @trace
     @tag_args
@@ -830,11 +862,40 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             List[Tuple[int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="state_group_edges",
-                column="prev_state_group",
+                column="state_group",
                 iterable=state_groups,
                 keyvalues={},
                 retcols=("state_group", "prev_state_group"),
                 desc="get_previous_state_groups",
+            ),
+        )
+
+        return dict(rows)
+
+    @trace
+    @tag_args
+    async def get_next_state_groups(
+        self, state_groups: Iterable[int]
+    ) -> Dict[int, int]:
+        """Fetch the groups that have the given state groups as their previous
+        state groups.
+
+        Args:
+            state_groups
+
+        Returns:
+            A mapping from state group to previous state group.
+        """
+
+        rows = cast(
+            List[Tuple[int, int]],
+            await self.db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="prev_state_group",
+                iterable=state_groups,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+                desc="get_next_state_groups",
             ),
         )
 
@@ -854,6 +915,12 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     ) -> None:
         # Delete all edges that reference a state group linked to room_id
         logger.info("[purge] removing %s from state_group_edges", room_id)
+
+        if isinstance(self.database_engine, PostgresEngine):
+            # Disable statement timeouts for this transaction; purging rooms can
+            # take a while!
+            txn.execute("SET LOCAL statement_timeout = 0")
+
         txn.execute(
             """
             DELETE FROM state_group_edges AS sge WHERE sge.state_group IN (
