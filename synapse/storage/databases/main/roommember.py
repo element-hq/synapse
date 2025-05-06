@@ -1445,13 +1445,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         def _txn(
             txn: LoggingTransaction,
         ) -> Dict[str, RoomsForUserSlidingSync]:
-            sql = """
-            SELECT room_id, membership, forgotten, event_stream_ordering FROM sliding_sync_membership_snapshots
-            WHERE user_id = ?
-            """
-            txn.execute(sql, (user_id,))
-            logger.info("asdf raw sliding_sync_membership_snapshots %s", txn.fetchall())
-
             # XXX: If you use any new columns that can change (like from
             # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
             # `get_sliding_sync_rooms_for_user_from_membership_snapshots` cache in the
@@ -1544,8 +1537,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 INNER JOIN rooms AS r USING (room_id)
                 WHERE user_id = ?
                     AND m.forgotten = 0
-                    AND m.membership == 'leave'
-                    AND m.user_id == m.sender
+                    AND m.membership = 'leave'
+                    AND m.user_id = m.sender
                     AND (m.event_stream_ordering > ?)
             """
             # If a leave happens after the token range, we may have still been joined
