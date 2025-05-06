@@ -79,7 +79,6 @@ logger = logging.getLogger(__name__)
 
 _MEMBERSHIP_PROFILE_UPDATE_NAME = "room_membership_profile_update"
 _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
-_POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
 
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
@@ -1749,7 +1748,7 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
                     AND room_memberships.event_stream_ordering <= ?
                     AND room_memberships.event_stream_ordering > ?;
             """
-            batch = int(stream_token) - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
+            batch = int(stream_token) - batch_size
             txn.execute(sql, (stream_token, batch))
 
         if stream_token is None:
@@ -1761,7 +1760,7 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             await self.db_pool.updates._end_background_update(
                 "populate_participant_bg_update"
             )
-            return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
+            return batch_size
 
         await self.db_pool.runInteraction(
             "_background_populate_participant_txn",
@@ -1769,16 +1768,14 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             stream_token,
         )
 
-        progress["last_stream_token"] = (
-            stream_token - _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
-        )
+        progress["last_stream_token"] = stream_token - batch_size
         await self.db_pool.runInteraction(
             "populate_participant_bg_update",
             self.db_pool.updates._background_update_progress_txn,
             "populate_participant_bg_update",
             progress,
         )
-        return _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE
+        return batch_size
 
     async def _background_add_membership_profile(
         self, progress: JsonDict, batch_size: int
