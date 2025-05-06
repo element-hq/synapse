@@ -1,3 +1,49 @@
+# Synapse 1.129.0 (2025-05-06)
+
+No significant changes since 1.129.0rc2.
+
+
+
+
+# Synapse 1.129.0rc2 (2025-04-30)
+
+Synapse 1.129.0rc1 was never formally released due to regressions discovered during the release process. 1.129.0rc2 fixes those regressions by reverting the affected PRs.
+
+### Internal Changes
+
+- Revert the slow background update introduced by [\#18068](https://github.com/element-hq/synapse/issues/18068) in v1.128.0. ([\#18372](https://github.com/element-hq/synapse/issues/18372))
+- Revert "Add total event, unencrypted message, and e2ee event counts to stats reporting", added in v1.129.0rc1. ([\#18373](https://github.com/element-hq/synapse/issues/18373))
+
+
+
+
+# Synapse 1.129.0rc1 (2025-04-15)
+
+### Features
+
+- Add `passthrough_authorization_parameters` in OIDC configuration to allow passing parameters to the authorization grant URL. ([\#18232](https://github.com/element-hq/synapse/issues/18232))
+- Add `total_event_count`, `total_message_count`, and `total_e2ee_event_count` fields to the homeserver usage statistics. ([\#18260](https://github.com/element-hq/synapse/issues/18260))
+
+### Bugfixes
+
+- Fix `force_tracing_for_users` config when using delegated auth. ([\#18334](https://github.com/element-hq/synapse/issues/18334))
+- Fix the token introspection cache logging access tokens when MAS integration is in use. ([\#18335](https://github.com/element-hq/synapse/issues/18335))
+- Stop caching introspection failures when delegating auth to MAS. ([\#18339](https://github.com/element-hq/synapse/issues/18339))
+- Fix `ExternalIDReuse` exception after migrating to MAS on workers with a high traffic. ([\#18342](https://github.com/element-hq/synapse/issues/18342))
+- Fix minor performance regression caused by tracking of room participation. Regressed in v1.128.0. ([\#18345](https://github.com/element-hq/synapse/issues/18345))
+
+### Updates to the Docker image
+
+- Optimize the build of the complement-synapse image. ([\#18294](https://github.com/element-hq/synapse/issues/18294))
+
+### Internal Changes
+
+- Disable statement timeout during room purge. ([\#18133](https://github.com/element-hq/synapse/issues/18133))
+- Add cache to storage functions used to auth requests when using delegated auth. ([\#18337](https://github.com/element-hq/synapse/issues/18337))
+
+
+
+
 # Synapse 1.128.0 (2025-04-08)
 
 No significant changes since 1.128.0rc1.

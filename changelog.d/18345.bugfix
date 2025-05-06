@@ -1,1 +1,0 @@
-Fix minor performance regression caused by tracking of room participation. Regressed in v1.128.0.
