@@ -840,13 +840,14 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         newly_left = interested_rooms.newly_left_rooms
 
         # Ensure that the invited, ban, and knock rooms show up
-        self.assertEqual(
+        self.assertIncludes(
             room_id_results,
             {
                 invited_room_id,
                 ban_room_id,
                 knock_room_id,
             },
+            exact=True,
         )
         # It should be pointing to the the respective membership event (latest
         # membership event in the from/to range)
@@ -3301,7 +3302,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
             to_token=now_token,
         )
 
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertIncludes(room_id_results.keys(), set(), exact=True)
 
     def test_basic_rooms(self) -> None:
         """
@@ -3439,7 +3440,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         )
 
         # Only the `newly_left` room should show up
-        self.assertEqual(room_id_results.keys(), {room_id2})
+        self.assertIncludes(room_id_results.keys(), {room_id2}, exact=True)
         self.assertEqual(
             room_id_results[room_id2].event_id,
             _leave_response2["event_id"],
@@ -3484,7 +3485,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         )
 
         # The kicked room should show up
-        self.assertEqual(room_id_results.keys(), {kick_room_id})
+        self.assertIncludes(room_id_results.keys(), {kick_room_id}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
             room_id_results[kick_room_id].event_id,
@@ -3558,7 +3559,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         )
 
         # Room1 should show up because it was `newly_left` via state reset during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        self.assertIncludes(room_id_results.keys(), {room_id1, room_id2}, exact=True)
         # It should be pointing to no event because we were removed from the room
         # without a corresponding leave event
         self.assertEqual(
