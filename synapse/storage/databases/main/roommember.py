@@ -65,6 +65,7 @@ from synapse.types import (
     PersistedEventPosition,
     StateMap,
     StrCollection,
+    StreamToken,
     get_domain_from_id,
 )
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
@@ -1424,10 +1425,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     async def get_sliding_sync_rooms_for_user(
         self,
         user_id: str,
+        to_token: StreamToken,
     ) -> Mapping[str, RoomsForUserSlidingSync]:
         """Get all the rooms for a user to handle a sliding sync request.
 
-        Ignores forgotten rooms and rooms that the user has left themselves.
+        Ignores forgotten rooms. Also ignores rooms that the user has left themselves
+        unless the user left *after* the token range
+        (the token range is > `from_token` and <= `to_token`).
+
 
         Returns:
             Map from room ID to membership info
@@ -1440,6 +1445,15 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
             # `get_sliding_sync_rooms_for_user` cache in the appropriate places (and add
             # tests).
+
+            sql = """
+            SELECT * FROM sliding_sync_membership_snapshots
+            WHERE user_id = ?
+                AND forgotten = 0
+            """
+            txn.execute(sql, (user_id,))
+            logger.info("asdf raw sliding_sync_membership_snapshots %s", txn.fetchall())
+
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -1452,8 +1466,25 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 LEFT JOIN sliding_sync_joined_rooms AS j ON (j.room_id = m.room_id AND m.membership = 'join')
                 WHERE user_id = ?
                     AND m.forgotten = 0
+                    AND (
+                        (m.membership != 'leave' OR m.user_id != m.sender)
+                        OR (m.event_stream_ordering > ?)
+                    )
             """
-            txn.execute(sql, (user_id,))
+            logger.info("asdf to_token %s", to_token)
+            # If a leave happens after the token range, we may have still been joined
+            # (or any non-self-leave which is relevant to sync) to the room before so we
+            # need to include it in the list of potentially relevant rooms to return
+            # here and apply our rewind logic (outside of this function).
+            #
+            # We use the min token position to ensure we don't miss any updates. With a
+            # naive stream_ordering comparison, we might catch a few membership updates
+            # that are within the token range but then they are relevant to sync anyway
+            # from being with in the token range so we don't need to to any
+            # post-filtering after we get the results back from the database.
+            min_to_token_position = to_token.room_key.stream
+            txn.execute(sql, (user_id, min_to_token_position))
+
             return {
                 row[0]: RoomsForUserSlidingSync(
                     room_id=row[0],

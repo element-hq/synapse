@@ -1030,7 +1030,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
 
         # Leave before we calculate the `from_token`
         room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        _leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1063,17 +1063,19 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
-
+        # `room_id1` should not show up because it was left before the token range.
+        # `room_id2` should show up because it is `newly_left` within the token range.
         self.assertEqual(
-            room_id_results[room_id1].event_id,
-            leave_response1["event_id"],
+            room_id_results.keys(),
+            {room_id2},
+            "Corresponding map to disambiguate the opaque room IDs: "
+            + str(
+                {
+                    "room_id1": room_id1,
+                    "room_id2": room_id2,
+                }
+            ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
-        # We should *NOT* be `newly_joined` or `newly_left` because that happened before
-        # the from/to range
-        self.assertTrue(room_id1 not in newly_joined)
-        self.assertTrue(room_id1 not in newly_left)
 
         self.assertEqual(
             room_id_results[room_id2].event_id,

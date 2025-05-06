@@ -245,7 +245,7 @@ class SlidingSyncRoomLists:
         # `newly_left` rooms below. This is more efficient than fetching all rooms and
         # then filtering out the old left rooms.
         room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
-            user_id
+            user_id, to_token
         )
 
         # Remove invites from ignored users
@@ -262,6 +262,10 @@ class SlidingSyncRoomLists:
                     and room_for_user_sliding_sync.sender in ignored_users
                 ):
                     room_membership_for_user_map.pop(room_id, None)
+
+        logger.info(
+            "asdf room_membership_for_user_map %s", room_membership_for_user_map
+        )
 
         changes = await self._get_rewind_changes_to_current_membership_to_token(
             sync_config.user, room_membership_for_user_map, to_token=to_token
@@ -299,6 +303,9 @@ class SlidingSyncRoomLists:
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
+        logger.info("asdf newly_joined_room_ids: %s", newly_joined_room_ids)
+        logger.info("asdf newly_left_room_map: %s", newly_left_room_map)
+
         # Add back `newly_left` rooms (rooms left in the from -> to token range).
         #
         # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include
@@ -309,6 +316,7 @@ class SlidingSyncRoomLists:
         missing_newly_left_rooms = (
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
+        logger.info("asdf missing_newly_left_rooms: %s", missing_newly_left_rooms)
         if missing_newly_left_rooms:
             # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
@@ -332,6 +340,11 @@ class SlidingSyncRoomLists:
                     )
 
                     change = changes.get(room_id)
+                    logger.info(
+                        "asdf newly_left_room_for_user_sliding_sync: %s change %s",
+                        newly_left_room_for_user_sliding_sync,
+                        change,
+                    )
                     if change is not None:
                         # Update room membership events to the point in time of the `to_token`
                         room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
