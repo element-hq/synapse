@@ -51,8 +51,8 @@ from synapse.util import Clock
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
-from tests.unittest import HomeserverTestCase, TestCase
 from tests.test_utils.event_injection import create_event
+from tests.unittest import HomeserverTestCase, TestCase
 
 logger = logging.getLogger(__name__)
 
@@ -3211,6 +3211,9 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
 
     def _get_sync_room_ids_for_user(
         self,
@@ -3459,8 +3462,17 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         user2_tok = self.login(user2_id, "pass")
 
         # The room where the state reset will happen
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            is_public=True,
+            tok=user2_tok,
+        )
+        # Create a dummy event for us to point back to for the state reset
+        dummy_event_response = self.helper.send(room_id1, "test", tok=user2_tok)
+        dummy_event_id = dummy_event_response["event_id"]
+
+        # Join after the dummy event
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         # Join another room so we don't hit the short-circuit and return early if they
         # have no room membership
@@ -3469,61 +3481,26 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
 
         before_reset_token = self.event_sources.get_current_token()
 
-        # Send another state event to make a position for the state reset to happen at
-        dummy_state_response = self.helper.send_state(
-            room_id1,
-            event_type="foobarbaz",
-            state_key="",
-            body={"foo": "bar"},
-            tok=user2_tok,
+        # Trigger a state reset
+        join_rule_event, join_rule_context = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[dummy_event_id],
+                type=EventTypes.JoinRules,
+                state_key="",
+                content={"join_rule": JoinRules.INVITE},
+                sender=user2_id,
+                room_id=room_id1,
+                room_version=self.get_success(self.store.get_room_version_id(room_id1)),
+            )
         )
-        dummy_state_pos = self.get_success(
-            self.store.get_position_for_event(dummy_state_response["event_id"])
+        _, join_rule_event_pos, _ = self.get_success(
+            self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
-        # Mock a state reset removing the membership for user1 in the current state
-        self.get_success(
-            self.store.db_pool.simple_delete(
-                table="current_state_events",
-                keyvalues={
-                    "room_id": room_id1,
-                    "type": EventTypes.Member,
-                    "state_key": user1_id,
-                },
-                desc="state reset user in current_state_events",
-            )
-        )
-        self.get_success(
-            self.store.db_pool.simple_delete(
-                table="local_current_membership",
-                keyvalues={
-                    "room_id": room_id1,
-                    "user_id": user1_id,
-                },
-                desc="state reset user in local_current_membership",
-            )
-        )
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                table="current_state_delta_stream",
-                values={
-                    "stream_id": dummy_state_pos.stream,
-                    "room_id": room_id1,
-                    "type": EventTypes.Member,
-                    "state_key": user1_id,
-                    "event_id": None,
-                    "prev_event_id": join_response1["event_id"],
-                    "instance_name": dummy_state_pos.instance_name,
-                },
-                desc="state reset user in current_state_delta_stream",
-            )
-        )
-
-        # Manually bust the cache since we we're just manually messing with the database
-        # and not causing an actual state reset.
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, dummy_state_pos.stream
-        )
+        # Ensure that the state reset worked and only user2 is in the room now
+        users_in_room = self.get_success(self.store.get_users_in_room(room_id1))
+        self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
 
         after_reset_token = self.event_sources.get_current_token()
 
