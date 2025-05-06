@@ -2278,13 +2278,14 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
 
-    def test_display_name_changes_leave_after_token_range(
+    def test_newly_joined_display_name_changes_leave_after_token_range(
         self,
     ) -> None:
         """
         Test that we point to the correct membership event within the from/to range even
-        if there are multiple `join` membership events in a row indicating
-        `displayname`/`avatar_url` updates and we leave after the `to_token`.
+        if we are `newly_joined` and there are multiple `join` membership events in a
+        row indicating `displayname`/`avatar_url` updates and we leave after the
+        `to_token`.
 
         See condition "1a)" comments in the `get_room_membership_for_user_at_to_token()` method.
         """
@@ -2299,6 +2300,7 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # leave and can still re-join.
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
         # Update the displayname during the token range
         displayname_change_during_token_range_response = self.helper.send_state(
             room_id1,
@@ -2373,6 +2375,107 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
+        self.assertTrue(room_id1 not in newly_left)
+
+    def test_display_name_changes_leave_after_token_range(
+        self,
+    ) -> None:
+        """
+        Test that we point to the correct membership event within the from/to range even
+        if there are multiple `join` membership events in a row indicating
+        `displayname`/`avatar_url` updates and we leave after the `to_token`.
+
+        See condition "1a)" comments in the `get_room_membership_for_user_at_to_token()` method.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        _before_room1_token = self.event_sources.get_current_token()
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_join_token = self.event_sources.get_current_token()
+
+        # Update the displayname during the token range
+        displayname_change_during_token_range_response = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+
+        after_display_name_change_token = self.event_sources.get_current_token()
+
+        # Update the displayname after the token range
+        displayname_change_after_token_range_response = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname after token range",
+            },
+            tok=user1_tok,
+        )
+
+        # Leave after the token
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        interested_rooms = self.get_success(
+            self.sliding_sync_handler.room_lists.compute_interested_rooms(
+                SlidingSyncConfig(
+                    user=UserID.from_string(user1_id),
+                    requester=create_requester(user_id=user1_id),
+                    lists={
+                        "foo-list": SlidingSyncConfig.SlidingSyncList(
+                            ranges=[(0, 99)],
+                            required_state=[],
+                            timeline_limit=1,
+                        )
+                    },
+                    conn_id=None,
+                ),
+                PerConnectionState(),
+                from_token=after_join_token,
+                to_token=after_display_name_change_token,
+            )
+        )
+        room_id_results = interested_rooms.room_membership_for_user_map
+        newly_joined = interested_rooms.newly_joined_rooms
+        newly_left = interested_rooms.newly_left_rooms
+
+        # Room should show up because we were joined during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            displayname_change_during_token_range_response["event_id"],
+            "Corresponding map to disambiguate the opaque event IDs: "
+            + str(
+                {
+                    "join_response": join_response["event_id"],
+                    "displayname_change_during_token_range_response": displayname_change_during_token_range_response[
+                        "event_id"
+                    ],
+                    "displayname_change_after_token_range_response": displayname_change_after_token_range_response[
+                        "event_id"
+                    ],
+                }
+            ),
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We only changed our display name during the token range so we shouldn't be
+        # considered `newly_joined` or `newly_left`
+        self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
 
     def test_display_name_changes_join_after_token_range(
