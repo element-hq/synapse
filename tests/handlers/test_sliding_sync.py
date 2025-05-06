@@ -646,9 +646,9 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=now_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
 
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertIncludes(room_id_results, set(), exact=True)
 
     def test_get_newly_joined_room(self) -> None:
         """
@@ -686,18 +686,25 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(room_id_results.keys(), {room_id})
+        self.assertIncludes(
+            room_id_results,
+            {room_id},
+            exact=True,
+        )
         # It should be pointing to the join event (latest membership event in the
         # from/to range)
         self.assertEqual(
-            room_id_results[room_id].event_id,
+            interested_rooms.room_membership_for_user_map[room_id].event_id,
             join_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id].membership,
+            Membership.JOIN,
+        )
         # We should be considered `newly_joined` because we joined during the token
         # range
         self.assertTrue(room_id in newly_joined)
@@ -736,18 +743,21 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(room_id_results.keys(), {room_id})
+        self.assertIncludes(room_id_results, {room_id}, exact=True)
         # It should be pointing to the join event (latest membership event in the
         # from/to range)
         self.assertEqual(
-            room_id_results[room_id].event_id,
+            interested_rooms.room_membership_for_user_map[room_id].event_id,
             join_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertTrue(room_id not in newly_joined)
         self.assertTrue(room_id not in newly_left)
@@ -825,13 +835,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Ensure that the invited, ban, and knock rooms show up
         self.assertEqual(
-            room_id_results.keys(),
+            room_id_results,
             {
                 invited_room_id,
                 ban_room_id,
@@ -841,26 +851,35 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # It should be pointing to the the respective membership event (latest
         # membership event in the from/to range)
         self.assertEqual(
-            room_id_results[invited_room_id].event_id,
+            interested_rooms.room_membership_for_user_map[invited_room_id].event_id,
             invite_response["event_id"],
         )
-        self.assertEqual(room_id_results[invited_room_id].membership, Membership.INVITE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[invited_room_id].membership,
+            Membership.INVITE,
+        )
         self.assertTrue(invited_room_id not in newly_joined)
         self.assertTrue(invited_room_id not in newly_left)
 
         self.assertEqual(
-            room_id_results[ban_room_id].event_id,
+            interested_rooms.room_membership_for_user_map[ban_room_id].event_id,
             ban_response["event_id"],
         )
-        self.assertEqual(room_id_results[ban_room_id].membership, Membership.BAN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[ban_room_id].membership,
+            Membership.BAN,
+        )
         self.assertTrue(ban_room_id not in newly_joined)
         self.assertTrue(ban_room_id not in newly_left)
 
         self.assertEqual(
-            room_id_results[knock_room_id].event_id,
+            interested_rooms.room_membership_for_user_map[knock_room_id].event_id,
             knock_room_membership_state_event.event_id,
         )
-        self.assertEqual(room_id_results[knock_room_id].membership, Membership.KNOCK)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[knock_room_id].membership,
+            Membership.KNOCK,
+        )
         self.assertTrue(knock_room_id not in newly_joined)
         self.assertTrue(knock_room_id not in newly_left)
 
@@ -912,19 +931,24 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_kick_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # The kicked room should show up
-        self.assertEqual(room_id_results.keys(), {kick_room_id})
+        self.assertIncludes(room_id_results, {kick_room_id}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[kick_room_id].event_id,
+            interested_rooms.room_membership_for_user_map[kick_room_id].event_id,
             kick_response["event_id"],
         )
-        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
-        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[kick_room_id].membership,
+            Membership.LEAVE,
+        )
+        self.assertNotEqual(
+            interested_rooms.room_membership_for_user_map[kick_room_id].sender, user1_id
+        )
         # We should *NOT* be `newly_joined` because we were not joined at the the time
         # of the `to_token`.
         self.assertTrue(kick_room_id not in newly_joined)
@@ -1020,10 +1044,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=before_room_forgets,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
 
         # We shouldn't see the room because it was forgotten
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertIncludes(room_id_results, set(), exact=True)
 
     def test_newly_left_rooms(self) -> None:
         """
@@ -1063,18 +1087,16 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room2_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        # Ideally, `room_id1` should not show up because it was left before the token range.
+        # `room_id1` should not show up because it was left before the token range.
         # `room_id2` should show up because it is `newly_left` within the token range.
         self.assertIncludes(
-            room_id_results.keys(),
+            room_id_results,
             {room_id2},
-            # This isn't exact because the new vs fallback path include left rooms
-            # differently (`room_id1` differs)
-            exact=False,
+            exact=True,
             message="Corresponding map to disambiguate the opaque room IDs: "
             + str(
                 {
@@ -1085,10 +1107,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         )
 
         self.assertEqual(
-            room_id_results[room_id2].event_id,
+            interested_rooms.room_membership_for_user_map[room_id2].event_id,
             leave_response2["event_id"],
         )
-        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id2].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined` because we are instead `newly_left`
         self.assertTrue(room_id2 not in newly_joined)
         self.assertTrue(room_id2 in newly_left)
@@ -1133,17 +1158,20 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response1["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -1188,16 +1216,16 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # We should still see the room because we were joined during the
         # from_token/to_token time period.
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1207,7 +1235,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -1250,15 +1281,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # We should still see the room because we were joined before the `from_token`
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1268,7 +1299,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -1329,15 +1363,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_kick_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # We shouldn't see the room because it was forgotten
-        self.assertEqual(room_id_results.keys(), {kick_room_id})
+        self.assertIncludes(room_id_results, {kick_room_id}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[kick_room_id].event_id,
+            interested_rooms.room_membership_for_user_map[kick_room_id].event_id,
             kick_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1349,8 +1383,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
-        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[kick_room_id].membership,
+            Membership.LEAVE,
+        )
+        self.assertNotEqual(
+            interested_rooms.room_membership_for_user_map[kick_room_id].sender, user1_id
+        )
         # We should *NOT* be `newly_joined` because we were kicked
         self.assertTrue(kick_room_id not in newly_joined)
         self.assertTrue(kick_room_id not in newly_left)
@@ -1400,15 +1439,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should still show up because it's newly_left during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             leave_response1["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1420,7 +1459,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined` because we are actually `newly_left` during
         # the token range
         self.assertTrue(room_id1 not in newly_joined)
@@ -1470,15 +1512,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should still show up because it's newly_left during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             leave_response1["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1489,7 +1531,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined` because we are actually `newly_left` during
         # the token range
         self.assertTrue(room_id1 not in newly_joined)
@@ -1544,20 +1589,23 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Only rooms we were joined to before the `to_token` should show up
-        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        self.assertIncludes(room_id_results, {room_id1, room_id2}, exact=True)
 
         # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response1["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because there is no
         # `from_token` to define a "live" range to compare against
         self.assertTrue(room_id1 not in newly_joined)
@@ -1566,10 +1614,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Room2
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id2].event_id,
+            interested_rooms.room_membership_for_user_map[room_id2].event_id,
             leave_response2["event_id"],
         )
-        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id2].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because there is no
         # `from_token` to define a "live" range to compare against
         self.assertTrue(room_id2 not in newly_joined)
@@ -1641,14 +1692,14 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=to_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # In the "current" state snapshot, we're joined to all of the rooms but in the
         # from/to token range...
         self.assertIncludes(
-            room_id_results.keys(),
+            room_id_results,
             {
                 # Included because we were joined before both tokens
                 room_id1,
@@ -1665,10 +1716,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_room1_response1["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because we joined `room1`
         # before either of the tokens
         self.assertTrue(room_id1 not in newly_joined)
@@ -1677,10 +1731,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Room2
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id2].event_id,
+            interested_rooms.room_membership_for_user_map[room_id2].event_id,
             leave_room2_response1["event_id"],
         )
-        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id2].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
         # `room1` before either of the tokens
         self.assertTrue(room_id2 not in newly_joined)
@@ -1729,17 +1786,20 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             leave_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
         # `room1` before either of the tokens
         self.assertTrue(room_id1 not in newly_joined)
@@ -1787,17 +1847,20 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             leave_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
         # `room1` before either of the tokens
         self.assertTrue(room_id1 not in newly_joined)
@@ -1852,15 +1915,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because it was newly_left and joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response2["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1874,7 +1937,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         # We should *NOT* be `newly_left` because we joined during the token range and
@@ -1929,15 +1995,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined before the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response2["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -1951,7 +2017,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -2003,15 +2072,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were invited before the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             invite_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2022,7 +2091,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.INVITE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.INVITE,
+        )
         # We should *NOT* be `newly_joined` because we were only invited before the
         # token range
         self.assertTrue(room_id1 not in newly_joined)
@@ -2092,15 +2164,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             displayname_change_during_token_range_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2115,7 +2187,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -2172,15 +2247,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_change1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             displayname_change_during_token_range_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2192,7 +2267,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -2259,15 +2337,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined before the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             displayname_change_before_token_range_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2282,7 +2360,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertTrue(room_id1 not in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -2358,15 +2439,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             displayname_change_during_token_range_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2381,7 +2462,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -2458,15 +2542,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_display_name_change_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             displayname_change_during_token_range_response["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2481,7 +2565,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We only changed our display name during the token range so we shouldn't be
         # considered `newly_joined` or `newly_left`
         self.assertTrue(room_id1 not in newly_joined)
@@ -2542,10 +2629,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
 
         # Room shouldn't show up because we joined after the from/to range
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertIncludes(room_id_results, set(), exact=True)
 
     def test_newly_joined_with_leave_join_in_token_range(
         self,
@@ -2591,18 +2678,21 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_more_changes_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because we were joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_response2["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be considered `newly_joined` because there is some non-join event in
         # between our latest join event.
         self.assertTrue(room_id1 in newly_joined)
@@ -2671,15 +2761,15 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room1_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room should show up because it was newly_left and joined during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertIncludes(room_id_results, {room_id1}, exact=True)
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             displayname_change_during_token_range_response2["event_id"],
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2694,7 +2784,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 }
             ),
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we first joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -2762,12 +2855,12 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_room3_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(
-            room_id_results.keys(),
+            room_id_results,
             {
                 # Left before the from/to range
                 room_id1,
@@ -2781,10 +2874,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             leave_room1_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because we were invited and left
         # before the token range
         self.assertTrue(room_id1 not in newly_joined)
@@ -2793,10 +2889,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Room2
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id2].event_id,
+            interested_rooms.room_membership_for_user_map[room_id2].event_id,
             invite_room2_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id2].membership, Membership.INVITE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id2].membership,
+            Membership.INVITE,
+        )
         # We should *NOT* be `newly_joined`/`newly_left` because we were invited before
         # the token range
         self.assertTrue(room_id2 not in newly_joined)
@@ -2805,10 +2904,13 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
         # Room3
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id3].event_id,
+            interested_rooms.room_membership_for_user_map[room_id3].event_id,
             leave_room3_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id3].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id3].membership,
+            Membership.LEAVE,
+        )
         # We should be `newly_left` because we were invited and left during
         # the token range
         self.assertTrue(room_id3 not in newly_joined)
@@ -2887,16 +2989,16 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
                 to_token=after_reset_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         # Room1 should show up because it was `newly_left` via state reset during the from/to range
-        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        self.assertIncludes(room_id_results, {room_id1, room_id2}, exact=True)
         # It should be pointing to no event because we were removed from the room
         # without a corresponding leave event
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             None,
             "Corresponding map to disambiguate the opaque event IDs: "
             + str(
@@ -2906,7 +3008,10 @@ class ComputeInterestedRoomsTestCase(SlidingSyncBase):
             ),
         )
         # State reset caused us to leave the room and there is no corresponding leave event
-        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.LEAVE,
+        )
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertTrue(room_id1 not in newly_joined)
         # We should be `newly_left` because we were removed via state reset during the from/to range
@@ -3138,12 +3243,12 @@ class ComputeInterestedRoomsShardTestCase(
                 to_token=stuck_activity_token,
             )
         )
-        room_id_results = interested_rooms.room_membership_for_user_map
+        room_id_results = set(interested_rooms.lists["foo-list"].ops[0].room_ids)
         newly_joined = interested_rooms.newly_joined_rooms
         newly_left = interested_rooms.newly_left_rooms
 
         self.assertEqual(
-            room_id_results.keys(),
+            room_id_results,
             {
                 room_id1,
                 room_id2,
@@ -3154,10 +3259,13 @@ class ComputeInterestedRoomsShardTestCase(
         # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id1].event_id,
+            interested_rooms.room_membership_for_user_map[room_id1].event_id,
             join_room1_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id1].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id1 in newly_joined)
         self.assertTrue(room_id1 not in newly_left)
@@ -3165,10 +3273,13 @@ class ComputeInterestedRoomsShardTestCase(
         # Room2
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id2].event_id,
+            interested_rooms.room_membership_for_user_map[room_id2].event_id,
             leave_room2_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id2].membership,
+            Membership.LEAVE,
+        )
         # room_id2 should *NOT* be considered `newly_left` because we left before the
         # from/to range and the join event during the range happened while worker2 was
         # stuck. This means that from the perspective of the master, where the
@@ -3181,10 +3292,13 @@ class ComputeInterestedRoomsShardTestCase(
         # Room3
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
-            room_id_results[room_id3].event_id,
+            interested_rooms.room_membership_for_user_map[room_id3].event_id,
             join_on_worker3_response["event_id"],
         )
-        self.assertEqual(room_id_results[room_id3].membership, Membership.JOIN)
+        self.assertEqual(
+            interested_rooms.room_membership_for_user_map[room_id3].membership,
+            Membership.JOIN,
+        )
         # We should be `newly_joined` because we joined during the token range
         self.assertTrue(room_id3 in newly_joined)
         self.assertTrue(room_id3 not in newly_left)
@@ -3325,7 +3439,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         )
 
         # Ensure that the invited, ban, and knock rooms show up
-        self.assertEqual(
+        self.assertIncludes(
             room_id_results.keys(),
             {
                 join_room_id,
@@ -3333,6 +3447,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
                 ban_room_id,
                 knock_room_id,
             },
+            exact=True,
         )
         # It should be pointing to the the respective membership event (latest
         # membership event in the from/to range)
