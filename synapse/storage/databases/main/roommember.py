@@ -1452,7 +1452,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 LEFT JOIN sliding_sync_joined_rooms AS j ON (j.room_id = m.room_id AND m.membership = 'join')
                 WHERE user_id = ?
                     AND m.forgotten = 0
-                    AND (m.membership != 'leave' OR m.user_id != m.sender)
             """
             txn.execute(sql, (user_id,))
             return {
