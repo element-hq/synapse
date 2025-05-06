@@ -3232,6 +3232,10 @@ Must be a valid URL including scheme and path.</p>
 additional parameters to the authorization grant URL.</p>
 </li>
 <li>
+<p><code>passthrough_authorization_parameters</code>: List of parameters that will be passed through from the redirect endpoint 
+to the authorization grant URL.</p>
+</li>
+<li>
 <p><code>allow_existing_users</code>: set to true to allow a user logging in via OIDC to
 match a pre-existing account instead of failing. This could be used if
 switching from password logins to OIDC. Defaults to false.</p>
@@ -3365,6 +3369,7 @@ claim MUST contain &quot;admin&quot;.</p>
     jwks_uri: &quot;https://accounts.example.com/.well-known/jwks.json&quot;
     additional_authorization_parameters:
       acr_values: 2fa
+    passthrough_authorization_parameters: [&quot;login_hint&quot;]
     skip_verification: true
     enable_registration: true
     user_mapping_provider:
