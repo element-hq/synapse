@@ -170,7 +170,7 @@ class Config:
 
     section: ClassVar[str]
 
-    def __init__(self, root_config: Optional["RootConfig"] = None):
+    def __init__(self, root_config: "RootConfig"):
         self.root = root_config
 
         # Get the path to the default Synapse template directory
