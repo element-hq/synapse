@@ -116,9 +116,6 @@ class AccountDataServlet(RestServlet):
                 user_id, account_data_type
             )
 
-        if account_data is None:
-            raise NotFoundError("Account data not found")
-
         # If experimental support for MSC3391 is enabled, then this endpoint should
         # return a 404 if the content for an account data type is an empty dict.
         if self._hs.config.experimental.msc3391_enabled and account_data == {}:
