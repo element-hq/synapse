@@ -378,7 +378,6 @@ class MediaRepository:
             media_length=content_length,
             user_id=auth_user,
             sha256=sha256,
-            # TODO: Better name?
             quarantined_by="system" if should_quarantine else None,
         )
 

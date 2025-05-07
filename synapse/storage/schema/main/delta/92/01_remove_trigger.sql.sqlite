@@ -11,6 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a column `participant` to `room_memberships` table to track whether a room member has sent
--- a `m.room.message` or `m.room.encrypted` event into a room they are a member of
-ALTER TABLE room_memberships ADD COLUMN participant BOOLEAN DEFAULT FALSE;
+-- Removes the trigger that was added in #18260 and then reverted
+DROP TRIGGER IF EXISTS event_stats_events_insert_trigger;
+DROP TRIGGER IF EXISTS event_stats_events_delete_trigger;
