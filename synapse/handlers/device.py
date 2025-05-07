@@ -1420,6 +1420,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         """Retry to resync device lists that are out of sync, except if another retry is
         in progress.
         """
+        # If the lock can not be acquired we want to always return immediately instead of blocking here
         if not self._resync_retry_lock.acquire(blocking=False):
             return
         try:
