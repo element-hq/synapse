@@ -157,10 +157,10 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             }
 
             for type, content in self.defaults.items():
-                if account_data.get(type) is None:
-                    account_data[type] = content
+                if user_account_data.get(type) is None:
+                    user_account_data[type] = content
 
-            return account_data
+            return user_account_data
 
         return await self.db_pool.runInteraction(
             "get_global_account_data_for_user", get_global_account_data_for_user
