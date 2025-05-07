@@ -1897,7 +1897,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             remaining_key_ids, {"AAAAAAAAAA", "BAAAAA", "BAAAAB", "BAAAAAAAAA"}
         )
 
-    @override_config({"limit_key_queries_to_users_who_share_rooms": True})
+    @override_config({"experimental_features": {"msc4263_limit_key_queries_to_users_who_share_rooms": True}})
     def test_query_devices_remote_restricted_not_in_shared_room(self) -> None:
         """Tests that querying keys for a remote user that we don't share a room
         with returns nothing.
@@ -1956,7 +1956,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             },
         )
 
-    @override_config({"limit_key_queries_to_users_who_share_rooms": True})
+    @override_config({"experimental_features": {"msc4263_limit_key_queries_to_users_who_share_rooms": True}})
     def test_query_devices_remote_restricted_in_shared_room(self) -> None:
         """Tests that querying keys for a remote user that we share a room
         with returns the cross signing keys correctly.

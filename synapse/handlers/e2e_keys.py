@@ -162,7 +162,7 @@ class E2eKeysHandler:
             async def filter_device_key_query(
                 query: Dict[str, List[str]],
             ) -> Dict[str, List[str]]:
-                if not self.config.server.limit_key_queries_to_users_who_share_rooms:
+                if not self.config.experimental.msc4263_limit_key_queries_to_users_who_share_rooms:
                     # Only ignore invalid user IDs, which is the same behaviour as if
                     # the user existed but had no keys.
                     return {
