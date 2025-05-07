@@ -2,8 +2,8 @@ from unittest import TestCase as StdlibTestCase
 
 import yaml
 
-from synapse.config._base import RootConfig
 from synapse.config import ConfigError
+from synapse.config._base import RootConfig
 from synapse.config.api import ApiConfig
 from synapse.types.state import StateFilter
 

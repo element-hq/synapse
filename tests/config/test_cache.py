@@ -19,8 +19,8 @@
 #
 #
 
+from synapse.config._base import RootConfig
 from synapse.config.cache import CacheConfig, add_resizable_cache
-from synapse.config._base import ConfigError, RootConfig
 from synapse.types import JsonDict
 from synapse.util.caches.lrucache import LruCache
 

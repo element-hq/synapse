@@ -20,8 +20,8 @@
 
 import yaml
 
+from synapse.config._base import RootConfig
 from synapse.config.database import DatabaseConfig
-from synapse.config._base import ConfigError, RootConfig
 
 from tests import unittest
 

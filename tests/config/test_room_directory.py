@@ -24,8 +24,8 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
+from synapse.config._base import RootConfig
 from synapse.config.room_directory import RoomDirectoryConfig
-from synapse.config._base import ConfigError, RootConfig
 from synapse.server import HomeServer
 from synapse.util import Clock
 
