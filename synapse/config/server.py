@@ -49,6 +49,11 @@ Using direct TCP replication for workers is no longer supported.
 Please see https://element-hq.github.io/synapse/latest/upgrade.html#direct-tcp-replication-is-no-longer-supported-migrate-to-redis
 """
 
+
+MISSING_SERVER_NAME = """\
+Missing mandatory `server_name` config option.
+"""
+
 # by default, we attempt to listen on both '::' *and* '0.0.0.0' because some OSes
 # (Windows, macOS, other BSD/Linux where net.ipv6.bindv6only is set) will only listen
 # on IPv6 when '::' is set.
@@ -295,8 +300,13 @@ class ServerConfig(Config):
     section = "server"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        self.server_name = config["server_name"]
         self.server_context = config.get("server_context", None)
+
+        server_name = config.get("server_name")
+        if server_name is None:
+            raise ConfigError(MISSING_SERVER_NAME, ("server_name",))
+
+        self.server_name = server_name
 
         try:
             parse_and_validate_server_name(self.server_name)

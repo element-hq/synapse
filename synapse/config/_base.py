@@ -101,28 +101,6 @@ def format_config_error(e: ConfigError) -> Iterator[str]:
         parent_e = parent_e.__cause__
 
 
-# We split these messages out to allow packages to override with package
-# specific instructions.
-MISSING_REPORT_STATS_CONFIG_INSTRUCTIONS = """\
-Please opt in or out of reporting homeserver usage statistics, by setting
-the `report_stats` key in your config file to either True or False.
-"""
-
-MISSING_REPORT_STATS_SPIEL = """\
-We would really appreciate it if you could help our project out by reporting
-homeserver usage statistics from your homeserver. Your homeserver's server name,
-along with very basic aggregate data (e.g. number of users) will be reported. But
-it helps us to track the growth of the Matrix community, and helps us to make Matrix
-a success, as well as to convince other networks that they should peer with us.
-
-Thank you.
-"""
-
-MISSING_SERVER_NAME = """\
-Missing mandatory `server_name` config option.
-"""
-
-
 CONFIG_FILE_HEADER = """\
 # Configuration file for Synapse.
 #
@@ -929,13 +907,6 @@ def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]:
 
         specified_config.update(yaml_config)
 
-    if "server_name" not in specified_config:
-        raise ConfigError(MISSING_SERVER_NAME)
-
-    if "report_stats" not in specified_config:
-        raise ConfigError(
-            MISSING_REPORT_STATS_CONFIG_INSTRUCTIONS + "\n" + MISSING_REPORT_STATS_SPIEL
-        )
     return specified_config
 
 
