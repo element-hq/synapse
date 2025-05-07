@@ -79,6 +79,7 @@ logger = logging.getLogger(__name__)
 
 _MEMBERSHIP_PROFILE_UPDATE_NAME = "room_membership_profile_update"
 _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
+_POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
 
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
@@ -1604,6 +1605,62 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             _get_rooms_for_user_by_join_date_txn,
             user_id,
             from_ts,
+        )
+
+    async def set_room_participation(self, user_id: str, room_id: str) -> None:
+        """
+        Record the provided user as participating in the given room
+
+        Args:
+            user_id: the user ID of the user
+            room_id: ID of the room to set the participant in
+        """
+
+        def _set_room_participation_txn(
+            txn: LoggingTransaction, user_id: str, room_id: str
+        ) -> None:
+            sql = """
+                UPDATE room_memberships
+                SET participant = true
+                WHERE event_id IN (
+                    SELECT event_id FROM local_current_membership
+                    WHERE user_id = ? AND room_id = ?
+                )
+                AND NOT participant
+            """
+            txn.execute(sql, (user_id, room_id))
+
+        await self.db_pool.runInteraction(
+            "_set_room_participation_txn", _set_room_participation_txn, user_id, room_id
+        )
+
+    async def get_room_participation(self, user_id: str, room_id: str) -> bool:
+        """
+        Check whether a user is listed as a participant in a room
+
+        Args:
+            user_id: user ID of the user
+            room_id: ID of the room to check in
+        """
+
+        def _get_room_participation_txn(
+            txn: LoggingTransaction, user_id: str, room_id: str
+        ) -> bool:
+            sql = """
+                SELECT participant
+                FROM local_current_membership AS l
+                INNER JOIN room_memberships AS r USING (event_id)
+                WHERE l.user_id = ?
+                AND l.room_id = ?
+            """
+            txn.execute(sql, (user_id, room_id))
+            res = txn.fetchone()
+            if res:
+                return res[0]
+            return False
+
+        return await self.db_pool.runInteraction(
+            "_get_room_participation_txn", _get_room_participation_txn, user_id, room_id
         )
 
 

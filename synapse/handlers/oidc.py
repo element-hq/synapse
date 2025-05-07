@@ -382,7 +382,12 @@ class OidcProvider:
         self._macaroon_generaton = macaroon_generator
 
         self._config = provider
-        self._callback_url: str = hs.config.oidc.oidc_callback_url
+
+        self._callback_url: str
+        if provider.redirect_uri is not None:
+            self._callback_url = provider.redirect_uri
+        else:
+            self._callback_url = hs.config.oidc.oidc_callback_url
 
         # Calculate the prefix for OIDC callback paths based on the public_baseurl.
         # We'll insert this into the Path= parameter of any session cookies we set.
@@ -461,6 +466,10 @@ class OidcProvider:
         self._device_handler = hs.get_device_handler()
 
         self._sso_handler.register_identity_provider(self)
+
+        self.passthrough_authorization_parameters = (
+            provider.passthrough_authorization_parameters
+        )
 
     def _validate_metadata(self, m: OpenIDProviderMetadata) -> None:
         """Verifies the provider metadata.
@@ -578,6 +587,24 @@ class OidcProvider:
         )
 
     @property
+    def _uses_access_token(self) -> bool:
+        """Return True if the `access_token` will be used during the login process.
+
+        This is useful to determine whether the access token
+        returned by the identity provider, and
+        any related metadata (such as the `at_hash` field in
+        the ID token), should be validated.
+        """
+        # Currently, Synapse only uses the access_token to fetch user metadata
+        # from the userinfo endpoint. Therefore we only have a single criteria
+        # to check right now but this may change in the future and this function
+        # should be updated if more usages are introduced.
+        #
+        # For example, if we start to use the access_token given to us by the
+        # IdP for more things, such as accessing Resource Server APIs.
+        return self._uses_userinfo
+
+    @property
     def issuer(self) -> str:
         """The issuer identifying this provider."""
         return self._config.issuer
@@ -639,6 +666,11 @@ class OidcProvider:
             metadata["code_challenge_methods_supported"] = ["S256"]
         elif self._config.pkce_method == "never":
             metadata.pop("code_challenge_methods_supported", None)
+
+        if self._config.id_token_signing_alg_values_supported:
+            metadata["id_token_signing_alg_values_supported"] = (
+                self._config.id_token_signing_alg_values_supported
+            )
 
         self._validate_metadata(metadata)
 
@@ -943,9 +975,16 @@ class OidcProvider:
             "nonce": nonce,
             "client_id": self._client_auth.client_id,
         }
-        if "access_token" in token:
+        if self._uses_access_token and "access_token" in token:
             # If we got an `access_token`, there should be an `at_hash` claim
-            # in the `id_token` that we can check against.
+            # in the `id_token` that we can check against. Setting this
+            # instructs authlib to check the value of `at_hash` in the
+            # ID token.
+            #
+            # We only need to verify the access token if we actually make
+            # use of it. Which currently only happens when we need to fetch
+            # the user's information from the userinfo_endpoint. Thus, this
+            # check is also gated on self._uses_userinfo.
             claims_params["access_token"] = token["access_token"]
 
         claims_options = {"iss": {"values": [metadata["issuer"]]}}
@@ -995,7 +1034,6 @@ class OidcProvider:
                 when everything is done (or None for UI Auth)
             ui_auth_session_id: The session ID of the ongoing UI Auth (or
                 None if this is a login).
-
         Returns:
             The redirect URL to the authorization endpoint.
 
@@ -1067,6 +1105,13 @@ class OidcProvider:
                     options,
                 )
             )
+
+        # add passthrough additional authorization parameters
+        passthrough_authorization_parameters = self.passthrough_authorization_parameters
+        for parameter in passthrough_authorization_parameters:
+            parameter_value = parse_string(request, parameter)
+            if parameter_value:
+                additional_authorization_parameters.update({parameter: parameter_value})
 
         authorization_endpoint = metadata.get("authorization_endpoint")
         return prepare_grant_uri(
