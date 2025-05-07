@@ -21,6 +21,7 @@
 import yaml
 
 from synapse.config.database import DatabaseConfig
+from synapse.config._base import ConfigError, RootConfig
 
 from tests import unittest
 
@@ -28,7 +29,9 @@ from tests import unittest
 class DatabaseConfigTestCase(unittest.TestCase):
     def test_database_configured_correctly(self) -> None:
         conf = yaml.safe_load(
-            DatabaseConfig().generate_config_section(data_dir_path="/data_dir_path")
+            DatabaseConfig(RootConfig()).generate_config_section(
+                data_dir_path="/data_dir_path"
+            )
         )
 
         expected_database_conf = {

@@ -25,6 +25,7 @@ import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.config.room_directory import RoomDirectoryConfig
+from synapse.config._base import ConfigError, RootConfig
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -63,7 +64,7 @@ class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
         """
         )
 
-        rd_config = RoomDirectoryConfig()
+        rd_config = RoomDirectoryConfig(RootConfig())
         rd_config.read_config(config)
 
         self.assertFalse(
@@ -123,7 +124,7 @@ class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
         """
         )
 
-        rd_config = RoomDirectoryConfig()
+        rd_config = RoomDirectoryConfig(RootConfig())
         rd_config.read_config(config)
 
         self.assertFalse(
