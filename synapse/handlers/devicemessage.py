@@ -20,11 +20,19 @@
 #
 
 import logging
+from copy import deepcopy
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
-from synapse.api.errors import Codes, SynapseError
+from canonicaljson import encode_canonical_json
+
+from synapse.api.constants import (
+    MAX_EDU_SIZE,
+    EduTypes,
+    EventContentFields,
+    ToDeviceEventTypes,
+)
+from synapse.api.errors import Codes, EventSizeError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import (
@@ -293,18 +301,18 @@ class DeviceMessageHandler:
 
         remote_edu_contents = {}
         for destination, messages in remote_messages.items():
-            # The EDU contains a "message_id" property which is used for
-            # idempotence. Make up a random one.
-            message_id = random_string(16)
-            log_kv({"destination": destination, "message_id": message_id})
-
-            remote_edu_contents[destination] = {
-                "messages": messages,
-                "sender": sender_user_id,
-                "type": message_type,
-                "message_id": message_id,
-                "org.matrix.opentracing_context": json_encoder.encode(context),
-            }
+            edu_contents = get_device_message_edu_contents(
+                sender_user_id, message_type, messages, context
+            )
+            remote_edu_contents[destination] = edu_contents
+            log_kv(
+                {
+                    "destination": destination,
+                    "message_ids": [
+                        edu_content["message_id"] for edu_content in edu_contents
+                    ],
+                }
+            )
 
         # Add messages to the database.
         # Retrieve the stream id of the last-processed to-device message.
@@ -409,3 +417,63 @@ class DeviceMessageHandler:
             "events": messages,
             "next_batch": f"d{stream_id}",
         }
+
+
+def get_device_message_edu_contents(
+    sender_user_id: str,
+    message_type: str,
+    messages: Dict[str, Dict[str, JsonDict]],
+    context: Dict[str, Any],
+) -> List[JsonDict]:
+    """
+    This function takes a dictionary of messages and splits them into several EDUs if needed.
+
+    It will raise an EventSizeError if a single message is too large to fit into an EDU.
+    """
+
+    base_edu_content = {
+        "messages": {},
+        "sender": sender_user_id,
+        "type": message_type,
+        "message_id": random_string(16),
+    }
+    # This is the size of the full EDU without any messages and without the opentracing context
+    base_edu_size = len(
+        encode_canonical_json(
+            {
+                "edu_type": "m.direct_to_device",
+                "content": base_edu_content,
+            }
+        )
+    )
+    base_edu_content["org.matrix.opentracing_context"] = json_encoder.encode(context)
+
+    edu_contents = []
+
+    current_edu_content: JsonDict = deepcopy(base_edu_content)
+    current_edu_size = base_edu_size
+
+    for recipient, message in messages.items():
+        # We remove 2 for the curly braces and add 2 for the colon and comma
+        # We may overshoot by 1 for single message EDUs because of the comma, but that's fine
+        message_entry_size = len(encode_canonical_json({recipient: message}))
+
+        if current_edu_size + message_entry_size > MAX_EDU_SIZE:
+            if len(current_edu_content["messages"]) == 0:
+                raise EventSizeError("device message too large", unpersistable=True)
+
+            edu_contents.append(current_edu_content)
+
+            current_edu_content = deepcopy(base_edu_content)
+            current_edu_content["message_id"] = random_string(16)
+
+            current_edu_size = base_edu_size
+        else:
+            current_edu_size += message_entry_size
+
+        current_edu_content["messages"][recipient] = message
+
+    if len(current_edu_content["messages"]) > 0:
+        edu_contents.append(current_edu_content)
+
+    return edu_contents
