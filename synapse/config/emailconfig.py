@@ -30,7 +30,7 @@ import attr
 
 from synapse.types import JsonDict
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, read_file
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,11 @@ MISSING_PASSWORD_RESET_CONFIG_ERROR = """\
 Password reset emails are enabled on this homeserver due to a partial
 'email' block. However, the following required keys are missing:
     %s
+"""
+
+CONFLICTING_PASSWORD_OPTS_ERROR = """\
+You have configured both `email.smtp_pass` and `email.smtp_pass_path`.
+These are mutually incompatible.
 """
 
 DEFAULT_SUBJECTS = {
@@ -83,7 +88,9 @@ class EmailSubjectConfig:
 class EmailConfig(Config):
     section = "email"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         # TODO: We should separate better the email configuration from the notification
         # and account validity config.
 
@@ -99,7 +106,24 @@ class EmailConfig(Config):
             "smtp_port", 465 if self.force_tls else 25
         )
         self.email_smtp_user = email_config.get("smtp_user", None)
-        self.email_smtp_pass = email_config.get("smtp_pass", None)
+        self.email_smtp_pass = email_config.get("smtp_pass")
+        if self.email_smtp_pass and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("email", "smtp_pass"),
+            )
+        email_smtp_pass_path = email_config.get("smtp_pass_path")
+        if email_smtp_pass_path:
+            if self.email_smtp_pass:
+                raise ConfigError(CONFLICTING_PASSWORD_OPTS_ERROR)
+            self.email_smtp_pass = read_file(
+                email_smtp_pass_path,
+                (
+                    "email",
+                    "smtp_pass_path",
+                ),
+            ).strip()
+
         self.require_transport_security = email_config.get(
             "require_transport_security", False
         )
