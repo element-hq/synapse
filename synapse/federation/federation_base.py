@@ -63,6 +63,7 @@ class FederationBase:
         self.store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
+        self._policy_handler = hs.get_room_policy_handler()
 
     @trace
     async def _check_sigs_and_hash(
@@ -144,6 +145,12 @@ class FederationBase:
                         pdu, "Event content has been tampered with"
                     )
             return redacted_event
+
+        policy_allowed = self._policy_handler.is_event_allowed(pdu)
+        if not policy_allowed:
+            logger.warning("Event not allowed by policy server, soft-failing %s", pdu.event_id)
+            pdu.internal_metadata.soft_failed = True
+            return pdu
 
         spam_check = await self._spam_checker_module_callbacks.check_event_for_spam(pdu)
 

@@ -75,6 +75,7 @@ from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.retryutils import NotRetryingDestination
@@ -420,6 +421,39 @@ class FederationClient(FederationBase):
             return signed_pdu
 
         return None
+
+    @trace
+    @tag_args
+    async def get_pdu_policy_recommendation(self, destination: str, pdu: EventBase, timeout: Optional[int] = None) -> Optional[str]:
+        """Requests that the destination server (typically a policy server)
+        check the event and return its recommendation on how to handle the
+        event.
+
+        Args:
+            destination: The remote homeserver to ask (a policy server)
+            pdu: The event to check
+            timeout: How long to try (in ms) the destination for before
+                giving up. None indicates no timeout.
+
+        Returns:
+            The policy recommendation, or None if we were unable to acquire one.
+        """
+
+        logger.debug("get_pdu_policy_recommendation for event_id=%s from %s", pdu.event_id, destination)
+
+        try:
+            res = await self.transport_layer.get_policy_recommendation_for_pdu(destination, pdu, timeout=timeout)
+            recommendation = res.get("recommendation")
+            if not isinstance(recommendation, str):
+                raise InvalidResponseError("recommendation is not a string")
+            if recommendation not in (RECOMMENDATION_OK, RECOMMENDATION_SPAM):
+                logger.warning("get_pdu_policy_recommendation: unknown recommendation: %s", recommendation)
+                return RECOMMENDATION_OK
+            return recommendation
+        except Exception as e:
+            logger.warning("get_pdu_policy_recommendation: server %s responded with error, assuming OK recommendation: %s", destination, e)
+            return RECOMMENDATION_OK
+
 
     @trace
     @tag_args
