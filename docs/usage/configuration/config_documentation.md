@@ -4331,21 +4331,9 @@ room list by default_
 Example configuration:
 
 ```yaml
-# No rule list specified. Anyone may publish any room to the public list.
+# No rule list specified. No one may publish any room to the public list, except server admins.
 # This is the default behaviour.
 room_list_publication_rules:
-```
-
-```yaml
-# A list of one rule which allows everything.
-# This has the same effect as the previous example.
-room_list_publication_rules:
-  - "action": "allow"
-```
-
-```yaml
-# An empty list of rules. No-one may publish to the room list.
-room_list_publication_rules: []
 ```
 
 ```yaml
@@ -4353,6 +4341,19 @@ room_list_publication_rules: []
 # This has the same effect as the previous example.
 room_list_publication_rules:
   - "action": "deny"
+```
+
+```yaml
+# An empty list of rules.
+# This has the same effect as the previous example.
+room_list_publication_rules: []
+```
+
+```yaml
+# A list of one rule which allows everything.
+# This was the default behaviour pre v1.126.0.
+room_list_publication_rules:
+  - "action": "allow"
 ```
 
 ```yaml
