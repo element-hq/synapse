@@ -19,6 +19,7 @@
 #
 #
 
+from synapse.config._base import RootConfig
 from synapse.config.cache import CacheConfig, add_resizable_cache
 from synapse.types import JsonDict
 from synapse.util.caches.lrucache import LruCache
@@ -29,7 +30,7 @@ from tests.unittest import TestCase
 class CacheConfigTests(TestCase):
     def setUp(self) -> None:
         # Reset caches before each test since there's global state involved.
-        self.config = CacheConfig()
+        self.config = CacheConfig(RootConfig())
         self.config.reset()
 
     def tearDown(self) -> None:

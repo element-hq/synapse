@@ -191,7 +191,7 @@ class KeyConfig(Config):
             if macaroon_secret_key:
                 raise ConfigError(CONFLICTING_MACAROON_SECRET_KEY_OPTS_ERROR)
             macaroon_secret_key = read_file(
-                macaroon_secret_key_path, "macaroon_secret_key_path"
+                macaroon_secret_key_path, ("macaroon_secret_key_path",)
             ).strip()
         if not macaroon_secret_key:
             macaroon_secret_key = self.root.registration.registration_shared_secret
@@ -216,7 +216,9 @@ class KeyConfig(Config):
         if form_secret_path:
             if form_secret:
                 raise ConfigError(CONFLICTING_FORM_SECRET_OPTS_ERROR)
-            self.form_secret = read_file(form_secret_path, "form_secret_path").strip()
+            self.form_secret = read_file(
+                form_secret_path, ("form_secret_path",)
+            ).strip()
         else:
             self.form_secret = form_secret
 
