@@ -18,12 +18,20 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from unittest.mock import AsyncMock, Mock
+
 from parameterized import parameterized_class
 
-from synapse.api.constants import EduTypes
+from twisted.test.proto_helpers import MemoryReactor
+
+from synapse.api.constants import MAX_EDU_SIZE, EduTypes
+from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, sendtodevice, sync
+from synapse.server import HomeServer
 from synapse.types import JsonDict
+from synapse.util import Clock
+from synapse.util.stringutils import random_string
 
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -61,7 +69,17 @@ class SendToDeviceTestCase(HomeserverTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         config["experimental_features"] = self.experimental_features
+        config["federation_sender_instances"] = None
         return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_transport_client = Mock(spec=["send_transaction"])
+        self.federation_transport_client.send_transaction = AsyncMock()
+        hs = self.setup_test_homeserver(
+            federation_transport_client=self.federation_transport_client,
+        )
+
+        return hs
 
     def test_user_to_user(self) -> None:
         """A to-device message from one user to another should get delivered"""
@@ -112,6 +130,82 @@ class SendToDeviceTestCase(HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(channel.json_body.get("to_device", {}).get("events", []), [])
+
+    def test_large_remote_todevice(self) -> None:
+        """A to-device message needs to fit in the EDU size limit"""
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+
+        # send the message
+        test_msg = {"foo": random_string(MAX_EDU_SIZE)}
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/12345",
+            content={"messages": {"@remote_user:secondserver": {"device": test_msg}}},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 413, channel.result)
+        self.assertEqual(Codes.TOO_LARGE, channel.json_body["errcode"])
+
+    def test_edu_splitting(self) -> None:
+        """Test that a bunch of to-device messages are split into multiple EDUs if they are too large"""
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
+
+        # 2 small messages that should fit in a single EDU
+        for i in range(2):
+            messages[f"@remote_user{i}:" + destination] = {
+                "device": {"foo": random_string(100)}
+            }
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/123456",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        self.get_success(sender.send_device_messages([destination]))
+
+        self.pump()
+
+        json_cb = mock_send_transaction.call_args[0][1]
+        data = json_cb()
+        self.assertEqual(len(data["edus"]), 1)
+
+        mock_send_transaction.reset_mock()
+
+        # 2 messages, each just big enough to fit in an EDU
+        for i in range(2):
+            messages[f"@remote_user{i}:" + destination] = {
+                "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+            }
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/1234567",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        self.get_success(sender.send_device_messages([destination]))
+
+        self.pump()
+
+        json_cb = mock_send_transaction.call_args[0][1]
+        data = json_cb()
+        self.assertEqual(len(data["edus"]), 2)
 
     @override_config({"rc_key_requests": {"per_second": 10, "burst_count": 2}})
     def test_local_room_key_request(self) -> None:
