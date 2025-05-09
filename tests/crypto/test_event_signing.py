@@ -48,7 +48,6 @@ class EventSigningTestCase(unittest.TestCase):
     def test_sign_minimal(self) -> None:
         event_dict = {
             "event_id": "$0:domain",
-            "origin": "domain",
             "origin_server_ts": 1000000,
             "signatures": {},
             "type": "X",
@@ -80,7 +79,6 @@ class EventSigningTestCase(unittest.TestCase):
         event_dict = {
             "content": {"body": "Here is the message content"},
             "event_id": "$0:domain",
-            "origin": "domain",
             "origin_server_ts": 1000000,
             "type": "m.room.message",
             "room_id": "!r:domain",

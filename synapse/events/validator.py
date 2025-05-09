@@ -67,7 +67,6 @@ class EventValidator:
             "auth_events",
             "content",
             "hashes",
-            "origin",
             "prev_events",
             "sender",
             "type",
@@ -76,13 +75,6 @@ class EventValidator:
         for k in required:
             if k not in event:
                 raise SynapseError(400, "Event does not have key %s" % (k,))
-
-        # Check that the following keys have string values
-        event_strings = ["origin"]
-
-        for s in event_strings:
-            if not isinstance(getattr(event, s), str):
-                raise SynapseError(400, "'%s' not a string type" % (s,))
 
         # Depending on the room version, ensure the data is spec compliant JSON.
         if event.room_version.strict_canonicaljson:

@@ -117,7 +117,6 @@ It returns a JSON body like the following:
         "hashes": {
             "sha256": "xK1//xnmvHJIOvbgXlkI8eEqdvoMmihVDJ9J4SNlsAw"
         },
-        "origin": "matrix.org",
         "origin_server_ts": 1592291711430,
         "prev_events": [
             "$YK4arsKKcc0LRoe700pS8DSjOvUT4NDv0HfInlMFw2M"

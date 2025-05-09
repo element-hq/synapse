@@ -533,7 +533,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "content": {"membership": "join"},
             "auth_events": [],
             "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
@@ -550,7 +549,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "auth_events": [],
             "content": {"membership": "join"},
             "unsigned": {
@@ -577,7 +575,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.power_levels",
-            "origin": "test.servx",
             "content": {},
             "auth_events": [],
             "unsigned": {
