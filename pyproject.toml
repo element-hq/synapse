@@ -385,6 +385,9 @@ build-backend = "poetry.core.masonry.api"
 #  - PyPy on Aarch64 and musllinux on aarch64: too slow to build.
 #    c.f. https://github.com/matrix-org/synapse/pull/14259
 skip = "cp36* cp37* cp38* pp37* pp38* *-musllinux_i686 pp*aarch64 *-musllinux_aarch64"
+# Enable non-default builds.
+# "pypy" used to be included by default up until cibuildwheel 3.
+enable = "pypy"
 
 # We need a rust compiler.
 #
