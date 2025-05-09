@@ -9,5 +9,4 @@
   - End with either a period (.) or an exclamation mark (!).
   - Start with a capital letter.
   - Feel free to credit yourself, by adding a sentence "Contributed by @github_username." or "Contributed by [Your Name]." to the end of the entry.
-* [ ] [Code style](https://element-hq.github.io/synapse/latest/code_style.html) is correct
-  (run the [linters](https://element-hq.github.io/synapse/latest/development/contributing_guide.html#run-the-linters))
+* [ ] [Code style](https://element-hq.github.io/synapse/latest/code_style.html) is correct (run the [linters](https://element-hq.github.io/synapse/latest/development/contributing_guide.html#run-the-linters))
