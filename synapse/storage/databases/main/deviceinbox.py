@@ -735,11 +735,14 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         assert self._can_write_to_device
 
         def add_messages_txn(
-            txn: LoggingTransaction, now_ms: int, stream_id: int
+            txn: LoggingTransaction,
+            now_ms: int,
+            stream_ids: List[int],
+            last_stream_id: int,
         ) -> None:
             # Add the local messages directly to the local inbox.
             self._add_messages_to_local_device_inbox_txn(
-                txn, stream_id, local_messages_by_user_then_device
+                txn, last_stream_id, local_messages_by_user_then_device
             )
 
             # Add the remote messages to the federation outbox.
@@ -758,23 +761,23 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 values=[
                     (
                         destination,
-                        stream_id,
+                        stream_ids[i],
                         now_ms,
                         json_encoder.encode(edu_content),
                         self._instance_name,
                     )
                     for destination, edu_contents in remote_edu_contents.items()
-                    for edu_content in edu_contents
+                    for i, edu_content in enumerate(edu_contents)
                 ],
             )
 
             for destination, edu_contents in remote_edu_contents.items():
-                for edu_content in edu_contents:
+                for i, edu_content in enumerate(edu_contents):
                     if issue9533_logger.isEnabledFor(logging.DEBUG):
                         issue9533_logger.debug(
                             "Queued outgoing to-device messages with "
                             "stream_id %i, EDU message_id %s, type %s for %s: %s",
-                            stream_id,
+                            stream_ids[i],
                             edu_content["message_id"],
                             edu_content["type"],
                             destination,
@@ -808,16 +811,24 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                                     msg.get(EventContentFields.TO_DEVICE_MSGID),
                                 )
 
-        async with self._to_device_msg_id_gen.get_next() as stream_id:
+        nb_edus = sum(len(edus) for edus in remote_edu_contents.values())
+        async with self._to_device_msg_id_gen.get_next_mult(nb_edus) as stream_ids:
+            last_stream_id = stream_ids[len(stream_ids) - 1]
             now_ms = self._clock.time_msec()
             await self.db_pool.runInteraction(
-                "add_messages_to_device_inbox", add_messages_txn, now_ms, stream_id
+                "add_messages_to_device_inbox",
+                add_messages_txn,
+                now_ms,
+                stream_ids,
+                last_stream_id,
             )
             for user_id in local_messages_by_user_then_device.keys():
-                self._device_inbox_stream_cache.entity_has_changed(user_id, stream_id)
+                self._device_inbox_stream_cache.entity_has_changed(
+                    user_id, last_stream_id
+                )
             for destination in remote_edu_contents.keys():
                 self._device_federation_outbox_stream_cache.entity_has_changed(
-                    destination, stream_id
+                    destination, last_stream_id
                 )
 
         return self._to_device_msg_id_gen.get_current_token()

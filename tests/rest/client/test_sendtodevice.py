@@ -207,6 +207,46 @@ class SendToDeviceTestCase(HomeserverTestCase):
         data = json_cb()
         self.assertEqual(len(data["edus"]), 2)
 
+    def test_transaction_splitting(self) -> None:
+        """Test that a bunch of to-device messages are split into multiple transactions if they are too many EDUs"""
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+
+        _ = self.register_user("u1", "pass")
+        user1_tok = self.login("u1", "pass", "d1")
+        destination = "secondserver"
+        messages = {}
+
+        for i in range(101):
+            messages[f"@remote_user{i}:" + destination] = {
+                "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
+            }
+
+        channel = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/12345678",
+            content={"messages": messages},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        self.get_success(sender.send_device_messages([destination]))
+
+        self.pump()
+
+        self.assertEqual(mock_send_transaction.call_count, 2)
+
+        # A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
+        first_call = mock_send_transaction.call_args_list[0][0][1]()
+        self.assertEqual(len(first_call["edus"]), 90)
+
+        second_call = mock_send_transaction.call_args_list[1][0][1]()
+        self.assertEqual(len(second_call["edus"]), 11)
+
     @override_config({"rc_key_requests": {"per_second": 10, "burst_count": 2}})
     def test_local_room_key_request(self) -> None:
         """m.room_key_request has special-casing; test from local user"""

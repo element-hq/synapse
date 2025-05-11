@@ -468,9 +468,8 @@ def get_device_message_edu_contents(
             current_edu_content["message_id"] = random_string(16)
 
             current_edu_size = base_edu_size
-        else:
-            current_edu_size += message_entry_size
 
+        current_edu_size += message_entry_size
         current_edu_content["messages"][recipient] = message
 
     if len(current_edu_content["messages"]) > 0:
