@@ -1,3 +1,41 @@
+[project]
+name = "matrix-synapse"
+version = "1.129.0"
+description = "Homeserver for the Matrix decentralised comms protocol"
+authors = [
+    { name = "Matrix.org Team and Contributors", email = "packages@matrix.org" },
+]
+license = "AGPL-3.0-or-later"
+readme = "README.rst"
+dynamic = [
+    # TODO: Transition our `tool.poetry.dependencies` section to
+    # `project.dependencies`.
+    "dependencies",
+]
+requires-python = ">=3.9.0,<4.0"
+
+# https://python-poetry.org/docs/pyproject/#urls
+[project.urls]
+homepage = "https://github.com/element-hq/synapse"
+repository = "https://github.com/element-hq/synapse"
+documentation = "https://element-hq.github.io/synapse/latest"
+"Bug Tracker" = "https://github.com/element-hq/synapse/issues"
+
+# https://python-poetry.org/docs/pyproject/#scripts
+[project.scripts]
+synapse_homeserver = "synapse.app.homeserver:main"
+synapse_worker = "synapse.app.generic_worker:main"
+synctl = "synapse._scripts.synctl:main"
+export_signing_key = "synapse._scripts.export_signing_key:main"
+generate_config = "synapse._scripts.generate_config:main"
+generate_log_config = "synapse._scripts.generate_log_config:main"
+generate_signing_key = "synapse._scripts.generate_signing_key:main"
+hash_password = "synapse._scripts.hash_password:main"
+register_new_matrix_user = "synapse._scripts.register_new_matrix_user:main"
+synapse_port_db = "synapse._scripts.synapse_port_db:main"
+synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
+update_synapse_database = "synapse._scripts.update_synapse_database:main"
+
 [tool.towncrier]
     package = "synapse"
     filename = "CHANGES.md"
@@ -96,19 +134,12 @@ manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 
 [tool.poetry]
-name = "matrix-synapse"
-version = "1.129.0"
-description = "Homeserver for the Matrix decentralised comms protocol"
-authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
-license = "AGPL-3.0-or-later"
-readme = "README.rst"
-repository = "https://github.com/element-hq/synapse"
-packages = [
-    { include = "synapse" },
-]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Topic :: Communications :: Chat",
+]
+packages = [
+    { include = "synapse" },
 ]
 include = [
     { path = "AUTHORS.rst", format = "sdist" },
@@ -139,24 +170,7 @@ exclude = [
 script = "build_rust.py"
 generate-setup-file = true
 
-[tool.poetry.scripts]
-synapse_homeserver = "synapse.app.homeserver:main"
-synapse_worker = "synapse.app.generic_worker:main"
-synctl = "synapse._scripts.synctl:main"
-
-export_signing_key = "synapse._scripts.export_signing_key:main"
-generate_config = "synapse._scripts.generate_config:main"
-generate_log_config = "synapse._scripts.generate_log_config:main"
-generate_signing_key = "synapse._scripts.generate_signing_key:main"
-hash_password = "synapse._scripts.hash_password:main"
-register_new_matrix_user = "synapse._scripts.register_new_matrix_user:main"
-synapse_port_db = "synapse._scripts.synapse_port_db:main"
-synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
-update_synapse_database = "synapse._scripts.update_synapse_database:main"
-
 [tool.poetry.dependencies]
-python = "^3.9.0"
-
 # Mandatory Dependencies
 # ----------------------
 # we use the TYPE_CHECKER.redefine method added in jsonschema 3.0.0
@@ -252,7 +266,8 @@ parameterized = { version = ">=0.7.4", optional = true }
 idna = { version = ">=2.5", optional = true }
 pyicu = { version = ">=2.10.2", optional = true }
 
-[tool.poetry.extras]
+# https://python-poetry.org/docs/pyproject/#optional-dependencies
+[project.optional-dependencies]
 # NB: Packages that should be part of `pip install matrix-synapse[all]` need to be specified
 # twice: once here, and once in the `all` extra.
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
@@ -315,7 +330,7 @@ all = [
     #   - systemd: this is a system-based requirement
 ]
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
