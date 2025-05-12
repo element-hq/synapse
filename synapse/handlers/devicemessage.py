@@ -454,14 +454,17 @@ def get_device_message_edu_contents(
     current_edu_size = base_edu_size
 
     for recipient, message in messages.items():
-        # We remove 2 for the curly braces and add 2 for the colon and comma
-        # We may overshoot by 1 for single message EDUs because of the comma, but that's fine
-        message_entry_size = len(encode_canonical_json({recipient: message}))
+        # We remove 2 for the curly braces and add 1 for the colon
+        message_entry_size = len(encode_canonical_json({recipient: message})) - 2 + 1
+
+        if base_edu_size + message_entry_size > MAX_EDU_SIZE:
+            raise EventSizeError("device message too large", unpersistable=True)
+
+        first_message = len(current_edu_content["messages"]) == 0
+        if not first_message:
+            message_entry_size += 1  # Add 1 for the comma
 
         if current_edu_size + message_entry_size > MAX_EDU_SIZE:
-            if len(current_edu_content["messages"]) == 0:
-                raise EventSizeError("device message too large", unpersistable=True)
-
             edu_contents.append(current_edu_content)
 
             current_edu_content = deepcopy(base_edu_content)
