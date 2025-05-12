@@ -220,9 +220,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
 
         self.assertIn("test_id_1", limiter.actions)
 
-        self.get_success_or_raise(
-            limiter.can_do_action(None, key="test_id_2", _time_now_s=10)
-        )
+        self.reactor.advance(60)
 
         self.assertNotIn("test_id_1", limiter.actions)
 
