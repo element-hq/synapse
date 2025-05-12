@@ -469,7 +469,7 @@ def get_device_message_edu_contents(
         if current_edu_size + message_entry_size > MAX_EDU_SIZE:
             edu_contents.append(current_edu_content)
             logger.debug(
-                "Splitting %d device messages from %s into a separate EDU msgid %s, %d EDUs queued",
+                "Splitting %d device messages from %s into EDU msgid %s, %d EDUs queued",
                 len(current_edu_content["messages"]),
                 sender_user_id,
                 current_edu_content["message_id"],
