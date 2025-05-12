@@ -811,6 +811,8 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                                     msg.get(EventContentFields.TO_DEVICE_MSGID),
                                 )
 
+        # We allocate one stream id per EDU so we can track if they were
+        # successfully sent or not.
         nb_edus = sum(len(edus) for edus in remote_edu_contents.values())
         async with self._to_device_msg_id_gen.get_next_mult(nb_edus) as stream_ids:
             last_stream_id = stream_ids[len(stream_ids) - 1]

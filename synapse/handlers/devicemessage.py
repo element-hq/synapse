@@ -460,8 +460,7 @@ def get_device_message_edu_contents(
         if base_edu_size + message_entry_size > MAX_EDU_SIZE:
             raise EventSizeError("device message too large", unpersistable=True)
 
-        first_message = len(current_edu_content["messages"]) == 0
-        if not first_message:
+        if len(current_edu_content["messages"]) > 0:
             message_entry_size += 1  # Add 1 for the comma
 
         if current_edu_size + message_entry_size > MAX_EDU_SIZE:
