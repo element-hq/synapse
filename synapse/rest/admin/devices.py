@@ -150,8 +150,8 @@ class DevicesRestServlet(RestServlet):
         if dehydrated_device_info:
             dehydrated_device_id = dehydrated_device_info[0]
             for device in devices:
-                if device["device_id"] == dehydrated_device_id:
-                    device["dehydrated"] = True
+                is_dehydrated = device["device_id"] == dehydrated_device_id
+                device["dehydrated"] = is_dehydrated
 
         return HTTPStatus.OK, {"devices": devices, "total": len(devices)}
 

@@ -468,12 +468,13 @@ class DevicesRestTestCase(unittest.HomeserverTestCase):
             self.assertIn("last_seen_ip", d)
             self.assertIn("last_seen_ts", d)
             if d["device_id"] == "dehydrated_device":
-                self.assertEqual(True, d.get("dehydrated"))
+                self.assertTrue(d.get("dehydrated"))
                 found_dehydrated = True
             else:
-                self.assertNotIn("dehydrated", d)
+                # Either the field is not present, or set to False
+                self.assertFalse(d.get("dehydrated"))
 
-        self.assertEqual(True, found_dehydrated)
+        self.assertTrue(found_dehydrated)
 
 
 class DeleteDevicesRestTestCase(unittest.HomeserverTestCase):
