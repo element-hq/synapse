@@ -431,33 +431,33 @@ def get_device_message_edu_contents(
     It will raise an EventSizeError if a single message is too large to fit into an EDU.
     """
 
-    base_edu_content = {
+    BASE_EDU_CONTENT = {
         "messages": {},
         "sender": sender_user_id,
         "type": message_type,
         "message_id": random_string(16),
     }
     # This is the size of the full EDU without any messages and without the opentracing context
-    base_edu_size = len(
+    BASE_EDU_SIZE = len(
         encode_canonical_json(
             {
                 "edu_type": "m.direct_to_device",
-                "content": base_edu_content,
+                "content": BASE_EDU_CONTENT,
             }
         )
     )
-    base_edu_content["org.matrix.opentracing_context"] = json_encoder.encode(context)
+    BASE_EDU_CONTENT["org.matrix.opentracing_context"] = json_encoder.encode(context)
 
     edu_contents = []
 
-    current_edu_content: JsonDict = deepcopy(base_edu_content)
-    current_edu_size = base_edu_size
+    current_edu_content: JsonDict = deepcopy(BASE_EDU_CONTENT)
+    current_edu_size = BASE_EDU_SIZE
 
     for recipient, message in messages.items():
         # We remove 2 for the curly braces and add 1 for the colon
         message_entry_size = len(encode_canonical_json({recipient: message})) - 2 + 1
 
-        if base_edu_size + message_entry_size > MAX_EDU_SIZE:
+        if current_edu_size + message_entry_size > MAX_EDU_SIZE:
             raise EventSizeError(
                 f"device message to {recipient} too large to fit in a single EDU",
                 unpersistable=True,
@@ -469,10 +469,10 @@ def get_device_message_edu_contents(
         if current_edu_size + message_entry_size > MAX_EDU_SIZE:
             edu_contents.append(current_edu_content)
 
-            current_edu_content = deepcopy(base_edu_content)
+            current_edu_content = deepcopy(BASE_EDU_CONTENT)
             current_edu_content["message_id"] = random_string(16)
 
-            current_edu_size = base_edu_size
+            current_edu_size = BASE_EDU_SIZE
 
         current_edu_content["messages"][recipient] = message
         current_edu_size += message_entry_size
