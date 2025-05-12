@@ -468,6 +468,12 @@ def get_device_message_edu_contents(
 
         if current_edu_size + message_entry_size > MAX_EDU_SIZE:
             edu_contents.append(current_edu_content)
+            logger.debug(
+                "Splitting %d device messages from %s into a separate EDU, %d EDUs queued",
+                len(current_edu_content["messages"]),
+                sender_user_id,
+                len(edu_contents),
+            )
 
             current_edu_content = deepcopy(BASE_EDU_CONTENT)
             current_edu_content["message_id"] = random_string(16)
@@ -479,5 +485,11 @@ def get_device_message_edu_contents(
 
     if len(current_edu_content["messages"]) > 0:
         edu_contents.append(current_edu_content)
+        logger.debug(
+            "Queuing last %d device messages from %s, %d EDUs queued",
+            len(current_edu_content["messages"]),
+            sender_user_id,
+            len(edu_contents),
+        )
 
     return edu_contents
