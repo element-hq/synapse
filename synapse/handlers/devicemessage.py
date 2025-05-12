@@ -457,7 +457,7 @@ def get_device_message_edu_contents(
         # We remove 2 for the curly braces and add 1 for the colon
         message_entry_size = len(encode_canonical_json({recipient: message})) - 2 + 1
 
-        if current_edu_size + message_entry_size > MAX_EDU_SIZE:
+        if BASE_EDU_SIZE + message_entry_size > MAX_EDU_SIZE:
             raise EventSizeError(
                 f"device message to {recipient} too large to fit in a single EDU",
                 unpersistable=True,
