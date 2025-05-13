@@ -42,7 +42,7 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.event_auth import get_named_level, get_power_level_event
-from synapse.events import EventBase
+from synapse.events import EventBase, is_creator
 from synapse.events.snapshot import EventContext
 from synapse.handlers.pagination import PURGE_ROOM_ACTION_NAME
 from synapse.handlers.profile import MAX_AVATAR_URL_LEN, MAX_DISPLAYNAME_LEN
@@ -1154,9 +1154,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         elif effective_membership_state == Membership.KNOCK:
             if not is_host_in_room:
-                # The knock needs to be sent over federation instead
-                remote_room_hosts.append(get_domain_from_id(room_id))
-
+                # we used to add the domain of the room ID to remote_room_hosts.
+                # This is not safe in MSC4291 rooms which do not have a domain.
                 content["membership"] = Membership.KNOCK
 
                 try:
@@ -2313,6 +2312,7 @@ def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[s
 
     # Check which members are able to invite by ensuring they're joined and have
     # the necessary power level.
+    create_event = auth_events[(EventTypes.Create, "")]
     for (event_type, state_key), event in auth_events.items():
         if event_type != EventTypes.Member:
             continue
@@ -2320,8 +2320,12 @@ def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[s
         if event.membership != Membership.JOIN:
             continue
 
+        if create_event.room_version.msc4289_creator_power_enabled and is_creator(
+            create_event, state_key
+        ):
+            result.append(state_key)
         # Check if the user has a custom power level.
-        if users.get(state_key, users_default_level) >= invite_level:
+        elif users.get(state_key, users_default_level) >= invite_level:
             result.append(state_key)
 
     return result

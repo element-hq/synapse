@@ -4094,7 +4094,7 @@ The default power levels for each preset are:
 "m.room.history_visibility": 100
 "m.room.canonical_alias": 50
 "m.room.avatar": 50
-"m.room.tombstone": 100
+"m.room.tombstone": 100 (150 if MSC4289 is used)
 "m.room.server_acl": 100
 "m.room.encryption": 100
 ```

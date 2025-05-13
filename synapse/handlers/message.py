@@ -674,7 +674,10 @@ class EventCreationHandler:
                     Codes.USER_ACCOUNT_SUSPENDED,
                 )
 
-        if event_dict["type"] == EventTypes.Create and event_dict["state_key"] == "":
+        is_create_event = (
+            event_dict["type"] == EventTypes.Create and event_dict["state_key"] == ""
+        )
+        if is_create_event:
             room_version_id = event_dict["content"]["room_version"]
             maybe_room_version_obj = KNOWN_ROOM_VERSIONS.get(room_version_id)
             if not maybe_room_version_obj:
@@ -780,6 +783,7 @@ class EventCreationHandler:
         """
         # the only thing the user can do is join the server notices room.
         if builder.type == EventTypes.Member:
+            assert builder.room_id is not None
             membership = builder.content.get("membership", None)
             if membership == Membership.JOIN:
                 return await self.store.is_server_notice_room(builder.room_id)
@@ -1242,13 +1246,40 @@ class EventCreationHandler:
                 for_verification=False,
             )
 
+        if (
+            builder.room_version.msc4291_room_ids_as_hashes
+            and builder.type == EventTypes.Create
+            and builder.is_state()
+        ):
+            if builder.room_id is not None:
+                raise SynapseError(
+                    400,
+                    "Cannot resend m.room.create event",
+                    Codes.INVALID_PARAM,
+                )
+        else:
+            assert builder.room_id is not None
+
         if prev_event_ids is not None:
             assert len(prev_event_ids) <= 10, (
                 "Attempting to create an event with %i prev_events"
                 % (len(prev_event_ids),)
             )
         else:
-            prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
+            if builder.room_id:
+                prev_event_ids = await self.store.get_prev_events_for_room(
+                    builder.room_id
+                )
+            else:
+                prev_event_ids = []  # can only happen for the create event in MSC4291 rooms
+
+        if builder.type == EventTypes.Create and builder.is_state():
+            if len(prev_event_ids) != 0:
+                raise SynapseError(
+                    400,
+                    "Cannot resend m.room.create event",
+                    Codes.INVALID_PARAM,
+                )
 
         # We now ought to have some `prev_events` (unless it's a create event).
         #
@@ -2124,6 +2155,7 @@ class EventCreationHandler:
                 original_event.room_version, third_party_result
             )
             self.validator.validate_builder(builder)
+            assert builder.room_id is not None
         except SynapseError as e:
             raise Exception(
                 "Third party rules module created an invalid event: " + e.msg,
