@@ -454,7 +454,6 @@ class FederationClient(FederationBase):
             logger.warning("get_pdu_policy_recommendation: server %s responded with error, assuming OK recommendation: %s", destination, e)
             return RECOMMENDATION_OK
 
-
     @trace
     @tag_args
     async def get_pdu(
