@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.x"
       - name: Install check-jsonschema
-        run: pip install check-jsonschema
+        run: pip install check-jsonschema==0.33.0
 
       - name: Validate meta schema
         run: check-jsonschema --check-metaschema schema/meta.schema.json
