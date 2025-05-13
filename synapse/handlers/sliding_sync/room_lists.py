@@ -1120,7 +1120,7 @@ class SlidingSyncRoomLists:
         (
             newly_joined_room_ids,
             newly_left_room_map,
-        ) = await self._get_newly_joined_and_left_rooms(
+        ) = await self._get_newly_joined_and_left_rooms_fallback(
             user_id, to_token=to_token, from_token=from_token
         )
 
@@ -1164,6 +1164,53 @@ class SlidingSyncRoomLists:
 
     @trace
     async def _get_newly_joined_and_left_rooms(
+        self,
+        user_id: str,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
+        """Fetch the sets of rooms that the user newly joined or left in the
+        given token range.
+
+        Note: there may be rooms in the newly left rooms where the user was
+        "state reset" out of the room, and so that room would not be part of the
+        "current memberships" of the user.
+
+        Returns:
+            A 2-tuple of newly joined room IDs and a map of newly_left room
+            IDs to the `RoomsForUserStateReset` entry.
+
+            We're using `RoomsForUserStateReset` but that doesn't necessarily mean the
+            user was state reset of the rooms. It's just that the `event_id`/`sender`
+            are optional and we can't tell the difference between the server leaving the
+            room when the user was the last person participating in the room and left or
+            was state reset out of the room. To actually check for a state reset, you
+            need to check if a membership still exists in the room.
+        """
+
+        newly_joined_room_ids: Set[str] = set()
+        newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
+
+        if not from_token:
+            return newly_joined_room_ids, newly_left_room_map
+
+        changes = await self.store.get_sliding_sync_membership_changes(
+            user_id,
+            from_key=from_token.room_key,
+            to_key=to_token.room_key,
+            excluded_room_ids=set(self.rooms_to_exclude_globally),
+        )
+
+        for room_id, entry in changes.items():
+            if entry.membership == Membership.JOIN:
+                newly_joined_room_ids.add(room_id)
+            elif entry.membership == Membership.LEAVE:
+                newly_left_room_map[room_id] = entry
+
+        return newly_joined_room_ids, newly_left_room_map
+
+    @trace
+    async def _get_newly_joined_and_left_rooms_fallback(
         self,
         user_id: str,
         to_token: StreamToken,
