@@ -7,6 +7,10 @@ authors = [
 ]
 license = "AGPL-3.0-or-later"
 readme = "README.rst"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Topic :: Communications :: Chat",
+]
 dynamic = [
     # TODO: Transition our `tool.poetry.dependencies` section to
     # `project.dependencies`.
@@ -134,10 +138,6 @@ manifest-path = "rust/Cargo.toml"
 module-name = "synapse.synapse_rust"
 
 [tool.poetry]
-classifiers = [
-    "Development Status :: 5 - Production/Stable",
-    "Topic :: Communications :: Chat",
-]
 packages = [
     { include = "synapse" },
 ]
