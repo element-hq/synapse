@@ -11,6 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a column `participant` to `room_memberships` table to track whether a room member has sent
--- a `m.room.message` or `m.room.encrypted` event into a room they are a member of
-ALTER TABLE room_memberships ADD COLUMN participant BOOLEAN DEFAULT FALSE;
+-- So we can fetch all rooms for a given user sorted by stream order
+DROP INDEX IF EXISTS sliding_sync_membership_snapshots_user_id;
+CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_sync_membership_snapshots(user_id, event_stream_ordering);
