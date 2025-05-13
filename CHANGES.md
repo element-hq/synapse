@@ -8,14 +8,14 @@
 
 ### Bugfixes
 
-- Fix longstanding bug where Synapse would immediately retry a failing push endpoint when a new event is received, ignoring any backoff timers. ([\#18363](https://github.com/element-hq/synapse/issues/18363))
+- Fix a longstanding bug where Synapse would immediately retry a failing push endpoint when a new event is received, ignoring any backoff timers. ([\#18363](https://github.com/element-hq/synapse/issues/18363))
 - Pass leave from remote invite rejection down Sliding Sync. ([\#18375](https://github.com/element-hq/synapse/issues/18375))
 
 ### Updates to the Docker image
 
-- In configure_workers_and_start.py, use the same absolute path of Python in the interpreter shebang, and invoke child Python processes with `sys.executable`. ([\#18291](https://github.com/element-hq/synapse/issues/18291))
+- In `configure_workers_and_start.py`, use the same absolute path of Python in the interpreter shebang, and invoke child Python processes with `sys.executable`. ([\#18291](https://github.com/element-hq/synapse/issues/18291))
 - Optimize the build of the workers image. ([\#18292](https://github.com/element-hq/synapse/issues/18292))
-- In start_for_complement.sh, replace some external program calls with shell builtins. ([\#18293](https://github.com/element-hq/synapse/issues/18293))
+- In `start_for_complement.sh`, replace some external program calls with shell builtins. ([\#18293](https://github.com/element-hq/synapse/issues/18293))
 - When generating container scripts from templates, don't add a leading newline so that their shebangs may be handled correctly. ([\#18295](https://github.com/element-hq/synapse/issues/18295))
 
 ### Improved Documentation
@@ -28,7 +28,7 @@
 
 ### Internal Changes
 
-- Return specific error code when adding an email address / phone number to account is not supported (MSC4178). ([\#17578](https://github.com/element-hq/synapse/issues/17578))
+- Return specific error code when adding an email address / phone number to account is not supported ([MSC4178](https://github.com/matrix-org/matrix-spec-proposals/pull/4178)). ([\#17578](https://github.com/element-hq/synapse/issues/17578))
 - Stop auto-provisionning missing users & devices when delegating auth to Matrix Authentication Service. Requires MAS 0.13.0 or later. ([\#18181](https://github.com/element-hq/synapse/issues/18181))
 - Apply file hashing and existing quarantines to media downloaded for URL previews. ([\#18297](https://github.com/element-hq/synapse/issues/18297))
 - Allow a few admin APIs used by matrix-authentication-service to run on workers. ([\#18313](https://github.com/element-hq/synapse/issues/18313))
