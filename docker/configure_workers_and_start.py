@@ -352,6 +352,11 @@ def error(txt: str) -> NoReturn:
 
 
 def flush_buffers() -> None:
+    """
+    Python's `print()` buffers output by default, typically waiting until ~8KB
+    accumulates. This method can be used to flush the buffers so we can see the output
+    of any print statements so far.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
 
