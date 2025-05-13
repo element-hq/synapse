@@ -54,6 +54,7 @@ from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
@@ -990,17 +991,35 @@ class StateResolutionStore:
         )
 
     def get_auth_chain_difference(
-        self, room_id: str, state_sets: List[Set[str]]
-    ) -> Awaitable[Set[str]]:
-        """Given sets of state events figure out the auth chain difference (as
+        self,
+        room_id: str,
+        state_sets: List[Set[str]],
+        conflicted_state: Optional[Set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+    ) -> Awaitable[StateDifference]:
+        """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).
 
-        This equivalent to fetching the full auth chain for each set of state
+        This is equivalent to fetching the full auth chain for each set of state
         and returning the events that don't appear in each and every auth
         chain.
 
+        If conflicted_state is not None, calculate and return the conflicted sub-graph as per
+        state res v2.1. The event IDs in the conflicted state MUST be a subset of the event IDs in
+        state_sets.
+
+        If additional_backwards_reachable_conflicted_events is set, the provided events are included
+        when calculating the conflicted subgraph. This is primarily useful for calculating the
+        subgraph across a combination of persisted and unpersisted events.
+
         Returns:
-            An awaitable that resolves to a set of event IDs.
+            information on the auth chain difference, and also the conflicted subgraph if
+            conflicted_state is not None
         """
 
-        return self.main_store.get_auth_chain_difference(room_id, state_sets)
+        return self.main_store.get_auth_chain_difference_extended(
+            room_id,
+            state_sets,
+            conflicted_state,
+            additional_backwards_reachable_conflicted_events,
+        )

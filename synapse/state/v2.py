@@ -39,10 +39,11 @@ from typing import (
 )
 
 from synapse import event_auth
-from synapse.api.constants import EventTypes
+from synapse.api.constants import CREATOR_POWER_LEVEL, EventTypes
 from synapse.api.errors import AuthError
-from synapse.api.room_versions import RoomVersion
-from synapse.events import EventBase
+from synapse.api.room_versions import RoomVersion, StateResolutionVersions
+from synapse.events import EventBase, is_creator
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import MutableStateMap, StateMap, StrCollection
 
 logger = logging.getLogger(__name__)
@@ -63,8 +64,12 @@ class StateResolutionStore(Protocol):
     ) -> Awaitable[Dict[str, EventBase]]: ...
 
     def get_auth_chain_difference(
-        self, room_id: str, state_sets: List[Set[str]]
-    ) -> Awaitable[Set[str]]: ...
+        self,
+        room_id: str,
+        state_sets: List[Set[str]],
+        conflicted_state: Optional[Set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[set[str]],
+    ) -> Awaitable[StateDifference]: ...
 
 
 # We want to await to the reactor occasionally during state res when dealing
@@ -123,12 +128,17 @@ async def resolve_events_with_store(
     logger.debug("%d conflicted state entries", len(conflicted_state))
     logger.debug("Calculating auth chain difference")
 
-    # Also fetch all auth events that appear in only some of the state sets'
-    # auth chains.
+    conflicted_set: Optional[Set[str]] = None
+    if room_version.state_res == StateResolutionVersions.V2_1:
+        # calculate the conflicted subgraph
+        conflicted_set = set(itertools.chain.from_iterable(conflicted_state.values()))
     auth_diff = await _get_auth_chain_difference(
-        room_id, state_sets, event_map, state_res_store
+        room_id,
+        state_sets,
+        event_map,
+        state_res_store,
+        conflicted_set,
     )
-
     full_conflicted_set = set(
         itertools.chain(
             itertools.chain.from_iterable(conflicted_state.values()), auth_diff
@@ -168,15 +178,26 @@ async def resolve_events_with_store(
 
     logger.debug("sorted %d power events", len(sorted_power_events))
 
+    # v2.1 starts iterative auth checks from the empty set and not the unconflicted state.
+    # It relies on IAC behaviour which populates the base state with the events from auth_events
+    # if the state tuple is missing from the base state. This ensures the base state is only
+    # populated from auth_events rather than whatever the unconflicted state is (which could be
+    # completely bogus).
+    base_state = (
+        {}
+        if room_version.state_res == StateResolutionVersions.V2_1
+        else unconflicted_state
+    )
+
     # Now sequentially auth each one
     resolved_state = await _iterative_auth_checks(
         clock,
         room_id,
         room_version,
-        sorted_power_events,
-        unconflicted_state,
-        event_map,
-        state_res_store,
+        event_ids=sorted_power_events,
+        base_state=base_state,
+        event_map=event_map,
+        state_res_store=state_res_store,
     )
 
     logger.debug("resolved power events")
@@ -239,13 +260,23 @@ async def _get_power_level_for_sender(
     event = await _get_event(room_id, event_id, event_map, state_res_store)
 
     pl = None
+    create = None
     for aid in event.auth_event_ids():
         aev = await _get_event(
             room_id, aid, event_map, state_res_store, allow_none=True
         )
         if aev and (aev.type, aev.state_key) == (EventTypes.PowerLevels, ""):
             pl = aev
-            break
+        if aev and (aev.type, aev.state_key) == (EventTypes.Create, ""):
+            create = aev
+
+    if event.type != EventTypes.Create:
+        # we should always have a create event
+        assert create is not None
+
+    if create and create.room_version.msc4289_creator_power_enabled:
+        if is_creator(create, event.sender):
+            return CREATOR_POWER_LEVEL
 
     if pl is None:
         # Couldn't find power level. Check if they're the creator of the room
@@ -286,6 +317,7 @@ async def _get_auth_chain_difference(
     state_sets: Sequence[StateMap[str]],
     unpersisted_events: Dict[str, EventBase],
     state_res_store: StateResolutionStore,
+    conflicted_state: Optional[Set[str]],
 ) -> Set[str]:
     """Compare the auth chains of each state set and return the set of events
     that only appear in some, but not all of the auth chains.
@@ -294,11 +326,18 @@ async def _get_auth_chain_difference(
         state_sets: The input state sets we are trying to resolve across.
         unpersisted_events: A map from event ID to EventBase containing all unpersisted
             events involved in this resolution.
-        state_res_store:
+        state_res_store: A way to retrieve events and extract graph information on the auth chains.
+        conflicted_state: which event IDs are conflicted. Used in v2.1 for calculating the conflicted
+            subgraph.
 
     Returns:
-        The auth difference of the given state sets, as a set of event IDs.
+        The auth difference of the given state sets, as a set of event IDs. Also includes the
+        conflicted subgraph if `conflicted_state` is set.
     """
+    is_state_res_v21 = conflicted_state is not None
+    num_conflicted_state = (
+        len(conflicted_state) if conflicted_state is not None else None
+    )
 
     # The `StateResolutionStore.get_auth_chain_difference` function assumes that
     # all events passed to it (and their auth chains) have been persisted
@@ -318,14 +357,19 @@ async def _get_auth_chain_difference(
     # the event's auth chain with the events in `unpersisted_events` *plus* their
     # auth event IDs.
     events_to_auth_chain: Dict[str, Set[str]] = {}
+    # remember the forward links when doing the graph traversal, we'll need it for v2.1 checks
+    # This is a map from an event to the set of events that contain it as an auth event.
+    event_to_next_event: Dict[str, Set[str]] = {}
     for event in unpersisted_events.values():
         chain = {event.event_id}
         events_to_auth_chain[event.event_id] = chain
 
         to_search = [event]
         while to_search:
-            for auth_id in to_search.pop().auth_event_ids():
+            next_event = to_search.pop()
+            for auth_id in next_event.auth_event_ids():
                 chain.add(auth_id)
+                event_to_next_event.setdefault(auth_id, set()).add(next_event.event_id)
                 auth_event = unpersisted_events.get(auth_id)
                 if auth_event:
                     to_search.append(auth_event)
@@ -335,6 +379,8 @@ async def _get_auth_chain_difference(
     #
     # Note: If there are no `unpersisted_events` (which is the common case), we can do a
     # much simpler calculation.
+    additional_backwards_reachable_conflicted_events: Set[str] = set()
+    unpersisted_conflicted_events: Set[str] = set()
     if unpersisted_events:
         # The list of state sets to pass to the store, where each state set is a set
         # of the event ids making up the state. This is similar to `state_sets`,
@@ -372,7 +418,16 @@ async def _get_auth_chain_difference(
                     )
                 else:
                     set_ids.add(event_id)
-
+        if conflicted_state:
+            for conflicted_event_id in conflicted_state:
+                # presence in this map means it is unpersisted.
+                event_chain = events_to_auth_chain.get(conflicted_event_id)
+                if event_chain is not None:
+                    unpersisted_conflicted_events.add(conflicted_event_id)
+                    # tell the DB layer that we have some unpersisted conflicted events
+                    additional_backwards_reachable_conflicted_events.update(
+                        e for e in event_chain if e not in unpersisted_events
+                    )
         # The auth chain difference of the unpersisted events of the state sets
         # is calculated by taking the difference between the union and
         # intersections.
@@ -384,12 +439,89 @@ async def _get_auth_chain_difference(
         auth_difference_unpersisted_part = ()
         state_sets_ids = [set(state_set.values()) for state_set in state_sets]
 
-    difference = await state_res_store.get_auth_chain_difference(
-        room_id, state_sets_ids
-    )
-    difference.update(auth_difference_unpersisted_part)
+    if conflicted_state:
+        # to ensure that conflicted state is a subset of state set IDs, we need to remove UNPERSISTED
+        # conflicted state set ids as we removed them above.
+        conflicted_state = conflicted_state - unpersisted_conflicted_events
 
-    return difference
+    difference = await state_res_store.get_auth_chain_difference(
+        room_id,
+        state_sets_ids,
+        conflicted_state,
+        additional_backwards_reachable_conflicted_events,
+    )
+    difference.auth_difference.update(auth_difference_unpersisted_part)
+
+    # if we're doing v2.1 we may need to add or expand the conflicted subgraph
+    if (
+        is_state_res_v21
+        and difference.conflicted_subgraph is not None
+        and unpersisted_events
+    ):
+        # we always include the conflicted events themselves in the subgraph.
+        if conflicted_state:
+            difference.conflicted_subgraph.update(conflicted_state)
+        # we may need to expand the subgraph in the case where the subgraph starts in the DB and
+        # ends in unpersisted events. To do this, we first need to see where the subgraph got up to,
+        # which we can do by finding the intersection between the additional backwards reachable
+        # conflicted events and the conflicted subgraph. Events in both sets mean A) some unpersisted
+        # conflicted event could backwards reach it and B) some persisted conflicted event could forward
+        # reach it.
+        subgraph_frontier = difference.conflicted_subgraph.intersection(
+            additional_backwards_reachable_conflicted_events
+        )
+        # we can now combine the 2 scenarios:
+        #  - subgraph starts in DB and ends in unpersisted
+        #  - subgraph starts in unpersisted and ends in unpersisted
+        # by expanding the frontier into unpersisted events.
+        # The frontier is currently all persisted events. We want to expand this into unpersisted
+        # events. Mark every forwards reachable event from the frontier in the forwards_conflicted_set
+        # but NOT the backwards conflicted set. This mirrors what the DB layer does but in reverse:
+        # we supplied events which are backwards reachable to the DB and now the DB is providing
+        # forwards reachable events from the DB.
+        forwards_conflicted_set: Set[str] = set()
+        # we include unpersisted conflicted events here to process exclusive unpersisted subgraphs
+        search_queue = subgraph_frontier.union(unpersisted_conflicted_events)
+        while search_queue:
+            frontier_event = search_queue.pop()
+            next_event_ids = event_to_next_event.get(frontier_event, set())
+            search_queue.update(next_event_ids)
+            forwards_conflicted_set.add(frontier_event)
+
+        # we've already calculated the backwards form as this is the auth chain for each
+        # unpersisted conflicted event.
+        backwards_conflicted_set: Set[str] = set()
+        for uce in unpersisted_conflicted_events:
+            backwards_conflicted_set.update(events_to_auth_chain.get(uce, []))
+
+        # the unpersisted conflicted subgraph is the intersection of the backwards/forwards sets
+        conflicted_subgraph_unpersisted_part = backwards_conflicted_set.intersection(
+            forwards_conflicted_set
+        )
+        # print(f"event_to_next_event={event_to_next_event}")
+        # print(f"unpersisted_conflicted_events={unpersisted_conflicted_events}")
+        # print(f"unperssited backwards_conflicted_set={backwards_conflicted_set}")
+        # print(f"unperssited forwards_conflicted_set={forwards_conflicted_set}")
+        difference.conflicted_subgraph.update(conflicted_subgraph_unpersisted_part)
+
+    if difference.conflicted_subgraph:
+        old_events = difference.auth_difference.union(
+            conflicted_state if conflicted_state else set()
+        )
+        additional_events = difference.conflicted_subgraph.difference(old_events)
+
+        logger.debug(
+            "v2.1 %s additional events replayed=%d num_conflicts=%d conflicted_subgraph=%d auth_difference=%d",
+            room_id,
+            len(additional_events),
+            num_conflicted_state,
+            len(difference.conflicted_subgraph),
+            len(difference.auth_difference),
+        )
+        # State res v2.1 includes the conflicted subgraph in the difference
+        return difference.auth_difference.union(difference.conflicted_subgraph)
+
+    return difference.auth_difference
 
 
 def _seperate(
