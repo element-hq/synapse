@@ -39,7 +39,5 @@ jobs:
           scripts-dev/gen_config_documentation.py \
             schema/synapse-config.schema.yaml \
           > docs/usage/configuration/config_documentation.md
-      - name: Log any differences
-        run: git diff
       - name: Error in case of any differences
-        run: '! git status --porcelain=1 | grep "^ M"'
+        run: 'git diff || ! git status --porcelain=1 | grep "^ M"'
