@@ -1,1 +1,1 @@
-Move specific Synapse config out of `RootConfig`.
+Move Synapse specific config out of `RootConfig` for the load/read config flow (not config generation).
