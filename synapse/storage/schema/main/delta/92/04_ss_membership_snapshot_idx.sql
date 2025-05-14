@@ -13,4 +13,4 @@
 
 -- So we can fetch all rooms for a given user sorted by stream order
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9203, 'sliding_sync_membership_snapshots_user_id_stream_ordering', '{}');
+  (9204, 'sliding_sync_membership_snapshots_user_id_stream_ordering', '{}');
