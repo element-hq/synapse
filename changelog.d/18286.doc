@@ -1,1 +1,1 @@
-Update room_list_publication_rules docs that were missed in v.126.0. Contributed by @HarHarLinks.
+Update `room_list_publication_rules` docs to consider defaults that changed in v1.126.0. Contributed by @HarHarLinks.
