@@ -54,16 +54,6 @@ from synapse.util.templates import _create_mxc_to_http_filter, _format_ts_filter
 
 logger = logging.getLogger(__name__)
 
-MISSING_REPORT_STATS_SPIEL = """\
-We would really appreciate it if you could help our project out by reporting
-homeserver usage statistics from your homeserver. Your homeserver's server name,
-along with very basic aggregate data (e.g. number of users) will be reported. But
-it helps us to track the growth of the Matrix community, and helps us to make Matrix
-a success, as well as to convince other networks that they should peer with us.
-
-Thank you.
-"""
-
 
 class ConfigError(Exception):
     """Represents a problem parsing the configuration
@@ -110,6 +100,16 @@ def format_config_error(e: ConfigError) -> Iterator[str]:
         yield ":\n%s%s" % ("  " * indent, str(parent_e))
         parent_e = parent_e.__cause__
 
+
+MISSING_REPORT_STATS_SPIEL = """\
+We would really appreciate it if you could help our project out by reporting
+homeserver usage statistics from your homeserver. Your homeserver's server name,
+along with very basic aggregate data (e.g. number of users) will be reported. But
+it helps us to track the growth of the Matrix community, and helps us to make Matrix
+a success, as well as to convince other networks that they should peer with us.
+
+Thank you.
+"""
 
 CONFIG_FILE_HEADER = """\
 # Configuration file for Synapse.
