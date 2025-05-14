@@ -73,16 +73,16 @@ def main(force_colors: bool) -> None:
     click.secho(f"Current schema version: {current_schema_version}")
 
     seen_deltas = False
-    bad_files = []
-    changed_files = []
+    bad_delta_files = []
+    changed_delta_files = []
     for diff in diffs:
-        changed_files.append(diff.b_path)
-
-        if not diff.new_file or diff.b_path is None:
-            continue
-
         match = SCHEMA_FILE_REGEX.match(diff.b_path)
         if not match:
+            continue
+
+        changed_delta_files.append(diff.b_path)
+
+        if not diff.new_file or diff.b_path is None:
             continue
 
         seen_deltas = True
@@ -90,7 +90,7 @@ def main(force_colors: bool) -> None:
         _, delta_version, _ = match.groups()
 
         if delta_version != str(current_schema_version):
-            bad_files.append(diff.b_path)
+            bad_delta_files.append(diff.b_path)
 
     if not seen_deltas:
         click.secho(
@@ -101,8 +101,8 @@ def main(force_colors: bool) -> None:
         )
         return
 
-    if bad_files:
-        bad_files.sort()
+    if bad_delta_files:
+        bad_delta_files.sort()
 
         click.secho(
             "Found deltas in the wrong folder!",
@@ -111,7 +111,7 @@ def main(force_colors: bool) -> None:
             color=force_colors,
         )
 
-        for f in bad_files:
+        for f in bad_delta_files:
             click.secho(
                 f"\t{f}",
                 fg="red",
@@ -137,7 +137,7 @@ def main(force_colors: bool) -> None:
 
     # Now check that we're not trying to create or drop indices. If we want to
     # do that they should be in background updates.
-    for delta_file in changed_files:
+    for delta_file in changed_delta_files:
         with open(delta_file) as fd:
             delta_lines = fd.readlines()
 
