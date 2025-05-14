@@ -74,8 +74,10 @@ def main(force_colors: bool) -> None:
 
     seen_deltas = False
     bad_files = []
-    new_files = []
+    changed_files = []
     for diff in diffs:
+        changed_files.append(diff.b_path)
+
         if not diff.new_file or diff.b_path is None:
             continue
 
@@ -89,8 +91,6 @@ def main(force_colors: bool) -> None:
 
         if delta_version != str(current_schema_version):
             bad_files.append(diff.b_path)
-
-        new_files.append(diff.b_path)
 
     if not seen_deltas:
         click.secho(
@@ -137,7 +137,7 @@ def main(force_colors: bool) -> None:
 
     # Now check that we're not trying to create or drop indices. If we want to
     # do that they should be in background updates.
-    for delta_file in new_files:
+    for delta_file in changed_files:
         with open(delta_file) as fd:
             delta_lines = fd.readlines()
 
