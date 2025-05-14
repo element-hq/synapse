@@ -36,7 +36,21 @@ class RoomPolicyHandler:
         self._federation_client = hs.get_federation_client()
 
     async def is_event_allowed(self, event: EventBase) -> bool:
-        """Check if the given event is allowed in the room."""
+        """Check if the given event is allowed in the room by the policy server.
+
+        If no policy server is configured in the room, this returns True. Similarly, if
+        the policy server is invalid in any way (not joined, not a server, etc), this
+        returns True.
+
+        If a valid and contactable policy server is configured in the room, this returns
+        True if that server suggests the event is not spammy, and False otherwise.
+
+        Args:
+            event: The event to check. This should be a fully-formed PDU.
+
+        Returns:
+            bool: True if the event is allowed in the room, False otherwise.
+        """
         policy_event = await self._storage_controllers.state.get_current_state_event(
             event.room_id, "org.matrix.msc4284.policy", ""
         )
