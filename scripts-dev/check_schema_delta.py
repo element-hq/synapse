@@ -143,7 +143,7 @@ def main(force_colors: bool) -> None:
 
         for line in delta_lines:
             # Strip SQL comments
-            line, _ = line.split("--", maxsplit=1)
+            line = line.split("--", maxsplit=1)[0]
 
             match = INDEX_REGEX.search(line)
             if match:
