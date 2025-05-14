@@ -19,6 +19,7 @@
 #
 #
 
+from synapse.config._base import RootConfig
 from synapse.config.appservice import AppServiceConfig, ConfigError
 
 from tests.unittest import TestCase
@@ -36,12 +37,12 @@ class AppServiceConfigTest(TestCase):
             ["foo", "bar", False],
         ]:
             with self.assertRaises(ConfigError):
-                AppServiceConfig().read_config(
+                AppServiceConfig(RootConfig()).read_config(
                     {"app_service_config_files": invalid_value}
                 )
 
     def test_valid_app_service_config_files(self) -> None:
-        AppServiceConfig().read_config({"app_service_config_files": []})
-        AppServiceConfig().read_config(
+        AppServiceConfig(RootConfig()).read_config({"app_service_config_files": []})
+        AppServiceConfig(RootConfig()).read_config(
             {"app_service_config_files": ["/not/a/real/path", "/not/a/real/path/2"]}
         )
