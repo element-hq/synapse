@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 # Check that no schema deltas have been added to the wrong version.
+#
+# Also checks that schema deltas do not try and create or drop indices.
 
 import re
 from typing import Any, Dict, List
@@ -9,6 +11,7 @@ import click
 import git
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
+INDEX_REGEX = re.compile(r"(CREATE|DROP) .*INDEX", flags=re.IGNORECASE)
 
 
 @click.command()
@@ -20,6 +23,9 @@ SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
     help="Always output ANSI colours",
 )
 def main(force_colors: bool) -> None:
+    # Return code. Set to non-zero when we encounter an error
+    return_code = 0
+
     click.secho(
         "+++ Checking schema deltas are in the right folder",
         fg="green",
@@ -68,6 +74,7 @@ def main(force_colors: bool) -> None:
 
     seen_deltas = False
     bad_files = []
+    all_files = []
     for diff in diffs:
         if not diff.new_file or diff.b_path is None:
             continue
@@ -83,6 +90,8 @@ def main(force_colors: bool) -> None:
         if delta_version != str(current_schema_version):
             bad_files.append(diff.b_path)
 
+        all_files.append(diff.b_path)
+
     if not seen_deltas:
         click.secho(
             "No deltas found.",
@@ -92,41 +101,63 @@ def main(force_colors: bool) -> None:
         )
         return
 
-    if not bad_files:
+    if bad_files:
+        bad_files.sort()
+
+        click.secho(
+            "Found deltas in the wrong folder!",
+            fg="red",
+            bold=True,
+            color=force_colors,
+        )
+
+        for f in bad_files:
+            click.secho(
+                f"\t{f}",
+                fg="red",
+                bold=True,
+                color=force_colors,
+            )
+
+        click.secho()
+        click.secho(
+            f"Please move these files to delta/{current_schema_version}/",
+            fg="red",
+            bold=True,
+            color=force_colors,
+        )
+
+    else:
         click.secho(
             f"All deltas are in the correct folder: {current_schema_version}!",
             fg="green",
             bold=True,
             color=force_colors,
         )
-        return
 
-    bad_files.sort()
+    # Now check that we're not trying to create or drop indices. If we want to
+    # do that they should be in background updates.
+    for delta_file in all_files:
+        with open(delta_file) as fd:
+            delta_lines = fd.readlines()
 
-    click.secho(
-        "Found deltas in the wrong folder!",
-        fg="red",
-        bold=True,
-        color=force_colors,
-    )
+        for line in delta_lines:
+            # Strip SQL comments
+            line, _ = line.split("--", maxsplit=1)
 
-    for f in bad_files:
-        click.secho(
-            f"\t{f}",
-            fg="red",
-            bold=True,
-            color=force_colors,
-        )
+            match = INDEX_REGEX.search(line)
+            if match:
+                clause = match.group()
 
-    click.secho()
-    click.secho(
-        f"Please move these files to delta/{current_schema_version}/",
-        fg="red",
-        bold=True,
-        color=force_colors,
-    )
+                click.secho(
+                    f"Found delta with index creation/deletion: '{clause}' in {delta_file}\nThese should be in background updates.",
+                    fg="red",
+                    bold=True,
+                    color=force_colors,
+                )
+                return_code = 1
 
-    click.get_current_context().exit(1)
+    click.get_current_context().exit(return_code)
 
 
 if __name__ == "__main__":
