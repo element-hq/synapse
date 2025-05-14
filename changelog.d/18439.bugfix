@@ -1,0 +1,1 @@
+Fix startup being blocked on creating a new index. Introduced in v1.130.0rc1.
