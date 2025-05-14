@@ -7591,22 +7591,23 @@ of <code>alice</code>, <code>room</code> and <code>abcedgghijk</code>.</p>
 <p><em>Changed in Synapse 1.126.0: The default was changed to deny publishing to the
 room list by default</em></p>
 <p>Example configuration:</p>
-<pre><code class="language-yaml"># No rule list specified. Anyone may publish any room to the public list.
+<pre><code class="language-yaml"># No rule list specified. No one may publish any room to the public list, except server admins.
 # This is the default behaviour.
 room_list_publication_rules:
-</code></pre>
-<pre><code class="language-yaml"># A list of one rule which allows everything.
-# This has the same effect as the previous example.
-room_list_publication_rules:
-  - &quot;action&quot;: &quot;allow&quot;
-</code></pre>
-<pre><code class="language-yaml"># An empty list of rules. No-one may publish to the room list.
-room_list_publication_rules: []
 </code></pre>
 <pre><code class="language-yaml"># A list of one rule which denies everything.
 # This has the same effect as the previous example.
 room_list_publication_rules:
   - &quot;action&quot;: &quot;deny&quot;
+</code></pre>
+<pre><code class="language-yaml"># An empty list of rules.
+# This has the same effect as the previous example.
+room_list_publication_rules: []
+</code></pre>
+<pre><code class="language-yaml"># A list of one rule which allows everything.
+# This was the default behaviour pre v1.126.0.
+room_list_publication_rules:
+  - &quot;action&quot;: &quot;allow&quot;
 </code></pre>
 <pre><code class="language-yaml"># Prevent a specific user from publishing rooms.
 # Allow other users to publish anything.
