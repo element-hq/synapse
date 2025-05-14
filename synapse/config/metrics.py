@@ -27,21 +27,11 @@ import attr
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
 
-from ._base import Config, ConfigError
+from ._base import MISSING_REPORT_STATS_SPIEL, Config, ConfigError
 
 MISSING_REPORT_STATS_CONFIG_INSTRUCTIONS = """\
 Please opt in or out of reporting homeserver usage statistics, by setting
 the `report_stats` key in your config file to either True or False.
-"""
-
-MISSING_REPORT_STATS_SPIEL = """\
-We would really appreciate it if you could help our project out by reporting
-homeserver usage statistics from your homeserver. Your homeserver's server name,
-along with very basic aggregate data (e.g. number of users) will be reported. But
-it helps us to track the growth of the Matrix community, and helps us to make Matrix
-a success, as well as to convince other networks that they should peer with us.
-
-Thank you.
 """
 
 
