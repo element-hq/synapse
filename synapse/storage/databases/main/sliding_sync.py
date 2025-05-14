@@ -72,7 +72,7 @@ class SlidingSyncStore(SQLBaseStore):
             update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
             index_name="sliding_sync_membership_snapshots_user_id",
             table="sliding_sync_membership_snapshots",
-            columns=("user_id" "event_stream_ordering",),
+            columns=("user_id", "event_stream_ordering",),
             replaces_index="sliding_sync_membership_snapshots_user_id",
         )
 
