@@ -70,9 +70,9 @@ class SlidingSyncStore(SQLBaseStore):
 
         self.db_pool.updates.register_background_index_update(
             update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
-            index_name="sliding_sync_membership_snapshots_user_id",
+            index_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
             table="sliding_sync_membership_snapshots",
-            columns=("user_id", "event_stream_ordering",),
+            columns=("user_id", "event_stream_ordering"),
             replaces_index="sliding_sync_membership_snapshots_user_id",
         )
 
