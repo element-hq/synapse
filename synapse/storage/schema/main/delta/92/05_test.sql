@@ -2,4 +2,4 @@
 -- CREATE INDEX or DROP INDEX in the schema file, and instead use
 -- background updates.
 
-SELECT 1;
+CREATE UNIQUE index foobar ON foobar(ads);
