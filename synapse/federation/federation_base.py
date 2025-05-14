@@ -148,7 +148,9 @@ class FederationBase:
 
         policy_allowed = self._policy_handler.is_event_allowed(pdu)
         if not policy_allowed:
-            logger.warning("Event not allowed by policy server, soft-failing %s", pdu.event_id)
+            logger.warning(
+                "Event not allowed by policy server, soft-failing %s", pdu.event_id
+            )
             pdu.internal_metadata.soft_failed = True
             return pdu
 

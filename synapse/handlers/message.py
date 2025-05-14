@@ -1113,7 +1113,8 @@ class EventCreationHandler:
                 if not policy_allowed:
                     logger.warning(
                         "Event not allowed by policy server, rejecting %s",
-                        event.event_id)
+                        event.event_id,
+                    )
                     raise SynapseError(
                         403,
                         "This message has been rejected as probable spam",

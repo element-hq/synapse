@@ -143,7 +143,9 @@ class TransportLayerClient:
             destination, path=path, timeout=timeout, try_trailing_slash_on_400=True
         )
 
-    async def get_policy_recommendation_for_pdu(self, destination: str, event: EventBase, timeout: Optional[int] = None) -> JsonDict:
+    async def get_policy_recommendation_for_pdu(
+        self, destination: str, event: EventBase, timeout: Optional[int] = None
+    ) -> JsonDict:
         """Requests the policy recommendation for the given pdu from the given server.
 
         Args:
@@ -155,7 +157,11 @@ class TransportLayerClient:
         Returns:
             The full recommendation object from the remote server.
         """
-        logger.debug("get_policy_recommendation dest=%s, event_id=%s", destination, event.event_id)
+        logger.debug(
+            "get_policy_recommendation dest=%s, event_id=%s",
+            destination,
+            event.event_id,
+        )
         return await self.client.post_json(
             destination=destination,
             path=f"/_matrix/policy/unstable/org.matrix.msc4284/event/{event.event_id}/check",

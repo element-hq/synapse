@@ -424,7 +424,9 @@ class FederationClient(FederationBase):
 
     @trace
     @tag_args
-    async def get_pdu_policy_recommendation(self, destination: str, pdu: EventBase, timeout: Optional[int] = None) -> Optional[str]:
+    async def get_pdu_policy_recommendation(
+        self, destination: str, pdu: EventBase, timeout: Optional[int] = None
+    ) -> Optional[str]:
         """Requests that the destination server (typically a policy server)
         check the event and return its recommendation on how to handle the
         event.
@@ -439,19 +441,32 @@ class FederationClient(FederationBase):
             The policy recommendation, or None if we were unable to acquire one.
         """
 
-        logger.debug("get_pdu_policy_recommendation for event_id=%s from %s", pdu.event_id, destination)
+        logger.debug(
+            "get_pdu_policy_recommendation for event_id=%s from %s",
+            pdu.event_id,
+            destination,
+        )
 
         try:
-            res = await self.transport_layer.get_policy_recommendation_for_pdu(destination, pdu, timeout=timeout)
+            res = await self.transport_layer.get_policy_recommendation_for_pdu(
+                destination, pdu, timeout=timeout
+            )
             recommendation = res.get("recommendation")
             if not isinstance(recommendation, str):
                 raise InvalidResponseError("recommendation is not a string")
             if recommendation not in (RECOMMENDATION_OK, RECOMMENDATION_SPAM):
-                logger.warning("get_pdu_policy_recommendation: unknown recommendation: %s", recommendation)
+                logger.warning(
+                    "get_pdu_policy_recommendation: unknown recommendation: %s",
+                    recommendation,
+                )
                 return RECOMMENDATION_OK
             return recommendation
         except Exception as e:
-            logger.warning("get_pdu_policy_recommendation: server %s responded with error, assuming OK recommendation: %s", destination, e)
+            logger.warning(
+                "get_pdu_policy_recommendation: server %s responded with error, assuming OK recommendation: %s",
+                destination,
+                e,
+            )
             return RECOMMENDATION_OK
 
     @trace

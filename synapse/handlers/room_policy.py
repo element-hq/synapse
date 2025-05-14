@@ -53,13 +53,17 @@ class RoomPolicyHandler:
         if not UserID.is_valid("@x:" + policy_server):
             return True  # invalid policy server == default allow
 
-        is_in_room = await self._event_auth_handler.is_host_in_room(event.room_id, policy_server)
+        is_in_room = await self._event_auth_handler.is_host_in_room(
+            event.room_id, policy_server
+        )
         if not is_in_room:
             return True  # policy server not in room == default allow
 
         # At this point, the server appears valid and is in the room, so ask it to check
         # the event.
-        recommendation = await self._federation_client.get_pdu_policy_recommendation(policy_server, event)
+        recommendation = await self._federation_client.get_pdu_policy_recommendation(
+            policy_server, event
+        )
         if recommendation != RECOMMENDATION_OK:
             return False
 
