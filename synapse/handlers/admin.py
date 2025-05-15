@@ -445,7 +445,7 @@ class AdminHandler:
                 user_id,
                 room,
                 limit,
-                ["m.room.member", "m.room.message"],
+                ["m.room.member", "m.room.message", "m.room.encrypted"],
             )
             if not event_ids:
                 # nothing to redact in this room

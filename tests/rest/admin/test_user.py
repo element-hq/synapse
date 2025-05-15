@@ -36,7 +36,13 @@ from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
-from synapse.api.constants import ApprovalNoticeMedium, EventTypes, LoginType, UserTypes
+from synapse.api.constants import (
+    ApprovalNoticeMedium,
+    EventContentFields,
+    EventTypes,
+    LoginType,
+    UserTypes,
+)
 from synapse.api.errors import Codes, HttpResponseException, ResourceLimitError
 from synapse.api.room_versions import RoomVersions
 from synapse.media.filepath import MediaFilePaths
@@ -5466,6 +5472,53 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     break
         # we originally sent 5 messages so 5 should be redacted
         self.assertEqual(len(original_message_ids), 0)
+
+    def test_redact_redacts_encrypted_messages(self) -> None:
+        """
+        Test that user's encrypted messages are redacted
+        """
+        encrypted_room = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        self.helper.send_state(
+            encrypted_room,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=self.admin_tok,
+        )
+        # join room send some messages
+        originals = []
+        join = self.helper.join(encrypted_room, self.bad_user, tok=self.bad_user_tok)
+        originals.append(join["event_id"])
+        for _ in range(15):
+            res = self.helper.send_event(
+                encrypted_room, "m.room.encrypted", {}, tok=self.bad_user_tok
+            )
+            originals.append(res["event_id"])
+
+        # redact user's events
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": []},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matched = []
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{encrypted_room}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        for event in channel.json_body["chunk"]:
+            for event_id in originals:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    matched.append(event_id)
+        self.assertEqual(len(matched), len(originals))
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
