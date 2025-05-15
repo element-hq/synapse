@@ -107,8 +107,6 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 return {"recommendation": RECOMMENDATION_OK}
             else:
                 self.fail("Unexpected event ID")
-                # return not called, but the type engine is angry without a return
-                return {"recommendation": RECOMMENDATION_OK}
 
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu.side_effect = get_policy_recommendation_for_pdu
 
