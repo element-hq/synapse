@@ -7,8 +7,12 @@ It is recommended to put a reverse proxy such as
 [HAProxy](https://www.haproxy.org/) or
 [relayd](https://man.openbsd.org/relayd.8) in front of Synapse. One advantage
 of doing so is that it means that you can expose the default https port
-(443) to Matrix clients without needing to run Synapse with root
-privileges.
+(443) to Matrix clients without needing to run Synapse with `CAP_NET_BIND_SERVICE` 
+to bind such a low port number.
+
+> [!WARNING]
+> Although you technically can run Synapse with root privileges you **shouldn't**.
+> It will work but it might compromise security of your instance.
 
 You should configure your reverse proxy to forward requests to `/_matrix` or
 `/_synapse/client` to Synapse, and have it set the `X-Forwarded-For` and
