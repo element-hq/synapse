@@ -11,7 +11,11 @@ import click
 import git
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
-INDEX_REGEX = re.compile(r"(CREATE|DROP) .*INDEX", flags=re.IGNORECASE)
+INDEX_CREATION_REGEX = re.compile(
+    r"(CREATE .*INDEX .*ON ([a-z_]+)", flags=re.IGNORECASE
+)
+INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_]+)", flags=re.IGNORECASE)
+TABLE_CREATION_REGEX = re.compile(r"(CREATE .*TABLE ([a-z_]+)", flags=re.IGNORECASE)
 
 
 @click.command()
@@ -76,13 +80,17 @@ def main(force_colors: bool) -> None:
     bad_delta_files = []
     changed_delta_files = []
     for diff in diffs:
+        if diff.b_path is None:
+            # We don't lint deleted files.
+            continue
+
         match = SCHEMA_FILE_REGEX.match(diff.b_path)
         if not match:
             continue
 
         changed_delta_files.append(diff.b_path)
 
-        if not diff.new_file or diff.b_path is None:
+        if not diff.new_file:
             continue
 
         seen_deltas = True
@@ -136,26 +144,55 @@ def main(force_colors: bool) -> None:
         )
 
     # Now check that we're not trying to create or drop indices. If we want to
-    # do that they should be in background updates.
+    # do that they should be in background updates. The exception is when we
+    # create indices on tables we've just created.
     for delta_file in changed_delta_files:
         with open(delta_file) as fd:
             delta_lines = fd.readlines()
 
+        # Strip SQL comments
+        delta_lines = [line.split("--", maxsplit=1)[0] for line in delta_lines]
+
+        # First find all tables we create in this delta file.
+
+        # Now check for index creation/deletion
+        created_tables = set()
         for line in delta_lines:
             # Strip SQL comments
             line = line.split("--", maxsplit=1)[0]
 
-            match = INDEX_REGEX.search(line)
+            # Check and track any tables we create
+            match = TABLE_CREATION_REGEX.search(line)
+            if match:
+                table_name = match.group(1)
+                created_tables.add(table_name)
+
+            # Check for dropping indices, these are always banned
+            match = INDEX_DELETION_REGEX.search(line)
             if match:
                 clause = match.group()
 
                 click.secho(
-                    f"Found delta with index creation/deletion: '{clause}' in {delta_file}\nThese should be in background updates.",
+                    f"Found delta with index deletion: '{clause}' in {delta_file}\nThese should be in background updates.",
                     fg="red",
                     bold=True,
                     color=force_colors,
                 )
                 return_code = 1
+
+            # Check for index creation, which is only allowed for tables we've
+            # created.
+            match = INDEX_CREATION_REGEX.search(line)
+            if match:
+                table_name = match.group(1)
+                if table_name not in created_tables:
+                    click.secho(
+                        f"Found delta with index creation: '{clause}' in {delta_file}\nThese should be in background updates.",
+                        fg="red",
+                        bold=True,
+                        color=force_colors,
+                    )
+                    return_code = 1
 
     click.get_current_context().exit(return_code)
 
