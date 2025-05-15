@@ -70,6 +70,15 @@ class FederationBase:
         self._policy_handler: Optional[RoomPolicyHandler] = None
 
     def _lazily_get_policy_handler(self) -> RoomPolicyHandler:
+        """Lazily get the room policy handler.
+
+        This is required to avoid an import cycle: RoomPolicyHandler requires a
+        FederationClient, which requires a FederationBase, which requires a
+        RoomPolicyHandler.
+
+        Returns:
+            RoomPolicyHandler: The room policy handler.
+        """
         if self._policy_handler is None:
             self._policy_handler = self.hs.get_room_policy_handler()
         return self._policy_handler

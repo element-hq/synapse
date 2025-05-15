@@ -38,6 +38,9 @@ class RoomPolicyHandler:
     async def is_event_allowed(self, event: EventBase) -> bool:
         """Check if the given event is allowed in the room by the policy server.
 
+        Note: This will *always* return True if the room's policy server is Synapse
+        itself. This is because Synapse can't be a policy server (currently).
+
         If no policy server is configured in the room, this returns True. Similarly, if
         the policy server is invalid in any way (not joined, not a server, etc), this
         returns True.
