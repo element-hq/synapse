@@ -30,6 +30,7 @@ from synapse.crypto.keyring import Keyring
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.utils import prune_event, validate_canonicaljson
 from synapse.federation.units import filter_pdus_for_valid_depth
+from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.opentracing import log_kv, trace
 from synapse.types import JsonDict, get_domain_from_id
@@ -63,7 +64,15 @@ class FederationBase:
         self.store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
-        self._policy_handler = hs.get_room_policy_handler()
+
+        # We need to define this lazily otherwise we get a cyclic dependency.
+        #self._policy_handler = hs.get_room_policy_handler()
+        self._policy_handler = None
+
+    def _lazily_get_policy_handler(self) -> RoomPolicyHandler:
+        if self._policy_handler is None:
+            self._policy_handler = self.hs.get_room_policy_handler()
+        return self._policy_handler
 
     @trace
     async def _check_sigs_and_hash(
@@ -146,7 +155,7 @@ class FederationBase:
                     )
             return redacted_event
 
-        policy_allowed = self._policy_handler.is_event_allowed(pdu)
+        policy_allowed = self._lazily_get_policy_handler().is_event_allowed(pdu)
         if not policy_allowed:
             logger.warning(
                 "Event not allowed by policy server, soft-failing %s", pdu.event_id
