@@ -830,7 +830,7 @@ description = "Read metadata from Python packages"
 optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
-markers = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\" or python_version < \"3.10\""
+markers = "(platform_machine != \"ppc64le\" and platform_machine != \"s390x\" or python_version < \"3.10\") and python_version < \"3.12\""
 files = [
     {file = "importlib_metadata-6.7.0-py3-none-any.whl", hash = "sha256:cb52082e659e97afc5dac71e79de97d8681de3aa07ff18578330904a9d18e5b5"},
     {file = "importlib_metadata-6.7.0.tar.gz", hash = "sha256:1aaf550d4f73e5d6783e7acb77aec43d49da8017410afae93822cc9cca98c4d4"},
@@ -3265,7 +3265,7 @@ description = "Backport of pathlib-compatible object wrapper for zip files"
 optional = false
 python-versions = ">=3.8"
 groups = ["dev"]
-markers = "platform_machine != \"ppc64le\" and platform_machine != \"s390x\" and python_version < \"3.12\" or python_version < \"3.10\""
+markers = "(platform_machine != \"ppc64le\" and platform_machine != \"s390x\" or python_version < \"3.10\") and python_version < \"3.12\""
 files = [
     {file = "zipp-3.19.1-py3-none-any.whl", hash = "sha256:2828e64edb5386ea6a52e7ba7cdb17bb30a73a858f5eb6eb93d8d36f5ea26091"},
     {file = "zipp-3.19.1.tar.gz", hash = "sha256:35427f6d5594f4acf82d25541438348c26736fa9b3afa2754bcd63cdb99d8e8f"},
@@ -3371,8 +3371,8 @@ docs = ["Sphinx", "repoze.sphinx.autointerface"]
 test = ["zope.i18nmessageid", "zope.testing", "zope.testrunner"]
 
 [extras]
-all = ["Pympler", "authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pyicu", "pysaml2", "sentry-sdk", "txredisapi"]
-cache-memory = ["Pympler"]
+all = ["authlib", "hiredis", "jaeger-client", "lxml", "matrix-synapse-ldap3", "opentracing", "psycopg2", "psycopg2cffi", "psycopg2cffi-compat", "pyicu", "pympler", "pysaml2", "sentry-sdk", "txredisapi"]
+cache-memory = ["pympler"]
 jwt = ["authlib"]
 matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 oidc = ["authlib"]
@@ -3388,5 +3388,5 @@ user-search = ["pyicu"]
 
 [metadata]
 lock-version = "2.1"
-python-versions = "^3.9.0"
-content-hash = "d71159b19349fdc0b7cd8e06e8c8778b603fc37b941c6df34ddc31746783d94d"
+python-versions = ">=3.9.0,<4.0"
+content-hash = "5c1cc899eff7d5814053c6064aeb1d4a54dd6fb5ecd4364db7d4b0fdd4d0ac66"
