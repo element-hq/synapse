@@ -1,0 +1,1 @@
+Prevent race-condition in `_maybe_retry_device_resync` entrance.
