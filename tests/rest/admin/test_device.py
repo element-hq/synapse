@@ -27,7 +27,7 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.handlers.device import DeviceHandler
-from synapse.rest.client import login
+from synapse.rest.client import devices, login
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -299,6 +299,7 @@ class DeviceRestTestCase(unittest.HomeserverTestCase):
 class DevicesRestTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
+        devices.register_servlets,
         login.register_servlets,
     ]
 
@@ -390,14 +391,62 @@ class DevicesRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(0, channel.json_body["total"])
         self.assertEqual(0, len(channel.json_body["devices"]))
 
+    @unittest.override_config(
+        {"experimental_features": {"msc2697_enabled": False, "msc3814_enabled": True}}
+    )
     def test_get_devices(self) -> None:
         """
         Tests that a normal lookup for devices is successfully
         """
         # Create devices
         number_devices = 5
-        for _ in range(number_devices):
+        # we create 2 fewer devices in the loop, because we will create another
+        # login after the loop, and we will create a dehydrated device
+        for _ in range(number_devices - 2):
             self.login("user", "pass")
+
+        other_user_token = self.login("user", "pass")
+        dehydrated_device_url = (
+            "/_matrix/client/unstable/org.matrix.msc3814.v1/dehydrated_device"
+        )
+        content = {
+            "device_data": {
+                "algorithm": "m.dehydration.v1.olm",
+            },
+            "device_id": "dehydrated_device",
+            "initial_device_display_name": "foo bar",
+            "device_keys": {
+                "user_id": "@user:test",
+                "device_id": "dehydrated_device",
+                "valid_until_ts": "80",
+                "algorithms": [
+                    "m.olm.curve25519-aes-sha2",
+                ],
+                "keys": {
+                    "<algorithm>:<device_id>": "<key_base64>",
+                },
+                "signatures": {
+                    "@user:test": {"<algorithm>:<device_id>": "<signature_base64>"}
+                },
+            },
+            "fallback_keys": {
+                "alg1:device1": "f4llb4ckk3y",
+                "signed_<algorithm>:<device_id>": {
+                    "fallback": "true",
+                    "key": "f4llb4ckk3y",
+                    "signatures": {
+                        "@user:test": {"<algorithm>:<device_id>": "<key_base64>"}
+                    },
+                },
+            },
+            "one_time_keys": {"alg1:k1": "0net1m3k3y"},
+        }
+        self.make_request(
+            "PUT",
+            dehydrated_device_url,
+            access_token=other_user_token,
+            content=content,
+        )
 
         # Get devices
         channel = self.make_request(
@@ -410,13 +459,22 @@ class DevicesRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(number_devices, channel.json_body["total"])
         self.assertEqual(number_devices, len(channel.json_body["devices"]))
         self.assertEqual(self.other_user, channel.json_body["devices"][0]["user_id"])
-        # Check that all fields are available
+        # Check that all fields are available, and that the dehydrated device is marked as dehydrated
+        found_dehydrated = False
         for d in channel.json_body["devices"]:
             self.assertIn("user_id", d)
             self.assertIn("device_id", d)
             self.assertIn("display_name", d)
             self.assertIn("last_seen_ip", d)
             self.assertIn("last_seen_ts", d)
+            if d["device_id"] == "dehydrated_device":
+                self.assertTrue(d.get("dehydrated"))
+                found_dehydrated = True
+            else:
+                # Either the field is not present, or set to False
+                self.assertFalse(d.get("dehydrated"))
+
+        self.assertTrue(found_dehydrated)
 
 
 class DeleteDevicesRestTestCase(unittest.HomeserverTestCase):
