@@ -67,7 +67,7 @@ class FederationBase:
 
         # We need to define this lazily otherwise we get a cyclic dependency.
         # self._policy_handler = hs.get_room_policy_handler()
-        self._policy_handler = None
+        self._policy_handler: Optional[RoomPolicyHandler] = None
 
     def _lazily_get_policy_handler(self) -> RoomPolicyHandler:
         if self._policy_handler is None:
