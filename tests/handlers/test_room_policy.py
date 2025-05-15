@@ -17,23 +17,12 @@ from unittest import mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.errors import AuthError, StoreError
-from synapse.api.room_versions import RoomVersion
-from synapse.event_auth import (
-    check_state_dependent_auth_rules,
-    check_state_independent_auth_rules,
-)
-from synapse.events import make_event_from_dict, EventBase
-from synapse.events.snapshot import EventContext
-from synapse.federation.transport.client import StateRequestResponse
-from synapse.logging.context import LoggingContext
+from synapse.events import EventBase, make_event_from_dict
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.state import StateResolutionStore
-from synapse.state.v2 import _mainline_sort, _reverse_topological_power_sort
 from synapse.types import JsonDict, UserID
-from synapse.types.handlers.policy_server import RECOMMENDATION_SPAM, RECOMMENDATION_OK
+from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util import Clock
 
 from tests import unittest
@@ -54,7 +43,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.mock_federation_transport_client = mock.Mock(
             spec=["get_policy_recommendation_for_pdu"]
         )
-        self.mock_federation_transport_client.get_policy_recommendation_for_pdu = mock.AsyncMock()
+        self.mock_federation_transport_client.get_policy_recommendation_for_pdu = (
+            mock.AsyncMock()
+        )
         return super().setup_test_homeserver(
             federation_transport_client=self.mock_federation_transport_client
         )
@@ -67,7 +58,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         # Create a room
         self.creator = self.register_user("creator", "test1234")
         self.creator_token = self.login("creator", "test1234")
-        self.room_id = self.helper.create_room_as(room_creator=self.creator, tok=self.creator_token)
+        self.room_id = self.helper.create_room_as(
+            room_creator=self.creator, tok=self.creator_token
+        )
         room_version = self.get_success(main_store.get_room_version(self.room_id))
 
         # Create some sample events
@@ -100,6 +93,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         # Prepare the policy server mock to decide spam vs not spam on those events
         self.call_count = 0
+
         async def get_policy_recommendation_for_pdu(
             destination: str,
             pdu: EventBase,
@@ -115,17 +109,26 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 self.fail("Unexpected event ID")
                 # return not called, but the type engine is angry without a return
                 return {"recommendation": RECOMMENDATION_OK}
+
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu.side_effect = get_policy_recommendation_for_pdu
 
     def _add_policy_server_to_room(self) -> None:
         # Inject a member event into the room
         policy_user_id = f"@policy:{self.OTHER_SERVER_NAME}"
         self.get_success(
-            event_injection.inject_member_event(self.hs, self.room_id, policy_user_id, "join")
+            event_injection.inject_member_event(
+                self.hs, self.room_id, policy_user_id, "join"
+            )
         )
-        self.helper.send_state(self.room_id, "org.matrix.msc4284.policy", {
-            "via": self.OTHER_SERVER_NAME,
-        }, tok=self.creator_token, state_key="")
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc4284.policy",
+            {
+                "via": self.OTHER_SERVER_NAME,
+            },
+            tok=self.creator_token,
+            state_key="",
+        )
 
     def test_no_policy_event_set(self) -> None:
         # We don't need to modify the room state at all - we're testing the default
@@ -135,46 +138,76 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(self.call_count, 0)
 
     def test_empty_policy_event_set(self) -> None:
-        self.helper.send_state(self.room_id, "org.matrix.msc4284.policy", {
-            # empty content (no `via`)
-        }, tok=self.creator_token, state_key="")
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc4284.policy",
+            {
+                # empty content (no `via`)
+            },
+            tok=self.creator_token,
+            state_key="",
+        )
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
         self.assertEqual(self.call_count, 0)
 
     def test_nonstring_policy_event_set(self) -> None:
-        self.helper.send_state(self.room_id, "org.matrix.msc4284.policy", {
-            "via": 42,  # should be a server name
-        }, tok=self.creator_token, state_key="")
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc4284.policy",
+            {
+                "via": 42,  # should be a server name
+            },
+            tok=self.creator_token,
+            state_key="",
+        )
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
         self.assertEqual(self.call_count, 0)
 
     def test_self_policy_event_set(self) -> None:
-        self.helper.send_state(self.room_id, "org.matrix.msc4284.policy", {
-            # We ignore events when the policy server is ourselves (for now?)
-            "via": (UserID.from_string(self.creator)).domain,
-        }, tok=self.creator_token, state_key="")
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc4284.policy",
+            {
+                # We ignore events when the policy server is ourselves (for now?)
+                "via": (UserID.from_string(self.creator)).domain,
+            },
+            tok=self.creator_token,
+            state_key="",
+        )
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
         self.assertEqual(self.call_count, 0)
 
     def test_invalid_server_policy_event_set(self) -> None:
-        self.helper.send_state(self.room_id, "org.matrix.msc4284.policy", {
-            "via": "|this| is *not* a (valid) server name.com",
-        }, tok=self.creator_token, state_key="")
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc4284.policy",
+            {
+                "via": "|this| is *not* a (valid) server name.com",
+            },
+            tok=self.creator_token,
+            state_key="",
+        )
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
         self.assertEqual(self.call_count, 0)
 
     def test_not_in_room_policy_event_set(self) -> None:
-        self.helper.send_state(self.room_id, "org.matrix.msc4284.policy", {
-            "via": f"x.{self.OTHER_SERVER_NAME}",
-        }, tok=self.creator_token, state_key="")
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc4284.policy",
+            {
+                "via": f"x.{self.OTHER_SERVER_NAME}",
+            },
+            tok=self.creator_token,
+            state_key="",
+        )
 
         ok = self.get_success(self.handler.is_event_allowed(self.spammy_event))
         self.assertEqual(ok, True)
