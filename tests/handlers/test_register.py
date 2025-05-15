@@ -598,7 +598,7 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
 
     @override_config(
         {
-            "allow_underscore_prefixed_localpart": "true",
+            "allow_underscore_prefixed_localpart": True,
         }
     )
     def test_underscore_localpart_allowed_if_configured(self) -> None:
