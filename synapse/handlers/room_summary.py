@@ -111,7 +111,15 @@ class RoomSummaryHandler:
         # If a user tries to fetch the same page multiple times in quick succession,
         # only process the first attempt and return its result to subsequent requests.
         self._pagination_response_cache: ResponseCache[
-            Tuple[str, str, bool, Optional[int], Optional[int], Optional[str]]
+            Tuple[
+                str,
+                str,
+                bool,
+                Optional[int],
+                Optional[int],
+                Optional[str],
+                Optional[List[str]],
+            ]
         ] = ResponseCache(
             hs.get_clock(),
             "get_room_hierarchy",
@@ -126,6 +134,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
+        remote_room_hosts: Optional[List[str]] = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy C-S API.
@@ -162,6 +171,7 @@ class RoomSummaryHandler:
                 max_depth,
                 limit,
                 from_token,
+                remote_room_hosts,
             ),
             self._get_room_hierarchy,
             requester.user.to_string(),
@@ -170,6 +180,7 @@ class RoomSummaryHandler:
             max_depth,
             limit,
             from_token,
+            remote_room_hosts,
         )
 
     async def _get_room_hierarchy(
@@ -180,6 +191,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
+        remote_room_hosts: Optional[List[str]] = None,
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
@@ -199,7 +211,7 @@ class RoomSummaryHandler:
 
         if not local_room:
             room_hierarchy = await self._summarize_remote_room_hierarchy(
-                _RoomQueueEntry(requested_room_id, ()),
+                _RoomQueueEntry(requested_room_id, remote_room_hosts or []),
                 False,
             )
             root_room_entry = room_hierarchy[0]
@@ -240,7 +252,7 @@ class RoomSummaryHandler:
             processed_rooms = set(pagination_session["processed_rooms"])
         else:
             # The queue of rooms to process, the next room is last on the stack.
-            room_queue = [_RoomQueueEntry(requested_room_id, ())]
+            room_queue = [_RoomQueueEntry(requested_room_id, remote_room_hosts or [])]
 
             # Rooms we have already processed.
             processed_rooms = set()
