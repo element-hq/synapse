@@ -18,8 +18,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.events import EventBase
-from synapse.types import UserID
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK
+from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -67,7 +67,9 @@ class RoomPolicyHandler:
         if policy_server == self._hs.hostname:
             return True  # Synapse itself can't be a policy server (currently)
 
-        if not UserID.is_valid("@x:" + policy_server):
+        try:
+            parse_and_validate_server_name(policy_server)
+        except ValueError:
             return True  # invalid policy server == default allow
 
         is_in_room = await self._event_auth_handler.is_host_in_room(
