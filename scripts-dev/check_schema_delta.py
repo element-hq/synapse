@@ -38,7 +38,7 @@ def main(force_colors: bool) -> None:
     click.secho("Updating repo...")
 
     repo = git.Repo()
-    repo.remote().fetch()
+    repo.remote().fetch(refspec="develop")
 
     click.secho("Getting current schema version...")
 
