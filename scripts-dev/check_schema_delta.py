@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 # Check that no schema deltas have been added to the wrong version.
+#
+# Also checks that schema deltas do not try and create or drop indices.
 
 import re
 from typing import Any, Dict, List
@@ -9,6 +11,9 @@ import click
 import git
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
+INDEX_CREATION_REGEX = re.compile(r"CREATE .*INDEX .*ON ([a-z_]+)", flags=re.IGNORECASE)
+INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_]+)", flags=re.IGNORECASE)
+TABLE_CREATION_REGEX = re.compile(r"CREATE .*TABLE ([a-z_]+)", flags=re.IGNORECASE)
 
 
 @click.command()
@@ -20,6 +25,9 @@ SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
     help="Always output ANSI colours",
 )
 def main(force_colors: bool) -> None:
+    # Return code. Set to non-zero when we encounter an error
+    return_code = 0
+
     click.secho(
         "+++ Checking schema deltas are in the right folder",
         fg="green",
@@ -30,7 +38,7 @@ def main(force_colors: bool) -> None:
     click.secho("Updating repo...")
 
     repo = git.Repo()
-    repo.remote().fetch()
+    repo.remote().fetch(refspec="develop")
 
     click.secho("Getting current schema version...")
 
@@ -67,13 +75,20 @@ def main(force_colors: bool) -> None:
     click.secho(f"Current schema version: {current_schema_version}")
 
     seen_deltas = False
-    bad_files = []
+    bad_delta_files = []
+    changed_delta_files = []
     for diff in diffs:
-        if not diff.new_file or diff.b_path is None:
+        if diff.b_path is None:
+            # We don't lint deleted files.
             continue
 
         match = SCHEMA_FILE_REGEX.match(diff.b_path)
         if not match:
+            continue
+
+        changed_delta_files.append(diff.b_path)
+
+        if not diff.new_file:
             continue
 
         seen_deltas = True
@@ -81,7 +96,7 @@ def main(force_colors: bool) -> None:
         _, delta_version, _ = match.groups()
 
         if delta_version != str(current_schema_version):
-            bad_files.append(diff.b_path)
+            bad_delta_files.append(diff.b_path)
 
     if not seen_deltas:
         click.secho(
@@ -92,41 +107,93 @@ def main(force_colors: bool) -> None:
         )
         return
 
-    if not bad_files:
+    if bad_delta_files:
+        bad_delta_files.sort()
+
+        click.secho(
+            "Found deltas in the wrong folder!",
+            fg="red",
+            bold=True,
+            color=force_colors,
+        )
+
+        for f in bad_delta_files:
+            click.secho(
+                f"\t{f}",
+                fg="red",
+                bold=True,
+                color=force_colors,
+            )
+
+        click.secho()
+        click.secho(
+            f"Please move these files to delta/{current_schema_version}/",
+            fg="red",
+            bold=True,
+            color=force_colors,
+        )
+
+    else:
         click.secho(
             f"All deltas are in the correct folder: {current_schema_version}!",
             fg="green",
             bold=True,
             color=force_colors,
         )
-        return
 
-    bad_files.sort()
+    # Make sure we process them in order.
+    changed_delta_files.sort()
 
-    click.secho(
-        "Found deltas in the wrong folder!",
-        fg="red",
-        bold=True,
-        color=force_colors,
-    )
+    # Now check that we're not trying to create or drop indices. If we want to
+    # do that they should be in background updates. The exception is when we
+    # create indices on tables we've just created.
+    created_tables = set()
+    for delta_file in changed_delta_files:
+        with open(delta_file) as fd:
+            delta_lines = fd.readlines()
 
-    for f in bad_files:
-        click.secho(
-            f"\t{f}",
-            fg="red",
-            bold=True,
-            color=force_colors,
-        )
+        # Strip SQL comments
+        delta_lines = [line.split("--", maxsplit=1)[0] for line in delta_lines]
 
-    click.secho()
-    click.secho(
-        f"Please move these files to delta/{current_schema_version}/",
-        fg="red",
-        bold=True,
-        color=force_colors,
-    )
+        for line in delta_lines:
+            # Strip SQL comments
+            line = line.split("--", maxsplit=1)[0]
 
-    click.get_current_context().exit(1)
+            # Check and track any tables we create
+            match = TABLE_CREATION_REGEX.search(line)
+            if match:
+                table_name = match.group(1)
+                created_tables.add(table_name)
+
+            # Check for dropping indices, these are always banned
+            match = INDEX_DELETION_REGEX.search(line)
+            if match:
+                clause = match.group()
+
+                click.secho(
+                    f"Found delta with index deletion: '{clause}' in {delta_file}\nThese should be in background updates.",
+                    fg="red",
+                    bold=True,
+                    color=force_colors,
+                )
+                return_code = 1
+
+            # Check for index creation, which is only allowed for tables we've
+            # created.
+            match = INDEX_CREATION_REGEX.search(line)
+            if match:
+                clause = match.group()
+                table_name = match.group(1)
+                if table_name not in created_tables:
+                    click.secho(
+                        f"Found delta with index creation: '{clause}' in {delta_file}\nThese should be in background updates.",
+                        fg="red",
+                        bold=True,
+                        color=force_colors,
+                    )
+                    return_code = 1
+
+    click.get_current_context().exit(return_code)
 
 
 if __name__ == "__main__":
