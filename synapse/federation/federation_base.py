@@ -164,7 +164,7 @@ class FederationBase:
                     )
             return redacted_event
 
-        policy_allowed = self._lazily_get_policy_handler().is_event_allowed(pdu)
+        policy_allowed = await self._lazily_get_policy_handler().is_event_allowed(pdu)
         if not policy_allowed:
             logger.warning(
                 "Event not allowed by policy server, soft-failing %s", pdu.event_id

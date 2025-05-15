@@ -1109,7 +1109,7 @@ class EventCreationHandler:
                     event.sender,
                 )
 
-                policy_allowed = self._policy_handler.is_event_allowed(event)
+                policy_allowed = await self._policy_handler.is_event_allowed(event)
                 if not policy_allowed:
                     logger.warning(
                         "Event not allowed by policy server, rejecting %s",
