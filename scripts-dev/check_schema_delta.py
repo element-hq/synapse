@@ -141,9 +141,13 @@ def main(force_colors: bool) -> None:
             color=force_colors,
         )
 
+    # Make sure we process them in order.
+    changed_delta_files.sort()
+
     # Now check that we're not trying to create or drop indices. If we want to
     # do that they should be in background updates. The exception is when we
     # create indices on tables we've just created.
+    created_tables = set()
     for delta_file in changed_delta_files:
         with open(delta_file) as fd:
             delta_lines = fd.readlines()
@@ -151,10 +155,6 @@ def main(force_colors: bool) -> None:
         # Strip SQL comments
         delta_lines = [line.split("--", maxsplit=1)[0] for line in delta_lines]
 
-        # First find all tables we create in this delta file.
-
-        # Now check for index creation/deletion
-        created_tables = set()
         for line in delta_lines:
             # Strip SQL comments
             line = line.split("--", maxsplit=1)[0]
