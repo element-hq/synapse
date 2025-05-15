@@ -88,12 +88,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter("synapse_storage_events_persisted_events", "")
-event_counter = Counter(
-    "synapse_storage_events_persisted_events_sep",
-    "",
-    ["type", "origin_type", "origin_entity"],
-)
 
 # State event type/key pairs that we need to gather to fill in the
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
@@ -260,6 +254,18 @@ class PersistEventsStore:
         self._backfill_id_gen: AbstractStreamIdGenerator = self.store._backfill_id_gen
         self._stream_id_gen: AbstractStreamIdGenerator = self.store._stream_id_gen
 
+        self.persist_event_counter = Counter(
+            "synapse_storage_events_persisted_events",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+        self.event_counter = Counter(
+            "synapse_storage_events_persisted_events_sep",
+            "",
+            ["type", "origin_type", "origin_entity"],
+            registry=hs.metrics_collector_registry,
+        )
+
     @trace
     async def _persist_events_and_state_updates(
         self,
@@ -356,7 +362,7 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
             )
-            persist_event_counter.inc(len(events_and_contexts))
+            self.persist_event_counter.inc(len(events_and_contexts))
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
@@ -374,7 +380,7 @@ class PersistEventsStore:
                     origin_type = "remote"
                     origin_entity = get_domain_from_id(event.sender)
 
-                event_counter.labels(event.type, origin_type, origin_entity).inc()
+                self.event_counter.labels(event.type, origin_type, origin_entity).inc()
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
