@@ -6254,6 +6254,16 @@ raise an error if the registration completes and the username conflicts.</p>
 <pre><code class="language-yaml">inhibit_user_in_use_error: true
 </code></pre>
 <hr />
+<h3 id="allow_underscore_prefixed_registration"><a class="header" href="#allow_underscore_prefixed_registration"><code>allow_underscore_prefixed_registration</code></a></h3>
+<p>Whether users are allowed to register with a underscore-prefixed localpart.
+By default, AppServices use prefixes like <code>_example</code> to namespace their
+associated ghost users. If turned on, this may result in clashes or confusion.
+Useful when provisioning users from an external identity provider.</p>
+<p>Defaults to false.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">allow_underscore_prefixed_registration: false
+</code></pre>
+<hr />
 <h2 id="user-session-management"><a class="header" href="#user-session-management">User session management</a></h2>
 <hr />
 <h3 id="session_lifetime"><a class="header" href="#session_lifetime"><code>session_lifetime</code></a></h3>
