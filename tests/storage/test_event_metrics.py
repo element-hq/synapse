@@ -20,7 +20,6 @@
 #
 from prometheus_client import generate_latest
 
-from synapse.metrics import REGISTRY
 from synapse.types import UserID, create_requester
 
 from tests.unittest import HomeserverTestCase
@@ -61,7 +60,7 @@ class ExtremStatisticsTestCase(HomeserverTestCase):
         items = list(
             filter(
                 lambda x: b"synapse_forward_extremities_" in x and b"# HELP" not in x,
-                generate_latest(REGISTRY).split(b"\n"),
+                generate_latest(self.hs.metrics_collector_registry).split(b"\n"),
             )
         )
 

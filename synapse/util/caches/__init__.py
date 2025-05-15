@@ -27,7 +27,6 @@ from sys import intern
 from typing import Any, Callable, Dict, List, Optional, Sized, TypeVar
 
 import attr
-from prometheus_client import REGISTRY
 from prometheus_client.core import Gauge
 
 from synapse.config.cache import add_resizable_cache
@@ -94,7 +93,7 @@ response_cache_total = Gauge(
 
 
 # Register our custom cache metrics registry with the global registry
-REGISTRY.register(CACHE_METRIC_REGISTRY)
+hs.metrics_collector_registry.register(CACHE_METRIC_REGISTRY)
 
 
 class EvictionReason(Enum):

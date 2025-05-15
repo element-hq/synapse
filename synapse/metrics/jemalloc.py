@@ -26,7 +26,7 @@ import re
 from typing import Iterable, Literal, Optional, overload
 
 import attr
-from prometheus_client import REGISTRY, Metric
+from prometheus_client import REGISTRY, CollectorRegistry, Metric
 
 from synapse.metrics import GaugeMetricFamily
 from synapse.metrics._types import Collector
@@ -185,6 +185,10 @@ def _setup_jemalloc_stats() -> None:
     class JemallocCollector(Collector):
         """Metrics for internal jemalloc stats."""
 
+        def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+            if registry is not None:
+                registry.register(self)
+
         def collect(self) -> Iterable[Metric]:
             stats.refresh_stats()
 
@@ -230,7 +234,7 @@ def _setup_jemalloc_stats() -> None:
 
             yield g
 
-    REGISTRY.register(JemallocCollector())
+    JemallocCollector(registry=hs.metrics_collector_registry)
 
     logger.debug("Added jemalloc stats")
 

@@ -24,10 +24,11 @@ import gc
 import logging
 import platform
 import time
-from typing import Iterable
+from typing import Iterable, Optional
 
 from prometheus_client.core import (
     REGISTRY,
+    CollectorRegistry,
     CounterMetricFamily,
     Gauge,
     GaugeMetricFamily,
@@ -81,6 +82,10 @@ gc_time = Histogram(
 
 
 class GCCounts(Collector):
+    def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+        if registry is not None:
+            registry.register(self)
+
     def collect(self) -> Iterable[Metric]:
         cm = GaugeMetricFamily("python_gc_counts", "GC object counts", labels=["gen"])
         for n, m in enumerate(gc.get_count()):
@@ -101,7 +106,7 @@ def install_gc_manager() -> None:
     if running_on_pypy:
         return
 
-    REGISTRY.register(GCCounts())
+    GCCounts(registry=hs.metrics_collector_registry)
 
     gc.disable()
 
@@ -145,6 +150,10 @@ def install_gc_manager() -> None:
 
 
 class PyPyGCStats(Collector):
+    def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+        if registry is not None:
+            registry.register(self)
+
     def collect(self) -> Iterable[Metric]:
         # @stats is a pretty-printer object with __str__() returning a nice table,
         # plus some fields that contain data from that table.
@@ -208,4 +217,4 @@ class PyPyGCStats(Collector):
 
 
 if running_on_pypy:
-    REGISTRY.register(PyPyGCStats())
+    PyPyGCStats(registry=hs.metrics_collector_registry)
