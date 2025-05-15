@@ -495,6 +495,7 @@ class EventCreationHandler:
         self._instance_name = hs.get_instance_name()
         self._notifier = hs.get_notifier()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self._policy_handler = hs.get_room_policy_handler()
 
         self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
 
@@ -1108,6 +1109,18 @@ class EventCreationHandler:
                     event.sender,
                 )
 
+                policy_allowed = await self._policy_handler.is_event_allowed(event)
+                if not policy_allowed:
+                    logger.warning(
+                        "Event not allowed by policy server, rejecting %s",
+                        event.event_id,
+                    )
+                    raise SynapseError(
+                        403,
+                        "This message has been rejected as probable spam",
+                        Codes.FORBIDDEN,
+                    )
+
                 spam_check_result = (
                     await self._spam_checker_module_callbacks.check_event_for_spam(
                         event
@@ -1119,7 +1132,7 @@ class EventCreationHandler:
                             [code, dict] = spam_check_result
                             raise SynapseError(
                                 403,
-                                "This message had been rejected as probable spam",
+                                "This message has been rejected as probable spam",
                                 code,
                                 dict,
                             )
