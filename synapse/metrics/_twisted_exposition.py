@@ -20,7 +20,7 @@
 #
 #
 
-from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
+from prometheus_client import CollectorRegistry, generate_latest
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -35,7 +35,7 @@ class MetricsResource(Resource):
 
     isLeaf = True
 
-    def __init__(self, registry: CollectorRegistry = REGISTRY):
+    def __init__(self, registry: CollectorRegistry):
         self.registry = registry
 
     def render_GET(self, request: Request) -> bytes:

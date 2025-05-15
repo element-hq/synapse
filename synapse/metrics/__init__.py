@@ -37,7 +37,6 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    cast,
 )
 
 import attr
@@ -79,6 +78,7 @@ class LaterGauge(Collector):
     caller: Callable[
         [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
     ]
+    registry: Optional[CollectorRegistry] = REGISTRY
 
     def collect(self) -> Iterable[Metric]:
         g = GaugeMetricFamily(self.name, self.desc, labels=self.labels)
@@ -104,9 +104,11 @@ class LaterGauge(Collector):
     def _register(self) -> None:
         if self.name in all_gauges.keys():
             logger.warning("%s already registered, reregistering" % (self.name,))
-            REGISTRY.unregister(all_gauges.pop(self.name))
+            if self.registry is not None:
+                self.registry.unregister(all_gauges.pop(self.name))
 
-        REGISTRY.register(self)
+        if self.registry is not None:
+            self.registry.register(self)
         all_gauges[self.name] = self
 
 
@@ -129,6 +131,8 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         desc
         labels
         sub_metrics: A list of sub metrics that the callbacks will update.
+        registry: The Prometheus metrics `CollectorRegistry` to register the metric
+            with. If not provided, the default `REGISTRY` will be used.
     """
 
     def __init__(
@@ -137,11 +141,13 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         desc: str,
         labels: StrSequence,
         sub_metrics: StrSequence,
+        registry: Optional[CollectorRegistry] = REGISTRY,
     ):
         self.name = name
         self.desc = desc
         self.labels = labels
         self.sub_metrics = sub_metrics
+        self.registry = registry
 
         # Create a class which have the sub_metrics values as attributes, which
         # default to 0 on initialization. Used to pass to registered callbacks.
@@ -230,9 +236,11 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
     def _register_with_collector(self) -> None:
         if self.name in all_gauges.keys():
             logger.warning("%s already registered, reregistering" % (self.name,))
-            REGISTRY.unregister(all_gauges.pop(self.name))
+            if self.registry is not None:
+                self.registry.unregister(all_gauges.pop(self.name))
 
-        REGISTRY.register(self)
+        if self.registry is not None:
+            self.registry.register(self)
         all_gauges[self.name] = self
 
 
@@ -257,7 +265,7 @@ class GaugeBucketCollector(Collector):
         name: str,
         documentation: str,
         buckets: Iterable[float],
-        registry: CollectorRegistry = REGISTRY,
+        registry: Optional[CollectorRegistry] = REGISTRY,
     ):
         """
         Args:
@@ -265,7 +273,8 @@ class GaugeBucketCollector(Collector):
                will be added.)
             documentation: help text for the metric
             buckets: The top bounds of the buckets to report
-            registry: metric registry to register with
+            registry: The Prometheus metrics `CollectorRegistry` to register the metric
+                with. If not provided, the default `REGISTRY` will be used.
         """
         self._name = name
         self._documentation = documentation
@@ -282,7 +291,8 @@ class GaugeBucketCollector(Collector):
         # this has been initialised after a successful data update
         self._metric: Optional[GaugeHistogramMetricFamily] = None
 
-        registry.register(self)
+        if registry is not None:
+            registry.register(self)
 
     def collect(self) -> Iterable[Metric]:
         # Don't report metrics unless we've already collected some data
@@ -331,7 +341,7 @@ class GaugeBucketCollector(Collector):
 
 
 class CPUMetrics(Collector):
-    def __init__(self) -> None:
+    def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
         ticks_per_sec = 100
         try:
             # Try and get the system config
@@ -340,6 +350,9 @@ class CPUMetrics(Collector):
             pass
 
         self.ticks_per_sec = ticks_per_sec
+
+        if registry is not None:
+            registry.register(self)
 
     def collect(self) -> Iterable[Metric]:
         if not HAVE_PROC_SELF_STAT:
@@ -358,8 +371,7 @@ class CPUMetrics(Collector):
             yield sys
 
 
-REGISTRY.register(CPUMetrics())
-
+CPUMetrics(registry=hs.metrics_collector_registry)
 
 #
 # Federation Metrics
