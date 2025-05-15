@@ -11,11 +11,9 @@ import click
 import git
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
-INDEX_CREATION_REGEX = re.compile(
-    r"(CREATE .*INDEX .*ON ([a-z_]+)", flags=re.IGNORECASE
-)
+INDEX_CREATION_REGEX = re.compile(r"CREATE .*INDEX .*ON ([a-z_]+)", flags=re.IGNORECASE)
 INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_]+)", flags=re.IGNORECASE)
-TABLE_CREATION_REGEX = re.compile(r"(CREATE .*TABLE ([a-z_]+)", flags=re.IGNORECASE)
+TABLE_CREATION_REGEX = re.compile(r"CREATE .*TABLE ([a-z_]+)", flags=re.IGNORECASE)
 
 
 @click.command()
@@ -184,6 +182,7 @@ def main(force_colors: bool) -> None:
             # created.
             match = INDEX_CREATION_REGEX.search(line)
             if match:
+                clause = match.group()
                 table_name = match.group(1)
                 if table_name not in created_tables:
                     click.secho(
