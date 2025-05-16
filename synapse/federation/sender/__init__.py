@@ -186,15 +186,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_pdus_destination_dist_count = Counter(
-    "synapse_federation_client_sent_pdu_destinations_count",
-    "Number of PDUs queued for sending to one or more destinations",
-)
-
-sent_pdus_destination_dist_total = Counter(
-    "synapse_federation_client_sent_pdu_destinations",
-    "Total number of PDUs queued for sending across all destinations",
-)
 
 # Time (in s) to wait before trying to wake up destinations that have
 # catch-up outstanding.
@@ -397,6 +388,7 @@ class FederationSender(AbstractFederationSender):
                 for d in self._per_destination_queues.values()
                 if d.transmission_loop_running
             ),
+            registry=hs.metrics_collector_registry,
         )
 
         LaterGauge(
@@ -406,6 +398,7 @@ class FederationSender(AbstractFederationSender):
             lambda: sum(
                 d.pending_pdu_count() for d in self._per_destination_queues.values()
             ),
+            registry=hs.metrics_collector_registry,
         )
         LaterGauge(
             "synapse_federation_transaction_queue_pending_edus",
@@ -414,6 +407,19 @@ class FederationSender(AbstractFederationSender):
             lambda: sum(
                 d.pending_edu_count() for d in self._per_destination_queues.values()
             ),
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.sent_pdus_destination_dist_count = Counter(
+            "synapse_federation_client_sent_pdu_destinations_count",
+            "Number of PDUs queued for sending to one or more destinations",
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.sent_pdus_destination_dist_total = Counter(
+            "synapse_federation_client_sent_pdu_destinations",
+            "Total number of PDUs queued for sending across all destinations",
+            registry=hs.metrics_collector_registry,
         )
 
         self._is_processing = False
@@ -710,8 +716,8 @@ class FederationSender(AbstractFederationSender):
         if not destinations:
             return
 
-        sent_pdus_destination_dist_total.inc(len(destinations))
-        sent_pdus_destination_dist_count.inc()
+        self.sent_pdus_destination_dist_total.inc(len(destinations))
+        self.sent_pdus_destination_dist_count.inc()
 
         assert pdu.internal_metadata.stream_ordering
 

@@ -120,7 +120,7 @@ GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 @wrap_as_background_process("LruCache._expire_old_entries")
 async def _expire_old_entries(
-    clock: Clock, expiry_seconds: float, autotune_config: Optional[dict]
+    hs: HomeServer, clock: Clock, expiry_seconds: float, autotune_config: Optional[dict]
 ) -> None:
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
@@ -238,6 +238,7 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     clock.looping_call(
         _expire_old_entries,
         30 * 1000,
+        hs,
         clock,
         expiry_time,
         hs.config.caches.cache_autotuning,

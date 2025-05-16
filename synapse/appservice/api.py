@@ -56,33 +56,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_transactions_counter = Counter(
-    "synapse_appservice_api_sent_transactions",
-    "Number of /transactions/ requests sent",
-    ["service"],
-)
-
-failed_transactions_counter = Counter(
-    "synapse_appservice_api_failed_transactions",
-    "Number of /transactions/ requests that failed to send",
-    ["service"],
-)
-
-sent_events_counter = Counter(
-    "synapse_appservice_api_sent_events", "Number of events sent to the AS", ["service"]
-)
-
-sent_ephemeral_counter = Counter(
-    "synapse_appservice_api_sent_ephemeral",
-    "Number of ephemeral events sent to the AS",
-    ["service"],
-)
-
-sent_todevice_counter = Counter(
-    "synapse_appservice_api_sent_todevice",
-    "Number of todevice messages sent to the AS",
-    ["service"],
-)
 
 HOUR_IN_MS = 60 * 60 * 1000
 
@@ -131,6 +104,41 @@ class ApplicationServiceApi(SimpleHttpClient):
 
         self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
             hs.get_clock(), "as_protocol_meta", timeout_ms=HOUR_IN_MS
+        )
+
+        self.sent_transactions_counter = Counter(
+            "synapse_appservice_api_sent_transactions",
+            "Number of /transactions/ requests sent",
+            ["service"],
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.failed_transactions_counter = Counter(
+            "synapse_appservice_api_failed_transactions",
+            "Number of /transactions/ requests that failed to send",
+            ["service"],
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.sent_events_counter = Counter(
+            "synapse_appservice_api_sent_events",
+            "Number of events sent to the AS",
+            ["service"],
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.sent_ephemeral_counter = Counter(
+            "synapse_appservice_api_sent_ephemeral",
+            "Number of ephemeral events sent to the AS",
+            ["service"],
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.sent_todevice_counter = Counter(
+            "synapse_appservice_api_sent_todevice",
+            "Number of todevice messages sent to the AS",
+            ["service"],
+            registry=hs.metrics_collector_registry,
         )
 
     def _get_headers(self, service: "ApplicationService") -> Dict[bytes, List[bytes]]:
@@ -395,10 +403,10 @@ class ApplicationServiceApi(SimpleHttpClient):
                     service.url,
                     [event.get("event_id") for event in events],
                 )
-            sent_transactions_counter.labels(service.id).inc()
-            sent_events_counter.labels(service.id).inc(len(serialized_events))
-            sent_ephemeral_counter.labels(service.id).inc(len(ephemeral))
-            sent_todevice_counter.labels(service.id).inc(len(to_device_messages))
+            self.sent_transactions_counter.labels(service.id).inc()
+            self.sent_events_counter.labels(service.id).inc(len(serialized_events))
+            self.sent_ephemeral_counter.labels(service.id).inc(len(ephemeral))
+            self.sent_todevice_counter.labels(service.id).inc(len(to_device_messages))
             return True
         except CodeMessageException as e:
             logger.warning(
@@ -417,7 +425,7 @@ class ApplicationServiceApi(SimpleHttpClient):
                 ex.args,
                 exc_info=logger.isEnabledFor(logging.DEBUG),
             )
-        failed_transactions_counter.labels(service.id).inc()
+        self.failed_transactions_counter.labels(service.id).inc()
         return False
 
     async def claim_client_keys(

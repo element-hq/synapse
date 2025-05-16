@@ -30,6 +30,7 @@ import functools
 import logging
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
 
+from prometheus_client import CollectorRegistry
 from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
@@ -307,6 +308,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+
+        self.metrics_collector_registry = CollectorRegistry(auto_describe=True)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
