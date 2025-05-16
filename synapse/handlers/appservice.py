@@ -68,8 +68,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter("synapse_handlers_appservice_events_processed", "")
-
 
 class ApplicationServicesHandler:
     def __init__(self, hs: "HomeServer"):
@@ -93,6 +91,12 @@ class ApplicationServicesHandler:
 
         self._ephemeral_events_linearizer = Linearizer(
             name="appservice_ephemeral_events"
+        )
+
+        self.events_processed_counter = Counter(
+            "synapse_handlers_appservice_events_processed",
+            "",
+            registry=hs.metrics_collector_registry,
         )
 
     def notify_interested_services(self, max_token: RoomStreamToken) -> None:
@@ -200,7 +204,7 @@ class ApplicationServicesHandler:
                         "appservice_sender"
                     ).set(upper_bound)
 
-                    events_processed_counter.inc(len(events))
+                    self.events_processed_counter.inc(len(events))
 
                     event_processing_loop_room_count.labels("appservice_sender").inc(
                         len(events_by_room)

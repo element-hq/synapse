@@ -137,26 +137,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-notified_presence_counter = Counter("synapse_handler_presence_notified_presence", "")
-federation_presence_out_counter = Counter(
-    "synapse_handler_presence_federation_presence_out", ""
-)
-presence_updates_counter = Counter("synapse_handler_presence_presence_updates", "")
-timers_fired_counter = Counter("synapse_handler_presence_timers_fired", "")
-federation_presence_counter = Counter(
-    "synapse_handler_presence_federation_presence", ""
-)
-bump_active_time_counter = Counter("synapse_handler_presence_bump_active_time", "")
-
-get_updates_counter = Counter("synapse_handler_presence_get_updates", "", ["type"])
-
-notify_reason_counter = Counter(
-    "synapse_handler_presence_notify_reason", "", ["locality", "reason"]
-)
-state_transition_counter = Counter(
-    "synapse_handler_presence_state_transition", "", ["locality", "from", "to"]
-)
-
 # If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
 # "currently_active"
 LAST_ACTIVE_GRANULARITY = 60 * 1000
@@ -221,6 +201,19 @@ class BasePresenceHandler(abc.ABC):
         active_presence = self.store.take_presence_startup_info()
         # The combined status across all user devices.
         self.user_to_current_state = {state.user_id: state for state in active_presence}
+
+        self.notify_reason_counter = Counter(
+            "synapse_handler_presence_notify_reason",
+            "",
+            ["locality", "reason"],
+            registry=hs.metrics_collector_registry,
+        )
+        self.state_transition_counter = Counter(
+            "synapse_handler_presence_state_transition",
+            "",
+            ["locality", "from", "to"],
+            registry=hs.metrics_collector_registry,
+        )
 
     @abc.abstractmethod
     async def user_syncing(
@@ -666,7 +659,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             old_state = self.user_to_current_state.get(new_state.user_id)
             self.user_to_current_state[new_state.user_id] = new_state
             is_mine = self.is_mine_id(new_state.user_id)
-            if not old_state or should_notify(old_state, new_state, is_mine):
+            if not old_state or should_notify(self, old_state, new_state, is_mine):
                 state_to_notify.append(new_state)
 
         stream_id = token
@@ -761,6 +754,38 @@ class PresenceHandler(BasePresenceHandler):
             "",
             [],
             lambda: len(self.user_to_current_state),
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.notified_presence_counter = Counter(
+            "synapse_handler_presence_notified_presence",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+        self.federation_presence_out_counter = Counter(
+            "synapse_handler_presence_federation_presence_out",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+        self.presence_updates_counter = Counter(
+            "synapse_handler_presence_presence_updates",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+        self.timers_fired_counter = Counter(
+            "synapse_handler_presence_timers_fired",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+        self.federation_presence_counter = Counter(
+            "synapse_handler_presence_federation_presence",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+        self.bump_active_time_counter = Counter(
+            "synapse_handler_presence_bump_active_time",
+            "",
+            registry=hs.metrics_collector_registry,
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -966,6 +991,7 @@ class PresenceHandler(BasePresenceHandler):
                 )
 
                 new_state, should_notify, should_ping = handle_update(
+                    self,
                     prev_state,
                     new_state,
                     is_mine=self.is_mine_id(user_id),
@@ -988,10 +1014,10 @@ class PresenceHandler(BasePresenceHandler):
 
             # TODO: We should probably ensure there are no races hereafter
 
-            presence_updates_counter.inc(len(new_states))
+            self.presence_updates_counter.inc(len(new_states))
 
             if to_notify:
-                notified_presence_counter.inc(len(to_notify))
+                self.notified_presence_counter.inc(len(to_notify))
                 await self._persist_and_notify(list(to_notify.values()))
 
             self.unpersisted_users_changes |= {s.user_id for s in new_states}
@@ -1010,7 +1036,7 @@ class PresenceHandler(BasePresenceHandler):
                 if user_id not in to_notify
             }
             if to_federation_ping:
-                federation_presence_out_counter.inc(len(to_federation_ping))
+                self.federation_presence_out_counter.inc(len(to_federation_ping))
 
                 hosts_to_states = await get_interested_remotes(
                     self.store,
@@ -1060,7 +1086,7 @@ class PresenceHandler(BasePresenceHandler):
             for user_id in users_to_check
         ]
 
-        timers_fired_counter.inc(len(states))
+        self.timers_fired_counter.inc(len(states))
 
         # Set of user ID & device IDs which are currently syncing.
         syncing_user_devices = {
@@ -1094,7 +1120,7 @@ class PresenceHandler(BasePresenceHandler):
 
         user_id = user.to_string()
 
-        bump_active_time_counter.inc()
+        self.bump_active_time_counter.inc()
 
         now = self.clock.time_msec()
 
@@ -1346,7 +1372,7 @@ class PresenceHandler(BasePresenceHandler):
             updates.append(prev_state.copy_and_replace(**new_fields))
 
         if updates:
-            federation_presence_counter.inc(len(updates))
+            self.federation_presence_counter.inc(len(updates))
             await self._update_states(updates)
 
     async def set_state(
@@ -1655,7 +1681,10 @@ class PresenceHandler(BasePresenceHandler):
 
 
 def should_notify(
-    old_state: UserPresenceState, new_state: UserPresenceState, is_mine: bool
+    base_presence_handler: BasePresenceHandler,
+    old_state: UserPresenceState,
+    new_state: UserPresenceState,
+    is_mine: bool,
 ) -> bool:
     """Decides if a presence state change should be sent to interested parties."""
     user_location = "remote"
@@ -1666,19 +1695,25 @@ def should_notify(
         return False
 
     if old_state.status_msg != new_state.status_msg:
-        notify_reason_counter.labels(user_location, "status_msg_change").inc()
+        base_presence_handler.notify_reason_counter.labels(
+            user_location, "status_msg_change"
+        ).inc()
         return True
 
     if old_state.state != new_state.state:
-        notify_reason_counter.labels(user_location, "state_change").inc()
-        state_transition_counter.labels(
+        base_presence_handler.notify_reason_counter.labels(
+            user_location, "state_change"
+        ).inc()
+        base_presence_handler.state_transition_counter.labels(
             user_location, old_state.state, new_state.state
         ).inc()
         return True
 
     if old_state.state == PresenceState.ONLINE:
         if new_state.currently_active != old_state.currently_active:
-            notify_reason_counter.labels(user_location, "current_active_change").inc()
+            base_presence_handler.notify_reason_counter.labels(
+                user_location, "current_active_change"
+            ).inc()
             return True
 
         if (
@@ -1687,14 +1722,14 @@ def should_notify(
         ):
             # Only notify about last active bumps if we're not currently active
             if not new_state.currently_active:
-                notify_reason_counter.labels(
+                base_presence_handler.notify_reason_counter.labels(
                     user_location, "last_active_change_online"
                 ).inc()
                 return True
 
     elif new_state.last_active_ts - old_state.last_active_ts > LAST_ACTIVE_GRANULARITY:
         # Always notify for a transition where last active gets bumped.
-        notify_reason_counter.labels(
+        base_presence_handler.notify_reason_counter.labels(
             user_location, "last_active_change_not_online"
         ).inc()
         return True
@@ -1763,6 +1798,13 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         self.get_presence_router = hs.get_presence_router
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+
+        self.get_updates_counter = Counter(
+            "synapse_handler_presence_get_updates",
+            "",
+            ["type"],
+            registry=hs.metrics_collector_registry,
+        )
 
     async def get_new_events(
         self,
@@ -1870,7 +1912,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
                     # If we have the full list of changes for presence we can
                     # simply check which ones share a room with the user.
-                    get_updates_counter.labels("stream").inc()
+                    self.get_updates_counter.labels("stream").inc()
 
                     sharing_users = await self.store.do_users_share_a_room(
                         user_id, updated_users
@@ -1883,7 +1925,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 else:
                     # Too many possible updates. Find all users we can see and check
                     # if any of them have changed.
-                    get_updates_counter.labels("full").inc()
+                    self.get_updates_counter.labels("full").inc()
 
                     users_interested_in = (
                         await self.store.get_users_who_share_room_with_user(user_id)
@@ -2130,6 +2172,7 @@ def handle_timeout(
 
 
 def handle_update(
+    base_presence_handler: BasePresenceHandler,
     prev_state: UserPresenceState,
     new_state: UserPresenceState,
     is_mine: bool,
@@ -2213,7 +2256,7 @@ def handle_update(
             )
 
     # Check whether the change was something worth notifying about
-    if should_notify(prev_state, new_state, is_mine):
+    if should_notify(base_presence_handler, prev_state, new_state, is_mine):
         new_state = new_state.copy_and_replace(last_federation_update_ts=now)
         persist_and_notify = True
 

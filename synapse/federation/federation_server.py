@@ -105,25 +105,6 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter("synapse_federation_server_received_pdus", "")
-
-received_edus_counter = Counter("synapse_federation_server_received_edus", "")
-
-received_queries_counter = Counter(
-    "synapse_federation_server_received_queries", "", ["type"]
-)
-
-pdu_process_time = Histogram(
-    "synapse_federation_server_pdu_process_time",
-    "Time taken to process an event",
-)
-
-last_pdu_ts_metric = Gauge(
-    "synapse_federation_last_received_pdu_time",
-    "The timestamp of the last PDU which was successfully received from the given domain",
-    labelnames=("server_name",),
-)
-
 
 # The name of the lock to use when process events in a room received over
 # federation.
@@ -184,6 +165,38 @@ class FederationServer(FederationBase):
 
         # Whether we have started handling old events in the staging area.
         self._started_handling_of_staged_events = False
+
+        self.received_pdus_counter = Counter(
+            "synapse_federation_server_received_pdus",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.received_edus_counter = Counter(
+            "synapse_federation_server_received_edus",
+            "",
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.received_queries_counter = Counter(
+            "synapse_federation_server_received_queries",
+            "",
+            ["type"],
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.pdu_process_time = Histogram(
+            "synapse_federation_server_pdu_process_time",
+            "Time taken to process an event",
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.last_pdu_ts_metric = Gauge(
+            "synapse_federation_last_received_pdu_time",
+            "The timestamp of the last PDU which was successfully received from the given domain",
+            labelnames=("server_name",),
+            registry=hs.metrics_collector_registry,
+        )
 
     @wrap_as_background_process("_handle_old_staged_events")
     async def _handle_old_staged_events(self) -> None:
@@ -424,7 +437,7 @@ class FederationServer(FederationBase):
             report back to the sending server.
         """
 
-        received_pdus_counter.inc(len(transaction.pdus))
+        self.received_pdus_counter.inc(len(transaction.pdus))
 
         origin_host, _ = parse_server_name(origin)
 
@@ -535,7 +548,7 @@ class FederationServer(FederationBase):
         )
 
         if newest_pdu_ts and origin in self._federation_metrics_domains:
-            last_pdu_ts_metric.labels(server_name=origin).set(newest_pdu_ts / 1000)
+            self.last_pdu_ts_metric.labels(server_name=origin).set(newest_pdu_ts / 1000)
 
         return pdu_results
 
@@ -543,7 +556,7 @@ class FederationServer(FederationBase):
         """Process the EDUs in a received transaction."""
 
         async def _process_edu(edu_dict: JsonDict) -> None:
-            received_edus_counter.inc()
+            self.received_edus_counter.inc()
 
             edu = Edu(
                 origin=origin,
@@ -658,7 +671,7 @@ class FederationServer(FederationBase):
     async def on_query_request(
         self, query_type: str, args: Dict[str, str]
     ) -> Tuple[int, Dict[str, Any]]:
-        received_queries_counter.labels(query_type).inc()
+        self.received_queries_counter.labels(query_type).inc()
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
 
@@ -1299,7 +1312,7 @@ class FederationServer(FederationBase):
                     origin, event.event_id
                 )
                 if received_ts is not None:
-                    pdu_process_time.observe(
+                    self.pdu_process_time.observe(
                         (self._clock.time_msec() - received_ts) / 1000
                     )
 

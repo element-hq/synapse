@@ -92,12 +92,6 @@ logger = logging.getLogger(__name__)
 
 INVALID_USERNAME_OR_PASSWORD = "Invalid username or password"
 
-invalid_login_token_counter = Counter(
-    "synapse_user_login_invalid_login_tokens",
-    "Counts the number of rejected m.login.token on /login",
-    ["reason"],
-)
-
 
 def convert_client_dict_legacy_fields_to_identifier(
     submission: JsonDict,
@@ -280,6 +274,13 @@ class AuthHandler:
         self._extra_attributes: Dict[str, SsoLoginExtraAttributes] = {}
 
         self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+
+        self.invalid_login_token_counter = Counter(
+            "synapse_user_login_invalid_login_tokens",
+            "Counts the number of rejected m.login.token on /login",
+            ["reason"],
+            registry=hs.metrics_collector_registry,
+        )
 
     async def validate_user_via_ui_auth(
         self,
@@ -1477,11 +1478,11 @@ class AuthHandler:
         try:
             return await self.store.consume_login_token(login_token)
         except LoginTokenExpired:
-            invalid_login_token_counter.labels("expired").inc()
+            self.invalid_login_token_counter.labels("expired").inc()
         except LoginTokenReused:
-            invalid_login_token_counter.labels("reused").inc()
+            self.invalid_login_token_counter.labels("reused").inc()
         except NotFoundError:
-            invalid_login_token_counter.labels("not found").inc()
+            self.invalid_login_token_counter.labels("not found").inc()
 
         raise AuthError(403, "Invalid login token", errcode=Codes.FORBIDDEN)
 

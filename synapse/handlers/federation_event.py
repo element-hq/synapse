@@ -105,41 +105,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-soft_failed_event_counter = Counter(
-    "synapse_federation_soft_failed_events_total",
-    "Events received over federation that we marked as soft_failed",
-)
-
-# Added to debug performance and track progress on optimizations
-backfill_processing_after_timer = Histogram(
-    "synapse_federation_backfill_processing_after_time_seconds",
-    "sec",
-    [],
-    buckets=(
-        0.1,
-        0.25,
-        0.5,
-        1.0,
-        2.5,
-        5.0,
-        7.5,
-        10.0,
-        15.0,
-        20.0,
-        25.0,
-        30.0,
-        40.0,
-        50.0,
-        60.0,
-        80.0,
-        100.0,
-        120.0,
-        150.0,
-        180.0,
-        "+Inf",
-    ),
-)
-
 
 class FederationEventHandler:
     """Handles events that originated from federation.
@@ -194,6 +159,43 @@ class FederationEventHandler:
         self.room_queues: Dict[str, List[Tuple[EventBase, str]]] = {}
 
         self._room_pdu_linearizer = Linearizer("fed_room_pdu")
+
+        self.soft_failed_event_counter = Counter(
+            "synapse_federation_soft_failed_events_total",
+            "Events received over federation that we marked as soft_failed",
+            registry=hs.metrics_collector_registry,
+        )
+
+        # Added to debug performance and track progress on optimizations
+        self.backfill_processing_after_timer = Histogram(
+            "synapse_federation_backfill_processing_after_time_seconds",
+            "sec",
+            [],
+            buckets=(
+                0.1,
+                0.25,
+                0.5,
+                1.0,
+                2.5,
+                5.0,
+                7.5,
+                10.0,
+                15.0,
+                20.0,
+                25.0,
+                30.0,
+                40.0,
+                50.0,
+                60.0,
+                80.0,
+                100.0,
+                120.0,
+                150.0,
+                180.0,
+                "+Inf",
+            ),
+            registry=hs.metrics_collector_registry,
+        )
 
     async def on_receive_pdu(self, origin: str, pdu: EventBase) -> None:
         """Process a PDU received via a federation /send/ transaction
@@ -698,7 +700,7 @@ class FederationEventHandler:
         if not events:
             return
 
-        with backfill_processing_after_timer.time():
+        with self.backfill_processing_after_timer.time():
             # if there are any events in the wrong room, the remote server is buggy and
             # should not be trusted.
             for ev in events:
@@ -2062,7 +2064,7 @@ class FederationEventHandler:
                     "hs": origin,
                 },
             )
-            soft_failed_event_counter.inc()
+            self.soft_failed_event_counter.inc()
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
