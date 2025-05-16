@@ -30,6 +30,7 @@ from prometheus_client import REGISTRY, CollectorRegistry, Metric
 
 from synapse.metrics import GaugeMetricFamily
 from synapse.metrics._types import Collector
+from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -140,10 +141,11 @@ def get_jemalloc_stats() -> Optional[JemallocStats]:
     Note that this will always return None until `setup_jemalloc_stats` has been
     called.
     """
+    # TODO
     return _JEMALLOC_STATS
 
 
-def _setup_jemalloc_stats() -> None:
+def _setup_jemalloc_stats(hs: HomeServer) -> None:
     """Checks to see if jemalloc is loaded, and hooks up a collector to record
     statistics exposed by jemalloc.
     """
@@ -239,11 +241,11 @@ def _setup_jemalloc_stats() -> None:
     logger.debug("Added jemalloc stats")
 
 
-def setup_jemalloc_stats() -> None:
+def setup_jemalloc_stats(hs: HomeServer) -> None:
     """Try to setup jemalloc stats, if jemalloc is loaded."""
 
     try:
-        _setup_jemalloc_stats()
+        _setup_jemalloc_stats(hs)
     except Exception as e:
         # This should only happen if we find the loaded jemalloc library, but
         # fail to load it somehow (e.g. we somehow picked the wrong version).

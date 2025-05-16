@@ -134,7 +134,7 @@ _background_processes_active_since_last_scrape: "Set[_BackgroundProcess]" = set(
 _bg_metrics_lock = threading.Lock()
 
 
-class _Collector(Collector):
+class BackgroundProcessCollector(Collector):
     """A custom metrics collector for the background process metrics.
 
     Ensures that all of the metrics are up-to-date with any in-flight processes
@@ -167,9 +167,6 @@ class _Collector(Collector):
             _background_process_db_sched_duration,
         ):
             yield from m.collect()
-
-
-_Collector(registry=hs.metrics_collector_registry)
 
 
 class _BackgroundProcess:

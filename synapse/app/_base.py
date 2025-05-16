@@ -74,8 +74,12 @@ from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
-from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics import CPUMetrics, install_gc_manager, register_threadpool
+from synapse.metrics._gc import GCCounts, PyPyGCStats, running_on_pypy
+from synapse.metrics.background_process_metrics import (
+    BackgroundProcessCollector,
+    wrap_as_background_process,
+)
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -178,7 +182,6 @@ def start_reactor(
 
     def run() -> None:
         logger.info("Running")
-        setup_jemalloc_stats()
         change_resource_limit(soft_file_limit)
         if gc_thresholds:
             gc.set_threshold(*gc_thresholds)
@@ -593,6 +596,7 @@ async def start(hs: "HomeServer") -> None:
     )
 
     setup_sentry(hs)
+    setup_global_metrics(hs)
     setup_sdnotify(hs)
 
     # If background tasks are running on the main process or this is the worker in
@@ -678,6 +682,20 @@ def setup_sentry(hs: "HomeServer") -> None:
     name = hs.get_instance_name()
     global_scope.set_tag("worker_app", app)
     global_scope.set_tag("worker_name", name)
+
+
+def setup_global_metrics(hs: "HomeServer") -> None:
+    """Set up global metrics for this homeserver.
+
+    This is called after the homeserver has been set up, but before any
+    listeners are started.
+    """
+    CPUMetrics(registry=hs.metrics_collector_registry)
+    if running_on_pypy:
+        PyPyGCStats(registry=hs.metrics_collector_registry)
+        GCCounts(registry=hs.metrics_collector_registry)
+    BackgroundProcessCollector(registry=hs.metrics_collector_registry)
+    setup_jemalloc_stats()
 
 
 def setup_sdnotify(hs: "HomeServer") -> None:

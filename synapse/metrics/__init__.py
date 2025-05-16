@@ -338,8 +338,6 @@ class GaugeBucketCollector(Collector):
 #
 # Detailed CPU metrics
 #
-
-
 class CPUMetrics(Collector):
     def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
         ticks_per_sec = 100
@@ -371,7 +369,7 @@ class CPUMetrics(Collector):
             yield sys
 
 
-CPUMetrics(registry=hs.metrics_collector_registry)
+
 
 #
 # Federation Metrics

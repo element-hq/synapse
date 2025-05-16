@@ -106,8 +106,6 @@ def install_gc_manager() -> None:
     if running_on_pypy:
         return
 
-    GCCounts(registry=hs.metrics_collector_registry)
-
     gc.disable()
 
     # The time (in seconds since the epoch) of the last time we did a GC for each generation.
@@ -214,7 +212,3 @@ class PyPyGCStats(Collector):
         pypy_mem.add_metric(["used", "totals", "gc_peak"], s.peak_memory)
         pypy_mem.add_metric(["allocated", "totals", "gc_peak"], s.peak_allocated_memory)
         yield pypy_mem
-
-
-if running_on_pypy:
-    PyPyGCStats(registry=hs.metrics_collector_registry)
