@@ -547,12 +547,19 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             # If the user has no receipts in the room, retrieve the stream ordering for
             # the latest membership event from this user in this room (which we assume is
             # a join).
+            # Sometimes (usually state resets) there can be no membership event either,
+            # so we allow None and return no notifications which is probably about
+            # the best we can do short of failing outright.
             event_id = self.db_pool.simple_select_one_onecol_txn(
                 txn=txn,
                 table="local_current_membership",
                 keyvalues={"room_id": room_id, "user_id": user_id},
                 retcol="event_id",
+                allow_none=True,
             )
+
+            if event_id is None:
+                return _EMPTY_ROOM_NOTIF_COUNTS
 
             stream_ordering = self.get_stream_id_for_event_txn(txn, event_id)
 
