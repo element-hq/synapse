@@ -1,0 +1,1 @@
+Add a new module API callback that allows overriding of per user ratelimits.
