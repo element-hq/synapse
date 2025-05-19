@@ -15,6 +15,10 @@ INDEX_CREATION_REGEX = re.compile(r"CREATE .*INDEX .*ON ([a-z_]+)", flags=re.IGN
 INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_]+)", flags=re.IGNORECASE)
 TABLE_CREATION_REGEX = re.compile(r"CREATE .*TABLE ([a-z_]+)", flags=re.IGNORECASE)
 
+# The base branch we want to check against. We use the main development branch
+# on the assumption that is what we are developing against.
+DEVELOP_BRANCH = "develop"
+
 
 @click.command()
 @click.option(
@@ -38,17 +42,17 @@ def main(force_colors: bool) -> None:
     click.secho("Updating repo...")
 
     repo = git.Repo()
-    repo.remote().fetch(refspec="develop")
+    repo.remote().fetch(refspec=DEVELOP_BRANCH)
 
     click.secho("Getting current schema version...")
 
-    r = repo.git.show("origin/develop:synapse/storage/schema/__init__.py")
+    r = repo.git.show(f"origin/{DEVELOP_BRANCH}:synapse/storage/schema/__init__.py")
 
     locals: Dict[str, Any] = {}
     exec(r, locals)
     current_schema_version = locals["SCHEMA_VERSION"]
 
-    diffs: List[git.Diff] = repo.remote().refs.develop.commit.diff(None)
+    diffs: List[git.Diff] = repo.remote().refs[DEVELOP_BRANCH].commit.diff(None)
 
     # Get the schema version of the local file to check against current schema on develop
     with open("synapse/storage/schema/__init__.py") as file:
@@ -61,7 +65,7 @@ def main(force_colors: bool) -> None:
         # local schema version must be +/-1 the current schema version on develop
         if abs(local_schema_version - current_schema_version) != 1:
             click.secho(
-                "The proposed schema version has diverged more than one version from develop, please fix!",
+                f"The proposed schema version has diverged more than one version from {DEVELOP_BRANCH}, please fix!",
                 fg="red",
                 bold=True,
                 color=force_colors,
