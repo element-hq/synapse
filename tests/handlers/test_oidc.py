@@ -1483,8 +1483,8 @@ class OidcHandlerTestCase(HomeserverTestCase):
             }
         }
     )
-    def test_attribute_requirements_exists(self) -> None:
-        """The required attributes must *only exist* in the OIDC userinfo response."""
+    def test_attribute_requirements_does_not_exist(self) -> None:
+        """OIDC login fails if the required attribute does not exist in the OIDC userinfo response."""
         # userinfo lacking "test" attribute should fail.
         userinfo = {
             "sub": "tester",
@@ -1494,11 +1494,23 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.get_success(self.handler.handle_oidc_callback(request))
         self.complete_sso_login.assert_not_called()
 
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [{"attribute": "test"}],
+            }
+        }
+    )
+    def test_attribute_requirements_exist(self) -> None:
+        """OIDC login succeeds if the required attribute exist (regardless of value)
+        in the OIDC userinfo response.
+        """
         # userinfo with "test" attribute and random value should succeed.
         userinfo = {
             "sub": "tester",
             "username": "tester",
-            "test": random_string(5),
+            "test": random_string(5),  # value does not matter
         }
         request, _ = self.start_authorization(userinfo)
         self.get_success(self.handler.handle_oidc_callback(request))
