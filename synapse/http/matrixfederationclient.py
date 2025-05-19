@@ -425,9 +425,9 @@ class MatrixFederationHttpClient:
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret
-            assert (
-                proxy_authorization_secret is not None
-            ), "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+            assert proxy_authorization_secret is not None, (
+                "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+            )
             federation_proxy_credentials = BearerProxyCredentials(
                 proxy_authorization_secret.encode("ascii")
             )

@@ -3901,9 +3901,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         image_data1 = SMALL_PNG
         # Resolution: 1×1, MIME type: image/gif, Extension: gif, Size: 35 B
         image_data2 = unhexlify(
-            b"47494638376101000100800100000000"
-            b"ffffff2c00000000010001000002024c"
-            b"01003b"
+            b"47494638376101000100800100000000ffffff2c00000000010001000002024c01003b"
         )
         # Resolution: 1×1, MIME type: image/bmp, Extension: bmp, Size: 54 B
         image_data3 = unhexlify(
