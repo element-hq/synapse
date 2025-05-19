@@ -2738,6 +2738,15 @@ Example configuration:
 inhibit_user_in_use_error: true
 ```
 ---
+### `allow_underscore_prefixed_registration`
+
+*(boolean)* Whether users are allowed to register with a underscore-prefixed localpart. By default, AppServices use prefixes like `_example` to namespace their associated ghost users. If turned on, this may result in clashes or confusion. Useful when provisioning users from an external identity provider. Defaults to `false`.
+
+Example configuration:
+```yaml
+allow_underscore_prefixed_registration: true
+```
+---
 ## User session management
 
 Config options related to user session management.
@@ -3934,7 +3943,7 @@ room_list_publication_rules: null
 
 ```yaml
 room_list_publication_rules:
-- action: allow
+- action: deny
 ```
 
 ```yaml
@@ -3943,7 +3952,7 @@ room_list_publication_rules: []
 
 ```yaml
 room_list_publication_rules:
-- action: deny
+- action: allow
 ```
 
 ```yaml

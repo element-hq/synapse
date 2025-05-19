@@ -3113,6 +3113,17 @@ properties:
     default: false
     examples:
       - true
+  allow_underscore_prefixed_registration:
+    type: boolean
+    description: >-
+      Whether users are allowed to register with a underscore-prefixed
+      localpart. By default, AppServices use prefixes like `_example` to
+      namespace their associated ghost users. If turned on, this may result in
+      clashes or confusion. Useful when provisioning users from an external
+      identity provider.
+    default: false
+    examples:
+      - true
   session_lifetime:
     $ref: "#/$defs/duration"
     description: >-
@@ -4947,9 +4958,9 @@ properties:
     default: null
     examples:
       - null
-      - - action: allow
-      - []
       - - action: deny
+      - []
+      - - action: allow
       - - user_id: "@bad_user:example.com"
           action: deny
         - action: allow
