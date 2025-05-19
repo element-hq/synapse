@@ -77,7 +77,7 @@ class InitialSyncHandler:
                 bool,
                 bool,
             ]
-        ] = ResponseCache(hs.get_clock(), "initial_sync_cache")
+        ] = ResponseCache(hs.get_clock(), hs.get_cache_manager(), "initial_sync_cache")
         self._event_serializer = hs.get_event_client_serializer()
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state

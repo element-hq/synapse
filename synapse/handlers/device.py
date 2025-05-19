@@ -1231,6 +1231,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
             cache_name="device_update_edu",
             clock=self.clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
             iterable=True,

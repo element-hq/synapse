@@ -200,6 +200,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         #   the old access token to continue working for a short time.
         self._introspection_cache: ResponseCache[str] = ResponseCache(
             self._clock,
+            hs.get_cache_manager(),
             "token_introspection",
             timeout_ms=120_000,
             # don't log because the keys are access tokens

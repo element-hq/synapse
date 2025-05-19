@@ -1773,7 +1773,11 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         # Map of (user_id, device_id) -> bool. If there is an entry that implies
         # the device exists.
         self.device_id_exists_cache: LruCache[Tuple[str, str], Literal[True]] = (
-            LruCache(cache_name="device_id_exists", max_size=10000)
+            LruCache(
+                max_size=10000,
+                cache_name="device_id_exists",
+                cache_manager=hs.get_cache_manager(),
+            )
         )
 
     async def store_device(

@@ -22,7 +22,7 @@
 import logging
 import time
 from selectors import SelectSelector, _PollLikeSelector  # type: ignore[attr-defined]
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from prometheus_client import Histogram, Metric
 from prometheus_client.core import REGISTRY, CollectorRegistry, GaugeMetricFamily
@@ -31,9 +31,6 @@ from twisted.internet import reactor, selectreactor
 from twisted.internet.asyncioreactor import AsyncioSelectorReactor
 
 from synapse.metrics._types import Collector
-
-if TYPE_CHECKING:
-    from synapse.server import HomeServer
 
 try:
     from selectors import KqueueSelector
@@ -174,6 +171,6 @@ except Exception as e:
     logger.warning("Configuring ReactorLastSeenMetric failed: %r", e)
 
 
-def setup_reactor_metrics(hs: "HomeServer") -> None:
+def setup_reactor_metrics(registry: Optional[CollectorRegistry] = REGISTRY) -> None:
     if wrapper:
-        ReactorLastSeenMetric(wrapper, registry=hs.metrics_collector_registry)
+        ReactorLastSeenMetric(wrapper, registry=registry)

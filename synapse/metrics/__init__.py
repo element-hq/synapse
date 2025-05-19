@@ -369,8 +369,6 @@ class CPUMetrics(Collector):
             yield sys
 
 
-
-
 #
 # Federation Metrics
 #

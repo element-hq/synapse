@@ -20,8 +20,10 @@
 #
 
 from typing import List, cast
+from unittest.mock import Mock
 
 from synapse.util import Clock
+from synapse.util.caches import CacheManager
 from synapse.util.caches.expiringcache import ExpiringCache
 
 from tests.utils import MockClock
@@ -33,7 +35,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_get_set(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, str] = ExpiringCache(
-            "test", cast(Clock, clock), max_len=1
+            "test", cast(Clock, clock), cache_manager=Mock(spec=CacheManager), max_len=1
         )
 
         cache["key"] = "value"
@@ -43,7 +45,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_eviction(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, str] = ExpiringCache(
-            "test", cast(Clock, clock), max_len=2
+            "test", cast(Clock, clock), cache_manager=Mock(spec=CacheManager), max_len=2
         )
 
         cache["key"] = "value"
@@ -59,7 +61,11 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_iterable_eviction(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, List[int]] = ExpiringCache(
-            "test", cast(Clock, clock), max_len=5, iterable=True
+            "test",
+            cast(Clock, clock),
+            cache_manager=Mock(spec=CacheManager),
+            max_len=5,
+            iterable=True,
         )
 
         cache["key"] = [1]
@@ -79,7 +85,10 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_time_eviction(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, int] = ExpiringCache(
-            "test", cast(Clock, clock), expiry_ms=1000
+            "test",
+            cast(Clock, clock),
+            cache_manager=Mock(spec=CacheManager),
+            expiry_ms=1000,
         )
 
         cache["key"] = 1

@@ -43,7 +43,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.util import Clock
 from synapse.util.async_helpers import AbstractObservableDeferred, ObservableDeferred
-from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.caches import CacheManager, EvictionReason
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,7 @@ class ResponseCache(Generic[KV]):
     def __init__(
         self,
         clock: Clock,
+        cache_manager: CacheManager,
         name: str,
         timeout_ms: float = 0,
         enable_logging: bool = True,
@@ -114,7 +115,9 @@ class ResponseCache(Generic[KV]):
         self.timeout_sec = timeout_ms / 1000.0
 
         self._name = name
-        self._metrics = register_cache("response_cache", name, self, resizable=False)
+        self._metrics = cache_manager.register_cache(
+            "response_cache", name, self, resizable=False
+        )
         self._enable_logging = enable_logging
 
     def size(self) -> int:

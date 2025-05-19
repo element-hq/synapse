@@ -58,7 +58,6 @@ from synapse.types import JsonValue
 from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
-from synapse.util.caches import register_cache
 from synapse.util.metrics import measure_func
 from synapse.visibility import filter_event_for_clients_with_state
 
@@ -134,7 +133,7 @@ class BulkPushRuleEvaluator:
 
         self._related_event_match_enabled = self.hs.config.experimental.msc3664_enabled
 
-        self.room_push_rule_cache_metrics = register_cache(
+        self.room_push_rule_cache_metrics = hs.get_cache_manager().register_cache(
             "cache",
             "room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,

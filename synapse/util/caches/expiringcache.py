@@ -30,7 +30,7 @@ from twisted.internet import defer
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util import Clock
-from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.caches import CacheManager, EvictionReason
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ class ExpiringCache(Generic[KT, VT]):
         self,
         cache_name: str,
         clock: Clock,
+        cache_manager: CacheManager,
         max_len: int = 0,
         expiry_ms: int = 0,
         reset_expiry_on_get: bool = False,
@@ -83,7 +84,7 @@ class ExpiringCache(Generic[KT, VT]):
 
         self.iterable = iterable
 
-        self.metrics = register_cache("expiring", cache_name, self)
+        self.metrics = cache_manager.register_cache("expiring", cache_name, self)
 
         if not self._expiry_ms:
             # Don't bother starting the loop if things never expire

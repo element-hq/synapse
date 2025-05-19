@@ -114,6 +114,7 @@ class RoomSummaryHandler:
             Tuple[str, str, bool, Optional[int], Optional[int], Optional[str]]
         ] = ResponseCache(
             hs.get_clock(),
+            hs.get_cache_manager(),
             "get_room_hierarchy",
         )
         self._msc3266_enabled = hs.config.experimental.msc3266_enabled

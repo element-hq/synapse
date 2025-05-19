@@ -25,6 +25,7 @@ from parameterized import parameterized
 
 from twisted.internet import defer
 
+from synapse.util.caches import CacheManager
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 
 from tests.server import get_clock
@@ -44,9 +45,10 @@ class ResponseCacheTestCase(TestCase):
 
     def setUp(self) -> None:
         self.reactor, self.clock = get_clock()
+        self.cache_manager = Mock(spec=CacheManager)
 
     def with_cache(self, name: str, ms: int = 0) -> ResponseCache:
-        return ResponseCache(self.clock, name, timeout_ms=ms)
+        return ResponseCache(self.clock, self.cache_manager, name, timeout_ms=ms)
 
     @staticmethod
     async def instant_return(o: str) -> str:

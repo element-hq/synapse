@@ -352,6 +352,7 @@ class SyncHandler:
         #    memory.
         self.response_cache: ResponseCache[SyncRequestKey] = ResponseCache(
             hs.get_clock(),
+            hs.get_cache_manager(),
             "sync",
             timeout_ms=hs.config.caches.sync_response_cache_duration,
         )
@@ -362,6 +363,7 @@ class SyncHandler:
         ] = ExpiringCache(
             "lazy_loaded_members_cache",
             self.clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )

@@ -103,7 +103,10 @@ class ApplicationServiceApi(SimpleHttpClient):
         self.config = hs.config.appservice
 
         self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "as_protocol_meta", timeout_ms=HOUR_IN_MS
+            hs.get_clock(),
+            hs.get_cache_manager(),
+            "as_protocol_meta",
+            timeout_ms=HOUR_IN_MS,
         )
 
         self.sent_transactions_counter = Counter(

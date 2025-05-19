@@ -639,6 +639,7 @@ class StateResolutionHandler:
             ExpiringCache(
                 cache_name="state_cache",
                 clock=self.clock,
+                cache_manager=hs.get_cache_manager(),
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
                 iterable=True,

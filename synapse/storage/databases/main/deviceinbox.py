@@ -81,6 +81,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
             clock=self._clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
         )

@@ -24,13 +24,17 @@ import logging
 import typing
 from enum import Enum, auto
 from sys import intern
-from typing import Any, Callable, Dict, List, Optional, Sized, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sized, TypeVar
 
 import attr
+from prometheus_client import REGISTRY, CollectorRegistry
 from prometheus_client.core import Gauge
 
 from synapse.config.cache import add_resizable_cache
 from synapse.util.metrics import DynamicCollectorRegistry
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -38,62 +42,83 @@ logger = logging.getLogger(__name__)
 # Whether to track estimated memory usage of the LruCaches.
 TRACK_MEMORY_USAGE = False
 
-# We track cache metrics in a special registry that lets us update the metrics
-# just before they are returned from the scrape endpoint.
-CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()
 
-caches_by_name: Dict[str, Sized] = {}
+class CacheMetrics:
+    def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+        # We track cache metrics in a special registry that lets us update the metrics
+        # just before they are returned from the scrape endpoint.
+        self.CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()
 
-cache_size = Gauge(
-    "synapse_util_caches_cache_size", "", ["name"], registry=CACHE_METRIC_REGISTRY
-)
-cache_hits = Gauge(
-    "synapse_util_caches_cache_hits", "", ["name"], registry=CACHE_METRIC_REGISTRY
-)
-cache_evicted = Gauge(
-    "synapse_util_caches_cache_evicted_size",
-    "",
-    ["name", "reason"],
-    registry=CACHE_METRIC_REGISTRY,
-)
-cache_total = Gauge(
-    "synapse_util_caches_cache", "", ["name"], registry=CACHE_METRIC_REGISTRY
-)
-cache_max_size = Gauge(
-    "synapse_util_caches_cache_max_size", "", ["name"], registry=CACHE_METRIC_REGISTRY
-)
-cache_memory_usage = Gauge(
-    "synapse_util_caches_cache_size_bytes",
-    "Estimated memory usage of the caches",
-    ["name"],
-    registry=CACHE_METRIC_REGISTRY,
-)
+        self.cache_size = Gauge(
+            "synapse_util_caches_cache_size",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.cache_hits = Gauge(
+            "synapse_util_caches_cache_hits",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.cache_evicted = Gauge(
+            "synapse_util_caches_cache_evicted_size",
+            "",
+            ["name", "reason"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.cache_total = Gauge(
+            "synapse_util_caches_cache",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.cache_max_size = Gauge(
+            "synapse_util_caches_cache_max_size",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.cache_memory_usage = Gauge(
+            "synapse_util_caches_cache_size_bytes",
+            "Estimated memory usage of the caches",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
 
-response_cache_size = Gauge(
-    "synapse_util_caches_response_cache_size",
-    "",
-    ["name"],
-    registry=CACHE_METRIC_REGISTRY,
-)
-response_cache_hits = Gauge(
-    "synapse_util_caches_response_cache_hits",
-    "",
-    ["name"],
-    registry=CACHE_METRIC_REGISTRY,
-)
-response_cache_evicted = Gauge(
-    "synapse_util_caches_response_cache_evicted_size",
-    "",
-    ["name", "reason"],
-    registry=CACHE_METRIC_REGISTRY,
-)
-response_cache_total = Gauge(
-    "synapse_util_caches_response_cache", "", ["name"], registry=CACHE_METRIC_REGISTRY
-)
+        self.response_cache_size = Gauge(
+            "synapse_util_caches_response_cache_size",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.response_cache_hits = Gauge(
+            "synapse_util_caches_response_cache_hits",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.response_cache_evicted = Gauge(
+            "synapse_util_caches_response_cache_evicted_size",
+            "",
+            ["name", "reason"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
+        self.response_cache_total = Gauge(
+            "synapse_util_caches_response_cache",
+            "",
+            ["name"],
+            registry=self.CACHE_METRIC_REGISTRY,
+        )
 
+        # Register our custom cache metrics registry with the global registry
+        registry.register(self.CACHE_METRIC_REGISTRY)
 
-# Register our custom cache metrics registry with the global registry
-hs.metrics_collector_registry.register(CACHE_METRIC_REGISTRY)
+    def register_hook(self, metric_name: str, hook: Callable[[], None]) -> None:
+        """
+        Registers a hook that is called before metric collection.
+        """
+        self.CACHE_METRIC_REGISTRY.register_hook(metric_name, hook)
 
 
 class EvictionReason(Enum):
@@ -104,6 +129,7 @@ class EvictionReason(Enum):
 
 @attr.s(slots=True, auto_attribs=True)
 class CacheMetric:
+    _cache_metrics: CacheMetrics
     _cache: Sized
     _cache_type: str
     _cache_name: str
@@ -145,31 +171,41 @@ class CacheMetric:
     def collect(self) -> None:
         try:
             if self._cache_type == "response_cache":
-                response_cache_size.labels(self._cache_name).set(len(self._cache))
-                response_cache_hits.labels(self._cache_name).set(self.hits)
+                self._cache_metrics.response_cache_size.labels(self._cache_name).set(
+                    len(self._cache)
+                )
+                self._cache_metrics.response_cache_hits.labels(self._cache_name).set(
+                    self.hits
+                )
                 for reason in EvictionReason:
-                    response_cache_evicted.labels(self._cache_name, reason.name).set(
-                        self.eviction_size_by_reason[reason]
-                    )
-                response_cache_total.labels(self._cache_name).set(
+                    self._cache_metrics.response_cache_evicted.labels(
+                        self._cache_name, reason.name
+                    ).set(self.eviction_size_by_reason[reason])
+                self._cache_metrics.response_cache_total.labels(self._cache_name).set(
                     self.hits + self.misses
                 )
             else:
-                cache_size.labels(self._cache_name).set(len(self._cache))
-                cache_hits.labels(self._cache_name).set(self.hits)
+                self._cache_metrics.cache_size.labels(self._cache_name).set(
+                    len(self._cache)
+                )
+                self._cache_metrics.cache_hits.labels(self._cache_name).set(self.hits)
                 for reason in EvictionReason:
-                    cache_evicted.labels(self._cache_name, reason.name).set(
-                        self.eviction_size_by_reason[reason]
-                    )
-                cache_total.labels(self._cache_name).set(self.hits + self.misses)
+                    self._cache_metrics.cache_evicted.labels(
+                        self._cache_name, reason.name
+                    ).set(self.eviction_size_by_reason[reason])
+                self._cache_metrics.cache_total.labels(self._cache_name).set(
+                    self.hits + self.misses
+                )
                 max_size = getattr(self._cache, "max_size", None)
                 if max_size:
-                    cache_max_size.labels(self._cache_name).set(max_size)
+                    self._cache_metrics.cache_max_size.labels(self._cache_name).set(
+                        max_size
+                    )
 
                 if TRACK_MEMORY_USAGE:
                     # self.memory_usage can be None if nothing has been inserted
                     # into the cache yet.
-                    cache_memory_usage.labels(self._cache_name).set(
+                    self._cache_metrics.cache_memory_usage.labels(self._cache_name).set(
                         self.memory_usage or 0
                     )
             if self._collect_callback:
@@ -179,41 +215,49 @@ class CacheMetric:
             raise
 
 
-def register_cache(
-    cache_type: str,
-    cache_name: str,
-    cache: Sized,
-    collect_callback: Optional[Callable] = None,
-    resizable: bool = True,
-    resize_callback: Optional[Callable] = None,
-) -> CacheMetric:
-    """Register a cache object for metric collection and resizing.
-
-    Args:
-        cache_type: a string indicating the "type" of the cache. This is used
-            only for deduplication so isn't too important provided it's constant.
-        cache_name: name of the cache
-        cache: cache itself, which must implement __len__(), and may optionally implement
-             a max_size property
-        collect_callback: If given, a function which is called during metric
-            collection to update additional metrics.
-        resizable: Whether this cache supports being resized, in which case either
-            resize_callback must be provided, or the cache must support set_max_size().
-        resize_callback: A function which can be called to resize the cache.
-
-    Returns:
-        an object which provides inc_{hits,misses,evictions} methods
+class CacheManager:
     """
-    if resizable:
-        if not resize_callback:
-            resize_callback = cache.set_cache_factor  # type: ignore
-        add_resizable_cache(cache_name, resize_callback)
+    Used as a central point to register caches and collect metrics on them.
+    """
 
-    metric = CacheMetric(cache, cache_type, cache_name, collect_callback)
-    metric_name = "cache_%s_%s" % (cache_type, cache_name)
-    caches_by_name[cache_name] = cache
-    CACHE_METRIC_REGISTRY.register_hook(metric_name, metric.collect)
-    return metric
+    def __init__(self, hs: "HomeServer") -> None:
+        self._cache_metrics = CacheMetrics(hs.metrics_collector_registry)
+
+    def register_cache(
+        self,
+        cache_type: str,
+        cache_name: str,
+        cache: Sized,
+        collect_callback: Optional[Callable] = None,
+        resizable: bool = True,
+        resize_callback: Optional[Callable] = None,
+    ) -> CacheMetric:
+        """Register a cache object for metric collection and resizing.
+
+        Args:
+            cache_type: a string indicating the "type" of the cache. This is used
+                only for deduplication so isn't too important provided it's constant.
+            cache_name: name of the cache
+            cache: cache itself, which must implement __len__(), and may optionally implement
+                a max_size property
+            collect_callback: If given, a function which is called during metric
+                collection to update additional metrics.
+            resizable: Whether this cache supports being resized, in which case either
+                resize_callback must be provided, or the cache must support set_max_size().
+            resize_callback: A function which can be called to resize the cache.
+
+        Returns:
+            an object which provides inc_{hits,misses,evictions} methods
+        """
+        if resizable:
+            if not resize_callback:
+                resize_callback = cache.set_cache_factor  # type: ignore
+            add_resizable_cache(cache_name, resize_callback)
+
+        metric = CacheMetric(self, cache, cache_type, cache_name, collect_callback)
+        metric_name = "cache_%s_%s" % (cache_type, cache_name)
+        self._cache_metrics.register_hook(metric_name, metric.collect)
+        return metric
 
 
 KNOWN_KEYS = {

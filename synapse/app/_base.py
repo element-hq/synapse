@@ -695,7 +695,7 @@ def setup_global_metrics(hs: "HomeServer") -> None:
         PyPyGCStats(registry=hs.metrics_collector_registry)
         GCCounts(registry=hs.metrics_collector_registry)
     BackgroundProcessCollector(registry=hs.metrics_collector_registry)
-    setup_reactor_metrics(hs)
+    setup_reactor_metrics(registry=hs.metrics_collector_registry)
 
 
 def setup_sdnotify(hs: "HomeServer") -> None:

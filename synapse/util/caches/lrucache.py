@@ -51,7 +51,7 @@ from twisted.internet.interfaces import IReactorTime
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.util import Clock, caches
-from synapse.util.caches import CacheMetric, EvictionReason, register_cache
+from synapse.util.caches import CacheMetric, EvictionReason, CacheManager
 from synapse.util.caches.treecache import (
     TreeCache,
     iterate_tree_cache_entry,
@@ -376,13 +376,50 @@ class LruCache(Generic[KT, VT]):
     If cache_type=TreeCache, all keys must be tuples.
     """
 
+    # If you're providing in the `cache_name`, then you must provide the `cache_manager`
+    @overload
     def __init__(
         self,
         max_size: int,
-        cache_name: Optional[str] = None,
+        *,
+        cache_name: str,
+        cache_manager: CacheManager,
+        metrics_collection_callback: Optional[Callable[[], None]] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
+        apply_cache_factor_from_config: bool = True,
+        clock: Optional[Clock] = None,
+        prune_unread_entries: bool = True,
+        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
+    ): ...
+
+    # If you're *not* providing in the `cache_name`, then you shouldn't provide the
+    # `cache_manager`
+    @overload
+    def __init__(
+        self,
+        max_size: int,
+        *,
+        cache_name: Literal[None],
+        cache_manager: Literal[None],
+        metrics_collection_callback: Literal[None],
+        cache_type: Type[Union[dict, TreeCache]] = dict,
+        size_callback: Optional[Callable[[VT], int]] = None,
+        apply_cache_factor_from_config: bool = True,
+        clock: Optional[Clock] = None,
+        prune_unread_entries: bool = True,
+        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
+    ): ...
+
+    def __init__(
+        self,
+        max_size: int,
+        *,
+        cache_name: Optional[str] = None,
+        cache_manager: Optional[CacheManager] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
+        cache_type: Type[Union[dict, TreeCache]] = dict,
+        size_callback: Optional[Callable[[VT], int]] = None,
         apply_cache_factor_from_config: bool = True,
         clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
@@ -395,11 +432,10 @@ class LruCache(Generic[KT, VT]):
             cache_name: The name of this cache, for the prometheus metrics. If unset,
                 no metrics will be reported on this cache.
 
-            cache_type:
-                type of underlying cache to be used. Typically one of dict
-                or TreeCache.
+            cache_manager: The cache manager to handle metrics. If unset, no metrics will be
+                reported on this cache.
 
-            size_callback:
+                Ignored if `cache_name` is `None`.
 
             metrics_collection_callback:
                 metrics collection callback. This is called early in the metrics
@@ -407,7 +443,13 @@ class LruCache(Generic[KT, VT]):
                 prometheus Registry are collected, so can be used to update any dynamic
                 metrics.
 
-                Ignored if cache_name is None.
+                Ignored if `cache_name` is `None`.
+
+            cache_type:
+                type of underlying cache to be used. Typically one of dict
+                or TreeCache.
+
+            size_callback:
 
             apply_cache_factor_from_config: If true, `max_size` will be
                 multiplied by a cache factor derived from the homeserver config
@@ -458,7 +500,7 @@ class LruCache(Generic[KT, VT]):
         self._on_resize: Optional[Callable[[], None]] = None
 
         if cache_name is not None:
-            metrics: Optional[CacheMetric] = register_cache(
+            metrics: Optional[CacheMetric] = cache_manager.register_cache(
                 "lru_cache",
                 cache_name,
                 self,

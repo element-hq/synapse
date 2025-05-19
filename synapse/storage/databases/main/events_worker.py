@@ -283,8 +283,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
             AsyncLruCache(
-                cache_name="*getEvent*",
                 max_size=hs.config.caches.event_cache_size,
+                cache_name="*getEvent*",
+                cache_manager=hs.get_cache_manager(),
                 # `extra_index_cb` Returns a tuple as that is the key type
                 extra_index_cb=lambda _, v: (v.event.room_id,),
             )
