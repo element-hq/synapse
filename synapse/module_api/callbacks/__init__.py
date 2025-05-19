@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 from synapse.module_api.callbacks.account_validity_callbacks import (
     AccountValidityModuleApiCallbacks,
 )
+from synapse.module_api.callbacks.media_repository_callbacks import (
+    MediaRepositoryModuleApiCallbacks,
+)
 from synapse.module_api.callbacks.ratelimit_callbacks import (
     RatelimitModuleApiCallbacks,
 )
@@ -42,5 +45,6 @@ class ModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.account_validity = AccountValidityModuleApiCallbacks()
         self.ratelimit = RatelimitModuleApiCallbacks(hs)
+        self.media_repository = MediaRepositoryModuleApiCallbacks(hs)
         self.spam_checker = SpamCheckerModuleApiCallbacks(hs)
         self.third_party_event_rules = ThirdPartyEventRulesModuleApiCallbacks(hs)

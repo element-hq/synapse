@@ -50,6 +50,7 @@
         - [Account data callbacks](modules/account_data_callbacks.md)
         - [Add extra fields to client events unsigned section callbacks](modules/add_extra_fields_to_client_events_unsigned.md)
         - [Ratelimit callbacks](modules/ratelimit_callbacks.md)
+        - [Media repository](modules/media_repository_callbacks.md)
         - [Porting a legacy module to the new interface](modules/porting_legacy_module.md)
     - [Workers](workers.md)
       - [Using `synctl` with Workers](synctl_workers.md)
