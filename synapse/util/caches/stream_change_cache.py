@@ -26,7 +26,7 @@ from typing import Collection, Dict, FrozenSet, List, Mapping, Optional, Set, Un
 import attr
 from sortedcontainers import SortedDict
 
-from synapse.util import caches
+from synapse.util.caches import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,9 @@ class StreamChangeCache:
 
     def __init__(
         self,
+        *,
         name: str,
+        cache_manager: CacheManager,
         current_stream_pos: int,
         max_size: int = 10000,
         prefilled_cache: Optional[Mapping[EntityType, int]] = None,
@@ -95,7 +97,7 @@ class StreamChangeCache:
         self._earliest_known_stream_pos = current_stream_pos
 
         self.name = name
-        self.metrics = caches.register_cache(
+        self.metrics = cache_manager.register_cache(
             "cache", self.name, self._cache, resize_callback=self.set_cache_factor
         )
 

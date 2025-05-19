@@ -63,6 +63,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+        self.cache_manager = hs.get_cache_manager()
 
         self._can_write_to_account_data = (
             self._instance_name in hs.config.worker.writers.account_data
@@ -87,7 +88,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         account_max = self.get_max_account_data_stream_id()
         self._account_data_stream_cache = StreamChangeCache(
-            "AccountDataAndTagsChangeCache", account_max
+            name="AccountDataAndTagsChangeCache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=account_max,
         )
 
         self.db_pool.updates.register_background_index_update(

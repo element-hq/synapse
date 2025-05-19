@@ -21,7 +21,7 @@ import base64
 import logging
 import os
 from typing import Generator, List, Optional, cast
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 import treq
 from netaddr import IPSet
@@ -60,6 +60,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.types import ISynapseReactor
+from synapse.util.caches import CacheManager
 from synapse.util.caches.ttlcache import TTLCache
 
 from tests import unittest
@@ -84,16 +85,23 @@ class MatrixFederationAgentTests(unittest.TestCase):
 
         self.tls_factory = FederationPolicyForHTTPS(config)
 
+        cache_manager = Mock(spec=CacheManager)
+
         self.well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache(
-            "test_cache", timer=self.reactor.seconds
+            "test_cache",
+            timer=self.reactor.seconds,
+            cache_manager=cache_manager,
         )
         self.had_well_known_cache: TTLCache[bytes, bool] = TTLCache(
-            "test_cache", timer=self.reactor.seconds
+            "test_cache",
+            timer=self.reactor.seconds,
+            cache_manager=cache_manager,
         )
         self.well_known_resolver = WellKnownResolver(
             self.reactor,
             Agent(self.reactor, contextFactory=self.tls_factory),
             b"test-agent",
+            cache_manager=cache_manager,
             well_known_cache=self.well_known_cache,
             had_well_known_cache=self.had_well_known_cache,
         )
@@ -274,6 +282,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            cache_manager=Mock(spec=CacheManager),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=self.well_known_resolver,
         )
@@ -1016,11 +1025,13 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            cache_manager=Mock(spec=CacheManager),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
                 cast(ISynapseReactor, self.reactor),
                 Agent(self.reactor, contextFactory=tls_factory),
                 b"test-agent",
+                cache_manager=Mock(spec=CacheManager),
                 well_known_cache=self.well_known_cache,
                 had_well_known_cache=self.had_well_known_cache,
             ),

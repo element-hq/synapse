@@ -280,7 +280,9 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         # caches which room_ids changed at which serials
         self._typing_stream_change_cache = StreamChangeCache(
-            "TypingStreamChangeCache", self._latest_room_serial
+            name="TypingStreamChangeCache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=self._latest_room_serial,
         )
 
     def _handle_timeout_for_member(self, now: int, member: RoomMember) -> None:

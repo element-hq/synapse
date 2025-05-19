@@ -233,7 +233,6 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
     ) -> Callable[..., "defer.Deferred[Any]"]:
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
-            cache_manager=
             max_entries=self.max_entries,
             tree=self.tree,
             iterable=self.iterable,
@@ -487,6 +486,7 @@ class _CachedFunctionDescriptor:
     cache_context: bool
     iterable: bool
     prune_unread_entries: bool
+    name: Optional[str]
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
@@ -498,6 +498,7 @@ class _CachedFunctionDescriptor:
             cache_context=self.cache_context,
             iterable=self.iterable,
             prune_unread_entries=self.prune_unread_entries,
+            name=self.name,
         )
         return cast(CachedFunction[F], d)
 
@@ -511,6 +512,7 @@ def cached(
     cache_context: bool = False,
     iterable: bool = False,
     prune_unread_entries: bool = True,
+    name: Optional[str] = None,
 ) -> _CachedFunctionDescriptor:
     return _CachedFunctionDescriptor(
         max_entries=max_entries,
@@ -520,6 +522,7 @@ def cached(
         cache_context=cache_context,
         iterable=iterable,
         prune_unread_entries=prune_unread_entries,
+        name=name,
     )
 
 

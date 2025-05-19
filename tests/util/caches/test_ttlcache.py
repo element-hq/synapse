@@ -20,6 +20,7 @@
 
 from unittest.mock import Mock
 
+from synapse.util.caches import CacheManager
 from synapse.util.caches.ttlcache import TTLCache
 
 from tests import unittest
@@ -28,7 +29,11 @@ from tests import unittest
 class CacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.mock_timer = Mock(side_effect=lambda: 100.0)
-        self.cache: TTLCache[str, str] = TTLCache("test_cache", self.mock_timer)
+        self.cache: TTLCache[str, str] = TTLCache(
+            "test_cache",
+            cache_manager=Mock(spec=CacheManager),
+            timer=self.mock_timer,
+        )
 
     def test_get(self) -> None:
         """simple set/get tests"""

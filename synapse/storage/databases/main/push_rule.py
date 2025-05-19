@@ -163,8 +163,9 @@ class PushRulesWorkerStore(
         )
 
         self.push_rules_stream_cache = StreamChangeCache(
-            "PushRulesStreamChangeCache",
-            push_rules_id,
+            name="PushRulesStreamChangeCache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=push_rules_id,
             prefilled_cache=push_rules_prefill,
         )
 

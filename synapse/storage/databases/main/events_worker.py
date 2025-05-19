@@ -269,8 +269,9 @@ class EventsWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._curr_state_delta_stream_cache: StreamChangeCache = StreamChangeCache(
-            "_curr_state_delta_stream_cache",
-            min_curr_state_delta_id,
+            name="_curr_state_delta_stream_cache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=min_curr_state_delta_id,
             prefilled_cache=curr_state_delta_prefill,
         )
 

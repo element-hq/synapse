@@ -51,7 +51,7 @@ from twisted.internet.interfaces import IReactorTime
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.util import Clock, caches
-from synapse.util.caches import CacheMetric, EvictionReason, CacheManager
+from synapse.util.caches import CacheManager, CacheMetric, EvictionReason
 from synapse.util.caches.treecache import (
     TreeCache,
     iterate_tree_cache_entry,
@@ -119,7 +119,10 @@ GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 @wrap_as_background_process("LruCache._expire_old_entries")
 async def _expire_old_entries(
-    hs: HomeServer, clock: Clock, expiry_seconds: float, autotune_config: Optional[dict]
+    hs: "HomeServer",
+    clock: Clock,
+    expiry_seconds: float,
+    autotune_config: Optional[dict],
 ) -> None:
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
