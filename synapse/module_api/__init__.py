@@ -106,6 +106,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import (
     USER_MAY_JOIN_ROOM_CALLBACK,
     USER_MAY_PUBLISH_ROOM_CALLBACK,
     USER_MAY_SEND_3PID_INVITE_CALLBACK,
+    USER_MAY_SEND_STATE_EVENT_CALLBACK,
     SpamCheckerModuleApiCallbacks,
 )
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -314,6 +315,7 @@ class ModuleApi:
             USER_MAY_CREATE_ROOM_ALIAS_CALLBACK
         ] = None,
         user_may_publish_room: Optional[USER_MAY_PUBLISH_ROOM_CALLBACK] = None,
+        user_may_send_state_event: Optional[USER_MAY_SEND_STATE_EVENT_CALLBACK] = None,
         check_username_for_spam: Optional[CHECK_USERNAME_FOR_SPAM_CALLBACK] = None,
         check_registration_for_spam: Optional[
             CHECK_REGISTRATION_FOR_SPAM_CALLBACK
@@ -338,6 +340,7 @@ class ModuleApi:
             check_registration_for_spam=check_registration_for_spam,
             check_media_file_for_spam=check_media_file_for_spam,
             check_login_for_spam=check_login_for_spam,
+            user_may_send_state_event=user_may_send_state_event,
         )
 
     def register_account_validity_callbacks(
