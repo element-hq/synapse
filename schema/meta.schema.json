@@ -9,7 +9,7 @@
     "https://json-schema.org/draft/2020-12/vocab/meta-data": true,
     "https://json-schema.org/draft/2020-12/vocab/format-annotation": true,
     "https://json-schema.org/draft/2020-12/vocab/content": true,
-    "https://element-hq.github.io/synapse/schema/v1/vocab/documentation": true
+    "https://element-hq.github.io/synapse/schema/v1/vocab/documentation": false
   },
   "$ref": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
