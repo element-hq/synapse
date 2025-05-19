@@ -1,9 +1,8 @@
 # Media repository callbacks
 
-Media repository callbacks allow module developers to add extra steps to verify the
-validity on an account, i.e. see if a user can be granted access to their account on the
-Synapse instance. Media repository callbacks can be registered using the module API's
-`register_media_repository_callbacks` method.
+Media repository callbacks allow module developers to customise the behaviour of the
+media repository on a per user basis. Media repository callbacks can be registered
+using the module API's `register_media_repository_callbacks` method.
 
 The available media repository callbacks are:
 
