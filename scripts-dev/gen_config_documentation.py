@@ -1,4 +1,4 @@
-#!/bin/python3
+#!/usr/bin/env python3
 """Generate Synapse documentation from JSON Schema file."""
 
 import json
