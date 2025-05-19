@@ -90,6 +90,9 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
     ON_USER_LOGIN_CALLBACK,
     ON_USER_REGISTRATION_CALLBACK,
 )
+from synapse.module_api.callbacks.ratelimit_callbacks import (
+    GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
+)
 from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_EVENT_FOR_SPAM_CALLBACK,
     CHECK_LOGIN_FOR_SPAM_CALLBACK,
@@ -358,6 +361,20 @@ class ModuleApi:
             on_legacy_send_mail=on_legacy_send_mail,
             on_legacy_renew=on_legacy_renew,
             on_legacy_admin_request=on_legacy_admin_request,
+        )
+
+    def register_ratelimit_callbacks(
+        self,
+        *,
+        get_ratelimit_override_for_user: Optional[
+            GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        ] = None,
+    ) -> None:
+        """Registers callbacks for ratelimit capabilities.
+        Added in Synapse v1.x.x.
+        """
+        return self._callbacks.ratelimit.register_callbacks(
+            get_ratelimit_override_for_user=get_ratelimit_override_for_user,
         )
 
     def register_third_party_rules_callbacks(
