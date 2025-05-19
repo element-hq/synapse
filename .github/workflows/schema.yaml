@@ -21,9 +21,15 @@ jobs:
       - name: Validate meta schema
         run: check-jsonschema --check-metaschema schema/meta.schema.json
       - name: Validate schema
-        run: check-jsonschema --schemafile=schema/meta.schema.json schema/synapse-config.schema.yaml
+        run: |-
+          check-jsonschema \
+            --schemafile=schema/meta.schema.json \
+            schema/synapse-config.schema.yaml
       - name: Validate default config
-        run: echo "{}" | check-jsonschema --fill-defaults --schemafile=schema/synapse-config.schema.yaml -
+      # Populates the empty instance with default values and checks against the schema.
+        run: |-
+          echo "{}" | check-jsonschema \
+            --fill-defaults --schemafile=schema/synapse-config.schema.yaml -
 
   check-doc-generation:
     name: Ensure generated documentation is up-to-date
@@ -40,4 +46,5 @@ jobs:
             schema/synapse-config.schema.yaml \
           > docs/usage/configuration/config_documentation.md
       - name: Error in case of any differences
+      # Errors if there are now any modified files (untracked files are ignored).
         run: 'git diff || ! git status --porcelain=1 | grep "^ M"'
