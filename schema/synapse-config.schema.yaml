@@ -1,5 +1,5 @@
 $schema: https://schema.element.io/v1/meta.schema.json
-$id: https://schema.element.io/synapse/v1.120.0/synapse-config.schema.json
+$id: https://schema.element.io/synapse/v1.131.0/synapse-config.schema.json
 type: object
 properties:
   modules:
