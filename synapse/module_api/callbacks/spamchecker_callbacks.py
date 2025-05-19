@@ -136,6 +136,15 @@ USER_MAY_CREATE_ROOM_CALLBACK = Callable[
         ]
     ],
 ]
+USER_MAY_CREATE_ROOM_WITH_VISIBILITY_CALLBACK = Callable[
+    [str, str],
+    Awaitable[
+        Union[
+            Literal["NOT_SPAM"],
+            Codes,
+        ]
+    ],
+]
 USER_MAY_CREATE_ROOM_ALIAS_CALLBACK = Callable[
     [str, RoomAlias],
     Awaitable[
@@ -332,6 +341,9 @@ class SpamCheckerModuleApiCallbacks:
             USER_MAY_SEND_3PID_INVITE_CALLBACK
         ] = []
         self._user_may_create_room_callbacks: List[USER_MAY_CREATE_ROOM_CALLBACK] = []
+        self._user_may_create_room_with_visibility_callbacks: List[
+            USER_MAY_CREATE_ROOM_WITH_VISIBILITY_CALLBACK
+        ] = []
         self._user_may_create_room_alias_callbacks: List[
             USER_MAY_CREATE_ROOM_ALIAS_CALLBACK
         ] = []
@@ -367,6 +379,9 @@ class SpamCheckerModuleApiCallbacks:
         ] = None,
         check_media_file_for_spam: Optional[CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK] = None,
         check_login_for_spam: Optional[CHECK_LOGIN_FOR_SPAM_CALLBACK] = None,
+        user_may_create_room_with_visibility: Optional[
+            USER_MAY_CREATE_ROOM_WITH_VISIBILITY_CALLBACK
+        ] = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if check_event_for_spam is not None:
@@ -390,6 +405,11 @@ class SpamCheckerModuleApiCallbacks:
 
         if user_may_create_room is not None:
             self._user_may_create_room_callbacks.append(user_may_create_room)
+
+        if user_may_create_room_with_visibility is not None:
+            self._user_may_create_room_with_visibility_callbacks.append(
+                user_may_create_room_with_visibility,
+            )
 
         if user_may_create_room_alias is not None:
             self._user_may_create_room_alias_callbacks.append(
@@ -645,6 +665,29 @@ class SpamCheckerModuleApiCallbacks:
                     and isinstance(res[1], dict)
                 ):
                     return res
+                else:
+                    logger.warning(
+                        "Module returned invalid value, rejecting room creation as spam"
+                    )
+                    return synapse.api.errors.Codes.FORBIDDEN, {}
+
+        return self.NOT_SPAM
+
+    async def user_may_create_room_with_visibility(
+        self, userid: str, visibility: str
+    ) -> Union[Tuple[Codes, dict], Literal["NOT_SPAM"]]:
+        """Checks if a given user may create a room with a given visibility
+        Args:
+            userid: The ID of the user attempting to create a room
+            visibility: The visibility of the room to be created
+        """
+        for callback in self._user_may_create_room_with_visibility_callbacks:
+            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+                res = await delay_cancellation(callback(userid, visibility))
+                if res is self.NOT_SPAM:
+                    continue
+                elif isinstance(res, synapse.api.errors.Codes):
+                    return res, {}
                 else:
                     logger.warning(
                         "Module returned invalid value, rejecting room creation as spam"

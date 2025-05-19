@@ -27,6 +27,7 @@ well as some specific methods:
 
 * `user_may_invite`
 * `user_may_create_room`
+* `user_may_create_room_with_visibility`
 * `user_may_create_room_alias`
 * `user_may_publish_room`
 * `check_username_for_spam`

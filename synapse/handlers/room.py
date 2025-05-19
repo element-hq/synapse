@@ -784,6 +784,10 @@ class RoomCreationHandler:
                     Codes.MISSING_PARAM,
                 )
 
+        # The spec says rooms should default to private visibility if
+        # `visibility` is not specified.
+        visibility = config.get("visibility", "private")
+
         if not is_requester_admin:
             spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
                 user_id
@@ -792,6 +796,17 @@ class RoomCreationHandler:
                 raise SynapseError(
                     403,
                     "You are not permitted to create rooms",
+                    errcode=spam_check[0],
+                    additional_fields=spam_check[1],
+                )
+            spam_check = await self._spam_checker_module_callbacks.user_may_create_room_with_visibility(
+                user_id,
+                visibility,
+            )
+            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                raise SynapseError(
+                    403,
+                    "You are not permitted to create rooms with visibility {visibility}",
                     errcode=spam_check[0],
                     additional_fields=spam_check[1],
                 )
@@ -887,9 +902,6 @@ class RoomCreationHandler:
                 % (user_id,),
             )
 
-        # The spec says rooms should default to private visibility if
-        # `visibility` is not specified.
-        visibility = config.get("visibility", "private")
         is_public = visibility == "public"
 
         self._validate_room_config(config, visibility)
