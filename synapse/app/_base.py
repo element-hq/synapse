@@ -76,11 +76,11 @@ from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import CPUMetrics, install_gc_manager, register_threadpool
 from synapse.metrics._gc import GCCounts, PyPyGCStats, running_on_pypy
+from synapse.metrics._reactor_metrics import setup_reactor_metrics
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessCollector,
     wrap_as_background_process,
 )
-from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
@@ -695,7 +695,7 @@ def setup_global_metrics(hs: "HomeServer") -> None:
         PyPyGCStats(registry=hs.metrics_collector_registry)
         GCCounts(registry=hs.metrics_collector_registry)
     BackgroundProcessCollector(registry=hs.metrics_collector_registry)
-    setup_jemalloc_stats()
+    setup_reactor_metrics(hs)
 
 
 def setup_sdnotify(hs: "HomeServer") -> None:

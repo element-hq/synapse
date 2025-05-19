@@ -23,14 +23,16 @@ import ctypes
 import logging
 import os
 import re
-from typing import Iterable, Literal, Optional, overload
+from typing import TYPE_CHECKING, Iterable, Literal, Optional, overload
 
 import attr
 from prometheus_client import REGISTRY, CollectorRegistry, Metric
 
 from synapse.metrics import GaugeMetricFamily
 from synapse.metrics._types import Collector
-from synapse.server import HomeServer
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -132,25 +134,10 @@ class JemallocStats:
         return self._mallctl(f"stats.{name}")
 
 
-_JEMALLOC_STATS: Optional[JemallocStats] = None
-
-
-def get_jemalloc_stats() -> Optional[JemallocStats]:
-    """Returns an interface to jemalloc, if it is being used.
-
-    Note that this will always return None until `setup_jemalloc_stats` has been
-    called.
-    """
-    # TODO
-    return _JEMALLOC_STATS
-
-
-def _setup_jemalloc_stats(hs: HomeServer) -> None:
+def _setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
     """Checks to see if jemalloc is loaded, and hooks up a collector to record
     statistics exposed by jemalloc.
     """
-
-    global _JEMALLOC_STATS
 
     # Try to find the loaded jemalloc shared library, if any. We need to
     # introspect into what is loaded, rather than loading whatever is on the
@@ -182,7 +169,6 @@ def _setup_jemalloc_stats(hs: HomeServer) -> None:
     jemalloc_dll = ctypes.CDLL(jemalloc_path)
 
     stats = JemallocStats(jemalloc_dll)
-    _JEMALLOC_STATS = stats
 
     class JemallocCollector(Collector):
         """Metrics for internal jemalloc stats."""
@@ -239,13 +225,14 @@ def _setup_jemalloc_stats(hs: HomeServer) -> None:
     JemallocCollector(registry=hs.metrics_collector_registry)
 
     logger.debug("Added jemalloc stats")
+    return stats
 
 
-def setup_jemalloc_stats(hs: HomeServer) -> None:
+def setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
     """Try to setup jemalloc stats, if jemalloc is loaded."""
 
     try:
-        _setup_jemalloc_stats(hs)
+        return _setup_jemalloc_stats(hs)
     except Exception as e:
         # This should only happen if we find the loaded jemalloc library, but
         # fail to load it somehow (e.g. we somehow picked the wrong version).

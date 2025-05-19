@@ -50,7 +50,6 @@ from twisted.internet.interfaces import IReactorTime
 
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import wrap_as_background_process
-from synapse.metrics.jemalloc import get_jemalloc_stats
 from synapse.util import Clock, caches
 from synapse.util.caches import CacheMetric, EvictionReason, register_cache
 from synapse.util.caches.treecache import (
@@ -141,7 +140,7 @@ async def _expire_old_entries(
     evicting_due_to_memory = False
 
     # determine if we're evicting due to memory
-    jemalloc_interface = get_jemalloc_stats()
+    jemalloc_interface = hs.jemalloc_stats
     if jemalloc_interface and autotune_config:
         try:
             jemalloc_interface.refresh_stats()
