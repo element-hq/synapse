@@ -2592,7 +2592,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 return True, 0
 
             # Update the progress to the last room ID we pulled from the DB,
-            # this ensure we always make progress.
+            # this ensures we always make progress.
             self.db_pool.updates._background_update_progress_txn(
                 txn,
                 _BackgroundUpdates.FIXUP_MAX_DEPTH_CAP,
@@ -2600,6 +2600,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
             if not room_ids:
+                # There were no rooms in this batch that required the fix.
                 return False, 0
 
             clause, list_args = make_in_list_sql_clause(

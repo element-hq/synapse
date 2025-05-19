@@ -51,7 +51,8 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
     def create_room(self, room_version: RoomVersion) -> Dict[str, int]:
         """Create a room with a known room version and insert events.
 
-        Returns that set of event IDs that exceed MAX_DEPTH.
+        Returns the set of event IDs that exceed MAX_DEPTH and
+        their depth.
         """
 
         # Create a room with a specific room version
@@ -123,7 +124,7 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
             else:
                 # Events with a depth less than MAX_DEPTH should remain
                 # unchanged.
-                self.assertLess(topological_ordering, MAX_DEPTH)
+                self.assertEqual(topological_ordering, event_id_to_depth[event_id])
 
     def test_fixup_max_depth_cap_bg_update_old_room_version(self) -> None:
         """Test that the background update does not cap topological_ordering for
