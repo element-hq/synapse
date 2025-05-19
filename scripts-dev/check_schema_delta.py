@@ -153,9 +153,6 @@ def main(force_colors: bool) -> None:
         with open(delta_file) as fd:
             delta_lines = fd.readlines()
 
-        # Strip SQL comments
-        delta_lines = [line.split("--", maxsplit=1)[0] for line in delta_lines]
-
         for line in delta_lines:
             # Strip SQL comments
             line = line.split("--", maxsplit=1)[0]
