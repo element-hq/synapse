@@ -141,7 +141,8 @@ def main(force_colors: bool) -> None:
             color=force_colors,
         )
 
-    # Make sure we process them in order.
+    # Make sure we process them in order. This sort works because deltas are numbered
+    # and delta files are also numbered in order.
     changed_delta_files.sort()
 
     # Now check that we're not trying to create or drop indices. If we want to
