@@ -158,6 +158,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_room,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         # Ratelimiter for invites, keyed by recipient (across all rooms, all
@@ -166,6 +167,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_user,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         # Ratelimiter for invites, keyed by issuer (across all rooms, all
@@ -174,6 +176,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_issuer,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         self._third_party_invite_limiter = Ratelimiter(
