@@ -3785,6 +3785,9 @@ attribute_requirements:
        one_of: ["Stephensson", "Smith"]
      - attribute: groups
        value: "admin"
+     # If `value` or `one_of` are not specified, the attribute only needs
+     # to exist, regardless of value.
+     - attribute: picture
 ```
 
 `attribute` is a required field, while `value` and `one_of` are optional.
