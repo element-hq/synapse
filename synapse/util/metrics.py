@@ -79,21 +79,20 @@ class _InFlightMetric(Protocol):
     real_time_sum: float
 
 
-# Tracks the number of blocks currently active
-in_flight: InFlightGauge[_InFlightMetric] = InFlightGauge(
-    "synapse_util_metrics_block_in_flight",
-    "",
-    labels=["block_name"],
-    sub_metrics=["real_time_max", "real_time_sum"],
-)
+metrics_collector_registry_to_in_flight_gauge: Dict[
+    CollectorRegistry, InFlightGauge
+] = {}
 
 
 P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class HasClock(Protocol):
+class HasClockAndMetricsCollectorRegistry(Protocol):
+    # Used to measure functions
     clock: Clock
+    # Used to namespace the metrics to the given homeserver
+    metrics_collector_registry: CollectorRegistry
 
 
 def measure_func(
@@ -119,13 +118,17 @@ def measure_func(
     """
 
     def wrapper(
-        func: Callable[Concatenate[HasClock, P], Awaitable[R]],
+        func: Callable[
+            Concatenate[HasClockAndMetricsCollectorRegistry, P], Awaitable[R]
+        ],
     ) -> Callable[P, Awaitable[R]]:
         block_name = func.__name__ if name is None else name
 
         @wraps(func)
-        async def measured_func(self: HasClock, *args: P.args, **kwargs: P.kwargs) -> R:
-            with Measure(self.clock, block_name):
+        async def measured_func(
+            self: HasClockAndMetricsCollectorRegistry, *args: P.args, **kwargs: P.kwargs
+        ) -> R:
+            with Measure(self.clock, self.metrics_collector_registry, block_name):
                 r = await func(self, *args, **kwargs)
             return r
 
@@ -141,12 +144,15 @@ def measure_func(
 class Measure:
     __slots__ = [
         "clock",
+        "metrics_collector_registry",
         "name",
         "_logging_context",
         "start",
     ]
 
-    def __init__(self, clock: Clock, name: str) -> None:
+    def __init__(
+        self, clock: Clock, metrics_collector_registry: CollectorRegistry, name: str
+    ) -> None:
         """
         Args:
             clock: An object with a "time()" method, which returns the current
@@ -154,6 +160,7 @@ class Measure:
             name: The name of the metric to report.
         """
         self.clock = clock
+        self.metrics_collector_registry = metrics_collector_registry
         self.name = name
         curr_context = current_context()
         if not curr_context:
@@ -168,13 +175,30 @@ class Measure:
         self._logging_context = LoggingContext(str(curr_context), parent_context)
         self.start: Optional[float] = None
 
+    def get_in_flight_gauge(self) -> InFlightGauge[_InFlightMetric]:
+        existing_in_flight_gauge = metrics_collector_registry_to_in_flight_gauge.get(
+            self.metrics_collector_registry, None
+        )
+        if existing_in_flight_gauge is not None:
+            return existing_in_flight_gauge
+
+        # Tracks the number of blocks currently active
+        in_flight_gauge: InFlightGauge[_InFlightMetric] = InFlightGauge(
+            "synapse_util_metrics_block_in_flight",
+            "",
+            labels=["block_name"],
+            sub_metrics=["real_time_max", "real_time_sum"],
+        )
+
+        return in_flight_gauge
+
     def __enter__(self) -> "Measure":
         if self.start is not None:
             raise RuntimeError("Measure() objects cannot be re-used")
 
         self.start = self.clock.time()
         self._logging_context.__enter__()
-        in_flight.register((self.name,), self._update_in_flight)
+        self.get_in_flight_gauge().register((self.name,), self._update_in_flight)
 
         logger.debug("Entering block %s", self.name)
 
@@ -194,7 +218,7 @@ class Measure:
         duration = self.clock.time() - self.start
         usage = self.get_resource_usage()
 
-        in_flight.unregister((self.name,), self._update_in_flight)
+        self.get_in_flight_gauge().unregister((self.name,), self._update_in_flight)
         self._logging_context.__exit__(exc_type, exc_val, exc_tb)
 
         try:

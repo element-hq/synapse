@@ -87,7 +87,10 @@ class DeviceWorkerHandler:
     device_list_updater: "DeviceListWorkerUpdater"
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_collector_registry = (
+            hs.metrics_collector_registry
+        )  # nb must be called this for @measure_func
         self.hs = hs
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()

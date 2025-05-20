@@ -127,7 +127,10 @@ class BulkPushRuleEvaluator:
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
         self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_collector_registry = (
+            hs.metrics_collector_registry
+        )  # nb must be called this for @measure_func
         self._event_auth_handler = hs.get_event_auth_handler()
         self.should_calculate_push_rules = self.hs.config.push.enable_push
 

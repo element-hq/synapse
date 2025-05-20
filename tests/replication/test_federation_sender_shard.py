@@ -22,6 +22,7 @@ import logging
 from unittest.mock import AsyncMock, Mock
 
 from netaddr import IPSet
+from prometheus_client import CollectorRegistry
 from signedjson.key import (
     encode_verify_key_base64,
     generate_signing_key,
@@ -74,6 +75,7 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            metrics_collector_registry=CollectorRegistry(auto_describe=True),
             cache_manager=Mock(spec=CacheManager),
         )
 

@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, Mock, call, patch
 
 import treq
 from netaddr import IPSet
+from prometheus_client import CollectorRegistry
 from service_identity import VerificationError
 from zope.interface import implementer
 
@@ -101,6 +102,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             self.reactor,
             Agent(self.reactor, contextFactory=self.tls_factory),
             b"test-agent",
+            metrics_collector_registry=CollectorRegistry(auto_describe=True),
             cache_manager=cache_manager,
             well_known_cache=self.well_known_cache,
             had_well_known_cache=self.had_well_known_cache,
@@ -282,6 +284,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            metrics_collector_registry=CollectorRegistry(auto_describe=True),
             cache_manager=Mock(spec=CacheManager),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=self.well_known_resolver,
@@ -1025,12 +1028,14 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            metrics_collector_registry=CollectorRegistry(auto_describe=True),
             cache_manager=Mock(spec=CacheManager),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
                 cast(ISynapseReactor, self.reactor),
                 Agent(self.reactor, contextFactory=tls_factory),
                 b"test-agent",
+                metrics_collector_registry=CollectorRegistry(auto_describe=True),
                 cache_manager=Mock(spec=CacheManager),
                 well_known_cache=self.well_known_cache,
                 had_well_known_cache=self.had_well_known_cache,

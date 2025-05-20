@@ -73,6 +73,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
+        self.metrics_collector_registry = hs.metrics_collector_registry
         self.notifier = hs.get_notifier()
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
@@ -157,7 +158,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     def _clear_queue_before_pos(self, position_to_delete: int) -> None:
         """Clear all the queues from before a given position"""
-        with Measure(self.clock, "send_queue._clear"):
+        with Measure(self.clock, self.metrics_collector_registry, "send_queue._clear"):
             # Delete things out of presence maps
             keys = self.presence_destinations.keys()
             i = self.presence_destinations.bisect_left(position_to_delete)

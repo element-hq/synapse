@@ -25,6 +25,7 @@ from io import BytesIO
 from typing import Callable, Dict, Optional, Tuple
 
 import attr
+from prometheus_client import CollectorRegistry
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IReactorTime
@@ -91,12 +92,14 @@ class WellKnownResolver:
         reactor: IReactorTime,
         agent: IAgent,
         user_agent: bytes,
+        metrics_collector_registry: CollectorRegistry,
         cache_manager: CacheManager,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
         had_well_known_cache: Optional[TTLCache[bytes, bool]] = None,
     ):
         self._reactor = reactor
         self._clock = Clock(reactor)
+        self._metrics_collector_registry = metrics_collector_registry
 
         self._well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache(
             "well-known",
@@ -133,7 +136,9 @@ class WellKnownResolver:
         # TODO: should we linearise so that we don't end up doing two .well-known
         # requests for the same server in parallel?
         try:
-            with Measure(self._clock, "get_well_known"):
+            with Measure(
+                self._clock, self._metrics_collector_registry, "get_well_known"
+            ):
                 result: Optional[bytes]
                 cache_period: float
 

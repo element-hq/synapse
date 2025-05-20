@@ -1236,7 +1236,9 @@ class EventsWorkerStore(SQLBaseStore):
                 to event row. Note that it may well contain additional events that
                 were not part of this request.
         """
-        with Measure(self._clock, "_fetch_event_list"):
+        with Measure(
+            self._clock, self._metrics_collector_registry, "_fetch_event_list"
+        ):
             try:
                 events_to_fetch = {
                     event_id for events, _ in event_list for event_id in events

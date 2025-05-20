@@ -105,6 +105,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             ip_allowlist=None,
             ip_blocklist=IPSet(),
             # After we get access to the `hs` homeserver instance, we can replace the federation agent
+            metrics_collector_registry=hs.metrics_collector_registry,
             cache_manager=hs.get_cache_manager(),
         )
 

@@ -422,6 +422,7 @@ class MatrixFederationHttpClient:
                 user_agent=user_agent.encode("ascii"),
                 ip_allowlist=hs.config.server.federation_ip_range_allowlist,
                 ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+                metrics_collector_registry=hs.metrics_collector_registry,
                 cache_manager=hs.get_cache_manager(),
             )
         else:
@@ -452,6 +453,7 @@ class MatrixFederationHttpClient:
         )
 
         self.clock = hs.get_clock()
+        self.metrics_collector_registry = hs.metrics_collector_registry
         self._store = hs.get_datastores().main
         self.version_string_bytes = hs.version_string.encode("ascii")
         self.default_timeout_seconds = hs.config.federation.client_timeout_ms / 1000
@@ -698,7 +700,11 @@ class MatrixFederationHttpClient:
                     outgoing_requests_counter.labels(request.method).inc()
 
                     try:
-                        with Measure(self.clock, "outbound_request"):
+                        with Measure(
+                            self.clock,
+                            self.metrics_collector_registry,
+                            "outbound_request",
+                        ):
                             # we don't want all the fancy cookie and redirect handling
                             # that treq.request gives: just use the raw Agent.
 

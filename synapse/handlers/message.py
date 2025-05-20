@@ -481,10 +481,13 @@ class EventCreationHandler:
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.state = hs.get_state_handler()
-        self.clock = hs.get_clock()
         self.validator = EventValidator()
-        self.profile_handler = hs.get_profile_handler()
         self.event_builder_factory = hs.get_event_builder_factory()
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_collector_registry = (
+            hs.metrics_collector_registry
+        )  # nb must be called this for @measure_func
+        self.profile_handler = hs.get_profile_handler()
         self.server_name = hs.hostname
         self.notifier = hs.get_notifier()
         self.config = hs.config

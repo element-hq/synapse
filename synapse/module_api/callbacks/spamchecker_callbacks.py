@@ -321,6 +321,7 @@ class SpamCheckerModuleApiCallbacks:
 
     def __init__(self, hs: "synapse.server.HomeServer") -> None:
         self.clock = hs.get_clock()
+        self.metrics_collector_registry = hs.metrics_collector_registry
 
         self._check_event_for_spam_callbacks: List[CHECK_EVENT_FOR_SPAM_CALLBACK] = []
         self._should_drop_federated_event_callbacks: List[
@@ -436,7 +437,11 @@ class SpamCheckerModuleApiCallbacks:
                 generally discouraged as it doesn't support internationalization.
         """
         for callback in self._check_event_for_spam_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(callback(event))
                 if res is False or res == self.NOT_SPAM:
                     # This spam-checker accepts the event.
@@ -489,7 +494,11 @@ class SpamCheckerModuleApiCallbacks:
             True if the event should be silently dropped
         """
         for callback in self._should_drop_federated_event_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res: Union[bool, str] = await delay_cancellation(callback(event))
             if res:
                 return res
@@ -511,7 +520,11 @@ class SpamCheckerModuleApiCallbacks:
             NOT_SPAM if the operation is permitted, [Codes, Dict] otherwise.
         """
         for callback in self._user_may_join_room_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(callback(user_id, room_id, is_invited))
                 # Normalize return values to `Codes` or `"NOT_SPAM"`.
                 if res is True or res is self.NOT_SPAM:
@@ -550,7 +563,11 @@ class SpamCheckerModuleApiCallbacks:
             NOT_SPAM if the operation is permitted, Codes otherwise.
         """
         for callback in self._user_may_invite_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(
                     callback(inviter_userid, invitee_userid, room_id)
                 )
@@ -595,7 +612,11 @@ class SpamCheckerModuleApiCallbacks:
             NOT_SPAM if the operation is permitted, Codes otherwise.
         """
         for callback in self._user_may_send_3pid_invite_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(
                     callback(inviter_userid, medium, address, room_id)
                 )
@@ -630,7 +651,11 @@ class SpamCheckerModuleApiCallbacks:
             userid: The ID of the user attempting to create a room
         """
         for callback in self._user_may_create_room_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(callback(userid))
                 if res is True or res is self.NOT_SPAM:
                     continue
@@ -664,7 +689,11 @@ class SpamCheckerModuleApiCallbacks:
 
         """
         for callback in self._user_may_create_room_alias_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(callback(userid, room_alias))
                 if res is True or res is self.NOT_SPAM:
                     continue
@@ -697,7 +726,11 @@ class SpamCheckerModuleApiCallbacks:
             room_id: The ID of the room that would be published
         """
         for callback in self._user_may_publish_room_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(callback(userid, room_id))
                 if res is True or res is self.NOT_SPAM:
                     continue
@@ -739,7 +772,11 @@ class SpamCheckerModuleApiCallbacks:
             True if the user is spammy.
         """
         for callback in self._check_username_for_spam_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 checker_args = inspect.signature(callback)
                 # Make a copy of the user profile object to ensure the spam checker cannot
                 # modify it.
@@ -788,7 +825,11 @@ class SpamCheckerModuleApiCallbacks:
         """
 
         for callback in self._check_registration_for_spam_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 behaviour = await delay_cancellation(
                     callback(email_threepid, username, request_info, auth_provider_id)
                 )
@@ -830,7 +871,11 @@ class SpamCheckerModuleApiCallbacks:
         """
 
         for callback in self._check_media_file_for_spam_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(callback(file_wrapper, file_info))
                 # Normalize return values to `Codes` or `"NOT_SPAM"`.
                 if res is False or res is self.NOT_SPAM:
@@ -877,7 +922,11 @@ class SpamCheckerModuleApiCallbacks:
         """
 
         for callback in self._check_login_for_spam_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                self.metrics_collector_registry,
+                f"{callback.__module__}.{callback.__qualname__}",
+            ):
                 res = await delay_cancellation(
                     callback(
                         user_id,

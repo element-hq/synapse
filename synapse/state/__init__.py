@@ -188,7 +188,10 @@ class StateHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_collector_registry = (
+            hs.metrics_collector_registry
+        )  # nb must be called this for @measure_func
         self.store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self.hs = hs
@@ -631,6 +634,7 @@ class StateResolutionHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
+        self.metrics_collector_registry = hs.metrics_collector_registry
 
         self.resolve_linearizer = Linearizer(name="state_resolve_lock")
 
@@ -747,7 +751,9 @@ class StateResolutionHandler:
             # which will be used as a cache key for future resolutions, but
             # not get persisted.
 
-            with Measure(self.clock, "state.create_group_ids"):
+            with Measure(
+                self.clock, self.metrics_collector_registry, "state.create_group_ids"
+            ):
                 cache = _make_state_cache_entry(new_state, state_groups_ids)
 
             self._state_cache[group_names] = cache
@@ -785,7 +791,9 @@ class StateResolutionHandler:
             a map from (type, state_key) to event_id.
         """
         try:
-            with Measure(self.clock, "state._resolve_events") as m:
+            with Measure(
+                self.clock, self.metrics_collector_registry, "state._resolve_events"
+            ) as m:
                 room_version_obj = KNOWN_ROOM_VERSIONS[room_version]
                 if room_version_obj.state_res == StateResolutionVersions.V1:
                     return await v1.resolve_events_with_store(

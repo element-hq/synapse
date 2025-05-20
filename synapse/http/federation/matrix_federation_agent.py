@@ -26,6 +26,7 @@ from urllib.request import (  # type: ignore[attr-defined]
 )
 
 from netaddr import AddrFormatError, IPAddress, IPSet
+from prometheus_client import CollectorRegistry
 from zope.interface import implementer
 
 from twisted.internet import defer
@@ -101,6 +102,7 @@ class MatrixFederationAgent:
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
         ip_blocklist: IPSet,
+        metrics_collector_registry: CollectorRegistry,
         cache_manager: CacheManager,
         _srv_resolver: Optional[SrvResolver] = None,
         _well_known_resolver: Optional[WellKnownResolver] = None,
@@ -144,6 +146,7 @@ class MatrixFederationAgent:
                     ip_blocklist=ip_blocklist,
                 ),
                 user_agent=self.user_agent,
+                metrics_collector_registry=metrics_collector_registry,
                 cache_manager=cache_manager,
             )
 
