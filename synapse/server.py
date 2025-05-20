@@ -128,7 +128,7 @@ from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
-from synapse.metrics.jemalloc import JemallocStats, setup_jemalloc_stats
+from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
 from synapse.notifier import Notifier, ReplicationNotifier
@@ -312,8 +312,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self.metrics_collector_registry = CollectorRegistry(auto_describe=True)
-        self.jemalloc_stats: Optional[JemallocStats] = None
-        self.cache_manager: Optional[CacheManager] = None
+        # Also see `setup_global_metrics` for other metric setup
+        self.jemalloc_stats = setup_jemalloc_stats(self)
+        self.cache_manager = CacheManager(self)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
@@ -364,11 +365,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         logger.info("Setting up.")
         self.start_time = int(self.get_clock().time())
         self.datastores = Databases(self.DATASTORE_CLASS, self)
-
-        # Also see `setup_global_metrics` for other metric setup
-        self.jemalloc_stats = setup_jemalloc_stats(self)
-        self.cache_manager = CacheManager(self)
-
         logger.info("Finished setting up.")
 
         # Register background tasks required by this server. This must be done
@@ -431,11 +427,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         return self.datastores
 
     def get_cache_manager(self) -> CacheManager:
-        if not self.cache_manager:
-            raise Exception(
-                "HomeServer.setup must be called before getting cache manager"
-            )
-
         return self.cache_manager
 
     @cache_in_self
