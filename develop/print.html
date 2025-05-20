@@ -14427,6 +14427,7 @@ for the given <code>room_id</code>.</p>
     &quot;results&quot;: [
         {
             &quot;delete_id&quot;: &quot;delete_id1&quot;,
+            &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
             &quot;status&quot;: &quot;failed&quot;,
             &quot;error&quot;: &quot;error message&quot;,
             &quot;shutdown_room&quot;: {
@@ -14437,6 +14438,7 @@ for the given <code>room_id</code>.</p>
             }
         }, {
             &quot;delete_id&quot;: &quot;delete_id2&quot;,
+            &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
             &quot;status&quot;: &quot;purging&quot;,
             &quot;shutdown_room&quot;: {
                 &quot;kicked_users&quot;: [
@@ -14466,6 +14468,8 @@ for the given <code>room_id</code>.</p>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
     &quot;status&quot;: &quot;purging&quot;,
+    &quot;delete_id&quot;: &quot;bHkCNQpHqOaFhPtK&quot;,
+    &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
     &quot;shutdown_room&quot;: {
         &quot;kicked_users&quot;: [
             &quot;@foobar:example.com&quot;
@@ -14491,7 +14495,8 @@ for the given <code>room_id</code>.</p>
 This field is omitted from the result when you query by <code>delete_id</code>.
 Task objects contain the following fields:
 <ul>
-<li><code>delete_id</code> - The ID for this purge if you query by <code>room_id</code>.</li>
+<li><code>delete_id</code> - The ID for this purge</li>
+<li><code>room_id</code> - The ID of the room being deleted</li>
 <li><code>status</code> - The status will be one of:
 <ul>
 <li><code>shutting_down</code> - The process is removing users from the room.</li>
