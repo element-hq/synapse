@@ -225,9 +225,9 @@ class FakeChannel:
                 new_headers.addRawHeader(k, v)
             headers = new_headers
 
-        assert isinstance(
-            headers, Headers
-        ), f"headers are of the wrong type: {headers!r}"
+        assert isinstance(headers, Headers), (
+            f"headers are of the wrong type: {headers!r}"
+        )
 
         self.result["headers"] = headers
 

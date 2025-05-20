@@ -143,9 +143,9 @@ class MessageHandler:
         elif membership == Membership.LEAVE:
             key = (event_type, state_key)
             # If the membership is not JOIN, then the event ID should exist.
-            assert (
-                membership_event_id is not None
-            ), "check_user_in_room_or_world_readable returned invalid data"
+            assert membership_event_id is not None, (
+                "check_user_in_room_or_world_readable returned invalid data"
+            )
             room_state = await self._state_storage_controller.get_state_for_events(
                 [membership_event_id], StateFilter.from_types([key])
             )
@@ -242,9 +242,9 @@ class MessageHandler:
                 room_state = await self.store.get_events(state_ids.values())
             elif membership == Membership.LEAVE:
                 # If the membership is not JOIN, then the event ID should exist.
-                assert (
-                    membership_event_id is not None
-                ), "check_user_in_room_or_world_readable returned invalid data"
+                assert membership_event_id is not None, (
+                    "check_user_in_room_or_world_readable returned invalid data"
+                )
                 room_state_events = (
                     await self._state_storage_controller.get_state_for_events(
                         [membership_event_id], state_filter=state_filter
@@ -1266,12 +1266,14 @@ class EventCreationHandler:
                 # Allow an event to have empty list of prev_event_ids
                 # only if it has auth_event_ids.
                 or auth_event_ids
-            ), "Attempting to create a non-m.room.create event with no prev_events or auth_event_ids"
+            ), (
+                "Attempting to create a non-m.room.create event with no prev_events or auth_event_ids"
+            )
         else:
             # we now ought to have some prev_events (unless it's a create event).
-            assert (
-                builder.type == EventTypes.Create or prev_event_ids
-            ), "Attempting to create a non-m.room.create event with no prev_events"
+            assert builder.type == EventTypes.Create or prev_event_ids, (
+                "Attempting to create a non-m.room.create event with no prev_events"
+            )
 
         if for_batch:
             assert prev_event_ids is not None
