@@ -188,6 +188,7 @@ class Measure:
             "",
             labels=["block_name"],
             sub_metrics=["real_time_max", "real_time_sum"],
+            registry=self.metrics_collector_registry,
         )
 
         return in_flight_gauge
