@@ -112,7 +112,8 @@ class CacheMetrics:
         )
 
         # Register our custom cache metrics registry with the global registry
-        registry.register(self.CACHE_METRIC_REGISTRY)
+        if registry is not None:
+            registry.register(self.CACHE_METRIC_REGISTRY)
 
     def register_hook(self, metric_name: str, hook: Callable[[], None]) -> None:
         """
@@ -254,7 +255,9 @@ class CacheManager:
                 resize_callback = cache.set_cache_factor  # type: ignore
             add_resizable_cache(cache_name, resize_callback)
 
-        metric = CacheMetric(self, cache, cache_type, cache_name, collect_callback)
+        metric = CacheMetric(
+            self._cache_metrics, cache, cache_type, cache_name, collect_callback
+        )
         metric_name = "cache_%s_%s" % (cache_type, cache_name)
         self._cache_metrics.register_hook(metric_name, metric.collect)
         return metric
