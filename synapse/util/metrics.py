@@ -190,6 +190,9 @@ class Measure:
             sub_metrics=["real_time_max", "real_time_sum"],
             registry=self.metrics_collector_registry,
         )
+        metrics_collector_registry_to_in_flight_gauge[
+            self.metrics_collector_registry
+        ] = in_flight_gauge
 
         return in_flight_gauge
 
