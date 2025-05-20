@@ -123,14 +123,16 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         # vast majority of state in Matrix (today) is member events.
 
         self._state_group_cache: DictionaryCache[int, StateKey, str] = DictionaryCache(
-            "*stateGroupCache*",
             # TODO: this hasn't been tuned yet
-            50000,
+            max_entries=50000,
+            name="*stateGroupCache*",
+            cache_manager=hs.get_cache_manager(),
         )
         self._state_group_members_cache: DictionaryCache[int, StateKey, str] = (
             DictionaryCache(
-                "*stateGroupMembersCache*",
-                500000,
+                max_entries=500000,
+                name="*stateGroupMembersCache*",
+                cache_manager=hs.get_cache_manager(),
             )
         )
 

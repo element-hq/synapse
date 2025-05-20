@@ -20,6 +20,9 @@
 #
 
 
+from unittest.mock import Mock
+
+from synapse.util.caches import CacheManager
 from synapse.util.caches.dictionary_cache import DictionaryCache
 
 from tests import unittest
@@ -28,7 +31,9 @@ from tests import unittest
 class DictCacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.cache: DictionaryCache[str, str, str] = DictionaryCache(
-            "foobar", max_entries=10
+            max_entries=10,
+            name="foobar",
+            cache_manager=Mock(spec=CacheManager),
         )
 
     def test_simple_cache_hit_full(self) -> None:

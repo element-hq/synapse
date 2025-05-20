@@ -35,6 +35,7 @@ from typing import (
 
 import attr
 
+from synapse.util.caches import CacheManager
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache
 
@@ -127,7 +128,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
     for the '2' dict key.
     """
 
-    def __init__(self, name: str, max_entries: int = 1000):
+    def __init__(self, *, max_entries: int, name: str, cache_manager: CacheManager):
         # We use a single LruCache to store two different types of entries:
         #   1. Map from (key, dict_key) -> dict value (or sentinel, indicating
         #      the key doesn't exist in the dict); and
@@ -153,6 +154,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         ] = LruCache(
             max_size=max_entries,
             cache_name=name,
+            cache_manager=cache_manager,
             cache_type=TreeCache,
             size_callback=len,
         )
