@@ -2,7 +2,7 @@
 
 ### Bugfixes
 
-- Fix startup being blocked on creating a new index. Introduced in v1.130.0rc1. ([\#18439](https://github.com/element-hq/synapse/issues/18439))
+- Fix startup being blocked on creating a new index that was introduced in v1.130.0rc1. ([\#18439](https://github.com/element-hq/synapse/issues/18439))
 - Fix the ordering of local messages in rooms that were affected by [GHSA-v56r-hwv5-mxg6](https://github.com/advisories/GHSA-v56r-hwv5-mxg6). ([\#18447](https://github.com/element-hq/synapse/issues/18447))
 
 
