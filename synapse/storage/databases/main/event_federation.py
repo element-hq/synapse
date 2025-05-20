@@ -147,7 +147,8 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         self._event_auth_cache: LruCache[str, List[Tuple[str, int]]] = LruCache(
             500000,
             cache_name="_event_auth_cache",
-            cache_manager=hs.get_cache_manager(),
+            # TODO
+            # cache_manager=hs.get_cache_manager(),
             size_callback=len,
         )
 

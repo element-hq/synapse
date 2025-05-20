@@ -99,8 +99,6 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
         cache: LruCache = LruCache(
             10,
             cache_name="mycache",
-            # TODO
-            # cache_manager=TODO
         )
         self.assertEqual(cache.max_size, 100)
 

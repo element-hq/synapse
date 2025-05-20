@@ -51,7 +51,7 @@ from twisted.internet.interfaces import IReactorTime
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.util import Clock, caches
-from synapse.util.caches import CacheManager, CacheMetric, EvictionReason
+from synapse.util.caches import CacheMetric, EvictionReason
 from synapse.util.caches.treecache import (
     TreeCache,
     iterate_tree_cache_entry,
@@ -379,44 +379,11 @@ class LruCache(Generic[KT, VT]):
     If cache_type=TreeCache, all keys must be tuples.
     """
 
-    # If you're providing in the `cache_name`, then you must provide the `cache_manager`
-    @overload
-    def __init__(
-        self,
-        max_size: int,
-        *,
-        cache_name: str,
-        cache_manager: CacheManager,
-        metrics_collection_callback: Optional[Callable[[], None]] = None,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
-        size_callback: Optional[Callable[[VT], int]] = None,
-        apply_cache_factor_from_config: bool = True,
-        clock: Optional[Clock] = None,
-        prune_unread_entries: bool = True,
-        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
-    ): ...
-
-    # If you're *not* providing in the `cache_name`, then you shouldn't provide the
-    # `cache_manager` or the `metrics_collection_callback`
-    @overload
-    def __init__(
-        self,
-        max_size: int,
-        *,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
-        size_callback: Optional[Callable[[VT], int]] = None,
-        apply_cache_factor_from_config: bool = True,
-        clock: Optional[Clock] = None,
-        prune_unread_entries: bool = True,
-        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
-    ): ...
-
     def __init__(
         self,
         max_size: int,
         *,
         cache_name: Optional[str] = None,
-        cache_manager: Optional[CacheManager] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
@@ -431,9 +398,6 @@ class LruCache(Generic[KT, VT]):
 
             cache_name: The name of this cache, for the prometheus metrics. If unset,
                 no metrics will be reported on this cache.
-
-            cache_manager: The cache manager to handle metrics. If unset, no metrics will be
-                reported on this cache.
 
                 Ignored if `cache_name` is `None`.
 
@@ -499,15 +463,17 @@ class LruCache(Generic[KT, VT]):
         # do yet when we get resized.
         self._on_resize: Optional[Callable[[], None]] = None
 
-        if cache_name is not None:
-            metrics: Optional[CacheMetric] = cache_manager.register_cache(
-                "lru_cache",
-                cache_name,
-                self,
-                collect_callback=metrics_collection_callback,
-            )
-        else:
-            metrics = None
+        # TODO
+        # if cache_name is not None:
+        #     metrics: Optional[CacheMetric] = cache_manager.register_cache(
+        #         "lru_cache",
+        #         cache_name,
+        #         self,
+        #         collect_callback=metrics_collection_callback,
+        #     )
+        # else:
+        #     metrics = None
+        metrics: Optional[CacheMetric] = None
 
         # this is exposed for access from outside this class
         self.metrics = metrics
