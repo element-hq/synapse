@@ -291,12 +291,24 @@ def resolve_local_refs(schema: dict) -> dict:
                 the_def = defs[def_name]
 
             new_dict = {k: replace_ref(v) for k, v in d.items()}
-            if common_keys := new_dict.keys() & the_def.keys():
+            if common_keys := (new_dict.keys() & the_def.keys()) - {"properties"}:
                 print(
                     f"WARN: '{def_name}' overrides keys '{common_keys}'",
                     file=sys.stderr,
                 )
-            return {**new_dict, **the_def}
+
+            new_dict_props = new_dict.get("properties", {})
+            the_def_props = the_def.get("properties", {})
+            if common_props := new_dict_props.keys() & the_def_props.keys():
+                print(
+                    f"WARN: '{def_name}' overrides properties '{common_props}'",
+                    file=sys.stderr,
+                )
+            if merged_props := {**new_dict_props, **the_def_props}:
+                return {**new_dict, **the_def, "properties": merged_props}
+            else:
+                return {**new_dict, **the_def}
+
         elif isinstance(d, list):
             return [replace_ref(v) for v in d]
         else:
