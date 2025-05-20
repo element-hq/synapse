@@ -331,6 +331,7 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3)/rooms/[^/]+/initialSync$
 
 # Federation requests
+^/_matrix/federation/v1/version$
 ^/_matrix/federation/v1/event/
 ^/_matrix/federation/v1/state/
 ^/_matrix/federation/v1/state_ids/
@@ -380,6 +381,7 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
 ^/_matrix/client/(r0|v3|unstable)/capabilities$
 ^/_matrix/client/(r0|v3|unstable)/notifications$
+^/_synapse/admin/v1/rooms/
 
 # Encryption requests
 ^/_matrix/client/(r0|v3|unstable)/keys/query$
@@ -410,6 +412,7 @@ information.</p>
 <p>Additionally, the following REST endpoints can be handled for GET requests:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
+^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
 
 # Account data requests
 ^/_matrix/client/(r0|v3|unstable)/.*/tags
@@ -447,6 +450,14 @@ using):</p>
 For multiple workers not handling the SSO endpoints properly, see
 <a href="https://github.com/matrix-org/synapse/issues/7530">#7530</a> and
 <a href="https://github.com/matrix-org/synapse/issues/9427">#9427</a>.</p>
+<p>Additionally, when MSC3861 is enabled (<code>experimental_features.msc3861.enabled</code>
+set to <code>true</code>), the following endpoints can be handled by the worker:</p>
+<pre><code>^/_synapse/admin/v2/users/[^/]+$
+^/_synapse/admin/v1/username_available$
+^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
+# Only the GET method:
+^/_synapse/admin/v1/users/[^/]+/devices$
+</code></pre>
 <p>Note that a <a href="usage/configuration/config_documentation.html#listeners">HTTP listener</a>
 with <code>client</code> and <code>federation</code> <code>resources</code> must be configured in the
 <a href="usage/configuration/config_documentation.html#worker_listeners"><code>worker_listeners</code></a>

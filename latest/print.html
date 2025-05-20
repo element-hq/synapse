@@ -1869,7 +1869,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.129.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.130.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1887,6 +1887,13 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11300"><a class="header" href="#upgrading-to-v11300">Upgrading to v1.130.0</a></h1>
+<h2 id="documented-endpoint-which-can-be-delegated-to-a-federation-worker"><a class="header" href="#documented-endpoint-which-can-be-delegated-to-a-federation-worker">Documented endpoint which can be delegated to a federation worker</a></h2>
+<p>The endpoint <code>^/_matrix/federation/v1/version$</code> can be delegated to a federation
+worker. This is not new behaviour, but had not been documented yet. The 
+<a href="workers.html#synapseappgeneric_worker">list of delegatable endpoints</a> has 
+been updated to include it. Make sure to check your reverse proxy rules if you
+are using workers. </p>
 <h1 id="upgrading-to-v11260"><a class="header" href="#upgrading-to-v11260">Upgrading to v1.126.0</a></h1>
 <h2 id="room-list-publication-rules-change"><a class="header" href="#room-list-publication-rules-change">Room list publication rules change</a></h2>
 <p>The default <a href="usage/configuration/config_documentation.html#room_list_publication_rules"><code>room_list_publication_rules</code></a> setting was changed to disallow
@@ -7303,7 +7310,7 @@ not interested in push/unread counters. This is enabled by default.</li>
 <li><code>include_content</code>: Clients requesting push notifications can either have the body of
 the message sent in the notification poke along with other details
 like the sender, or just the event ID and room ID (<code>event_id_only</code>).
-If clients choose the to have the body sent, this option controls whether the
+If clients choose to have the body sent, this option controls whether the
 notification request includes the content of the event (other details
 like the sender are still included). If <code>event_id_only</code> is enabled, it
 has no effect.
@@ -7377,6 +7384,9 @@ If set to true, local users are more likely to appear above remote users when se
 user directory. Defaults to false.</p>
 </li>
 <li>
+<p><code>exclude_remote_users</code>: If set to true, the search will only return local users. Defaults to false.</p>
+</li>
+<li>
 <p><code>show_locked_users</code>: Defines whether to show locked users in search query results. Defaults to false.</p>
 </li>
 </ul>
@@ -7385,6 +7395,7 @@ user directory. Defaults to false.</p>
     enabled: false
     search_all_users: true
     prefer_local_users: true
+    exclude_remote_users: false
     show_locked_users: true
 </code></pre>
 <hr />
@@ -9181,6 +9192,29 @@ This can be optionally enabled by setting <code>backchannel_logout_enabled</code
         display_name_template: &quot;{{ user.display_name }}&quot;
 </code></pre>
 <p>Note that the fields <code>client_id</code> and <code>client_secret</code> are taken from the CURL response above.</p>
+<h3 id="pocket-id"><a class="header" href="#pocket-id">Pocket ID</a></h3>
+<p><a href="https://pocket-id.org/">Pocket ID</a> is a simple OIDC provider that allows users to authenticate with their passkeys.</p>
+<ol>
+<li>Go to <code>OIDC Clients</code></li>
+<li>Click on <code>Add OIDC Client</code></li>
+<li>Add a name, for example <code>Synapse</code></li>
+<li>Add <code>&quot;https://auth.example.org/_synapse/client/oidc/callback</code> to <code>Callback URLs</code>  # Replace <code>auth.example.org</code> with your domain</li>
+<li>Click on <code>Save</code></li>
+<li>Note down your <code>Client ID</code> and <code>Client secret</code>, these will be used later</li>
+</ol>
+<p>Synapse config:</p>
+<pre><code class="language-yaml">oidc_providers:
+  - idp_id: pocket_id
+    idp_name: Pocket ID
+    issuer: &quot;https://auth.example.org/&quot; # Replace with your domain
+    client_id: &quot;your-client-id&quot; # Replace with the &quot;Client ID&quot; you noted down before
+    client_secret: &quot;your-client-secret&quot; # Replace with the &quot;Client secret&quot; you noted down before
+    scopes: [&quot;openid&quot;, &quot;profile&quot;]
+    user_mapping_provider:
+      config:
+        localpart_template: &quot;{{ user.preferred_username }}&quot;
+        display_name_template: &quot;{{ user.name }}&quot;
+</code></pre>
 <h3 id="shibboleth-with-oidc-plugin"><a class="header" href="#shibboleth-with-oidc-plugin">Shibboleth with OIDC Plugin</a></h3>
 <p><a href="https://www.shibboleth.net/">Shibboleth</a> is an open Standard IdP solution widely used by Universities.</p>
 <ol>
@@ -10907,6 +10941,7 @@ doing.</strong></p>
 callback returns <code>False</code>, Synapse falls through to the next one. The value of the first
 callback that does not return <code>False</code> will be used. If this happens, Synapse will not call
 any of the subsequent implementations of this callback.</p>
+<p>Note that this check is applied to federation invites as of Synapse v1.130.0.</p>
 <h3 id="check_login_for_spam"><a class="header" href="#check_login_for_spam"><code>check_login_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.87.0</em></p>
 <pre><code class="language-python">async def check_login_for_spam(
@@ -11942,6 +11977,7 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3)/rooms/[^/]+/initialSync$
 
 # Federation requests
+^/_matrix/federation/v1/version$
 ^/_matrix/federation/v1/event/
 ^/_matrix/federation/v1/state/
 ^/_matrix/federation/v1/state_ids/
@@ -11991,6 +12027,7 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
 ^/_matrix/client/(r0|v3|unstable)/capabilities$
 ^/_matrix/client/(r0|v3|unstable)/notifications$
+^/_synapse/admin/v1/rooms/
 
 # Encryption requests
 ^/_matrix/client/(r0|v3|unstable)/keys/query$
@@ -12021,6 +12058,7 @@ information.</p>
 <p>Additionally, the following REST endpoints can be handled for GET requests:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
+^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
 
 # Account data requests
 ^/_matrix/client/(r0|v3|unstable)/.*/tags
@@ -12058,6 +12096,14 @@ using):</p>
 For multiple workers not handling the SSO endpoints properly, see
 <a href="https://github.com/matrix-org/synapse/issues/7530">#7530</a> and
 <a href="https://github.com/matrix-org/synapse/issues/9427">#9427</a>.</p>
+<p>Additionally, when MSC3861 is enabled (<code>experimental_features.msc3861.enabled</code>
+set to <code>true</code>), the following endpoints can be handled by the worker:</p>
+<pre><code>^/_synapse/admin/v2/users/[^/]+$
+^/_synapse/admin/v1/username_available$
+^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
+# Only the GET method:
+^/_synapse/admin/v1/users/[^/]+/devices$
+</code></pre>
 <p>Note that a <a href="usage/configuration/config_documentation.html#listeners">HTTP listener</a>
 with <code>client</code> and <code>federation</code> <code>resources</code> must be configured in the
 <a href="usage/configuration/config_documentation.html#worker_listeners"><code>worker_listeners</code></a>
