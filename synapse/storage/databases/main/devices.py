@@ -1780,8 +1780,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             LruCache(
                 max_size=10000,
                 cache_name="device_id_exists",
-                # TODO
-                # cache_manager=hs.get_cache_manager(),
+                cache_manager=hs.get_cache_manager(),
             )
         )
 
