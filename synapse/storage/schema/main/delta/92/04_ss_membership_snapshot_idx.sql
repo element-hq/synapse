@@ -12,5 +12,5 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- So we can fetch all rooms for a given user sorted by stream order
-DROP INDEX IF EXISTS sliding_sync_membership_snapshots_user_id;
-CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_sync_membership_snapshots(user_id, event_stream_ordering);
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (9204, 'sliding_sync_membership_snapshots_user_id_stream_ordering', '{}');
