@@ -146,7 +146,7 @@ def _setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
     # We look in `/proc/self/maps`, which only exists on linux.
     if not os.path.exists("/proc/self/maps"):
         logger.debug("Not looking for jemalloc as no /proc/self/maps exist")
-        return
+        return None
 
     # We're looking for a path at the end of the line that includes
     # "libjemalloc".
@@ -162,7 +162,7 @@ def _setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
     if not jemalloc_path:
         # No loaded jemalloc was found.
         logger.debug("jemalloc not found")
-        return
+        return None
 
     logger.debug("Found jemalloc at %s", jemalloc_path)
 
@@ -237,3 +237,5 @@ def setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
         # This should only happen if we find the loaded jemalloc library, but
         # fail to load it somehow (e.g. we somehow picked the wrong version).
         logger.info("Failed to setup collector to record jemalloc stats: %s", e)
+
+    return None
