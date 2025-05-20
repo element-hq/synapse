@@ -102,11 +102,11 @@ database:
 
 ## Postgresql major version upgrades
 
-Postgres uses seperate directories for database location between major versions (eg. ../data16/ or ../data17).
+Postgres uses separate directories for database locations between major versions (typically `/var/lib/postgresql/<version>/main`).
 
-Therefore, it is recommended to stop synapse and other services (MAS, etc) before upgrading Postgres major versions. You may also need to TRUNCATE e2e_one_time_keys_json (Refer too Backups section below)
+Therefore, it is recommended to stop Synapse and other services (MAS, etc) before upgrading Postgres major versions.
 
-Don't forget to [back up](./usage/administration/backups.md#database) your database!
+It is also strongly recommended to [back up](./usage/administration/backups.md#database) your database beforehand to ensure no data loss arising from a failed upgrade.
 
 ## Backups
 
