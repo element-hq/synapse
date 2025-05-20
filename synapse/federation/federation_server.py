@@ -141,7 +141,10 @@ class FederationServer(FederationBase):
 
         # We cache results for transaction with the same ID
         self._transaction_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "fed_txn_handler", timeout_ms=30000
+            hs.get_clock(),
+            hs.get_cache_manager(),
+            "fed_txn_handler",
+            timeout_ms=30000,
         )
 
         self.transaction_actions = TransactionActions(self.store)
@@ -154,13 +157,15 @@ class FederationServer(FederationBase):
             ResponseCache(
                 hs.get_clock(),
                 hs.get_cache_manager(),
-                hs.get_cache_manager(),
                 "state_resp",
                 timeout_ms=30000,
             )
         )
         self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), hs.get_cache_manager(), "state_ids_resp", timeout_ms=30000
+            hs.get_clock(),
+            hs.get_cache_manager(),
+            "state_ids_resp",
+            timeout_ms=30000,
         )
 
         self._federation_metrics_domains = (

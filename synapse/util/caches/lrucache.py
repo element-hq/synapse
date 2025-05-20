@@ -397,15 +397,12 @@ class LruCache(Generic[KT, VT]):
     ): ...
 
     # If you're *not* providing in the `cache_name`, then you shouldn't provide the
-    # `cache_manager`
+    # `cache_manager` or the `metrics_collection_callback`
     @overload
     def __init__(
         self,
         max_size: int,
         *,
-        cache_name: Literal[None],
-        cache_manager: Literal[None],
-        metrics_collection_callback: Literal[None],
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         apply_cache_factor_from_config: bool = True,

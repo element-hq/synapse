@@ -96,7 +96,12 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
 
     @override_config({"caches": {"per_cache_factors": {"mycache": 10}}})
     def test_special_size(self) -> None:
-        cache: LruCache = LruCache(10, "mycache")
+        cache: LruCache = LruCache(
+            10,
+            cache_name="mycache",
+            # TODO
+            # cache_manager=TODO
+        )
         self.assertEqual(cache.max_size, 100)
 
 
