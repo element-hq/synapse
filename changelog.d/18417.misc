@@ -1,0 +1,1 @@
+Explicitly enable PyPy builds in `cibuildwheel`s config to avoid it being disabled on a future upgrade to `cibuildwheel` v3.

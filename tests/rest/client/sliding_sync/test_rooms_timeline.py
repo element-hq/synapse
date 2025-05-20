@@ -309,8 +309,8 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self.assertEqual(
             response_body["rooms"][room_id1]["limited"],
             False,
-            f'Our `timeline_limit` was {sync_body["lists"]["foo-list"]["timeline_limit"]} '
-            + f'and {len(response_body["rooms"][room_id1]["timeline"])} events were returned in the timeline. '
+            f"Our `timeline_limit` was {sync_body['lists']['foo-list']['timeline_limit']} "
+            + f"and {len(response_body['rooms'][room_id1]['timeline'])} events were returned in the timeline. "
             + str(response_body["rooms"][room_id1]),
         )
         # Check to make sure the latest events are returned
@@ -387,7 +387,7 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["limited"],
             True,
             f"Our `timeline_limit` was {timeline_limit} "
-            + f'and {len(response_body["rooms"][room_id1]["timeline"])} events were returned in the timeline. '
+            + f"and {len(response_body['rooms'][room_id1]['timeline'])} events were returned in the timeline. "
             + str(response_body["rooms"][room_id1]),
         )
         # Check to make sure that the "live" and historical events are returned

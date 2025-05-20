@@ -1319,7 +1319,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         # Check that response json body contains a "rooms" key
         self.assertTrue(
             "rooms" in channel.json_body,
-            msg="Response body does not " "contain a 'rooms' key",
+            msg="Response body does not contain a 'rooms' key",
         )
 
         # Check that 3 rooms were returned

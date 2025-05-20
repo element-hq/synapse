@@ -2887,6 +2887,20 @@ Example configuration:
 inhibit_user_in_use_error: true
 ```
 ---
+### `allow_underscore_prefixed_registration`
+
+Whether users are allowed to register with a underscore-prefixed localpart.
+By default, AppServices use prefixes like `_example` to namespace their
+associated ghost users. If turned on, this may result in clashes or confusion.
+Useful when provisioning users from an external identity provider.
+
+Defaults to false.
+
+Example configuration:
+```yaml
+allow_underscore_prefixed_registration: false
+```
+---
 ## User session management
 ---
 ### `session_lifetime`
@@ -3672,6 +3686,9 @@ Options for each entry include:
 * `additional_authorization_parameters`: String to string dictionary that will be passed as
    additional parameters to the authorization grant URL.
 
+* `passthrough_authorization_parameters`: List of parameters that will be passed through from the redirect endpoint 
+   to the authorization grant URL.
+
 * `allow_existing_users`: set to true to allow a user logging in via OIDC to
    match a pre-existing account instead of failing. This could be used if
    switching from password logins to OIDC. Defaults to false.
@@ -3765,17 +3782,23 @@ match particular values in the OIDC userinfo. The requirements can be listed und
 ```yaml
 attribute_requirements:
      - attribute: family_name
-       value: "Stephensson"
+       one_of: ["Stephensson", "Smith"]
      - attribute: groups
        value: "admin"
+     # If `value` or `one_of` are not specified, the attribute only needs
+     # to exist, regardless of value.
+     - attribute: picture
 ```
+
+`attribute` is a required field, while `value` and `one_of` are optional.
+
 All of the listed attributes must match for the login to be permitted. Additional attributes can be added to
 userinfo by expanding the `scopes` section of the OIDC config to retrieve
 additional information from the OIDC provider.
 
 If the OIDC claim is a list, then the attribute must match any value in the list.
 Otherwise, it must exactly match the value of the claim. Using the example
-above, the `family_name` claim MUST be "Stephensson", but the `groups`
+above, the `family_name` claim MUST be either "Stephensson" or "Smith", but the `groups`
 claim MUST contain "admin".
 
 Example configuration:
@@ -3798,6 +3821,7 @@ oidc_providers:
     jwks_uri: "https://accounts.example.com/.well-known/jwks.json"
     additional_authorization_parameters:
       acr_values: 2fa
+    passthrough_authorization_parameters: ["login_hint"]
     skip_verification: true
     enable_registration: true
     user_mapping_provider:
@@ -4014,7 +4038,7 @@ This option has a number of sub-options. They are as follows:
 * `include_content`: Clients requesting push notifications can either have the body of
    the message sent in the notification poke along with other details
    like the sender, or just the event ID and room ID (`event_id_only`).
-   If clients choose the to have the body sent, this option controls whether the
+   If clients choose to have the body sent, this option controls whether the
    notification request includes the content of the event (other details
    like the sender are still included). If `event_id_only` is enabled, it
    has no effect.
@@ -4091,6 +4115,7 @@ This option has the following sub-options:
 * `prefer_local_users`: Defines whether to prefer local users in search query results.
    If set to true, local users are more likely to appear above remote users when searching the
    user directory. Defaults to false.
+* `exclude_remote_users`: If set to true, the search will only return local users. Defaults to false.
 * `show_locked_users`: Defines whether to show locked users in search query results. Defaults to false.
 
 Example configuration:
@@ -4099,6 +4124,7 @@ user_directory:
     enabled: false
     search_all_users: true
     prefer_local_users: true
+    exclude_remote_users: false
     show_locked_users: true
 ```
 ---
@@ -4325,21 +4351,9 @@ room list by default_
 Example configuration:
 
 ```yaml
-# No rule list specified. Anyone may publish any room to the public list.
+# No rule list specified. No one may publish any room to the public list, except server admins.
 # This is the default behaviour.
 room_list_publication_rules:
-```
-
-```yaml
-# A list of one rule which allows everything.
-# This has the same effect as the previous example.
-room_list_publication_rules:
-  - "action": "allow"
-```
-
-```yaml
-# An empty list of rules. No-one may publish to the room list.
-room_list_publication_rules: []
 ```
 
 ```yaml
@@ -4347,6 +4361,19 @@ room_list_publication_rules: []
 # This has the same effect as the previous example.
 room_list_publication_rules:
   - "action": "deny"
+```
+
+```yaml
+# An empty list of rules.
+# This has the same effect as the previous example.
+room_list_publication_rules: []
+```
+
+```yaml
+# A list of one rule which allows everything.
+# This was the default behaviour pre v1.126.0.
+room_list_publication_rules:
+  - "action": "allow"
 ```
 
 ```yaml
