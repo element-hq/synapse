@@ -25,7 +25,7 @@ export VIRTUALENV_NO_DOWNLOAD=1
 
 sed -i \
    -e "s/[~>]=/==/g" \
-   -e '/^python = "^/!s/\^/==/g' \
+   -e '/^requires-python = "^/!s/\^/==/g' \
    -e "/psycopg2/d" \
    -e 's/pyOpenSSL = "==16.0.0"/pyOpenSSL = "==17.0.0"/' \
    -e '/systemd/d' \
