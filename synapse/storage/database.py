@@ -572,6 +572,7 @@ class DatabasePool:
             "Background update status",
             [],
             self.updates.get_status,
+            registry=hs.metrics_collector_registry,
         )
 
         self._previous_txn_total_time = 0.0

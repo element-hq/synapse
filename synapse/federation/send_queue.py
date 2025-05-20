@@ -117,6 +117,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
                 "",
                 [],
                 lambda: len(queue),
+                registry=hs.metrics_collector_registry,
             )
 
         for queue_name in [

@@ -121,6 +121,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 "",
                 [],
                 lambda: self._known_servers_count,
+                registry=hs.metrics_collector_registry,
             )
 
     @wrap_as_background_process("_count_known_servers")

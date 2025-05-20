@@ -888,6 +888,7 @@ class PresenceHandler(BasePresenceHandler):
             "",
             [],
             lambda: len(self.wheel_timer),
+            registry=hs.metrics_collector_registry,
         )
 
         # Used to handle sending of presence to newly joined users/servers

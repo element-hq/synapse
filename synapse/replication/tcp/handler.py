@@ -215,6 +215,7 @@ class ReplicationCommandHandler:
             "",
             [],
             lambda: len(self._connections),
+            registry=hs.metrics_collector_registry,
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -241,6 +242,7 @@ class ReplicationCommandHandler:
                 (stream_name,): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
             },
+            registry=hs.metrics_collector_registry,
         )
 
         self._is_master = hs.config.worker.worker_app is None

@@ -61,8 +61,6 @@ logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
 
-all_gauges: Dict[str, Collector] = {}
-
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 
@@ -99,17 +97,8 @@ class LaterGauge(Collector):
         yield g
 
     def __attrs_post_init__(self) -> None:
-        self._register()
-
-    def _register(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering" % (self.name,))
-            if self.registry is not None:
-                self.registry.unregister(all_gauges.pop(self.name))
-
         if self.registry is not None:
             self.registry.register(self)
-        all_gauges[self.name] = self
 
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,
@@ -234,14 +223,8 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
             yield gauge
 
     def _register_with_collector(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering" % (self.name,))
-            if self.registry is not None:
-                self.registry.unregister(all_gauges.pop(self.name))
-
         if self.registry is not None:
             self.registry.register(self)
-        all_gauges[self.name] = self
 
 
 class GaugeBucketCollector(Collector):

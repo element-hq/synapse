@@ -132,6 +132,7 @@ class TaskScheduler:
             "The number of concurrent running tasks handled by the TaskScheduler",
             labels=None,
             caller=lambda: len(self._running_tasks),
+            registry=hs.metrics_collector_registry,
         )
 
     def register_action(
