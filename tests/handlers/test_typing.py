@@ -37,7 +37,6 @@ from synapse.http.federation.matrix_federation_agent import MatrixFederationAgen
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, create_requester
 from synapse.util import Clock
-from synapse.util.caches import CacheManager
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -85,15 +84,6 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
 
         # we mock out the federation client too
         self.mock_federation_client = AsyncMock(spec=["put_json"])
-        self.mock_federation_client.put_json.return_value = (200, "OK")
-        self.mock_federation_client.agent = MatrixFederationAgent(
-            reactor=reactor,
-            tls_client_options_factory=None,
-            user_agent=b"SynapseInTrialTest/0.0.0",
-            ip_allowlist=None,
-            ip_blocklist=IPSet(),
-            cache_manager=Mock(spec=CacheManager),
-        )
 
         # the tests assume that we are starting at unix time 1000
         reactor.pump((1000,))
@@ -105,7 +95,18 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             keyring=mock_keyring,
             replication_streams={},
         )
-        hs.federation_http_client = self.mock_federation_client
+
+        # Finish off mocking the federation client
+        self.mock_federation_client.put_json.return_value = (200, "OK")
+        self.mock_federation_client.agent = MatrixFederationAgent(
+            reactor=reactor,
+            tls_client_options_factory=None,
+            user_agent=b"SynapseInTrialTest/0.0.0",
+            ip_allowlist=None,
+            ip_blocklist=IPSet(),
+            # After we get access to the `hs` homeserver instance, we can replace the federation agent
+            cache_manager=hs.get_cache_manager(),
+        )
 
         return hs
 
