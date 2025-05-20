@@ -105,7 +105,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             keyring=mock_keyring,
             replication_streams={},
         )
-        hs._federation_http_client = self.mock_federation_client
+        hs.federation_http_client = self.mock_federation_client
 
         return hs
 
