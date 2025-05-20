@@ -288,7 +288,6 @@ class SynapseHomeServer(HomeServer):
                     raise ConfigError(
                         "Can not use a unix socket for manhole at this time."
                     )
-
             else:
                 # this shouldn't happen, as the listener type should have been checked
                 # during parsing

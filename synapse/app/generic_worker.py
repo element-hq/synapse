@@ -285,7 +285,6 @@ class GenericWorkerServer(HomeServer):
                     raise ConfigError(
                         "Can not using a unix socket for manhole at this time."
                     )
-
             else:
                 logger.warning("Unsupported listener type: %s", listener.type)
 
