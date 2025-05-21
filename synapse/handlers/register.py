@@ -159,7 +159,10 @@ class RegistrationHandler:
         if not localpart:
             raise SynapseError(400, "User ID cannot be empty", Codes.INVALID_USERNAME)
 
-        if localpart[0] == "_":
+        if (
+            localpart[0] == "_"
+            and not self.hs.config.registration.allow_underscore_prefixed_localpart
+        ):
             raise SynapseError(
                 400, "User ID may not begin with _", Codes.INVALID_USERNAME
             )

@@ -1,3 +1,76 @@
+# Synapse 1.130.0 (2025-05-20)
+
+### Bugfixes
+
+- Fix startup being blocked on creating a new index that was introduced in v1.130.0rc1. ([\#18439](https://github.com/element-hq/synapse/issues/18439))
+- Fix the ordering of local messages in rooms that were affected by [GHSA-v56r-hwv5-mxg6](https://github.com/advisories/GHSA-v56r-hwv5-mxg6). ([\#18447](https://github.com/element-hq/synapse/issues/18447))
+
+
+
+
+# Synapse 1.130.0rc1 (2025-05-13)
+
+### Features
+
+- Add an Admin API endpoint `GET /_synapse/admin/v1/scheduled_tasks`  to fetch scheduled tasks. ([\#18214](https://github.com/element-hq/synapse/issues/18214))
+- Add config option `user_directory.exclude_remote_users` which, when enabled, excludes remote users from user directory search results. ([\#18300](https://github.com/element-hq/synapse/issues/18300))
+- Add support for handling `GET /devices/` on workers. ([\#18355](https://github.com/element-hq/synapse/issues/18355))
+
+### Bugfixes
+
+- Fix a longstanding bug where Synapse would immediately retry a failing push endpoint when a new event is received, ignoring any backoff timers. ([\#18363](https://github.com/element-hq/synapse/issues/18363))
+- Pass leave from remote invite rejection down Sliding Sync. ([\#18375](https://github.com/element-hq/synapse/issues/18375))
+
+### Updates to the Docker image
+
+- In `configure_workers_and_start.py`, use the same absolute path of Python in the interpreter shebang, and invoke child Python processes with `sys.executable`. ([\#18291](https://github.com/element-hq/synapse/issues/18291))
+- Optimize the build of the workers image. ([\#18292](https://github.com/element-hq/synapse/issues/18292))
+- In `start_for_complement.sh`, replace some external program calls with shell builtins. ([\#18293](https://github.com/element-hq/synapse/issues/18293))
+- When generating container scripts from templates, don't add a leading newline so that their shebangs may be handled correctly. ([\#18295](https://github.com/element-hq/synapse/issues/18295))
+
+### Improved Documentation
+
+- Improve formatting of the README file. ([\#18218](https://github.com/element-hq/synapse/issues/18218))
+- Add documentation for configuring [Pocket ID](https://github.com/pocket-id/pocket-id) as an OIDC provider. ([\#18237](https://github.com/element-hq/synapse/issues/18237))
+- Fix typo in docs about the `push` config option. Contributed by @HarHarLinks. ([\#18320](https://github.com/element-hq/synapse/issues/18320))
+- Add `/_matrix/federation/v1/version` to list of federation endpoints that can be handled by workers. ([\#18377](https://github.com/element-hq/synapse/issues/18377))
+- Add an Admin API endpoint `GET /_synapse/admin/v1/scheduled_tasks`  to fetch scheduled tasks. ([\#18384](https://github.com/element-hq/synapse/issues/18384))
+
+### Internal Changes
+
+- Return specific error code when adding an email address / phone number to account is not supported ([MSC4178](https://github.com/matrix-org/matrix-spec-proposals/pull/4178)). ([\#17578](https://github.com/element-hq/synapse/issues/17578))
+- Stop auto-provisionning missing users & devices when delegating auth to Matrix Authentication Service. Requires MAS 0.13.0 or later. ([\#18181](https://github.com/element-hq/synapse/issues/18181))
+- Apply file hashing and existing quarantines to media downloaded for URL previews. ([\#18297](https://github.com/element-hq/synapse/issues/18297))
+- Allow a few admin APIs used by matrix-authentication-service to run on workers. ([\#18313](https://github.com/element-hq/synapse/issues/18313))
+- Apply `should_drop_federated_event` to federation invites. ([\#18330](https://github.com/element-hq/synapse/issues/18330))
+- Allow `/rooms/` admin API to be run on workers. ([\#18360](https://github.com/element-hq/synapse/issues/18360))
+- Minor performance improvements to the notifier. ([\#18367](https://github.com/element-hq/synapse/issues/18367))
+- Slight performance increase when using the ratelimiter. ([\#18369](https://github.com/element-hq/synapse/issues/18369))
+- Don't validate the `at_hash` (access token hash) field in OIDC ID Tokens if we don't end up actually using the OIDC Access Token. ([\#18374](https://github.com/element-hq/synapse/issues/18374), [\#18385](https://github.com/element-hq/synapse/issues/18385))
+- Fixed test failures when using authlib 1.5.2. ([\#18390](https://github.com/element-hq/synapse/issues/18390))
+- Refactor [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Simplified Sliding Sync room list tests to cover both new and fallback logic paths. ([\#18399](https://github.com/element-hq/synapse/issues/18399))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/add-to-project from 280af8ae1f83a494cfad2cb10f02f6d13529caa9 to 5b1a254a3546aef88e0a7724a77a623fa2e47c36. ([\#18365](https://github.com/element-hq/synapse/issues/18365))
+* Bump actions/download-artifact from 4.2.1 to 4.3.0. ([\#18364](https://github.com/element-hq/synapse/issues/18364))
+* Bump actions/setup-go from 5.4.0 to 5.5.0. ([\#18426](https://github.com/element-hq/synapse/issues/18426))
+* Bump anyhow from 1.0.97 to 1.0.98. ([\#18336](https://github.com/element-hq/synapse/issues/18336))
+* Bump packaging from 24.2 to 25.0. ([\#18393](https://github.com/element-hq/synapse/issues/18393))
+* Bump pillow from 11.1.0 to 11.2.1. ([\#18429](https://github.com/element-hq/synapse/issues/18429))
+* Bump pydantic from 2.10.3 to 2.11.4. ([\#18394](https://github.com/element-hq/synapse/issues/18394))
+* Bump pyo3-log from 0.12.2 to 0.12.3. ([\#18317](https://github.com/element-hq/synapse/issues/18317))
+* Bump pyopenssl from 24.3.0 to 25.0.0. ([\#18315](https://github.com/element-hq/synapse/issues/18315))
+* Bump sha2 from 0.10.8 to 0.10.9. ([\#18395](https://github.com/element-hq/synapse/issues/18395))
+* Bump sigstore/cosign-installer from 3.8.1 to 3.8.2. ([\#18366](https://github.com/element-hq/synapse/issues/18366))
+* Bump softprops/action-gh-release from 1 to 2. ([\#18264](https://github.com/element-hq/synapse/issues/18264))
+* Bump stefanzweifel/git-auto-commit-action from 5.1.0 to 5.2.0. ([\#18354](https://github.com/element-hq/synapse/issues/18354))
+* Bump txredisapi from 1.4.10 to 1.4.11. ([\#18392](https://github.com/element-hq/synapse/issues/18392))
+* Bump types-jsonschema from 4.23.0.20240813 to 4.23.0.20241208. ([\#18305](https://github.com/element-hq/synapse/issues/18305))
+* Bump types-psycopg2 from 2.9.21.20250121 to 2.9.21.20250318. ([\#18316](https://github.com/element-hq/synapse/issues/18316))
+
 # Synapse 1.129.0 (2025-05-06)
 
 No significant changes since 1.129.0rc2.

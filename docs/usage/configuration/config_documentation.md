@@ -2887,6 +2887,20 @@ Example configuration:
 inhibit_user_in_use_error: true
 ```
 ---
+### `allow_underscore_prefixed_registration`
+
+Whether users are allowed to register with a underscore-prefixed localpart.
+By default, AppServices use prefixes like `_example` to namespace their
+associated ghost users. If turned on, this may result in clashes or confusion.
+Useful when provisioning users from an external identity provider.
+
+Defaults to false.
+
+Example configuration:
+```yaml
+allow_underscore_prefixed_registration: false
+```
+---
 ## User session management
 ---
 ### `session_lifetime`
@@ -3768,17 +3782,23 @@ match particular values in the OIDC userinfo. The requirements can be listed und
 ```yaml
 attribute_requirements:
      - attribute: family_name
-       value: "Stephensson"
+       one_of: ["Stephensson", "Smith"]
      - attribute: groups
        value: "admin"
+     # If `value` or `one_of` are not specified, the attribute only needs
+     # to exist, regardless of value.
+     - attribute: picture
 ```
+
+`attribute` is a required field, while `value` and `one_of` are optional.
+
 All of the listed attributes must match for the login to be permitted. Additional attributes can be added to
 userinfo by expanding the `scopes` section of the OIDC config to retrieve
 additional information from the OIDC provider.
 
 If the OIDC claim is a list, then the attribute must match any value in the list.
 Otherwise, it must exactly match the value of the claim. Using the example
-above, the `family_name` claim MUST be "Stephensson", but the `groups`
+above, the `family_name` claim MUST be either "Stephensson" or "Smith", but the `groups`
 claim MUST contain "admin".
 
 Example configuration:
@@ -4331,21 +4351,9 @@ room list by default_
 Example configuration:
 
 ```yaml
-# No rule list specified. Anyone may publish any room to the public list.
+# No rule list specified. No one may publish any room to the public list, except server admins.
 # This is the default behaviour.
 room_list_publication_rules:
-```
-
-```yaml
-# A list of one rule which allows everything.
-# This has the same effect as the previous example.
-room_list_publication_rules:
-  - "action": "allow"
-```
-
-```yaml
-# An empty list of rules. No-one may publish to the room list.
-room_list_publication_rules: []
 ```
 
 ```yaml
@@ -4353,6 +4361,19 @@ room_list_publication_rules: []
 # This has the same effect as the previous example.
 room_list_publication_rules:
   - "action": "deny"
+```
+
+```yaml
+# An empty list of rules.
+# This has the same effect as the previous example.
+room_list_publication_rules: []
+```
+
+```yaml
+# A list of one rule which allows everything.
+# This was the default behaviour pre v1.126.0.
+room_list_publication_rules:
+  - "action": "allow"
 ```
 
 ```yaml
