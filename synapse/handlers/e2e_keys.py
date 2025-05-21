@@ -172,15 +172,19 @@ class E2eKeysHandler:
                     }
 
                 # Strip invalid user IDs and user IDs the requesting user does not share rooms with.
-                result: Dict[str, List[str]] = {}
-                from_rooms = await self.store.get_rooms_for_user(from_user_id)
-                for user_id, v in query.items():
-                    if not UserID.is_valid(user_id):
-                        continue
-                    rooms = await self.store.get_rooms_for_user(user_id)
-                    if not rooms.isdisjoint(from_rooms):
-                        result[user_id] = v
-                return result
+                valid_user_ids = [
+                    user_id for user_id in query.keys() if UserID.is_valid(user_id)
+                ]
+                allowed_user_ids = set(
+                    await self.store.do_users_share_a_room_joined_or_invited(
+                        from_user_id, valid_user_ids
+                    )
+                )
+                return {
+                    user_id: v
+                    for user_id, v in query.items()
+                    if user_id in allowed_user_ids
+                }
 
             device_keys_query: Dict[str, List[str]] = await filter_device_key_query(
                 query_body.get("device_keys", {})

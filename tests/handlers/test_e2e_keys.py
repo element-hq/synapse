@@ -1897,7 +1897,13 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             remaining_key_ids, {"AAAAAAAAAA", "BAAAAA", "BAAAAB", "BAAAAAAAAA"}
         )
 
-    @override_config({"experimental_features": {"msc4263_limit_key_queries_to_users_who_share_rooms": True}})
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4263_limit_key_queries_to_users_who_share_rooms": True
+            }
+        }
+    )
     def test_query_devices_remote_restricted_not_in_shared_room(self) -> None:
         """Tests that querying keys for a remote user that we don't share a room
         with returns nothing.
@@ -1905,6 +1911,8 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
 
         remote_user_id = "@test:other"
         local_user_id = "@test:test"
+
+        # Do *not* pretend we're sharing a room with the user we're querying.
 
         remote_master_key = "85T7JXPFBAySB/jwby4S3lBPTqY3+Zg53nYuGmu1ggY"
         remote_self_signing_key = "QeIiFEjluPBtI7WQdG365QKZcFs9kqmHir6RBD0//nQ"
@@ -1956,7 +1964,13 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             },
         )
 
-    @override_config({"experimental_features": {"msc4263_limit_key_queries_to_users_who_share_rooms": True}})
+    @override_config(
+        {
+            "experimental_features": {
+                "msc4263_limit_key_queries_to_users_who_share_rooms": True
+            }
+        }
+    )
     def test_query_devices_remote_restricted_in_shared_room(self) -> None:
         """Tests that querying keys for a remote user that we share a room
         with returns the cross signing keys correctly.
@@ -1966,7 +1980,11 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         local_user_id = "@test:test"
 
         # Pretend we're sharing a room with the user we're querying. If not,
-        # `_query_devices_for_destination` will return early.
+        # `query_devices` will filter out the user ID and `_query_devices_for_destination`
+        # will return early.
+        self.store.do_users_share_a_room_joined_or_invited = mock.AsyncMock(
+            return_value=[remote_user_id]
+        )
         self.store.get_rooms_for_user = mock.AsyncMock(return_value={"some_room_id"})
 
         remote_master_key = "85T7JXPFBAySB/jwby4S3lBPTqY3+Zg53nYuGmu1ggY"
