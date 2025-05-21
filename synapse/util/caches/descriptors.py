@@ -33,7 +33,6 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Protocol,
     Sequence,
     Tuple,
     Type,
@@ -44,7 +43,6 @@ from typing import (
 from weakref import WeakValueDictionary
 
 import attr
-from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 from twisted.python.failure import Failure
@@ -52,7 +50,6 @@ from twisted.python.failure import Failure
 from synapse.logging.context import make_deferred_yieldable, preserve_fn
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import delay_cancellation
-from synapse.util.caches import CacheManager
 from synapse.util.caches.deferred_cache import DeferredCache
 from synapse.util.caches.lrucache import LruCache
 
@@ -186,7 +183,6 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
 
     Args:
         orig:
-        cache_manager: The cache manager to handle metrics
         max_entries:
         num_args: number of positional arguments (excluding ``self`` and
             ``cache_context``) to use as cache keys. Defaults to all named
@@ -200,14 +196,11 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         prune_unread_entries: If True, cache entries that haven't been read recently
             will be evicted from the cache in the background. Set to False to opt-out
             of this behaviour.
-        name: Will default to the `__name__` of the `orig` function.
     """
 
     def __init__(
         self,
         orig: Callable[..., Any],
-        *,
-        cache_manager: CacheManager,
         max_entries: int = 1000,
         num_args: Optional[int] = None,
         uncached_args: Optional[Collection[str]] = None,
@@ -224,7 +217,6 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
             cache_context=cache_context,
             name=name,
         )
-        self.cache_manager = cache_manager
 
         if tree and self.num_args < 2:
             raise RuntimeError(
@@ -241,7 +233,6 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
     ) -> Callable[..., "defer.Deferred[Any]"]:
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
-            cache_manager=self.cache_manager,
             max_entries=self.max_entries,
             tree=self.tree,
             iterable=self.iterable,
@@ -496,12 +487,10 @@ class _CachedFunctionDescriptor:
     iterable: bool
     prune_unread_entries: bool
     name: Optional[str]
-    cache_manager: CacheManager
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
             orig,
-            cache_manager=self.cache_manager,
             max_entries=self.max_entries,
             num_args=self.num_args,
             uncached_args=self.uncached_args,
@@ -514,15 +503,6 @@ class _CachedFunctionDescriptor:
         return cast(CachedFunction[F], d)
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
-
-
-class HasCacheManager(Protocol):
-    # Used to handle registering the caches
-    cache_manager: CacheManager
-
-
 def cached(
     *,
     max_entries: int = 1000,
@@ -533,55 +513,17 @@ def cached(
     iterable: bool = False,
     prune_unread_entries: bool = True,
     name: Optional[str] = None,
-) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-    """Decorate an async method with a `Measure` context manager.
-
-    The Measure is created using `self.cache_manager`; it should only be used to decorate
-    methods in classes defining an instance-level `clock` attribute.
-
-    Usage:
-
-    @measure_func()
-    async def foo(...):
-        ...
-
-    Which is analogous to:
-
-    async def foo(...):
-        with Measure(...):
-            ...
-
-    """
-
-    def wrapper(
-        func: Callable[Concatenate[HasCacheManager, P], Awaitable[R]],
-    ) -> Callable[P, Awaitable[R]]:
-        # block_name = func.__name__ if name is None else name
-
-        @functools.wraps(func)
-        async def cached_func(
-            self: HasCacheManager, *args: P.args, **kwargs: P.kwargs
-        ) -> R:
-            return _CachedFunctionDescriptor(
-                max_entries=max_entries,
-                num_args=num_args,
-                uncached_args=uncached_args,
-                tree=tree,
-                cache_context=cache_context,
-                iterable=iterable,
-                prune_unread_entries=prune_unread_entries,
-                name=name,
-                # Grab this attribute from the instance
-                cache_manager=self.cache_manager,
-            )
-
-        # There are some shenanigans here, because we're decorating a method but
-        # explicitly making use of the `self` parameter. The key thing here is that the
-        # return type within the return type for `measure_func` itself describes how the
-        # decorated function will be called.
-        return cached_func  # type: ignore[return-value]
-
-    return wrapper  # type: ignore[return-value]
+) -> _CachedFunctionDescriptor:
+    return _CachedFunctionDescriptor(
+        max_entries=max_entries,
+        num_args=num_args,
+        uncached_args=uncached_args,
+        tree=tree,
+        cache_context=cache_context,
+        iterable=iterable,
+        prune_unread_entries=prune_unread_entries,
+        name=name,
+    )
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
