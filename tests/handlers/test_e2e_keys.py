@@ -1982,7 +1982,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         # Pretend we're sharing a room with the user we're querying. If not,
         # `query_devices` will filter out the user ID and `_query_devices_for_destination`
         # will return early.
-        self.store.do_users_share_a_room_joined_or_invited = mock.AsyncMock(
+        self.store.do_users_share_a_room_joined_or_invited = mock.AsyncMock(  # type: ignore[method-assign]
             return_value=[remote_user_id]
         )
         self.store.get_rooms_for_user = mock.AsyncMock(return_value={"some_room_id"})
