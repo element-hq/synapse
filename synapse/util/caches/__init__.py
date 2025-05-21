@@ -32,7 +32,6 @@ from prometheus_client.core import Gauge
 
 from synapse.config.cache import add_resizable_cache
 from synapse.util.metrics import DynamicCollectorRegistry
-from synapse.util.caches.deferred_cache import DeferredCache
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -224,26 +223,6 @@ class CacheManager:
 
     def __init__(self, hs: "HomeServer") -> None:
         self._cache_metrics = CacheMetrics(hs.metrics_collector_registry)
-
-        self._deferred_cache_map: Dict[str, DeferredCache[CacheKey, Any]] = {}
-
-    def get_deferred_cache(
-        self,
-        name: str,
-        max_entries: int = 1000,
-        tree: bool = False,
-        iterable: bool = False,
-        apply_cache_factor_from_config: bool = True,
-        prune_unread_entries: bool = True,
-    ) -> DeferredCache[CacheKey, Any]:
-        cache: DeferredCache[CacheKey, Any] = DeferredCache(
-            name=self.name,
-            cache_manager=self,
-            max_entries=self.max_entries,
-            tree=self.tree,
-            iterable=self.iterable,
-            prune_unread_entries=self.prune_unread_entries,
-        )
 
     def register_cache(
         self,
