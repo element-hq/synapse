@@ -894,9 +894,9 @@ class ModuleApi:
         Raises:
             synapse.api.errors.AuthError: the access token is invalid
         """
-        assert isinstance(
-            self._device_handler, DeviceHandler
-        ), "invalidate_access_token can only be called on the main process"
+        assert isinstance(self._device_handler, DeviceHandler), (
+            "invalidate_access_token can only be called on the main process"
+        )
 
         # see if the access token corresponds to a device
         user_info = yield defer.ensureDeferred(

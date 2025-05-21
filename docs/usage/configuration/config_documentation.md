@@ -3782,17 +3782,23 @@ match particular values in the OIDC userinfo. The requirements can be listed und
 ```yaml
 attribute_requirements:
      - attribute: family_name
-       value: "Stephensson"
+       one_of: ["Stephensson", "Smith"]
      - attribute: groups
        value: "admin"
+     # If `value` or `one_of` are not specified, the attribute only needs
+     # to exist, regardless of value.
+     - attribute: picture
 ```
+
+`attribute` is a required field, while `value` and `one_of` are optional.
+
 All of the listed attributes must match for the login to be permitted. Additional attributes can be added to
 userinfo by expanding the `scopes` section of the OIDC config to retrieve
 additional information from the OIDC provider.
 
 If the OIDC claim is a list, then the attribute must match any value in the list.
 Otherwise, it must exactly match the value of the claim. Using the example
-above, the `family_name` claim MUST be "Stephensson", but the `groups`
+above, the `family_name` claim MUST be either "Stephensson" or "Smith", but the `groups`
 claim MUST contain "admin".
 
 Example configuration:
