@@ -146,7 +146,7 @@ class TransportLayerClient:
     async def get_policy_recommendation_for_pdu(
         self, destination: str, event: EventBase, timeout: Optional[int] = None
     ) -> JsonDict:
-        """Requests the policy recommendation for the given pdu from the given server.
+        """Requests the policy recommendation for the given pdu from the given policy server.
 
         Args:
             destination: The host name of the remote homeserver checking the event.
@@ -158,7 +158,7 @@ class TransportLayerClient:
             The full recommendation object from the remote server.
         """
         logger.debug(
-            "get_policy_recommendation dest=%s, event_id=%s",
+            "get_policy_recommendation_for_pdu dest=%s, event_id=%s",
             destination,
             event.event_id,
         )
