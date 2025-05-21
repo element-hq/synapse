@@ -154,7 +154,8 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         ] = LruCache(
             max_size=max_entries,
             cache_name=name,
-            cache_manager=cache_manager,
+            # TODO
+            # cache_manager=cache_manager,
             cache_type=TreeCache,
             size_callback=len,
         )
