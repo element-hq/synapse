@@ -426,10 +426,18 @@ class FederationClient(FederationBase):
     @tag_args
     async def get_pdu_policy_recommendation(
         self, destination: str, pdu: EventBase, timeout: Optional[int] = None
-    ) -> Optional[str]:
+    ) -> str:
         """Requests that the destination server (typically a policy server)
         check the event and return its recommendation on how to handle the
         event.
+
+        If the policy server could not be contacted or the policy server
+        returned an unknown recommendation, this returns an OK recommendation.
+        This type fixing behaviour is done because the typical caller will be
+        in a critical call path and would generally interpret a `None` or similar
+        response as "weird value; don't care; move on without taking action". We
+        just frontload that logic here.
+
 
         Args:
             destination: The remote homeserver to ask (a policy server)
@@ -438,7 +446,8 @@ class FederationClient(FederationBase):
                 giving up. None indicates no timeout.
 
         Returns:
-            The policy recommendation, or None if we were unable to acquire one.
+            The policy recommendation, or RECOMMENDATION_OK if the policy server was
+            uncontactable or returned an unknown recommendation.
         """
 
         logger.debug(

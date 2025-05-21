@@ -99,6 +99,10 @@ class FederationBase:
         Also runs the event through the spam checker; if it fails, redacts the event
         and flags it as soft-failed.
 
+        Also checks that the event is allowed by the policy server, if the room uses
+        a policy server. If the event is not allowed, the event is flagged as
+        soft-failed but not redacted.
+
         Args:
             room_version: The room version of the PDU
             pdu: the event to be checked
