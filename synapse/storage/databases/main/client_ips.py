@@ -436,8 +436,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         self.client_ip_last_seen = LruCache[Tuple[str, str, str], int](
             max_size=50000,
             cache_name="client_ip_last_seen",
-            # TODO
-            # cache_manager=hs.get_cache_manager(),
+            cache_manager=hs.get_cache_manager(),
         )
 
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:

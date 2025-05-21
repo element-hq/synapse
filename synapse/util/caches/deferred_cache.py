@@ -44,6 +44,7 @@ from twisted.internet import defer
 from twisted.python.failure import Failure
 
 from synapse.util.async_helpers import ObservableDeferred
+from synapse.util.caches import CacheManager
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
 
@@ -80,6 +81,7 @@ class DeferredCache(Generic[KT, VT]):
     def __init__(
         self,
         name: str,
+        cache_manager: CacheManager,
         max_entries: int = 1000,
         tree: bool = False,
         iterable: bool = False,
@@ -89,6 +91,7 @@ class DeferredCache(Generic[KT, VT]):
         """
         Args:
             name: The name of the cache
+            cache_manager: The cache manager to handle metrics
             max_entries: Maximum amount of entries that the cache will hold
             tree: Use a TreeCache instead of a dict as the underlying cache type
             iterable: If True, count each item in the cached object as an entry,
@@ -114,6 +117,7 @@ class DeferredCache(Generic[KT, VT]):
         self.cache: LruCache[KT, VT] = LruCache(
             max_size=max_entries,
             cache_name=name,
+            cache_manager=cache_manager,
             cache_type=cache_type,
             size_callback=(
                 (lambda d: len(cast(Sized, d)) or 1)
