@@ -79,6 +79,9 @@ class _InFlightMetric(Protocol):
     real_time_sum: float
 
 
+# Each homeserver will have its own `CollectorRegistry`, which is used to namespace the
+# metrics to the given homeserver. Because of how `@measure_func` is used as a
+# decorator, we have to keep track of this out of band.
 metrics_collector_registry_to_in_flight_gauge: Dict[
     CollectorRegistry, InFlightGauge
 ] = {}
