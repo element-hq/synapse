@@ -986,8 +986,7 @@ def _check_power_levels(
             if old_level == user_level:
                 raise AuthError(
                     403,
-                    "You don't have permission to remove ops level equal "
-                    "to your own",
+                    "You don't have permission to remove ops level equal to your own",
                 )
 
         # Check if the old and new levels are greater than the user level

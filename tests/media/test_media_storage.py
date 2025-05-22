@@ -250,9 +250,7 @@ small_cmyk_jpeg = TestImage(
 )
 
 small_lossless_webp = TestImage(
-    unhexlify(
-        b"524946461a000000574542505650384c0d0000002f0000001007" b"1011118888fe0700"
-    ),
+    unhexlify(b"524946461a000000574542505650384c0d0000002f00000010071011118888fe0700"),
     b"image/webp",
     b".webp",
 )

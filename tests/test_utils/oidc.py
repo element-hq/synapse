@@ -20,7 +20,9 @@
 #
 
 
+import base64
 import json
+from hashlib import sha256
 from typing import Any, ContextManager, Dict, List, Optional, Tuple
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs
@@ -154,10 +156,23 @@ class FakeOidcServer:
         json_payload = json.dumps(payload)
         return jws.serialize_compact(protected, json_payload, self._key).decode("utf-8")
 
-    def generate_id_token(self, grant: FakeAuthorizationGrant) -> str:
+    def generate_id_token(
+        self, grant: FakeAuthorizationGrant, access_token: str
+    ) -> str:
+        # Generate a hash of the access token for the optional
+        # `at_hash` field in an ID Token.
+        #
+        # 3.1.3.6. ID Token, https://openid.net/specs/openid-connect-core-1_0.html#CodeIDToken
+        at_hash = (
+            base64.urlsafe_b64encode(sha256(access_token.encode("ascii")).digest()[:16])
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+
         now = int(self._clock.time())
         id_token = {
             **grant.userinfo,
+            "at_hash": at_hash,
             "iss": self.issuer,
             "aud": grant.client_id,
             "iat": now,
@@ -243,7 +258,7 @@ class FakeOidcServer:
         }
 
         if "openid" in grant.scope:
-            token["id_token"] = self.generate_id_token(grant)
+            token["id_token"] = self.generate_id_token(grant, access_token)
 
         return dict(token)
 
