@@ -44,9 +44,9 @@ class MSC4108DelegationRendezvousServlet(RestServlet):
         redirection_target: Optional[str] = (
             hs.config.experimental.msc4108_delegation_endpoint
         )
-        assert (
-            redirection_target is not None
-        ), "Servlet is only registered if there is a delegation target"
+        assert redirection_target is not None, (
+            "Servlet is only registered if there is a delegation target"
+        )
         self.endpoint = redirection_target.encode("utf-8")
 
     async def on_POST(self, request: SynapseRequest) -> None:
