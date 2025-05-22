@@ -19,6 +19,8 @@
 #
 #
 
+import logging
+import platform
 from twisted.internet import defer
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -28,7 +30,9 @@ from synapse.util import Clock
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.utils import test_timeout
-import platform
+
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerLockTestCase(unittest.HomeserverTestCase):
@@ -54,24 +58,21 @@ class WorkerLockTestCase(unittest.HomeserverTestCase):
 
     def test_lock_contention(self) -> None:
         """Test lock contention when a lot of locks wait on a single worker"""
-
+        nb_locks_to_test = 500
         current_machine = platform.machine().lower()
         if current_machine.startswith('riscv'):
             # RISC-V specific settings
             timeout_seconds = 15  # Increased timeout for RISC-V
-            nb_locks_to_test = 500 # Optionally reduce the number of locks for RISC-V
             #add a print or log statement here for visibility in CI logs
-            print(
-                f"INFO: Detected RISC-V architecture ({current_machine}). "
-                f"Adjusting test_lock_contention: timeout={timeout_seconds}s, nb_locks={nb_locks_to_test}"
+            logger.info( # use logger.info
+                f"Detected RISC-V architecture ({current_machine}). "
+                f"Adjusting test_lock_contention: timeout={timeout_seconds}s"
             )
         else:
             # Settings for other architectures
             timeout_seconds = 5
-            nb_locks_to_test = 500
         # It takes around 0.5s on a 5+ years old laptop
         with test_timeout(timeout_seconds): # Use the dynamically set timeout
-            # nb_locks = 500 # Original line, now we use nb_locks_to_test
             d = self._take_locks(nb_locks_to_test) # Use the (potentially adjusted) number of locks
             self.assertEqual(self.get_success(d), nb_locks_to_test) # Assert against the used number of locks
 
