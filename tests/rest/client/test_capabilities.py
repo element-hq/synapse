@@ -264,3 +264,43 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertTrue(capabilities["m.get_login_token"]["enabled"])
+
+    @override_config(
+        {
+            "experimental_features": {"msc4267_enabled": True},
+            "forget_rooms_on_leave": True,
+        }
+    )
+    def test_get_forget_forced_upon_leave_with_auto_forget(self) -> None:
+        # Server auto-forgets on /leave, expect enabled client capability
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertTrue(
+            capabilities["org.matrix.msc4267.forget_forced_upon_leave"]["enabled"]
+        )
+
+    @override_config(
+        {
+            "experimental_features": {"msc4267_enabled": True},
+            "forget_rooms_on_leave": False,
+        }
+    )
+    def test_get_forget_forced_upon_leave_without_auto_forget(self) -> None:
+        # Server doesn't auto-forget on /leave, expect disabled client capability
+        access_token = self.get_success(
+            self.auth_handler.create_access_token_for_user_id(
+                self.user, device_id=None, valid_until_ms=None
+            )
+        )
+        channel = self.make_request("GET", self.url, access_token=access_token)
+        capabilities = channel.json_body["capabilities"]
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertFalse(
+            capabilities["org.matrix.msc4267.forget_forced_upon_leave"]["enabled"]
+        )

@@ -560,3 +560,6 @@ class ExperimentalConfig(Config):
 
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
+
+        # MSC4267: Automatically forgetting rooms on leave
+        self.msc4267_enabled: bool = experimental.get("msc4267_enabled", False)
