@@ -87,7 +87,10 @@ class DeviceWorkerHandler:
     device_list_updater: "DeviceListWorkerUpdater"
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_collector_registry = (
+            hs.metrics_collector_registry
+        )  # nb must be called this for @measure_func
         self.hs = hs
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
@@ -1231,6 +1234,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
             cache_name="device_update_edu",
             clock=self.clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
             iterable=True,

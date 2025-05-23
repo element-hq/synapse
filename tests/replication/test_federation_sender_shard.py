@@ -22,6 +22,7 @@ import logging
 from unittest.mock import AsyncMock, Mock
 
 from netaddr import IPSet
+from prometheus_client import CollectorRegistry
 from signedjson.key import (
     encode_verify_key_base64,
     generate_signing_key,
@@ -42,6 +43,7 @@ from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
+from synapse.util.caches import CacheManager
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import get_clock
@@ -68,11 +70,13 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
 
         reactor, _ = get_clock()
         self.matrix_federation_agent = MatrixFederationAgent(
-            reactor,
+            reactor=reactor,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            metrics_collector_registry=CollectorRegistry(auto_describe=True),
+            cache_manager=Mock(spec=CacheManager),
         )
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

@@ -38,7 +38,7 @@ from typing import (
 )
 
 from prometheus_client import Metric
-from prometheus_client.core import REGISTRY, Counter, Gauge
+from prometheus_client.core import REGISTRY, CollectorRegistry, Counter, Gauge
 from typing_extensions import ParamSpec
 
 from twisted.internet import defer
@@ -134,12 +134,16 @@ _background_processes_active_since_last_scrape: "Set[_BackgroundProcess]" = set(
 _bg_metrics_lock = threading.Lock()
 
 
-class _Collector(Collector):
+class BackgroundProcessCollector(Collector):
     """A custom metrics collector for the background process metrics.
 
     Ensures that all of the metrics are up-to-date with any in-flight processes
     before they are returned.
     """
+
+    def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+        if registry is not None:
+            registry.register(self)
 
     def collect(self) -> Iterable[Metric]:
         global _background_processes_active_since_last_scrape
@@ -163,9 +167,6 @@ class _Collector(Collector):
             _background_process_db_sched_duration,
         ):
             yield from m.collect()
-
-
-REGISTRY.register(_Collector())
 
 
 class _BackgroundProcess:

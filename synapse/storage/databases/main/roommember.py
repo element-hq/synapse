@@ -121,6 +121,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 "",
                 [],
                 lambda: self._known_servers_count,
+                registry=hs.metrics_collector_registry,
             )
 
     @wrap_as_background_process("_count_known_servers")
@@ -916,7 +917,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         `_get_user_ids_from_membership_event_ids` for any uncached events.
         """
 
-        with Measure(self._clock, "get_joined_user_ids_from_state"):
+        with Measure(
+            self._clock,
+            self._metrics_collector_registry,
+            "get_joined_user_ids_from_state",
+        ):
             users_in_room = set()
             member_event_ids = [
                 e_id for key, e_id in state.items() if key[0] == EventTypes.Member

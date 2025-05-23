@@ -269,8 +269,9 @@ class EventsWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._curr_state_delta_stream_cache: StreamChangeCache = StreamChangeCache(
-            "_curr_state_delta_stream_cache",
-            min_curr_state_delta_id,
+            name="_curr_state_delta_stream_cache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=min_curr_state_delta_id,
             prefilled_cache=curr_state_delta_prefill,
         )
 
@@ -283,8 +284,10 @@ class EventsWorkerStore(SQLBaseStore):
 
         self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
             AsyncLruCache(
-                cache_name="*getEvent*",
                 max_size=hs.config.caches.event_cache_size,
+                cache_name="*getEvent*",
+                # TODO
+                # cache_manager=hs.get_cache_manager(),
                 # `extra_index_cb` Returns a tuple as that is the key type
                 extra_index_cb=lambda _, v: (v.event.room_id,),
             )
@@ -1233,7 +1236,9 @@ class EventsWorkerStore(SQLBaseStore):
                 to event row. Note that it may well contain additional events that
                 were not part of this request.
         """
-        with Measure(self._clock, "_fetch_event_list"):
+        with Measure(
+            self._clock, self._metrics_collector_registry, "_fetch_event_list"
+        ):
             try:
                 events_to_fetch = {
                     event_id for events, _ in event_list for event_id in events
