@@ -115,6 +115,7 @@ class RegistrationHandler:
         self._user_consent_version = self.hs.config.consent.user_consent_version
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
         self._server_name = hs.hostname
+        self._user_types_config = hs.config.user_types
 
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
@@ -305,6 +306,9 @@ class RegistrationHandler:
 
             elif default_display_name is None:
                 default_display_name = localpart
+
+            if user_type is None:
+                user_type = self._user_types_config.default_user_type
 
             await self.register_with_store(
                 user_id=user_id,

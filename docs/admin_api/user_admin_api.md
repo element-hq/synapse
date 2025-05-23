@@ -163,7 +163,7 @@ Body parameters:
 - `locked` - **bool**, optional. If unspecified, locked state will be left unchanged.
 - `user_type` - **string** or null, optional. If not provided, the user type will be
   not be changed. If `null` is given, the user type will be cleared.
-  Other allowed options are: `bot` and `support`.
+  Other allowed options are: `bot` and `support`. # XXXTODO
 
 ## List Accounts
 ### List Accounts (V2)
