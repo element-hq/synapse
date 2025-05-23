@@ -871,6 +871,73 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return {u for u, share_room in user_dict.items() if share_room}
 
+    @cached(max_entries=10000)
+    async def does_pair_of_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_id: str
+    ) -> bool:
+        raise NotImplementedError()
+
+    @cachedList(
+        cached_method_name="does_pair_of_users_share_a_room_joined_or_invited",
+        list_name="other_user_ids",
+    )
+    async def _do_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_ids: Collection[str]
+    ) -> Mapping[str, Optional[bool]]:
+        """Return mapping from user ID to whether they share a room with the
+        given user via being either joined or invited.
+
+        Note: `None` and `False` are equivalent and mean they don't share a
+        room.
+        """
+
+        def do_users_share_a_room_joined_or_invited_txn(
+            txn: LoggingTransaction, user_ids: Collection[str]
+        ) -> Dict[str, bool]:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "state_key", user_ids
+            )
+
+            # This query works by fetching both the list of rooms for the target
+            # user and the set of other users, and then checking if there is any
+            # overlap.
+            sql = f"""
+                SELECT DISTINCT b.state_key
+                FROM (
+                    SELECT room_id FROM current_state_events
+                    WHERE type = 'm.room.member' AND (membership = 'join' OR membership = 'invite') AND state_key = ?
+                ) AS a
+                INNER JOIN (
+                    SELECT room_id, state_key FROM current_state_events
+                    WHERE type = 'm.room.member' AND (membership = 'join' OR membership = 'invite') AND {clause}
+                ) AS b using (room_id)
+            """
+
+            txn.execute(sql, (user_id, *args))
+            return {u: True for (u,) in txn}
+
+        to_return = {}
+        for batch_user_ids in batch_iter(other_user_ids, 1000):
+            res = await self.db_pool.runInteraction(
+                "do_users_share_a_room_joined_or_invited",
+                do_users_share_a_room_joined_or_invited_txn,
+                batch_user_ids,
+            )
+            to_return.update(res)
+
+        return to_return
+
+    async def do_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_ids: Collection[str]
+    ) -> Set[str]:
+        """Return the set of users who share a room with the first users via being either joined or invited"""
+
+        user_dict = await self._do_users_share_a_room_joined_or_invited(
+            user_id, other_user_ids
+        )
+
+        return {u for u, share_room in user_dict.items() if share_room}
+
     async def get_users_who_share_room_with_user(self, user_id: str) -> Set[str]:
         """Returns the set of users who share a room with `user_id`"""
         room_ids = await self.get_rooms_for_user(user_id)
