@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
     from synapse.server import HomeServer
 
+logger = logging.getLogger(__name__)
+
 
 # This lock is used to avoid creating an event while we are purging the room.
 # We take a read lock when creating an event, and a write one when purging a room.
@@ -245,8 +247,13 @@ class WaitingLock:
                             timeout=self._get_next_retry_interval(),
                             reactor=self.reactor,
                         )
+                        # Let's reset retry interval since we got notified, we
+                        # should only increase it if we hit the previous one
+                        self._retry_interval = 0.1
                 except Exception:
                     pass
+
+        logger.warn(f"lock taken: {self.lock_name}, {self.lock_key}")
 
         return await self._inner_lock.__aenter__()
 
@@ -262,6 +269,7 @@ class WaitingLock:
 
         try:
             r = await self._inner_lock.__aexit__(exc_type, exc, tb)
+            logger.warn(f"lock released: {self.lock_name}, {self.lock_key}")
         finally:
             self._lock_span.__exit__(exc_type, exc, tb)
 
