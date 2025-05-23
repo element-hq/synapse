@@ -80,6 +80,7 @@ class SlidingSyncExtensionHandler:
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
+        user_receipts: Mapping[str, Sequence[ReceiptInRoom]],
     ) -> SlidingSyncResult.Extensions:
         """Handle extension requests.
 
@@ -95,6 +96,7 @@ class SlidingSyncExtensionHandler:
                 Sliding Sync response.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
+            user_receipts: Map of room ID to list of the syncing user's receipts in the room.
         """
 
         if sync_config.extensions is None:
@@ -142,6 +144,7 @@ class SlidingSyncExtensionHandler:
                 receipts_request=sync_config.extensions.receipts,
                 to_token=to_token,
                 from_token=from_token,
+                user_receipts=user_receipts,
             )
 
         typing_coro = None
@@ -619,6 +622,7 @@ class SlidingSyncExtensionHandler:
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
+        user_receipts: Mapping[str, Sequence[ReceiptInRoom]],
     ) -> Optional[SlidingSyncResult.Extensions.ReceiptsExtension]:
         """Handle Receipts extension (MSC3960)
 
@@ -635,6 +639,7 @@ class SlidingSyncExtensionHandler:
             account_data_request: The account_data extension from the request
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
+            user_receipts: Map of room ID to list of the syncing user's receipts in the room.
         """
         # Skip if the extension is not enabled
         if not receipts_request.enabled:
@@ -726,15 +731,6 @@ class SlidingSyncExtensionHandler:
                 )
 
             if initial_rooms:
-                # We also always send down receipts for the current user.
-                user_receipts = (
-                    await self.store.get_linearized_receipts_for_user_in_rooms(
-                        user_id=sync_config.user.to_string(),
-                        room_ids=initial_rooms,
-                        to_key=to_token.receipt_key,
-                    )
-                )
-
                 # For rooms we haven't previously sent down, we could send all receipts
                 # from that room but we only want to include receipts for events
                 # in the timeline to avoid bloating and blowing up the sync response
@@ -752,22 +748,23 @@ class SlidingSyncExtensionHandler:
                 # Combine the receipts for a room and add them to
                 # `fetched_receipts`
                 for room_id in initial_receipts.keys() | user_receipts.keys():
-                    receipt_content = ReceiptInRoom.merge_to_content(
-                        list(
-                            itertools.chain(
-                                initial_receipts.get(room_id, []),
-                                user_receipts.get(room_id, []),
+                    if room_id in initial_rooms:
+                        receipt_content = ReceiptInRoom.merge_to_content(
+                            list(
+                                itertools.chain(
+                                    initial_receipts.get(room_id, []),
+                                    user_receipts.get(room_id, []),
+                                )
                             )
                         )
-                    )
 
-                    fetched_receipts.append(
-                        {
-                            "room_id": room_id,
-                            "type": EduTypes.RECEIPT,
-                            "content": receipt_content,
-                        }
-                    )
+                        fetched_receipts.append(
+                            {
+                                "room_id": room_id,
+                                "type": EduTypes.RECEIPT,
+                                "content": receipt_content,
+                            }
+                        )
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
                 fetched_receipts, sync_config.user.to_string()
