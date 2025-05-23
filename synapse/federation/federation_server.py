@@ -551,6 +551,30 @@ class FederationServer(FederationBase):
                 edu_type=edu_dict["edu_type"],
                 content=edu_dict["content"],
             )
+
+            if edu.edu_type == EduTypes.TYPING:
+                origin_host, _ = parse_server_name(origin)
+                room_id = edu.content["room_id"]
+                try:
+                    await self.check_server_matches_acl(origin_host, room_id)
+                except AuthError:
+                    logger.warning(
+                        "Ignoring typing EDU for room %s from banned server", room_id
+                    )
+                    return
+
+            if edu.edu_type == EduTypes.RECEIPT:
+                origin_host, _ = parse_server_name(origin)
+                for room_id, _ in edu.content.items():
+                    try:
+                        await self.check_server_matches_acl(origin_host, room_id)
+                    except AuthError:
+                        logger.warning(
+                            "Ignoring receipt EDU containing room %s from banned server",
+                            room_id,
+                        )
+                        return
+
             try:
                 await self.registry.on_edu(edu.edu_type, origin, edu.content)
             except Exception:
