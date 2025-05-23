@@ -640,11 +640,13 @@ class UserRegisterServlet(RestServlet):
 
         want_mac = want_mac_builder.hexdigest()
 
+        user_registration_debug_logger.debug("asdf")
+
         if not hmac.compare_digest(want_mac.encode("ascii"), got_mac.encode("ascii")):
             user_registration_debug_logger.debug(
                 "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
-                want_mac,
                 got_mac,
+                want_mac,
                 self.hs.config.registration.registration_shared_secret,
                 body,
             )
