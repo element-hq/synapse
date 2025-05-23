@@ -102,10 +102,17 @@ class MediaConfigResource(RestServlet):
         self.clock = hs.get_clock()
         self.auth = hs.get_auth()
         self.limits_dict = {"m.upload.size": config.media.max_upload_size}
+        self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
 
     async def on_GET(self, request: SynapseRequest) -> None:
-        await self.auth.get_user_by_req(request)
-        respond_with_json(request, 200, self.limits_dict, send_cors=True)
+        requester = await self.auth.get_user_by_req(request)
+        user_specific_config = (
+            await self.media_repository_callbacks.get_media_config_for_user(
+                requester.user.to_string(),
+            )
+        )
+        response = user_specific_config if user_specific_config else self.limits_dict
+        respond_with_json(request, 200, response, send_cors=True)
 
 
 class ThumbnailResource(RestServlet):
