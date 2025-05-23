@@ -59,6 +59,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+user_registration_debug_logger = logging.getLogger(
+    "synapse.rest.admin.users.registration_debug"
+)
+"""
+A logger for debugging the user registration process. This is separate from the main
+logger as it logs sensitive information such as passwords and `registration_shared_secret`.
+"""
+
 
 class UsersRestServletV2(RestServlet):
     PATTERNS = admin_patterns("/users$", "v2")
@@ -633,6 +641,13 @@ class UserRegisterServlet(RestServlet):
         want_mac = want_mac_builder.hexdigest()
 
         if not hmac.compare_digest(want_mac.encode("ascii"), got_mac.encode("ascii")):
+            user_registration_debug_logger.debug(
+                "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
+                want_mac,
+                got_mac,
+                self.hs.config.registration.registration_shared_secret,
+                body,
+            )
             raise SynapseError(HTTPStatus.FORBIDDEN, "HMAC incorrect")
 
         should_issue_refresh_token = body.get("refresh_token", False)
