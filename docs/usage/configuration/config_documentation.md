@@ -834,6 +834,17 @@ Example configuration:
 ```yaml
 max_event_delay_duration: 24h
 ```
+---
+### `url_preview_user_agent`
+
+Setting the User-Agent for URL previews.
+
+Defaults to `Synapse (bot; +https://github.com/matrix-org/synapse)`.
+
+Example configuration:
+```yaml
+url_preview_user_agent: "Hello Matrix"
+```
 
 ## Homeserver blocking
 Useful options for Synapse admins.
