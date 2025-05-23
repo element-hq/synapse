@@ -99,6 +99,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import (
     SHOULD_DROP_FEDERATED_EVENT_CALLBACK,
     USER_MAY_CREATE_ROOM_ALIAS_CALLBACK,
     USER_MAY_CREATE_ROOM_CALLBACK,
+    USER_MAY_CREATE_ROOM_WITH_VISIBILITY_CALLBACK,
     USER_MAY_INVITE_CALLBACK,
     USER_MAY_JOIN_ROOM_CALLBACK,
     USER_MAY_PUBLISH_ROOM_CALLBACK,
@@ -307,6 +308,9 @@ class ModuleApi:
         user_may_invite: Optional[USER_MAY_INVITE_CALLBACK] = None,
         user_may_send_3pid_invite: Optional[USER_MAY_SEND_3PID_INVITE_CALLBACK] = None,
         user_may_create_room: Optional[USER_MAY_CREATE_ROOM_CALLBACK] = None,
+        user_may_create_room_with_visibility: Optional[
+            USER_MAY_CREATE_ROOM_WITH_VISIBILITY_CALLBACK
+        ] = None,
         user_may_create_room_alias: Optional[
             USER_MAY_CREATE_ROOM_ALIAS_CALLBACK
         ] = None,
@@ -335,6 +339,7 @@ class ModuleApi:
             check_registration_for_spam=check_registration_for_spam,
             check_media_file_for_spam=check_media_file_for_spam,
             check_login_for_spam=check_login_for_spam,
+            user_may_create_room_with_visibility=user_may_create_room_with_visibility,
         )
 
     def register_account_validity_callbacks(
