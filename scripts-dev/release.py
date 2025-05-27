@@ -256,7 +256,8 @@ def _prepare() -> None:
 
     # Update config schema $id.
     schema_file = "schema/synapse-config.schema.yaml"
-    url = f"https://element-hq.github.io/synapse/schema/synapse/v{new_version}/synapse-config.schema.json"
+    minor_version = ".".join(new_version.split(".")[:2])
+    url = f"https://element-hq.github.io/synapse/schema/synapse/v{minor_version}/synapse-config.schema.json"
     subprocess.check_output(["sed", "-i", f"0,/^\\$id: .*/s||$id: {url}|", schema_file])
 
     # Generate changelogs.

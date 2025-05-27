@@ -19,11 +19,11 @@ jobs:
         run: pip install check-jsonschema==0.33.0
 
       - name: Validate meta schema
-        run: check-jsonschema --check-metaschema schema/meta.schema.json
+        run: check-jsonschema --check-metaschema schema/v*/meta.schema.json
       - name: Validate schema
         run: |-
           check-jsonschema \
-            --schemafile=schema/meta.schema.json \
+            --schemafile=schema/v1/meta.schema.json \
             schema/synapse-config.schema.yaml
       - name: Validate default config
       # Populates the empty instance with default values and checks against the schema.
