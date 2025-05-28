@@ -30,6 +30,7 @@ import functools
 import logging
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
 
+from prometheus_client import CollectorRegistry
 from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
@@ -128,6 +129,7 @@ from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
+from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
 from synapse.notifier import Notifier, ReplicationNotifier
@@ -151,6 +153,7 @@ from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
+from synapse.util.caches import CacheManager
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -309,6 +312,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
+        self.metrics_collector_registry = CollectorRegistry(auto_describe=True)
+        # Also see `setup_global_metrics` for other metric setup
+        self.jemalloc_stats = setup_jemalloc_stats(self)
+        self.cache_manager = CacheManager(self)
+
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
 
@@ -367,7 +375,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             self.setup_background_tasks()
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
-        """Start the HTTP, manhole, metrics, etc listeners
+        """Start the HTTP, manhole, etc listeners
 
         Does nothing in this base class; overridden in derived classes to start the
         appropriate listeners.
@@ -418,6 +426,9 @@ class HomeServer(metaclass=abc.ABCMeta):
             raise Exception("HomeServer.setup must be called before getting datastores")
 
         return self.datastores
+
+    def get_cache_manager(self) -> CacheManager:
+        return self.cache_manager
 
     @cache_in_self
     def get_distributor(self) -> Distributor:

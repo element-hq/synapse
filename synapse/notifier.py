@@ -267,16 +267,27 @@ class Notifier:
 
             return sum(stream.count_listeners() for stream in all_user_streams)
 
-        LaterGauge("synapse_notifier_listeners", "", [], count_listeners)
+        LaterGauge(
+            "synapse_notifier_listeners",
+            "",
+            [],
+            count_listeners,
+            registry=hs.metrics_collector_registry,
+        )
 
         LaterGauge(
             "synapse_notifier_rooms",
             "",
             [],
             lambda: count(bool, list(self.room_to_user_streams.values())),
+            registry=hs.metrics_collector_registry,
         )
         LaterGauge(
-            "synapse_notifier_users", "", [], lambda: len(self.user_to_user_stream)
+            "synapse_notifier_users",
+            "",
+            [],
+            lambda: len(self.user_to_user_stream),
+            registry=hs.metrics_collector_registry,
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:

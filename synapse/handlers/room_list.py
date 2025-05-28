@@ -67,10 +67,15 @@ class RoomListHandler:
         self.enable_room_list_search = hs.config.roomdirectory.enable_room_list_search
         self.response_cache: ResponseCache[
             Tuple[Optional[int], Optional[str], Optional[ThirdPartyInstanceID]]
-        ] = ResponseCache(hs.get_clock(), "room_list")
+        ] = ResponseCache(hs.get_clock(), hs.get_cache_manager(), "room_list")
         self.remote_response_cache: ResponseCache[
             Tuple[str, Optional[int], Optional[str], bool, Optional[str]]
-        ] = ResponseCache(hs.get_clock(), "remote_room_list", timeout_ms=30 * 1000)
+        ] = ResponseCache(
+            hs.get_clock(),
+            hs.get_cache_manager(),
+            "remote_room_list",
+            timeout_ms=30 * 1000,
+        )
 
     async def get_local_public_room_list(
         self,

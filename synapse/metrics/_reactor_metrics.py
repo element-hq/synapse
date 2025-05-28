@@ -22,10 +22,10 @@
 import logging
 import time
 from selectors import SelectSelector, _PollLikeSelector  # type: ignore[attr-defined]
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 from prometheus_client import Histogram, Metric
-from prometheus_client.core import REGISTRY, GaugeMetricFamily
+from prometheus_client.core import REGISTRY, CollectorRegistry, GaugeMetricFamily
 
 from twisted.internet import reactor, selectreactor
 from twisted.internet.asyncioreactor import AsyncioSelectorReactor
@@ -110,8 +110,15 @@ class ObjWrapper:
 
 
 class ReactorLastSeenMetric(Collector):
-    def __init__(self, call_wrapper: CallWrapper):
+    def __init__(
+        self,
+        call_wrapper: CallWrapper,
+        registry: Optional[CollectorRegistry] = REGISTRY,
+    ):
         self._call_wrapper = call_wrapper
+
+        if registry is not None:
+            registry.register(self)
 
     def collect(self) -> Iterable[Metric]:
         cm = GaugeMetricFamily(
@@ -164,5 +171,6 @@ except Exception as e:
     logger.warning("Configuring ReactorLastSeenMetric failed: %r", e)
 
 
-if wrapper:
-    REGISTRY.register(ReactorLastSeenMetric(wrapper))
+def setup_reactor_metrics(registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+    if wrapper:
+        ReactorLastSeenMetric(wrapper, registry=registry)

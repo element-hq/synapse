@@ -84,14 +84,6 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
 
         # we mock out the federation client too
         self.mock_federation_client = AsyncMock(spec=["put_json"])
-        self.mock_federation_client.put_json.return_value = (200, "OK")
-        self.mock_federation_client.agent = MatrixFederationAgent(
-            reactor,
-            tls_client_options_factory=None,
-            user_agent=b"SynapseInTrialTest/0.0.0",
-            ip_allowlist=None,
-            ip_blocklist=IPSet(),
-        )
 
         # the tests assume that we are starting at unix time 1000
         reactor.pump((1000,))
@@ -102,6 +94,19 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             federation_http_client=self.mock_federation_client,
             keyring=mock_keyring,
             replication_streams={},
+        )
+
+        # Finish off mocking the federation client
+        self.mock_federation_client.put_json.return_value = (200, "OK")
+        self.mock_federation_client.agent = MatrixFederationAgent(
+            reactor=reactor,
+            tls_client_options_factory=None,
+            user_agent=b"SynapseInTrialTest/0.0.0",
+            ip_allowlist=None,
+            ip_blocklist=IPSet(),
+            # After we get access to the `hs` homeserver instance, we can replace the federation agent
+            metrics_collector_registry=hs.metrics_collector_registry,
+            cache_manager=hs.get_cache_manager(),
         )
 
         return hs
