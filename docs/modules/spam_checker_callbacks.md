@@ -180,6 +180,27 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
+### `user_may_create_room_with_visibility`
+
+_First introduced in Synapse vX.X.X_
+
+```python
+async def user_may_create_room_with_visibility(user_id: str, visibility: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
+```
+
+Called when processing a room creation request or updating join rules for an existing room.
+
+The callback must return one of:
+  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
+    decide to reject it.
+  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
+The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
+be used. If this happens, Synapse will not call any of the subsequent implementations of
+this callback.
 
 
 ### `user_may_create_room_alias`

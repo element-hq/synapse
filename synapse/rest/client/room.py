@@ -198,6 +198,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
+        self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -288,6 +289,20 @@ class RoomStateEventRestServlet(RestServlet):
             set_tag("txn_id", txn_id)
 
         content = parse_json_object_from_request(request)
+
+        if event_type == EventTypes.JoinRules:
+            visibility = "public"  # XXXTODO: determine visibility from content
+            spam_check = await self._spam_checker_module_callbacks.user_may_create_room_with_visibility(
+                requester.user.to_string(), visibility
+            )
+
+            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                raise SynapseError(
+                    403,
+                    "You are not permitted to change room visibility to {visibility}",
+                    errcode=spam_check[0],
+                    additional_fields=spam_check[1],
+                )
 
         origin_server_ts = None
         if requester.app_service:
