@@ -583,7 +583,9 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
 
         await self.db_pool.runInteraction("set_shadow_banned", set_shadow_banned_txn)
 
-    async def set_user_type(self, user: UserID, user_type: Optional[UserTypes]) -> None:
+    async def set_user_type(
+        self, user: UserID, user_type: Optional[Union[UserTypes, str]]
+    ) -> None:
         """Sets the user type.
 
         Args:
@@ -683,7 +685,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             retcol="user_type",
             allow_none=True,
         )
-        return res is None
+        return res is None or res not in [UserTypes.BOT, UserTypes.SUPPORT]
 
     def is_support_user_txn(self, txn: LoggingTransaction, user_id: str) -> bool:
         res = self.db_pool.simple_select_one_onecol_txn(
@@ -959,10 +961,12 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction("count_users", _count_users)
 
     async def count_real_users(self) -> int:
-        """Counts all users without a special user_type registered on the homeserver."""
+        """Counts all users without the bot or support user_types registered on the homeserver."""
 
         def _count_users(txn: LoggingTransaction) -> int:
-            txn.execute("SELECT COUNT(*) FROM users where user_type is null")
+            txn.execute(
+                f"SELECT COUNT(*) FROM users WHERE user_type IS NULL OR user_type NOT IN ('{UserTypes.BOT}', '{UserTypes.SUPPORT}')"
+            )
             row = txn.fetchone()
             assert row is not None
             return row[0]
@@ -2545,7 +2549,8 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
                 the user, setting their displayname to the given value
             admin: is an admin user?
             user_type: type of user. One of the values from api.constants.UserTypes,
-                or None for a normal user.
+                a custom value set in the configuration file, or None for a normal
+                user.
             shadow_banned: Whether the user is shadow-banned, i.e. they may be
                 told their requests succeeded but we ignore them.
             approved: Whether to consider the user has already been approved by an
