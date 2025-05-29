@@ -1,3 +1,4 @@
+import logging
 from enum import Enum
 from typing import Optional, Pattern
 
@@ -5,6 +6,8 @@ from immutabledict import ImmutableOrderedDict
 from matrix_common.regex import glob_to_regex
 
 from synapse.types import JsonMapping, UserID
+
+logger = logging.getLogger(__name__)
 
 
 class InviteRule(Enum):
@@ -25,7 +28,9 @@ class InviteRulesConfig:
         user_rules: dict[Pattern[str], InviteRule] = {}
         server_rules: dict[Pattern[str], InviteRule] = {}
 
-        def process_field(field: str, ruleset: dict[Pattern[str], InviteRule], rule: InviteRule) -> None:
+        def process_field(
+            field: str, ruleset: dict[Pattern[str], InviteRule], rule: InviteRule
+        ) -> None:
             values = account_data.get(field)
             if not isinstance(values, list):
                 return
@@ -34,8 +39,9 @@ class InviteRulesConfig:
                     return
                 try:
                     ruleset[glob_to_regex(value)] = rule
-                except:
-                    pass
+                except Exception as e:
+                    # If for whatever reason we can't process this, just ignore it.
+                    logger.debug("Could not process rule '%s': %s", value, e)
 
         if account_data:
             # In reverse order of importance.
