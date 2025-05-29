@@ -18,11 +18,11 @@ class InviteRule(Enum):
 class InviteRulesConfig:
     """Class to determine if a given user permits an invite from another user, and the action to take."""
 
-    user_rules: ImmutableOrderedDict[str, InviteRule]
+    user_rules: ImmutableOrderedDict[Pattern[str], InviteRule]
     server_rules: ImmutableOrderedDict[Pattern[str], InviteRule]
 
     def __init__(self, account_data: Optional[JsonMapping]):
-        user_rules: dict[str, InviteRule] = {}
+        user_rules: dict[Pattern[str], InviteRule] = {}
         server_rules: dict[Pattern[str], InviteRule] = {}
 
         if not account_data:
@@ -31,27 +31,27 @@ class InviteRulesConfig:
             # If there is no account data, then this effectively means allow all invites.
             return
 
-        # In reverse order of importance.
-        for user_id in account_data.get("blocked_users", []):
-            if not UserID.is_valid(user_id):
-                continue
-            user_rules[user_id] = InviteRule.BLOCK
-
-        for user_id in account_data.get("ignored_users", []):
-            if not UserID.is_valid(user_id):
-                continue
-            user_rules[user_id] = InviteRule.IGNORE
-
-        for user_id in account_data.get("allowed_users", []):
-            if not UserID.is_valid(user_id):
-                continue
-            user_rules[user_id] = InviteRule.ALLOW
+        def process_user_rule(user_id: str, rule: InviteRule) -> None:
+            if not isinstance(server_name, str) or len(server_name) < 1:
+                return
+            regex = glob_to_regex(server_name)
+            user_rules[regex] = rule
 
         def process_server_rule(server_name: str, rule: InviteRule) -> None:
             if not isinstance(server_name, str) or len(server_name) < 1:
                 return
             regex = glob_to_regex(server_name)
             server_rules[regex] = rule
+
+        # In reverse order of importance.
+        for user_id in account_data.get("blocked_users", []):
+            process_user_rule(user_id, InviteRule.BLOCK)
+
+        for user_id in account_data.get("ignored_users", []):
+            process_user_rule(user_id, InviteRule.IGNORE)
+
+        for user_id in account_data.get("allowed_users", []):
+            process_user_rule(user_id, InviteRule.ALLOW)
 
         for server_name in account_data.get("blocked_servers", []):
             process_server_rule(server_name, InviteRule.BLOCK)
@@ -67,9 +67,9 @@ class InviteRulesConfig:
 
     def get_invite_rule(self, user_id: UserID) -> InviteRule:
         """Get the invite rule that matches this user. Will return InviteRule.ALLOW if no rules match"""
-        user_rule = self.user_rules.get(user_id.to_string())
-        if user_rule:
-            return user_rule
+        for regex, user_rule in self.user_rules.items():
+            if regex.match(user_id.to_string()):
+                return user_rule
 
         for regex, server_rule in self.server_rules.items():
             if regex.match(user_id.domain):
