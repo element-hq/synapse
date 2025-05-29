@@ -25,23 +25,25 @@ class InviteRulesConfig:
         account_data: Optional[JsonMapping],
         always_allow_user_id: Optional[str] = None,
     ):
-        account_data_safe = account_data or {}
-
         self.user_rules = {}
         self.server_rules = {}
 
+        if not account_data:
+            # If there is no account data, then this effectively means allow all invites.
+            return
+
         # In reverse order of importance.
-        for user_id in account_data_safe.get("blocked_users", {}):
+        for user_id in account_data.get("blocked_users", []):
             if not UserID.is_valid(user_id):
                 continue
             self.user_rules[user_id] = InviteRule.BLOCK
 
-        for user_id in account_data_safe.get("ignored_users", {}):
+        for user_id in account_data.get("ignored_users", []):
             if not UserID.is_valid(user_id):
                 continue
             self.user_rules[user_id] = InviteRule.IGNORE
 
-        for user_id in account_data_safe.get("allowed_users", {}):
+        for user_id in account_data.get("allowed_users", []):
             if not UserID.is_valid(user_id):
                 continue
             self.user_rules[user_id] = InviteRule.ALLOW
@@ -50,25 +52,23 @@ class InviteRulesConfig:
         if always_allow_user_id:
             self.user_rules[always_allow_user_id] = InviteRule.ALLOW
 
-        for server_name in account_data_safe.get("blocked_servers", {}):
+        def process_server_rule(server_name, rule: InviteRule) -> None:
             if not isinstance(server_name, str) or len(server_name) < 1:
-                continue
+                return
             regex = glob_to_regex(server_name)
-            self.server_rules[regex] = InviteRule.BLOCK
+            self.server_rules[regex] = rule
 
-        for server_name in account_data_safe.get("ignored_servers", {}):
-            if not isinstance(server_name, str) or len(server_name) < 1:
-                continue
-            regex = glob_to_regex(server_name)
-            self.server_rules[regex] = InviteRule.IGNORE
+        for server_name in account_data.get("blocked_servers", []):
+            process_server_rule(server_name, InviteRule.BLOCK)
 
-        for server_name in account_data_safe.get("allowed_servers", {}):
-            if not isinstance(server_name, str) or len(server_name) < 1:
-                continue
-            regex = glob_to_regex(server_name)
-            self.server_rules[regex] = InviteRule.ALLOW
+        for server_name in account_data.get("ignored_servers", []):
+            process_server_rule(server_name, InviteRule.IGNORE)
+
+        for server_name in account_data.get("allowed_servers", []):
+            process_server_rule(server_name, InviteRule.ALLOW)
 
     def get_invite_rule(self, user_id: UserID) -> InviteRule:
+        """Get the invite rule that matches this user. Will return InviteRule.ALLOW if no rules match"""
         user_rule = self.user_rules.get(user_id.to_string())
         if user_rule:
             return user_rule

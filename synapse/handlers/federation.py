@@ -1096,13 +1096,18 @@ class FederationHandler:
         invite_config = await self.store.get_invite_config_for_user(event.state_key)
         rule = invite_config.get_invite_rule(UserID.from_string(event.sender))
         if rule == InviteRule.BLOCK:
-            logger.info(f"User {event.state_key} rejected invite from {event.sender}")
+            logger.info(
+                f"Automatically rejecting invite from {event.state_key} due to the the invite filtering rules of {event.sender}"
+            )
             raise SynapseError(
                 403,
                 "You are not permitted to invite this user.",
                 errcode=Codes.FORBIDDEN,
             )
         elif rule == InviteRule.IGNORE:
+            logger.info(
+                f"Silently invite from {event.state_key} due to the the invite filtering rules of {event.sender}"
+            )
             # Pretend to do some work to make it look like we persisted the event
             await self.clock.sleep(random.randint(1, 5))
             # We still send a normal response back to the server as if the event succeeded.

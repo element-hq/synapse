@@ -919,7 +919,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 rule = invite_config.get_invite_rule(requester.user)
                 if rule == InviteRule.BLOCK:
                     logger.info(
-                        f"User {target_id} rejected invite from {requester.user}"
+                        f"Automatically rejecting invite from {target_id} due to the the invite filtering rules of {requester.user}"
                     )
                     raise SynapseError(
                         403,
@@ -927,6 +927,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         errcode=Codes.FORBIDDEN,
                     )
                 elif rule == InviteRule.IGNORE:
+                    logger.info(
+                        f"Silently ignoring invite from {target_id} due to the the invite filtering rules of {requester.user}"
+                    )
                     # Same behaviour as shadow banning, to mimic success.
                     await self.clock.sleep(random.randint(1, 10))
                     raise ShadowBanError()

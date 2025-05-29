@@ -561,6 +561,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             )
         )
 
+    @cached(num_args=1)
     async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
         """
         Get the invite configuration for the current user.
@@ -594,6 +595,10 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
                     self.get_global_account_data_by_type_for_user.invalidate(
                         (row.user_id, row.data_type)
                     )
+                    if row.data_type == AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG:
+                        self.get_invite_config_for_user.invalidate(
+                            (row.user_id)
+                        )
                 self.get_global_account_data_for_user.invalidate((row.user_id,))
                 self.get_room_account_data_for_user.invalidate((row.user_id,))
                 self.get_account_data_for_room.invalidate((row.user_id, row.room_id))
