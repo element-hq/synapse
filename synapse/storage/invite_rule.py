@@ -29,28 +29,39 @@ class InviteRulesConfig:
         server_rules: dict[Pattern[str], InviteRule] = {}
 
         def process_field(
-            field: str, ruleset: dict[Pattern[str], InviteRule], rule: InviteRule
+            values: Optional[list[str]],
+            ruleset: dict[Pattern[str], InviteRule],
+            rule: InviteRule,
         ) -> None:
-            values = account_data.get(field)
-            if not isinstance(values, list):
-                return
-            for value in values:
-                if not isinstance(value, str) or len(value) < 1:
-                    return
-                try:
-                    ruleset[glob_to_regex(value)] = rule
-                except Exception as e:
-                    # If for whatever reason we can't process this, just ignore it.
-                    logger.debug("Could not process rule '%s': %s", value, e)
+            if isinstance(values, list):
+                for value in values:
+                    if isinstance(value, str) and len(value) >= 1:
+                        try:
+                            ruleset[glob_to_regex(value)] = rule
+                        except Exception as e:
+                            # If for whatever reason we can't process this, just ignore it.
+                            logger.debug("Could not process rule '%s': %s", value, e)
 
         if account_data:
             # In reverse order of importance.
-            process_field("blocked_users", user_rules, InviteRule.BLOCK)
-            process_field("ignored_users", user_rules, InviteRule.IGNORE)
-            process_field("allowed_users", user_rules, InviteRule.ALLOW)
-            process_field("blocked_servers", server_rules, InviteRule.BLOCK)
-            process_field("ignored_servers", server_rules, InviteRule.IGNORE)
-            process_field("allowed_servers", server_rules, InviteRule.ALLOW)
+            process_field(
+                account_data.get("blocked_users"), user_rules, InviteRule.BLOCK
+            )
+            process_field(
+                account_data.get("ignored_users"), user_rules, InviteRule.IGNORE
+            )
+            process_field(
+                account_data.get("allowed_users"), user_rules, InviteRule.ALLOW
+            )
+            process_field(
+                account_data.get("blocked_servers"), server_rules, InviteRule.BLOCK
+            )
+            process_field(
+                account_data.get("ignored_servers"), server_rules, InviteRule.IGNORE
+            )
+            process_field(
+                account_data.get("allowed_servers"), server_rules, InviteRule.ALLOW
+            )
 
         self.user_rules = ImmutableOrderedDict(user_rules)
         self.server_rules = ImmutableOrderedDict(server_rules)
