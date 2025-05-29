@@ -32,13 +32,6 @@ class InviteFilterTestCase(unittest.TestCase):
         self.assertEqual(config.get_invite_rule(ignored_user), InviteRule.IGNORE)
         self.assertEqual(config.get_invite_rule(regular_user), InviteRule.ALLOW)
 
-    def test_user_always_allow(self) -> None:
-        """Always permit invites from the server notices user"""
-        config = InviteRulesConfig(
-            {"blocked_users": [regular_user.to_string()]}, regular_user.to_string()
-        )
-        self.assertEqual(config.get_invite_rule(regular_user), InviteRule.ALLOW)
-
     def test_user_precedence(self) -> None:
         """Always take allowed over ignored, ignored over blocked, and then block."""
         config = InviteRulesConfig(

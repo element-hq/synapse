@@ -913,8 +913,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     additional_fields=block_invite_result[1],
                 )
 
-            # check the invitee's configuration and apply rules
-            if self.config.experimental.msc4155_enabled:
+            # check the invitee's configuration and apply rules. Admins on the server can bypass.
+            if not is_requester_admin and self.config.experimental.msc4155_enabled:
                 invite_config = await self.store.get_invite_config_for_user(target_id)
                 rule = invite_config.get_invite_rule(requester.user)
                 if rule == InviteRule.BLOCK:

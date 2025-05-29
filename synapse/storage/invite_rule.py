@@ -22,8 +22,7 @@ class InviteRulesConfig:
 
     def __init__(
         self,
-        account_data: Optional[JsonMapping],
-        always_allow_user_id: Optional[str] = None,
+        account_data: Optional[JsonMapping]
     ):
         self.user_rules = {}
         self.server_rules = {}
@@ -47,10 +46,6 @@ class InviteRulesConfig:
             if not UserID.is_valid(user_id):
                 continue
             self.user_rules[user_id] = InviteRule.ALLOW
-
-        # If server notices are configured, force enable this user.
-        if always_allow_user_id:
-            self.user_rules[always_allow_user_id] = InviteRule.ALLOW
 
         def process_server_rule(server_name, rule: InviteRule) -> None:
             if not isinstance(server_name, str) or len(server_name) < 1:

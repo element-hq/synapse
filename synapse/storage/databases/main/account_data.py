@@ -103,7 +103,6 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             self._delete_account_data_for_deactivated_users,
         )
 
-        self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
         self._enable_invite_config = hs.config.experimental.msc4155_enabled
 
     def get_max_account_data_stream_id(self) -> int:
@@ -580,7 +579,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         data = await self.get_global_account_data_by_type_for_user(
             user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
         )
-        return InviteRulesConfig(data, self._server_notices_mxid)
+        return InviteRulesConfig(data)
 
     def process_replication_rows(
         self,
