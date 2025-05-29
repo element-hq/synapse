@@ -1806,7 +1806,7 @@ class RoomShutdownHandler:
         ] = None,
     ) -> Optional[ShutdownRoomResponse]:
         """
-        Shuts down a room. Moves all local users and room aliases automatically
+        Shuts down a room. Moves all joined local users and room aliases automatically
         to a new room if `new_room_user_id` is set. Otherwise local users only
         leave the room without any information.
 
@@ -1949,16 +1949,17 @@ class RoomShutdownHandler:
 
                 # Join users to new room
                 if new_room_user_id:
-                    assert new_room_id is not None
-                    await self.room_member_handler.update_membership(
-                        requester=target_requester,
-                        target=target_requester.user,
-                        room_id=new_room_id,
-                        action=Membership.JOIN,
-                        content={},
-                        ratelimit=False,
-                        require_consent=False,
-                    )
+                    if membership == Membership.JOIN:
+                        assert new_room_id is not None
+                        await self.room_member_handler.update_membership(
+                            requester=target_requester,
+                            target=target_requester.user,
+                            room_id=new_room_id,
+                            action=Membership.JOIN,
+                            content={},
+                            ratelimit=False,
+                            require_consent=False,
+                        )
 
                 result["kicked_users"].append(user_id)
                 if update_result_fct:

@@ -145,6 +145,17 @@ class DevicesGetRestServlet(RestServlet):
         devices = await self.device_worker_handler.get_devices_by_user(
             target_user.to_string()
         )
+
+        # mark the dehydrated device by adding a "dehydrated" flag
+        dehydrated_device_info = await self.device_worker_handler.get_dehydrated_device(
+            target_user.to_string()
+        )
+        if dehydrated_device_info:
+            dehydrated_device_id = dehydrated_device_info[0]
+            for device in devices:
+                is_dehydrated = device["device_id"] == dehydrated_device_id
+                device["dehydrated"] = is_dehydrated
+
         return HTTPStatus.OK, {"devices": devices, "total": len(devices)}
 
 
