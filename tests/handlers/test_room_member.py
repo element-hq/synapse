@@ -478,16 +478,15 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
 
     @override_config({"experimental_features": {"msc4155_enabled": True}})
     def test_block_invite_local(self) -> None:
+        """Test that MSC4155 will block a user from being invited to a room"""
         room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
 
         self.get_success(
             self.store.add_account_data_for_user(
                 self.bob,
-                AccountDataTypes.INVITE_PERMISSION_CONFIG,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
                 {
-                    "user_exceptions": {
-                        self.alice: "block",
-                    },
+                    "blocked_users": [self.alice],
                 },
             )
         )
@@ -506,9 +505,7 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
 
     @override_config({"experimental_features": {"msc4155_enabled": True}})
     def test_block_invite_remote(self) -> None:
-        """Test that an invite from a remote user results in the invited user
-        automatically joining the room.
-        """
+        """Test that MSC4155 will block a remote user from being invited to a room"""
         # A remote user who sends the invite
         remote_server = "otherserver"
         remote_user = "@otheruser:" + remote_server
@@ -516,12 +513,54 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
         self.get_success(
             self.store.add_account_data_for_user(
                 self.bob,
-                AccountDataTypes.INVITE_PERMISSION_CONFIG,
-                {
-                    "user_exceptions": {
-                        remote_user: "block",
-                    },
-                },
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {"blocked_users": [remote_user]},
+            )
+        )
+
+        room_id = self.helper.create_room_as(
+            room_creator=self.alice, tok=self.alice_token
+        )
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        invite_event = event_from_pdu_json(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": "invite"},
+                "room_id": room_id,
+                "sender": remote_user,
+                "state_key": self.bob,
+                "depth": 32,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+
+        f = self.get_failure(
+            self.fed_handler.on_invite_request(
+                remote_server,
+                invite_event,
+                invite_event.room_version,
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 403)
+        self.assertEqual(f.errcode, "M_FORBIDDEN")
+
+    @override_config({"experimental_features": {"msc4155_enabled": True}})
+    def test_block_invite_remote_server(self) -> None:
+        """Test that MSC4155 will block a remote server's user from being invited to a room"""
+        # A remote user who sends the invite
+        remote_server = "otherserver"
+        remote_user = "@otheruser:" + remote_server
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {"blocked_servers": [remote_server]},
             )
         )
 

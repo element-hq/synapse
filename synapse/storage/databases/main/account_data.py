@@ -20,7 +20,6 @@
 #
 
 import logging
-from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -44,8 +43,9 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
+from synapse.storage.invite_rule import InviteRulesConfig
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, JsonMapping, UserID
+from synapse.types import JsonDict, JsonMapping
 from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.stream_change_cache import StreamChangeCache
@@ -54,64 +54,6 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-
-class InviteRule(Enum):
-    """Enum to define the sorting method used when returning destinations."""
-
-    ALLOW = "allow"
-    BLOCK = "block"
-
-
-class InviteRulesConfig:
-    default: InviteRule
-    user_exceptions: Dict[str, InviteRule]
-    server_exceptions: Dict[str, InviteRule]
-
-    def __init__(
-        self,
-        account_data: Optional[JsonMapping],
-        always_allow_user_id: Optional[str],
-    ):
-        account_data_safe = account_data or {}
-
-        default_str = account_data_safe.get("default")
-        self.default = (
-            (InviteRule(default_str) or InviteRule.ALLOW)
-            if isinstance(default_str, str)
-            else InviteRule.ALLOW
-        )
-        self.user_exceptions = {}
-        self.server_exceptions = {}
-
-        for user_id, rule in account_data_safe.get("user_exceptions", {}).items():
-            if not UserID.is_valid(user_id):
-                continue
-            if InviteRule(rule) is None:
-                continue
-            self.user_exceptions[user_id] = InviteRule(rule)
-
-        # If server notices are configured, force enable this user.
-        if always_allow_user_id:
-            self.user_exceptions[always_allow_user_id] = InviteRule.ALLOW
-
-        for server_name, rule in account_data_safe.get("server_exceptions", {}).items():
-            if not isinstance(server_name, str) or len(server_name) < 1:
-                continue
-            if InviteRule(rule) is None:
-                continue
-            self.server_exceptions[server_name] = InviteRule(rule)
-
-    def invite_allowed(self, user_id: UserID) -> bool:
-        user_rule = self.user_exceptions.get(user_id.to_string())
-        if user_rule:
-            return user_rule == InviteRule.ALLOW
-
-        server_rule = self.server_exceptions.get(user_id.domain)
-        if server_rule:
-            return server_rule == InviteRule.ALLOW
-
-        return self.default == InviteRule.ALLOW
 
 
 class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore):
@@ -162,6 +104,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
+        self._enable_invite_config = hs.config.experimental.msc4155_enabled
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
@@ -617,6 +560,26 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
                 desc="ignored_users",
             )
         )
+
+    async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
+        """
+        Get the invite configuration for the current user.
+
+        Args:
+            user_id: The user to get the account_data for.
+
+        Returns:
+            The global account_data.
+        """
+
+        if not self._enable_invite_config:
+            # This equates to allowing all invites, as if the setting was off.
+            return InviteRulesConfig(None)
+
+        data = await self.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
+        )
+        return InviteRulesConfig(data, self._server_notices_mxid)
 
     def process_replication_rows(
         self,
@@ -1076,25 +1039,6 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             )
 
         return number_deleted
-
-    async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
-        """
-        Get the invite configuration for the current user.
-
-        If experimental MSC3391 support is enabled, any entries with an empty
-        content body are excluded; as this means they have been deleted.
-
-        Args:
-            user_id: The user to get the account_data for.
-
-        Returns:
-            The global account_data.
-        """
-
-        data = await self.get_global_account_data_by_type_for_user(
-            user_id, AccountDataTypes.INVITE_PERMISSION_CONFIG
-        )
-        return InviteRulesConfig(data, self._server_notices_mxid)
 
 
 class AccountDataStore(AccountDataWorkerStore):

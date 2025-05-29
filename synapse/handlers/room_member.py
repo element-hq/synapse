@@ -53,6 +53,7 @@ from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
+from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
     JsonDict,
     Requester,
@@ -915,7 +916,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             # check the invitee's configuration and apply rules
             if self.config.experimental.msc4155_enabled:
                 invite_config = await self.store.get_invite_config_for_user(target_id)
-                if not invite_config.invite_allowed(requester.user):
+                rule = invite_config.get_invite_rule(requester.user)
+                if rule == InviteRule.BLOCK:
                     logger.info(
                         f"User {target_id} rejected invite from {requester.user}"
                     )
@@ -924,6 +926,10 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         "You are not permitted to invite this user.",
                         errcode=Codes.FORBIDDEN,
                     )
+                elif rule == InviteRule.IGNORE:
+                    # Same behaviour as shadow banning, to mimic success.
+                    await self.clock.sleep(random.randint(1, 10))
+                    raise ShadowBanError()
 
         # An empty prev_events list is allowed as long as the auth_event_ids are present
         if prev_event_ids is not None:

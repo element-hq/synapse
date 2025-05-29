@@ -281,7 +281,9 @@ class AccountDataTypes:
     TAG: Final = "m.tag"
     PUSH_RULES: Final = "m.push_rules"
     # MSC4155: Invite filtering
-    INVITE_PERMISSION_CONFIG: Final = "org.matrix.msc4155.invite_permission_config"
+    MSC4155_INVITE_PERMISSION_CONFIG: Final = (
+        "org.matrix.msc4155.invite_permission_config"
+    )
 
 
 class HistoryVisibility:
