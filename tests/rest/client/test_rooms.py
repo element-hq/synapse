@@ -757,6 +757,59 @@ class RoomsCreateTestCase(RoomBase):
         assert channel.resource_usage is not None
         self.assertEqual(37, channel.resource_usage.db_txn_count)
 
+    def test_post_room_topic(self) -> None:
+        # POST with topic key, expect new room id
+        channel = self.make_request("POST", "/createRoom", b'{"topic":"shenanigans"}')
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertTrue("room_id" in channel.json_body)
+        room_id = channel.json_body["room_id"]
+
+        # GET topic event, expect content from topic key
+        channel = self.make_request("GET", "/rooms/%s/state/m.room.topic" % (room_id,))
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertEqual(
+            {"topic": "shenanigans", "m.topic": {"m.text": [{"body": "shenanigans"}]}},
+            channel.json_body,
+        )
+
+    def test_post_room_topic_initial_state(self) -> None:
+        # POST with m.room.topic in initial state, expect new room id
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            b'{"initial_state":[{"type": "m.room.topic", "content": {"topic": "foobar"}}]}',
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertTrue("room_id" in channel.json_body)
+        room_id = channel.json_body["room_id"]
+
+        # GET topic event, expect content from initial state
+        channel = self.make_request("GET", "/rooms/%s/state/m.room.topic" % (room_id,))
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertEqual(
+            {"topic": "foobar"},
+            channel.json_body,
+        )
+
+    def test_post_room_topic_overriding_initial_state(self) -> None:
+        # POST with m.room.topic in initial state and topic key, expect new room id
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            b'{"initial_state":[{"type": "m.room.topic", "content": {"topic": "foobar"}}], "topic":"shenanigans"}',
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertTrue("room_id" in channel.json_body)
+        room_id = channel.json_body["room_id"]
+
+        # GET topic event, expect content from topic key
+        channel = self.make_request("GET", "/rooms/%s/state/m.room.topic" % (room_id,))
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertEqual(
+            {"topic": "shenanigans", "m.topic": {"m.text": [{"body": "shenanigans"}]}},
+            channel.json_body,
+        )
+
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
         channel = self.make_request("POST", "/createRoom", b'{"visibility":"private"}')
