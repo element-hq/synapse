@@ -120,20 +120,24 @@ USER_MAY_SEND_3PID_INVITE_CALLBACK = Callable[
         ]
     ],
 ]
-USER_MAY_CREATE_ROOM_CALLBACK = Callable[
-    [str],
-    Awaitable[
-        Union[
-            Literal["NOT_SPAM"],
-            Codes,
-            # Highly experimental, not officially part of the spamchecker API, may
-            # disappear without warning depending on the results of ongoing
-            # experiments.
-            # Use this to return additional information as part of an error.
-            Tuple[Codes, JsonDict],
-            # Deprecated
-            bool,
-        ]
+USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE = Union[
+    Literal["NOT_SPAM"],
+    Codes,
+    # Highly experimental, not officially part of the spamchecker API, may
+    # disappear without warning depending on the results of ongoing
+    # experiments.
+    # Use this to return additional information as part of an error.
+    Tuple[Codes, JsonDict],
+    # Deprecated
+    bool,
+]
+USER_MAY_CREATE_ROOM_CALLBACK = Union[
+    Callable[
+        [str, JsonDict],
+        Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE],
+    ],
+    Callable[  # Single argument variant for backwards compatibility
+        [str], Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE]
     ],
 ]
 USER_MAY_CREATE_ROOM_ALIAS_CALLBACK = Callable[
@@ -622,16 +626,41 @@ class SpamCheckerModuleApiCallbacks:
         return self.NOT_SPAM
 
     async def user_may_create_room(
-        self, userid: str
+        self, userid: str, room_config: JsonDict
     ) -> Union[Tuple[Codes, dict], Literal["NOT_SPAM"]]:
         """Checks if a given user may create a room
 
         Args:
             userid: The ID of the user attempting to create a room
+            room_config: The room creation configuration which is the body of the /createRoom request
         """
         for callback in self._user_may_create_room_callbacks:
             with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
-                res = await delay_cancellation(callback(userid))
+                checker_args = inspect.signature(callback)
+                # Also ensure backwards compatibility with spam checker callbacks
+                # that don't expect the room_config argument.
+                if len(checker_args.parameters) == 2:
+                    callback_with_requester_id = cast(
+                        Callable[
+                            [str, JsonDict],
+                            Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE],
+                        ],
+                        callback,
+                    )
+                    # We make a copy of the config to ensure the spam checker cannot modify it.
+                    res = await delay_cancellation(
+                        callback_with_requester_id(userid, room_config.copy())
+                    )
+                else:
+                    callback_without_requester_id = cast(
+                        Callable[
+                            [str], Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE]
+                        ],
+                        callback,
+                    )
+                    res = await delay_cancellation(
+                        callback_without_requester_id(userid)
+                    )
                 if res is True or res is self.NOT_SPAM:
                     continue
                 elif res is False:
