@@ -477,7 +477,7 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
         self.bob_token = self.login("bob", "pass")
 
     @override_config({"experimental_features": {"msc4155_enabled": True}})
-    def test_block_invite_local(self) -> None:
+    def test_misc4155_block_invite_local(self) -> None:
         """Test that MSC4155 will block a user from being invited to a room"""
         room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
 
@@ -503,8 +503,32 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
         self.assertEqual(f.code, 403)
         self.assertEqual(f.errcode, "M_FORBIDDEN")
 
+    @override_config({"experimental_features": {"msc4155_enabled": False}})
+    def test_msc4155_disabled_allow_invite_local(self) -> None:
+        """Test that MSC4155 will block a user from being invited to a room"""
+        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {
+                    "blocked_users": [self.alice],
+                },
+            )
+        )
+
+        self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=UserID.from_string(self.bob),
+                room_id=room_id,
+                action=Membership.INVITE,
+            ),
+        )
+
     @override_config({"experimental_features": {"msc4155_enabled": True}})
-    def test_block_invite_remote(self) -> None:
+    def test_msc4155_block_invite_remote(self) -> None:
         """Test that MSC4155 will block a remote user from being invited to a room"""
         # A remote user who sends the invite
         remote_server = "otherserver"
@@ -550,7 +574,7 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
         self.assertEqual(f.errcode, "M_FORBIDDEN")
 
     @override_config({"experimental_features": {"msc4155_enabled": True}})
-    def test_block_invite_remote_server(self) -> None:
+    def test_msc4155_block_invite_remote_server(self) -> None:
         """Test that MSC4155 will block a remote server's user from being invited to a room"""
         # A remote user who sends the invite
         remote_server = "otherserver"
