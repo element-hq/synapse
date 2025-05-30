@@ -74,28 +74,22 @@ class InviteRulesConfig:
         user_id_str = user_id.to_string()
         # The order here is important. We always process user rules before server rules
         # and we always process in the order of Allow, Ignore, Block.
-        for regex in self.allowed_users:
-            if regex.match(user_id_str):
-                return InviteRule.ALLOW
+        for patterns, rule in [
+            (self.allowed_users, InviteRule.ALLOW),
+            (self.ignored_users, InviteRule.IGNORE),
+            (self.blocked_users, InviteRule.BLOCK),
+        ]:
+            for regex in patterns:
+                if regex.match(user_id_str):
+                    return rule
 
-        for regex in self.ignored_users:
-            if regex.match(user_id_str):
-                return InviteRule.IGNORE
-
-        for regex in self.blocked_users:
-            if regex.match(user_id_str):
-                return InviteRule.BLOCK
-
-        for regex in self.allowed_servers:
-            if regex.match(user_id.domain):
-                return InviteRule.ALLOW
-
-        for regex in self.ignored_servers:
-            if regex.match(user_id.domain):
-                return InviteRule.IGNORE
-
-        for regex in self.blocked_servers:
-            if regex.match(user_id.domain):
-                return InviteRule.BLOCK
+        for patterns, rule in [
+            (self.allowed_servers, InviteRule.ALLOW),
+            (self.ignored_servers, InviteRule.IGNORE),
+            (self.blocked_servers, InviteRule.BLOCK),
+        ]:
+            for regex in patterns:
+                if regex.match(user_id.domain):
+                    return rule
 
         return InviteRule.ALLOW
