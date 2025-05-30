@@ -78,6 +78,18 @@ jobs:
           mdbook build
           cp book/welcome_and_overview.html book/index.html
 
+      - name: Prepare and publish schema files
+        run: |
+          sudo apt-get update && sudo apt-get install -y yq
+          mkdir -p book/schema
+          # Remove developer notice before publishing.
+          rm schema/v*/Do\ not\ edit\ files\ in\ this\ folder
+          # Copy schema files that are independent from current Synapse version.
+          cp -r -t book/schema schema/v*/
+          # Convert config schema from YAML source file to JSON.
+          yq < schema/synapse-config.schema.yaml \
+            > book/schema/synapse-config.schema.json
+
       # Deploy to the target directory.
       - name: Deploy to gh pages
         uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
