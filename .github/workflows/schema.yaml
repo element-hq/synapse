@@ -22,8 +22,10 @@ jobs:
         run: check-jsonschema --check-metaschema schema/v*/meta.schema.json
       - name: Validate schema
         run: |-
+          # Please bump on introduction of a new meta schema.
+          LATEST_META_SCHEMA_VERSION=v1
           check-jsonschema \
-            --schemafile=schema/v1/meta.schema.json \
+            --schemafile="schema/$LATEST_META_SCHEMA_VERSION/meta.schema.json" \
             schema/synapse-config.schema.yaml
       - name: Validate default config
       # Populates the empty instance with default values and checks against the schema.
