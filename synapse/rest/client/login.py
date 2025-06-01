@@ -19,6 +19,7 @@
 #
 #
 
+from copy import copy
 import logging
 import re
 from typing import (
@@ -306,6 +307,8 @@ class LoginRestServlet(RestServlet):
         if not appservice.is_interested_in_user(qualified_user_id):
             raise LoginError(403, "Invalid access_token", errcode=Codes.FORBIDDEN)
 
+        print("logging in appservice")
+
         return await self._complete_login(
             qualified_user_id,
             login_submission,
@@ -315,7 +318,14 @@ class LoginRestServlet(RestServlet):
             # is not actually created in Synapse.
             should_check_deactivated=qualified_user_id != appservice.sender,
             request_info=request_info,
+            callback=self._appservice_login_callback(appservice),
         )
+
+    def _appservice_login_callback(self, appservice: "ApplicationService") -> Optional[Callable[[LoginResponse], Awaitable[None]]]:
+        async def __handle_appservice_login(_: "LoginResponse"):
+            await self.hs.get_module_api_callbacks().appservice_login.reset_recoverer_backoff(appservice)
+
+        return __handle_appservice_login
 
     async def _do_other_login(
         self,
