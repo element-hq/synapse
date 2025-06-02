@@ -588,6 +588,29 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         d = self.store.is_support_user(user_id)
         self.assertFalse(self.get_success(d))
 
+    def test_underscore_localpart_rejected_by_default(self) -> None:
+        for invalid_user_id in ("_", "_prefixed"):
+            with self.subTest(invalid_user_id=invalid_user_id):
+                self.get_failure(
+                    self.handler.register_user(localpart=invalid_user_id),
+                    SynapseError,
+                )
+
+    @override_config(
+        {
+            "allow_underscore_prefixed_localpart": True,
+        }
+    )
+    def test_underscore_localpart_allowed_if_configured(self) -> None:
+        for valid_user_id in ("_", "_prefixed"):
+            with self.subTest(valid_user_id=valid_user_id):
+                user_id = self.get_success(
+                    self.handler.register_user(
+                        localpart=valid_user_id,
+                    ),
+                )
+                self.assertEqual(user_id, f"@{valid_user_id}:test")
+
     def test_invalid_user_id(self) -> None:
         invalid_user_id = "^abcd"
         self.get_failure(

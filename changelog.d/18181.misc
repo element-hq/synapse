@@ -1,1 +1,0 @@
-Stop auto-provisionning missing users & devices when delegating auth to Matrix Authentication Service. Requires MAS 0.13.0 or later.

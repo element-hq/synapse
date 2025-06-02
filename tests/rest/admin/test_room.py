@@ -369,6 +369,47 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self._is_blocked(room_id)
 
+    def test_invited_users_not_joined_to_new_room(self) -> None:
+        """
+        Test that when a new room id is provided, users who are only invited
+        but have not joined original room are not moved to new room.
+        """
+        invitee = self.register_user("invitee", "pass")
+
+        self.helper.invite(
+            self.room_id, self.other_user, invitee, tok=self.other_user_tok
+        )
+
+        # verify that user is invited
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/rooms/{self.room_id}/members?membership=invite",
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(len(channel.json_body["chunk"]), 1)
+        invite = channel.json_body["chunk"][0]
+        self.assertEqual(invite["state_key"], invitee)
+
+        # shutdown room
+        channel = self.make_request(
+            "DELETE",
+            self.url,
+            {"new_room_user_id": self.admin_user},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(len(channel.json_body["kicked_users"]), 2)
+
+        # joined member is moved to new room but invited user is not
+        users_in_room = self.get_success(
+            self.store.get_users_in_room(channel.json_body["new_room_id"])
+        )
+        self.assertNotIn(invitee, users_in_room)
+        self.assertIn(self.other_user, users_in_room)
+        self._is_purged(self.room_id)
+        self._has_no_members(self.room_id)
+
     def test_shutdown_room_consent(self) -> None:
         """Test that we can shutdown rooms with local users who have not
         yet accepted the privacy policy. This used to fail when we tried to
@@ -758,6 +799,8 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         self.assertEqual(2, len(channel.json_body["results"]))
         self.assertEqual("complete", channel.json_body["results"][0]["status"])
         self.assertEqual("complete", channel.json_body["results"][1]["status"])
+        self.assertEqual(self.room_id, channel.json_body["results"][0]["room_id"])
+        self.assertEqual(self.room_id, channel.json_body["results"][1]["room_id"])
         delete_ids = {delete_id1, delete_id2}
         self.assertTrue(channel.json_body["results"][0]["delete_id"] in delete_ids)
         delete_ids.remove(channel.json_body["results"][0]["delete_id"])
@@ -777,6 +820,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, len(channel.json_body["results"]))
         self.assertEqual("complete", channel.json_body["results"][0]["status"])
         self.assertEqual(delete_id2, channel.json_body["results"][0]["delete_id"])
+        self.assertEqual(self.room_id, channel.json_body["results"][0]["room_id"])
 
         # get status after more than clearing time for all tasks
         self.reactor.advance(TaskScheduler.KEEP_TASKS_FOR_MS / 1000 / 2)
@@ -1237,6 +1281,9 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             delete_id, channel_room_id.json_body["results"][0]["delete_id"]
         )
+        self.assertEqual(
+            self.room_id, channel_room_id.json_body["results"][0]["room_id"]
+        )
 
         # get information by delete_id
         channel_delete_id = self.make_request(
@@ -1249,6 +1296,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
             channel_delete_id.code,
             msg=channel_delete_id.json_body,
         )
+        self.assertEqual(self.room_id, channel_delete_id.json_body["room_id"])
 
         # test values that are the same in both responses
         for content in [
@@ -1312,7 +1360,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
         # Check that response json body contains a "rooms" key
         self.assertTrue(
             "rooms" in channel.json_body,
-            msg="Response body does not " "contain a 'rooms' key",
+            msg="Response body does not contain a 'rooms' key",
         )
 
         # Check that 3 rooms were returned
