@@ -49,6 +49,7 @@ from synapse.storage.databases.main.state import (
     Sentinel as StateSentinel,
 )
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
+from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import (
     RoomsForUser,
     RoomsForUserSlidingSync,
@@ -278,6 +279,7 @@ class SlidingSyncRoomLists:
 
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
+        invite_config = await self.store.get_invite_config_for_user(user_id)
         if ignored_users:
             # FIXME: It would be nice to avoid this copy but since
             # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
@@ -292,7 +294,14 @@ class SlidingSyncRoomLists:
                 room_for_user_sliding_sync = room_membership_for_user_map[room_id]
                 if (
                     room_for_user_sliding_sync.membership == Membership.INVITE
-                    and room_for_user_sliding_sync.sender in ignored_users
+                    and room_for_user_sliding_sync.sender
+                    and (
+                        room_for_user_sliding_sync.sender in ignored_users
+                        or invite_config.get_invite_rule(
+                            room_for_user_sliding_sync.sender
+                        )
+                        == InviteRule.IGNORE
+                    )
                 ):
                     room_membership_for_user_map.pop(room_id, None)
 

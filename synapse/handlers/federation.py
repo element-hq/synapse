@@ -25,7 +25,6 @@
 import enum
 import itertools
 import logging
-import random
 from enum import Enum
 from http import HTTPStatus
 from typing import (
@@ -80,7 +79,7 @@ from synapse.replication.http.federation import (
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
-from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
@@ -1092,9 +1091,8 @@ class FederationHandler:
             raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
 
         # check the invitee's configuration and apply rules
-        should_persist = True
         invite_config = await self.store.get_invite_config_for_user(event.state_key)
-        rule = invite_config.get_invite_rule(UserID.from_string(event.sender))
+        rule = invite_config.get_invite_rule(event.sender)
         if rule == InviteRule.BLOCK:
             logger.info(
                 f"Automatically rejecting invite from {event.state_key} due to the the invite filtering rules of {event.sender}"
@@ -1104,14 +1102,7 @@ class FederationHandler:
                 "You are not permitted to invite this user.",
                 errcode=Codes.FORBIDDEN,
             )
-        elif rule == InviteRule.IGNORE:
-            logger.info(
-                f"Silently invite from {event.state_key} due to the the invite filtering rules of {event.sender}"
-            )
-            # Pretend to do some work to make it look like we persisted the event
-            await self.clock.sleep(random.randint(1, 5))
-            # We still send a normal response back to the server as if the event succeeded.
-            should_persist = False
+        # InviteRule.IGNORE is handled at the sync layer
 
         # We retrieve the room member handler here as to not cause a cyclic dependency
         member_handler = self.hs.get_room_member_handler()
@@ -1138,19 +1129,18 @@ class FederationHandler:
             )
         )
 
-        if should_persist:
-            context = EventContext.for_outlier(self._storage_controllers)
+        context = EventContext.for_outlier(self._storage_controllers)
 
-            await self._bulk_push_rule_evaluator.action_for_events_by_user(
-                [(event, context)]
+        await self._bulk_push_rule_evaluator.action_for_events_by_user(
+            [(event, context)]
+        )
+        try:
+            await self._federation_event_handler.persist_events_and_notify(
+                event.room_id, [(event, context)]
             )
-            try:
-                await self._federation_event_handler.persist_events_and_notify(
-                    event.room_id, [(event, context)]
-                )
-            except Exception:
-                await self.store.remove_push_actions_from_staging(event.event_id)
-                raise
+        except Exception:
+            await self.store.remove_push_actions_from_staging(event.event_id)
+            raise
 
         return event
 

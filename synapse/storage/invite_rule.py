@@ -69,9 +69,9 @@ class InviteRulesConfig:
                 InviteRule.BLOCK,
             )
 
-    def get_invite_rule(self, user_id: UserID) -> InviteRule:
+    def get_invite_rule(self, user_id_str: str) -> InviteRule:
         """Get the invite rule that matches this user. Will return InviteRule.ALLOW if no rules match"""
-        user_id_str = user_id.to_string()
+        user_id = UserID.from_string(user_id_str)
         # The order here is important. We always process user rules before server rules
         # and we always process in the order of Allow, Ignore, Block.
         for patterns, rule in [
