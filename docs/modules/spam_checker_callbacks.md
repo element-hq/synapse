@@ -248,7 +248,7 @@ this callback.
 
 ### `user_may_send_state_event`
 
-_First introduced in Synapse vX.X.X_
+_First introduced in Synapse v1.132.0_
 
 ```python
 async def user_may_send_state_event(user_id: str, room_id: str, event_type: str, state_key: str, content: JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]

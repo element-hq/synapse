@@ -294,7 +294,7 @@ class RoomStateEventRestServlet(RestServlet):
         if not is_requester_admin:
             spam_check = (
                 await self._spam_checker_module_callbacks.user_may_send_state_event(
-                    userid=requester.user.to_string(),
+                    user_id=requester.user.to_string(),
                     room_id=room_id,
                     event_type=event_type,
                     state_key=state_key,

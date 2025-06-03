@@ -22,6 +22,7 @@
 import functools
 import inspect
 import logging
+from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -707,7 +708,7 @@ class SpamCheckerModuleApiCallbacks:
 
     async def user_may_send_state_event(
         self,
-        userid: str,
+        user_id: str,
         room_id: str,
         event_type: str,
         state_key: str,
@@ -715,14 +716,17 @@ class SpamCheckerModuleApiCallbacks:
     ) -> Union[Tuple[Codes, dict], Literal["NOT_SPAM"]]:
         """Checks if a given user may create a room with a given visibility
         Args:
-            userid: The ID of the user attempting to create a room
-            visibility: The visibility of the room to be created
+            user_id: The ID of the user attempting to create a room
+            room_id: The ID of the room that the event will be sent to
+            event_type: The type of the state event
+            state_key: The state key of the state event
+            content: The content of the state event
         """
         for callback in self._user_may_send_state_event_callbacks:
             with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
                 # We make a copy of the content to ensure that the spam checker cannot modify it.
                 res = await delay_cancellation(
-                    callback(userid, room_id, event_type, state_key, content.copy())
+                    callback(user_id, room_id, event_type, state_key, deepcopy(content))
                 )
                 if res is self.NOT_SPAM:
                     continue
