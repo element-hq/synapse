@@ -343,7 +343,7 @@ can be done by installing the <code>libjemalloc2</code> package and adding this
 line to <code>/etc/default/matrix-synapse</code>:</p>
 <pre><code>LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 </code></pre>
-<p><em>Note</em>: You may need to set <code>PYTHONMALLOC=malloc</code> to ensure that <code>jemalloc</code> can accurately calculate memory usage. By default, Python uses its internal small-object allocator, which may interfere with jemalloc's ability to track memory consumption correctly. This could prevent the <a href="../configuration/config_documentation.html#caches-and-associated-values">cache_autotuning</a> feature from functioning as expected, as the Python allocator may not reach the memory threshold set by <code>max_cache_memory_usage</code>, thus not triggering the cache eviction process.</p>
+<p><em>Note</em>: You may need to set <code>PYTHONMALLOC=malloc</code> to ensure that <code>jemalloc</code> can accurately calculate memory usage. By default, Python uses its internal small-object allocator, which may interfere with jemalloc's ability to track memory consumption correctly. This could prevent the <a href="../configuration/config_documentation.html#caches">cache_autotuning</a> feature from functioning as expected, as the Python allocator may not reach the memory threshold set by <code>max_cache_memory_usage</code>, thus not triggering the cache eviction process.</p>
 <p>This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.</p>
 <p>If you're encountering high CPU use by the Synapse process itself, you
