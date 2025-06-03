@@ -22,6 +22,7 @@
 import functools
 import inspect
 import logging
+from copy import deepcopy
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -649,7 +650,7 @@ class SpamCheckerModuleApiCallbacks:
                     )
                     # We make a copy of the config to ensure the spam checker cannot modify it.
                     res = await delay_cancellation(
-                        callback_with_requester_id(userid, room_config.copy())
+                        callback_with_requester_id(userid, deepcopy(room_config))
                     )
                 else:
                     callback_without_requester_id = cast(
