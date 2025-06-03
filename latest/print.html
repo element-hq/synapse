@@ -791,6 +791,10 @@ database server. Example values might be:</p>
     # to the server is considered dead
     keepalives_count: 3
 </code></pre>
+<h2 id="postgresql-major-version-upgrades"><a class="header" href="#postgresql-major-version-upgrades">Postgresql major version upgrades</a></h2>
+<p>Postgres uses separate directories for database locations between major versions (typically <code>/var/lib/postgresql/&lt;version&gt;/main</code>).</p>
+<p>Therefore, it is recommended to stop Synapse and other services (MAS, etc) before upgrading Postgres major versions.</p>
+<p>It is also strongly recommended to <a href="./usage/administration/backups.html#database">back up</a> your database beforehand to ensure no data loss arising from a failed upgrade.</p>
 <h2 id="backups-1"><a class="header" href="#backups-1">Backups</a></h2>
 <p>Don't forget to <a href="./usage/administration/backups.html#database">back up</a> your database!</p>
 <h2 id="tuning-postgres"><a class="header" href="#tuning-postgres">Tuning Postgres</a></h2>
@@ -1869,7 +1873,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.130.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.131.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -6254,6 +6258,16 @@ raise an error if the registration completes and the username conflicts.</p>
 <pre><code class="language-yaml">inhibit_user_in_use_error: true
 </code></pre>
 <hr />
+<h3 id="allow_underscore_prefixed_registration"><a class="header" href="#allow_underscore_prefixed_registration"><code>allow_underscore_prefixed_registration</code></a></h3>
+<p>Whether users are allowed to register with a underscore-prefixed localpart.
+By default, AppServices use prefixes like <code>_example</code> to namespace their
+associated ghost users. If turned on, this may result in clashes or confusion.
+Useful when provisioning users from an external identity provider.</p>
+<p>Defaults to false.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">allow_underscore_prefixed_registration: false
+</code></pre>
+<hr />
 <h2 id="user-session-management"><a class="header" href="#user-session-management">User session management</a></h2>
 <hr />
 <h3 id="session_lifetime"><a class="header" href="#session_lifetime"><code>session_lifetime</code></a></h3>
@@ -7055,16 +7069,20 @@ match particular values in the OIDC userinfo. The requirements can be listed und
 <code>attribute_requirements</code> as shown here:</p>
 <pre><code class="language-yaml">attribute_requirements:
      - attribute: family_name
-       value: &quot;Stephensson&quot;
+       one_of: [&quot;Stephensson&quot;, &quot;Smith&quot;]
      - attribute: groups
        value: &quot;admin&quot;
+     # If `value` or `one_of` are not specified, the attribute only needs
+     # to exist, regardless of value.
+     - attribute: picture
 </code></pre>
+<p><code>attribute</code> is a required field, while <code>value</code> and <code>one_of</code> are optional.</p>
 <p>All of the listed attributes must match for the login to be permitted. Additional attributes can be added to
 userinfo by expanding the <code>scopes</code> section of the OIDC config to retrieve
 additional information from the OIDC provider.</p>
 <p>If the OIDC claim is a list, then the attribute must match any value in the list.
 Otherwise, it must exactly match the value of the claim. Using the example
-above, the <code>family_name</code> claim MUST be &quot;Stephensson&quot;, but the <code>groups</code>
+above, the <code>family_name</code> claim MUST be either &quot;Stephensson&quot; or &quot;Smith&quot;, but the <code>groups</code>
 claim MUST contain &quot;admin&quot;.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">oidc_providers:
@@ -7591,22 +7609,23 @@ of <code>alice</code>, <code>room</code> and <code>abcedgghijk</code>.</p>
 <p><em>Changed in Synapse 1.126.0: The default was changed to deny publishing to the
 room list by default</em></p>
 <p>Example configuration:</p>
-<pre><code class="language-yaml"># No rule list specified. Anyone may publish any room to the public list.
+<pre><code class="language-yaml"># No rule list specified. No one may publish any room to the public list, except server admins.
 # This is the default behaviour.
 room_list_publication_rules:
-</code></pre>
-<pre><code class="language-yaml"># A list of one rule which allows everything.
-# This has the same effect as the previous example.
-room_list_publication_rules:
-  - &quot;action&quot;: &quot;allow&quot;
-</code></pre>
-<pre><code class="language-yaml"># An empty list of rules. No-one may publish to the room list.
-room_list_publication_rules: []
 </code></pre>
 <pre><code class="language-yaml"># A list of one rule which denies everything.
 # This has the same effect as the previous example.
 room_list_publication_rules:
   - &quot;action&quot;: &quot;deny&quot;
+</code></pre>
+<pre><code class="language-yaml"># An empty list of rules.
+# This has the same effect as the previous example.
+room_list_publication_rules: []
+</code></pre>
+<pre><code class="language-yaml"># A list of one rule which allows everything.
+# This was the default behaviour pre v1.126.0.
+room_list_publication_rules:
+  - &quot;action&quot;: &quot;allow&quot;
 </code></pre>
 <pre><code class="language-yaml"># Prevent a specific user from publishing rooms.
 # Allow other users to publish anything.
@@ -14408,6 +14427,7 @@ for the given <code>room_id</code>.</p>
     &quot;results&quot;: [
         {
             &quot;delete_id&quot;: &quot;delete_id1&quot;,
+            &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
             &quot;status&quot;: &quot;failed&quot;,
             &quot;error&quot;: &quot;error message&quot;,
             &quot;shutdown_room&quot;: {
@@ -14418,6 +14438,7 @@ for the given <code>room_id</code>.</p>
             }
         }, {
             &quot;delete_id&quot;: &quot;delete_id2&quot;,
+            &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
             &quot;status&quot;: &quot;purging&quot;,
             &quot;shutdown_room&quot;: {
                 &quot;kicked_users&quot;: [
@@ -14447,6 +14468,8 @@ for the given <code>room_id</code>.</p>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
     &quot;status&quot;: &quot;purging&quot;,
+    &quot;delete_id&quot;: &quot;bHkCNQpHqOaFhPtK&quot;,
+    &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
     &quot;shutdown_room&quot;: {
         &quot;kicked_users&quot;: [
             &quot;@foobar:example.com&quot;
@@ -14472,7 +14495,8 @@ for the given <code>room_id</code>.</p>
 This field is omitted from the result when you query by <code>delete_id</code>.
 Task objects contain the following fields:
 <ul>
-<li><code>delete_id</code> - The ID for this purge if you query by <code>room_id</code>.</li>
+<li><code>delete_id</code> - The ID for this purge</li>
+<li><code>room_id</code> - The ID of the room being deleted</li>
 <li><code>status</code> - The status will be one of:
 <ul>
 <li><code>shutting_down</code> - The process is removing users from the room.</li>
@@ -16694,7 +16718,7 @@ homeserver configuration options that exist to tweak it.</p>
 <tr><td><code>python_version</code></td><td>string</td><td>The Python version number in use (e.g &quot;3.7.1&quot;). Taken from <code>sys.version_info</code>.</td></tr>
 <tr><td><code>total_users</code></td><td>int</td><td>The number of registered users on the homeserver.</td></tr>
 <tr><td><code>total_nonbridged_users</code></td><td>int</td><td>The number of users, excluding those created by an Application Service.</td></tr>
-<tr><td><code>daily_user_type_native</code></td><td>int</td><td>The number of native users created in the last 24 hours.</td></tr>
+<tr><td><code>daily_user_type_native</code></td><td>int</td><td>The number of native, non-guest users created in the last 24 hours.</td></tr>
 <tr><td><code>daily_user_type_guest</code></td><td>int</td><td>The number of guest users created in the last 24 hours.</td></tr>
 <tr><td><code>daily_user_type_bridged</code></td><td>int</td><td>The number of users created by Application Services in the last 24 hours.</td></tr>
 <tr><td><code>total_room_count</code></td><td>int</td><td>The total number of rooms present on the homeserver.</td></tr>

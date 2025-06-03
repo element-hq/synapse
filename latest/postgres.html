@@ -245,6 +245,10 @@ database server. Example values might be:</p>
     # to the server is considered dead
     keepalives_count: 3
 </code></pre>
+<h2 id="postgresql-major-version-upgrades"><a class="header" href="#postgresql-major-version-upgrades">Postgresql major version upgrades</a></h2>
+<p>Postgres uses separate directories for database locations between major versions (typically <code>/var/lib/postgresql/&lt;version&gt;/main</code>).</p>
+<p>Therefore, it is recommended to stop Synapse and other services (MAS, etc) before upgrading Postgres major versions.</p>
+<p>It is also strongly recommended to <a href="./usage/administration/backups.html#database">back up</a> your database beforehand to ensure no data loss arising from a failed upgrade.</p>
 <h2 id="backups"><a class="header" href="#backups">Backups</a></h2>
 <p>Don't forget to <a href="./usage/administration/backups.html#database">back up</a> your database!</p>
 <h2 id="tuning-postgres"><a class="header" href="#tuning-postgres">Tuning Postgres</a></h2>
