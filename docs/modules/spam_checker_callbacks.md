@@ -159,7 +159,7 @@ _First introduced in Synapse v1.37.0_
 
 _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_api.errors.Codes` can be returned by this callback. Returning a boolean is now deprecated._ 
 
-_Changed in Synapse v1.x.x: Added the `room_config` argument. Callbacks that only expect a single `user_id` argument are still supported._
+_Changed in Synapse v1.132.0: Added the `room_config` argument. Callbacks that only expect a single `user_id` argument are still supported._
 
 ```python
 async def user_may_create_room(user_id: str, room_config: synapse.module_api.JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]

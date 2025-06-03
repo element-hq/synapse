@@ -152,6 +152,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         channel = self.create_room({"foo": "baa"})
         self.assertEqual(channel.code, 200)
+        self.assertEqual(self.last_user_id, self.user_id)
 
     def test_user_may_send_state_event(self) -> None:
         """Test that the user_may_send_state_event callback is called when a state event
