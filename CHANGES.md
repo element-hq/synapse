@@ -1,3 +1,57 @@
+# Synapse 1.131.0 (2025-06-03)
+
+No significant changes since 1.131.0rc1.
+
+# Synapse 1.131.0rc1 (2025-05-28)
+
+### Features
+
+- Add `msc4263_limit_key_queries_to_users_who_share_rooms` config option as per [MSC4263](https://github.com/matrix-org/matrix-spec-proposals/pull/4263). ([\#18180](https://github.com/element-hq/synapse/issues/18180))
+- Add option to allow registrations that begin with `_`. Contributed by `_` (@hex5f). ([\#18262](https://github.com/element-hq/synapse/issues/18262))
+- Include room ID in response to the [Room Deletion Status Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#status-of-deleting-rooms). ([\#18318](https://github.com/element-hq/synapse/issues/18318))
+- Add support for calling Policy Servers ([MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284)) to mark events as spam. ([\#18387](https://github.com/element-hq/synapse/issues/18387))
+
+### Bugfixes
+
+- Prevent race-condition in `_maybe_retry_device_resync` entrance. ([\#18391](https://github.com/element-hq/synapse/issues/18391))
+- Fix the `tests.handlers.test_worker_lock.WorkerLockTestCase.test_lock_contention` test which could spuriously time out on RISC-V architectures due to performance differences. ([\#18430](https://github.com/element-hq/synapse/issues/18430))
+- Fix admin redaction endpoint not redacting encrypted messages. ([\#18434](https://github.com/element-hq/synapse/issues/18434))
+
+### Improved Documentation
+
+- Update `room_list_publication_rules` docs to consider defaults that changed in v1.126.0. Contributed by @HarHarLinks. ([\#18286](https://github.com/element-hq/synapse/issues/18286))
+- Add advice for upgrading between major PostgreSQL versions to the database documentation. ([\#18445](https://github.com/element-hq/synapse/issues/18445))
+
+### Internal Changes
+
+- Fix a memory leak in `_NotifierUserStream`. ([\#18380](https://github.com/element-hq/synapse/issues/18380))
+- Fix a couple type annotations in the `RootConfig`/`Config`. ([\#18409](https://github.com/element-hq/synapse/issues/18409))
+- Explicitly enable PyPy builds in `cibuildwheel`s config to avoid it being disabled on a future upgrade to `cibuildwheel` v3. ([\#18417](https://github.com/element-hq/synapse/issues/18417))
+- Update the PR review template to remove an erroneous line break from the final bullet point. ([\#18419](https://github.com/element-hq/synapse/issues/18419))
+- Explain why we `flush_buffer()` for Python `print(...)` output. ([\#18420](https://github.com/element-hq/synapse/issues/18420))
+- Add lint to ensure we don't add a `CREATE/DROP INDEX` in a schema delta. ([\#18440](https://github.com/element-hq/synapse/issues/18440))
+- Allow checking only for the existence of a field in an SSO provider's response, rather than requiring the value(s) to check. ([\#18454](https://github.com/element-hq/synapse/issues/18454))
+- Add unit tests for homeserver usage statistics. ([\#18463](https://github.com/element-hq/synapse/issues/18463))
+- Don't move invited users to new room when shutting down room. ([\#18471](https://github.com/element-hq/synapse/issues/18471))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/setup-python from 5.5.0 to 5.6.0. ([\#18398](https://github.com/element-hq/synapse/issues/18398))
+* Bump authlib from 1.5.1 to 1.5.2. ([\#18452](https://github.com/element-hq/synapse/issues/18452))
+* Bump docker/build-push-action from 6.15.0 to 6.17.0. ([\#18397](https://github.com/element-hq/synapse/issues/18397), [\#18449](https://github.com/element-hq/synapse/issues/18449))
+* Bump lxml from 5.3.0 to 5.4.0. ([\#18480](https://github.com/element-hq/synapse/issues/18480))
+* Bump mypy-zope from 1.0.9 to 1.0.11. ([\#18428](https://github.com/element-hq/synapse/issues/18428))
+* Bump pyo3 from 0.23.5 to 0.24.2. ([\#18460](https://github.com/element-hq/synapse/issues/18460))
+* Bump pyo3-log from 0.12.3 to 0.12.4. ([\#18453](https://github.com/element-hq/synapse/issues/18453))
+* Bump pyopenssl from 25.0.0 to 25.1.0. ([\#18450](https://github.com/element-hq/synapse/issues/18450))
+* Bump ruff from 0.7.3 to 0.11.11. ([\#18451](https://github.com/element-hq/synapse/issues/18451), [\#18482](https://github.com/element-hq/synapse/issues/18482))
+* Bump tornado from 6.4.2 to 6.5.0. ([\#18459](https://github.com/element-hq/synapse/issues/18459))
+* Bump setuptools from 72.1.0 to 78.1.1. ([\#18461](https://github.com/element-hq/synapse/issues/18461))
+* Bump types-jsonschema from 4.23.0.20241208 to 4.23.0.20250516. ([\#18481](https://github.com/element-hq/synapse/issues/18481))
+* Bump types-requests from 2.32.0.20241016 to 2.32.0.20250328. ([\#18427](https://github.com/element-hq/synapse/issues/18427))
+
 # Synapse 1.130.0 (2025-05-20)
 
 ### Bugfixes
