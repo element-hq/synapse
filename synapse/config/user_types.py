@@ -32,7 +32,7 @@ class UserTypesConfig(Config):
         self.extra_user_types: List[str] = user_types.get("extra_user_types", [])
 
         all_user_types: List[str] = []
-        all_user_types.extend(UserTypes.ALL_USER_TYPES)
+        all_user_types.extend(UserTypes.ALL_BUILTIN_USER_TYPES)
         all_user_types.extend(self.extra_user_types)
 
         self.all_user_types = all_user_types
