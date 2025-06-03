@@ -2142,9 +2142,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
             # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-            sliding_sync_membership_snapshots_insert_map: (
-                SlidingSyncMembershipSnapshotSharedInsertValues
-            ) = {}
+            sliding_sync_membership_snapshots_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
             if membership == Membership.JOIN:
                 # If we're still joined, we can pull from current state.
                 current_state_ids_map: StateMap[
@@ -2781,9 +2779,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 "progress_json": "{}",
             },
         )
-        depends_on = (
-            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
-        )
+        depends_on = _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
 
     # Now kick-off the background update to catch-up with what we missed while Synapse
     # was downgraded.
