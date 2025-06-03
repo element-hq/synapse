@@ -24,6 +24,7 @@ from typing import Iterable, Optional, Set
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes
+from synapse.api.errors import Codes, SynapseError
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -92,6 +93,20 @@ class IgnoredUsersTestCase(unittest.HomeserverTestCase):
 
         # Check the removed user.
         self.assert_ignorers("@another:remote", {self.user})
+
+    def test_ignoring_self_fails(self) -> None:
+        """Ensure users cannot add themselves to the ignored list."""
+
+        f = self.get_failure(
+            self.store.add_account_data_for_user(
+                self.user,
+                AccountDataTypes.IGNORED_USER_LIST,
+                {"ignored_users": {self.user: {}}},
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 400)
+        self.assertEqual(f.errcode, Codes.INVALID_PARAM)
 
     def test_caching(self) -> None:
         """Ensure that caching works properly between different users."""
