@@ -4534,6 +4534,21 @@ shown.</p>
 <pre><code class="language-yaml">max_event_delay_duration: 24h
 </code></pre>
 <hr />
+<h3 id="user_types"><a class="header" href="#user_types"><code>user_types</code></a></h3>
+<p>Configuration settings related to the user types feature.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li><code>default_user_type</code>: The default user type to use for registering new users when no value has been specified.
+Defaults to none.</li>
+<li><code>extra_user_types</code>: Array of additional user types to allow. These are treated as real users. Defaults to [].</li>
+</ul>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">user_types:
+    default_user_type: &quot;custom&quot;
+    extra_user_types:
+      - &quot;custom&quot;
+      - &quot;custom2&quot;
+</code></pre>
 <h2 id="homeserver-blocking"><a class="header" href="#homeserver-blocking">Homeserver blocking</a></h2>
 <p>Useful options for Synapse admins.</p>
 <hr />
@@ -14612,7 +14627,8 @@ deactivating and erasing users see <a href="admin_api/user_admin_api.html#deacti
 <li>
 <p><code>user_type</code> - <strong>string</strong> or null, optional. If not provided, the user type will be
 not be changed. If <code>null</code> is given, the user type will be cleared.
-Other allowed options are: <code>bot</code> and <code>support</code>.</p>
+Other allowed options are: <code>bot</code> and <code>support</code> and any extra values defined in the homserver
+<a href="admin_api/../usage/configuration/config_documentation.html#user_types">configuration</a>.</p>
 </li>
 </ul>
 <h2 id="list-accounts"><a class="header" href="#list-accounts">List Accounts</a></h2>
