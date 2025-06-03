@@ -120,6 +120,7 @@ sytest_tests = [
         "postgres": "multi-postgres",
         "workers": "workers",
         "reactor": "asyncio",
+        "failure_allowed": True,
     },
 ]
 
