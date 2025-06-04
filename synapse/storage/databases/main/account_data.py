@@ -563,6 +563,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
     async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
         """
         Get the invite configuration for the current user.
+
+        Args:
+            user_id:
         """
 
         if not self._msc4155_enabled:
