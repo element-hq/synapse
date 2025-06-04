@@ -2784,8 +2784,14 @@ class PersistEventsStore:
             # See MSC4293 for details (as of May 28, 2025): https://github.com/matrix-org/matrix-spec-proposals/pull/4293
             return
 
-        # We also want to filter out events where the sender can't actually redact
+        # We also want to filter out events where the sender can't actually redact (no permission to redact)
+        # TODO
 
+        # Find all the current events sent by this user
+        # TODO
+
+        # Insert them into the redactions table
+        # TODO
 
 
     def insert_labels_for_event_txn(
