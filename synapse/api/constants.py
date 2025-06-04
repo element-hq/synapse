@@ -185,12 +185,18 @@ ServerNoticeLimitReached: Final = "m.server_notice.usage_limit_reached"
 
 class UserTypes:
     """Allows for user type specific behaviour. With the benefit of hindsight
-    'admin' and 'guest' users should also be UserTypes. Normal users are type None
+    'admin' and 'guest' users should also be UserTypes. Extra user types can be
+    added in the configuration. Normal users are type None or one of the extra
+    user types (if configured).
     """
 
     SUPPORT: Final = "support"
     BOT: Final = "bot"
-    ALL_USER_TYPES: Final = (SUPPORT, BOT)
+    ALL_BUILTIN_USER_TYPES: Final = (SUPPORT, BOT)
+    """
+    The user types that are built-in to Synapse. Extra user types can be
+    added in the configuration.
+    """
 
 
 class RelationTypes:
