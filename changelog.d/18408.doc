@@ -1,1 +1,1 @@
-Propose CAP_NET_BIND_SERVICE instead running synapse with root. There are alternative ways to use low numbered ports besides root. Users might be misleaded thinking they should run synapse with root privileges.
+Mention `CAP_NET_BIND_SERVICE` as an alternative to running Synapse as root in order to bind to a privileged port.
