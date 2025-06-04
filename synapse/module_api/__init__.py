@@ -136,6 +136,7 @@ from synapse.storage.background_updates import (
     ON_UPDATE_CALLBACK,
 )
 from synapse.storage.database import DatabasePool, LoggingTransaction
+from synapse.storage.databases.main.room import RatelimitOverride
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.types import (
     DomainSpecificString,
@@ -197,6 +198,7 @@ __all__ = [
     "ProfileInfo",
     "RoomAlias",
     "UserProfile",
+    "RatelimitOverride",
 ]
 
 logger = logging.getLogger(__name__)
