@@ -30,6 +30,9 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
 from synapse.module_api.callbacks.media_repository_callbacks import (
     MediaRepositoryModuleApiCallbacks,
 )
+from synapse.module_api.callbacks.ratelimit_callbacks import (
+    RatelimitModuleApiCallbacks,
+)
 from synapse.module_api.callbacks.spamchecker_callbacks import (
     SpamCheckerModuleApiCallbacks,
 )
@@ -42,5 +45,6 @@ class ModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.account_validity = AccountValidityModuleApiCallbacks()
         self.media_repository = MediaRepositoryModuleApiCallbacks(hs)
+        self.ratelimit = RatelimitModuleApiCallbacks(hs)
         self.spam_checker = SpamCheckerModuleApiCallbacks(hs)
         self.third_party_event_rules = ThirdPartyEventRulesModuleApiCallbacks(hs)
