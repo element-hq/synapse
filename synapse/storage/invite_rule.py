@@ -79,14 +79,14 @@ class InviteRulesConfig:
                 InviteRule.BLOCK,
             )
 
-    def get_invite_rule(self, user_id_str: str) -> InviteRule:
+    def get_invite_rule(self, user_id: str) -> InviteRule:
         """Get the invite rule that matches this user. Will return InviteRule.ALLOW if no rules match
 
         Args:
-            user_id_str: The user ID of the inviting user.
+            user_id: The user ID of the inviting user.
 
         """
-        user_id = UserID.from_string(user_id_str)
+        user = UserID.from_string(user_id)
         # The order here is important. We always process user rules before server rules
         # and we always process in the order of Allow, Ignore, Block.
         for patterns, rule in [
@@ -95,7 +95,7 @@ class InviteRulesConfig:
             (self.blocked_users, InviteRule.BLOCK),
         ]:
             for regex in patterns:
-                if regex.match(user_id_str):
+                if regex.match(user_id):
                     return rule
 
         for patterns, rule in [
@@ -104,7 +104,7 @@ class InviteRulesConfig:
             (self.blocked_servers, InviteRule.BLOCK),
         ]:
             for regex in patterns:
-                if regex.match(user_id.domain):
+                if regex.match(user.domain):
                     return rule
 
         return InviteRule.ALLOW
