@@ -375,7 +375,7 @@ class ModuleApi:
         ] = None,
     ) -> None:
         """Registers callbacks for ratelimit capabilities.
-        Added in Synapse v1.x.x.
+        Added in Synapse v1.132.0.
         """
         return self._callbacks.ratelimit.register_callbacks(
             get_ratelimit_override_for_user=get_ratelimit_override_for_user,
@@ -390,7 +390,7 @@ class ModuleApi:
         ] = None,
     ) -> None:
         """Registers callbacks for media repository capabilities.
-        Added in Synapse v1.x.x.
+        Added in Synapse v1.132.0.
         """
         return self._callbacks.media_repository.register_callbacks(
             get_media_config_for_user=get_media_config_for_user,

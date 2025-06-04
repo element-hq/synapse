@@ -8,14 +8,14 @@ The available ratelimit callbacks are:
 
 ### `get_ratelimit_override_for_user`
 
-_First introduced in Synapse v1.X.X_
+_First introduced in Synapse v1.132.0_
 
 ```python
 async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> Optional[RatelimitOverride]
 ```
 
 Called when constructing a ratelimiter of a particular type for a user. The module can
-return a `messages_per_second` and `burst_count` to be used, or `None` if no
+return a `messages_per_second` and `burst_count` to be used, or `None` if
 the default settings are adequate. The user is represented by their Matrix user ID
 (e.g. `@alice:example.com`). The limiter name is usually taken from the `RatelimitSettings` key
 value.
