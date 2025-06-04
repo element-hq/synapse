@@ -90,6 +90,10 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
     ON_USER_LOGIN_CALLBACK,
     ON_USER_REGISTRATION_CALLBACK,
 )
+from synapse.module_api.callbacks.media_repository_callbacks import (
+    GET_MEDIA_CONFIG_FOR_USER_CALLBACK,
+    IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK,
+)
 from synapse.module_api.callbacks.ratelimit_callbacks import (
     GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
 )
@@ -375,6 +379,22 @@ class ModuleApi:
         """
         return self._callbacks.ratelimit.register_callbacks(
             get_ratelimit_override_for_user=get_ratelimit_override_for_user,
+        )
+
+    def register_media_repository_callbacks(
+        self,
+        *,
+        get_media_config_for_user: Optional[GET_MEDIA_CONFIG_FOR_USER_CALLBACK] = None,
+        is_user_allowed_to_upload_media_of_size: Optional[
+            IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
+        ] = None,
+    ) -> None:
+        """Registers callbacks for media repository capabilities.
+        Added in Synapse v1.x.x.
+        """
+        return self._callbacks.media_repository.register_callbacks(
+            get_media_config_for_user=get_media_config_for_user,
+            is_user_allowed_to_upload_media_of_size=is_user_allowed_to_upload_media_of_size,
         )
 
     def register_third_party_rules_callbacks(

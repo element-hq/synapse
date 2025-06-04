@@ -1,1 +1,0 @@
-Allow checking only for the existence of a field in an SSO provider's response, rather than requiring the value(s) to check.
