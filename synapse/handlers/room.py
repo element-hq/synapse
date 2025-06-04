@@ -204,7 +204,11 @@ class RoomCreationHandler:
         Raises:
             ShadowBanError if the requester is shadow-banned.
         """
+        await self.creation_ratelimiter.ratelimit(requester, update=False)
+
+        # then apply the ratelimits
         await self.common_request_ratelimiter.ratelimit(requester)
+        await self.creation_ratelimiter.ratelimit(requester)
 
         user_id = requester.user.to_string()
 
