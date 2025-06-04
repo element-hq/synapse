@@ -40,14 +40,18 @@ class InviteRulesConfig:
                         # User IDs cannot exceed 255 bytes. Don't process large, potentially
                         # expensive glob patterns.
                         if len(value) > 255:
-                            logger.debug("Ignoring invite config glob pattern that is >255 bytes: {value}")
+                            logger.debug(
+                                "Ignoring invite config glob pattern that is >255 bytes: {value}"
+                            )
                             continue
 
                         try:
                             ruleset.append(glob_to_regex(value))
                         except Exception as e:
                             # If for whatever reason we can't process this, just ignore it.
-                            logger.debug(f"Could not process '{value}' field of invite rule config, ignoring: {e}")
+                            logger.debug(
+                                f"Could not process '{value}' field of invite rule config, ignoring: {e}"
+                            )
 
         if account_data:
             process_field(

@@ -193,12 +193,16 @@ class BulkPushRuleEvaluator:
         # if this event is an invite event, we may need to run rules for the user
         # who's been invited, otherwise they won't get told they've been invited
         invited = event.state_key
-        if invited and event.type == EventTypes.Member and event.membership == Membership.INVITE:
+        if (
+            invited
+            and event.type == EventTypes.Member
+            and event.membership == Membership.INVITE
+        ):
             invite_config = await self.store.get_invite_config_for_user(invited)
             if invite_config.get_invite_rule(event.sender) != InviteRule.ALLOW:
                 # Invite was blocked or ignored, never notify.
                 return {}
-            if  self.hs.is_mine_id(invited) and invited not in local_users:
+            if self.hs.is_mine_id(invited) and invited not in local_users:
                 local_users.append(invited)
 
         if not local_users:
