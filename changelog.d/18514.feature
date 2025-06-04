@@ -1,0 +1,1 @@
+Add configurable rate limiting for the creation of rooms.
