@@ -794,6 +794,8 @@ class ServerConfig(Config):
         else:
             self.max_event_delay_ms = None
 
+        self.account_data_defaults = config.get("account_data_defaults", {})
+
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 
