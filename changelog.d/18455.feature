@@ -1,0 +1,1 @@
+Add user_may_send_state_event callback to spam checker module API.

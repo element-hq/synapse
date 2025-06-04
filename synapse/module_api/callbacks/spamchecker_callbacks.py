@@ -173,6 +173,20 @@ USER_MAY_PUBLISH_ROOM_CALLBACK = Callable[
         ]
     ],
 ]
+USER_MAY_SEND_STATE_EVENT_CALLBACK = Callable[
+    [str, str, str, str, JsonDict],
+    Awaitable[
+        Union[
+            Literal["NOT_SPAM"],
+            Codes,
+            # Highly experimental, not officially part of the spamchecker API, may
+            # disappear without warning depending on the results of ongoing
+            # experiments.
+            # Use this to return additional information as part of an error.
+            Tuple[Codes, JsonDict],
+        ]
+    ],
+]
 CHECK_USERNAME_FOR_SPAM_CALLBACK = Union[
     Callable[[UserProfile], Awaitable[bool]],
     Callable[[UserProfile, str], Awaitable[bool]],
@@ -337,6 +351,9 @@ class SpamCheckerModuleApiCallbacks:
             USER_MAY_SEND_3PID_INVITE_CALLBACK
         ] = []
         self._user_may_create_room_callbacks: List[USER_MAY_CREATE_ROOM_CALLBACK] = []
+        self._user_may_send_state_event_callbacks: List[
+            USER_MAY_SEND_STATE_EVENT_CALLBACK
+        ] = []
         self._user_may_create_room_alias_callbacks: List[
             USER_MAY_CREATE_ROOM_ALIAS_CALLBACK
         ] = []
@@ -372,6 +389,7 @@ class SpamCheckerModuleApiCallbacks:
         ] = None,
         check_media_file_for_spam: Optional[CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK] = None,
         check_login_for_spam: Optional[CHECK_LOGIN_FOR_SPAM_CALLBACK] = None,
+        user_may_send_state_event: Optional[USER_MAY_SEND_STATE_EVENT_CALLBACK] = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if check_event_for_spam is not None:
@@ -395,6 +413,11 @@ class SpamCheckerModuleApiCallbacks:
 
         if user_may_create_room is not None:
             self._user_may_create_room_callbacks.append(user_may_create_room)
+
+        if user_may_send_state_event is not None:
+            self._user_may_send_state_event_callbacks.append(
+                user_may_send_state_event,
+            )
 
         if user_may_create_room_alias is not None:
             self._user_may_create_room_alias_callbacks.append(
@@ -675,6 +698,40 @@ class SpamCheckerModuleApiCallbacks:
                     and isinstance(res[1], dict)
                 ):
                     return res
+                else:
+                    logger.warning(
+                        "Module returned invalid value, rejecting room creation as spam"
+                    )
+                    return synapse.api.errors.Codes.FORBIDDEN, {}
+
+        return self.NOT_SPAM
+
+    async def user_may_send_state_event(
+        self,
+        user_id: str,
+        room_id: str,
+        event_type: str,
+        state_key: str,
+        content: JsonDict,
+    ) -> Union[Tuple[Codes, dict], Literal["NOT_SPAM"]]:
+        """Checks if a given user may create a room with a given visibility
+        Args:
+            user_id: The ID of the user attempting to create a room
+            room_id: The ID of the room that the event will be sent to
+            event_type: The type of the state event
+            state_key: The state key of the state event
+            content: The content of the state event
+        """
+        for callback in self._user_may_send_state_event_callbacks:
+            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+                # We make a copy of the content to ensure that the spam checker cannot modify it.
+                res = await delay_cancellation(
+                    callback(user_id, room_id, event_type, state_key, deepcopy(content))
+                )
+                if res is self.NOT_SPAM:
+                    continue
+                elif isinstance(res, synapse.api.errors.Codes):
+                    return res, {}
                 else:
                     logger.warning(
                         "Module returned invalid value, rejecting room creation as spam"
