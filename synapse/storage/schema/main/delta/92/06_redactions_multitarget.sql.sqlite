@@ -1,0 +1,9 @@
+-- sqlite is awful and requires rebuilding the table to drop the UNIQUE(event_id) constraint, so let's do that
+-- and build a new table with the constraints we want.
+CREATE TABLE redactions2 (event_id TEXT NOT NULL, redacts TEXT NOT NULL, have_censored BOOL NOT NULL DEFAULT false, received_ts BIGINT, UNIQUE(event_id, redacts));
+INSERT INTO redactions2 (event_id, redacts, have_censored, received_ts) SELECT r.event_id, r.redacts, r.have_censored, r.received_ts FROM redactions AS r;
+DROP INDEX redactions_redacts;
+DROP TABLE redactions;
+ALTER TABLE redactions2 RENAME TO redactions;
+CREATE INDEX redactions_redacts ON redactions(redacts);
+CREATE INDEX redactions_event_id ON redactions(event_id); -- replace the index we dropped

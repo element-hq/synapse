@@ -2684,6 +2684,8 @@ class PersistEventsStore:
             elif event.type == EventTypes.Retention:
                 # Update the room_retention table.
                 self._store_retention_policy_for_room_txn(txn, event)
+            elif event.type == EventTypes.Member and event.content.get("org.matrix.msc4293.redact_events", False) == True:
+                self._try_store_member_redaction_txn(txn, event)
 
             self._handle_event_relations(txn, event)
 
@@ -2774,6 +2776,17 @@ class PersistEventsStore:
                 "received_ts": self._clock.time_msec(),
             },
         )
+
+    def _try_store_member_redaction_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
+        # We only want to search for membership transitions which aren't kicks or bans
+        if event.membership != Membership.BAN and not (event.membership == Membership.LEAVE and event.sender != event.state_key):
+            # Not a membership event which is capable of redacting other events.
+            # See MSC4293 for details (as of May 28, 2025): https://github.com/matrix-org/matrix-spec-proposals/pull/4293
+            return
+
+        # We also want to filter out events where the sender can't actually redact
+
+
 
     def insert_labels_for_event_txn(
         self,
