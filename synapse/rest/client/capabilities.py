@@ -113,7 +113,7 @@ class CapabilitiesRestServlet(RestServlet):
             response["capabilities"][
                 "org.matrix.msc4155.invite_permission_config_enforced"
             ] = {
-                "enabled": self.config.experimental.msc4155_enabled,
+                "enabled": True,
             }
 
         return HTTPStatus.OK, response

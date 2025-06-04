@@ -103,7 +103,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             self._delete_account_data_for_deactivated_users,
         )
 
-        self._enable_invite_config = hs.config.experimental.msc4155_enabled
+        self._msc4155_enabled = hs.config.experimental.msc4155_enabled
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream

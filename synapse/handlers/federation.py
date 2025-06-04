@@ -1095,7 +1095,7 @@ class FederationHandler:
         rule = invite_config.get_invite_rule(event.sender)
         if rule == InviteRule.BLOCK:
             logger.info(
-                f"Automatically rejecting invite from {event.state_key} due to the the invite filtering rules of {event.sender}"
+                f"Automatically rejecting invite from {event.state_key} due to the invite filtering rules of {event.sender}"
             )
             raise SynapseError(
                 403,
