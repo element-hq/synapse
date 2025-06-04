@@ -263,7 +263,7 @@ class WorkerConfig(Config):
             if worker_replication_secret:
                 raise ConfigError(CONFLICTING_WORKER_REPLICATION_SECRET_OPTS_ERROR)
             self.worker_replication_secret = read_file(
-                worker_replication_secret_path, "worker_replication_secret_path"
+                worker_replication_secret_path, ("worker_replication_secret_path",)
             ).strip()
         else:
             self.worker_replication_secret = worker_replication_secret

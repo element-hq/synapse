@@ -250,9 +250,7 @@ small_cmyk_jpeg = TestImage(
 )
 
 small_lossless_webp = TestImage(
-    unhexlify(
-        b"524946461a000000574542505650384c0d0000002f0000001007" b"1011118888fe0700"
-    ),
+    unhexlify(b"524946461a000000574542505650384c0d0000002f00000010071011118888fe0700"),
     b"image/webp",
     b".webp",
 )
@@ -1362,3 +1360,42 @@ class MediaHashesTestCase(unittest.HomeserverTestCase):
             store_media.sha256,
             SMALL_PNG_SHA256,
         )
+
+
+class MediaRepoSizeModuleCallbackTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+        self.mock_result = True  # Allow all uploads by default
+
+        hs.get_module_api().register_media_repository_callbacks(
+            is_user_allowed_to_upload_media_of_size=self.is_user_allowed_to_upload_media_of_size,
+        )
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    async def is_user_allowed_to_upload_media_of_size(
+        self, user_id: str, size: int
+    ) -> bool:
+        self.last_user_id = user_id
+        self.last_size = size
+        return self.mock_result
+
+    def test_upload_allowed(self) -> None:
+        self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=200)
+        assert self.last_user_id == self.user
+        assert self.last_size == len(SMALL_PNG)
+
+    def test_upload_not_allowed(self) -> None:
+        self.mock_result = False
+        self.helper.upload_media(SMALL_PNG, tok=self.tok, expect_code=413)
+        assert self.last_user_id == self.user
+        assert self.last_size == len(SMALL_PNG)

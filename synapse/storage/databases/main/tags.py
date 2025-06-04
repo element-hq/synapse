@@ -274,10 +274,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
         assert isinstance(self._account_data_id_gen, AbstractStreamIdGenerator)
 
         def remove_tag_txn(txn: LoggingTransaction, next_id: int) -> None:
-            sql = (
-                "DELETE FROM room_tags "
-                " WHERE user_id = ? AND room_id = ? AND tag = ?"
-            )
+            sql = "DELETE FROM room_tags WHERE user_id = ? AND room_id = ? AND tag = ?"
             txn.execute(sql, (user_id, room_id, tag))
             self._update_revision_txn(txn, user_id, room_id, next_id)
 

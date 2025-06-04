@@ -77,7 +77,7 @@ logger = logging.getLogger(__name__)
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class RatelimitOverride:
-    messages_per_second: int
+    messages_per_second: float
     burst_count: int
 
 
