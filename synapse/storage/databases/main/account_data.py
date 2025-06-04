@@ -565,7 +565,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         Get the invite configuration for the current user.
         """
 
-        if not self._enable_invite_config:
+        if not self._msc4155_enabled:
             # This equates to allowing all invites, as if the setting was off.
             return InviteRulesConfig(None)
 
