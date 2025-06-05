@@ -927,7 +927,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     raise SynapseError(
                         403,
                         "You are not permitted to invite this user.",
-                        errcode=Codes.FORBIDDEN,
+                        errcode=Codes.INVITE_BLOCKED,
                     )
                 # InviteRule.IGNORE is handled at the sync layer.
 
