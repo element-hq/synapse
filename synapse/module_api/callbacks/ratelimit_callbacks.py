@@ -15,17 +15,17 @@
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
 
-from synapse.storage.databases.main.room import RatelimitOverride
 from synapse.util.async_helpers import delay_cancellation
 from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
+    from synapse.module_api import RatelimitOverride
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
 GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK = Callable[
-    [str, str], Awaitable[Optional[RatelimitOverride]]
+    [str, str], Awaitable[Optional["RatelimitOverride"]]
 ]
 
 
@@ -50,10 +50,10 @@ class RatelimitModuleApiCallbacks:
 
     async def get_ratelimit_override_for_user(
         self, user_id: str, limiter_name: str
-    ) -> Optional[RatelimitOverride]:
+    ) -> Optional["RatelimitOverride"]:
         for callback in self._get_ratelimit_override_for_user_callbacks:
             with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
-                res: Optional[RatelimitOverride] = await delay_cancellation(
+                res: Optional["RatelimitOverride"] = await delay_cancellation(
                     callback(user_id, limiter_name)
                 )
             if res:

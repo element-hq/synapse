@@ -3,8 +3,8 @@ from typing import Optional
 from synapse.api.ratelimiting import LimitExceededError, Ratelimiter
 from synapse.appservice import ApplicationService
 from synapse.config.ratelimiting import RatelimitSettings
+from synapse.module_api import RatelimitOverride
 from synapse.module_api.callbacks.ratelimit_callbacks import RatelimitModuleApiCallbacks
-from synapse.storage.databases.main.room import RatelimitOverride
 from synapse.types import create_requester
 
 from tests import unittest

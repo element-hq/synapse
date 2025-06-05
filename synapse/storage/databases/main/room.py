@@ -77,7 +77,9 @@ logger = logging.getLogger(__name__)
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class RatelimitOverride:
-    messages_per_second: float
+    # n.b. elsewhere in Synapse messages_per_second is represented as a float, but it is
+    # an integer in the database
+    messages_per_second: int
     burst_count: int
 
 

@@ -136,7 +136,6 @@ from synapse.storage.background_updates import (
     ON_UPDATE_CALLBACK,
 )
 from synapse.storage.database import DatabasePool, LoggingTransaction
-from synapse.storage.databases.main.room import RatelimitOverride
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.types import (
     DomainSpecificString,
@@ -198,7 +197,6 @@ __all__ = [
     "ProfileInfo",
     "RoomAlias",
     "UserProfile",
-    "RatelimitOverride",
 ]
 
 logger = logging.getLogger(__name__)
@@ -214,6 +212,16 @@ class UserIpAndAgent:
     user_agent: str
     # The time at which this user agent/ip was last seen.
     last_seen: int
+
+
+@attr.s(auto_attribs=True)
+class RatelimitOverride:
+    """Represents a ratelimit being overridden."""
+
+    messages_per_second: float
+    """The number of actions that can be performed in a second. `0.0` mean that ratelimiting is disabled."""
+    burst_count: int
+    """How many actions that can be performed before being limited."""
 
 
 def cached(
