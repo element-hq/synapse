@@ -447,12 +447,11 @@ class FederationSender(AbstractFederationSender):
             destination: server_name of remote server
 
         Returns:
-            None if federation_domain_whitelist exists and destination not in
-            whitelist. Otherwise PerDestinationQueue for this destination.
+            None if the destination is not allowed by the federation whitelist.
+            Otherwise a PerDestinationQueue for this destination.
         """
-        if (
-            self.hs.config.federation.federation_domain_whitelist is not None
-            and destination not in self.hs.config.federation.federation_domain_whitelist
+        if not self.hs.config.federation.is_domain_allowed_according_to_federation_whitelist(
+            destination
         ):
             return None
 
@@ -738,8 +737,9 @@ class FederationSender(AbstractFederationSender):
         destinations = [
             d
             for d in destinations
-            if self.hs.config.federation.federation_domain_whitelist is None
-            or d in self.hs.config.federation.federation_domain_whitelist
+            if self.hs.config.federation.is_domain_allowed_according_to_federation_whitelist(
+                d
+            )
         ]
         await self.store.store_destination_rooms_entries(
             destinations,
@@ -1067,9 +1067,8 @@ class FederationSender(AbstractFederationSender):
                 d
                 for d in destinations_to_wake
                 if self._federation_shard_config.should_handle(self._instance_name, d)
-                and (
-                    self.hs.config.federation.federation_domain_whitelist is None
-                    or d in self.hs.config.federation.federation_domain_whitelist
+                and self.hs.config.federation.is_domain_allowed_according_to_federation_whitelist(
+                    d
                 )
             ]
 
