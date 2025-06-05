@@ -806,7 +806,7 @@ A response body like the following is returned:
         }, {
             "delete_id": "delete_id2",
             "room_id": "!roomid:example.com",
-            "status": "purging",
+            "status": "active",
             "shutdown_room": {
                 "kicked_users": [
                     "@foobar:example.com"
@@ -843,7 +843,7 @@ A response body like the following is returned:
 
 ```json
 {
-    "status": "purging",
+    "status": "active",
     "delete_id": "bHkCNQpHqOaFhPtK",
     "room_id": "!roomid:example.com",
     "shutdown_room": {
@@ -876,8 +876,8 @@ The following fields are returned in the JSON response body:
   - `delete_id` - The ID for this purge
   - `room_id` - The ID of the room being deleted
   - `status` - The status will be one of:
-    - `shutting_down` - The process is removing users from the room.
-    - `purging` - The process is purging the room and event data from database.
+    - `scheduled` - The deletion is waiting to be started
+    - `active` - The process is purging the room and event data from database.
     - `complete` - The process has completed successfully.
     - `failed` - The process is aborted, an error has occurred.
   - `error` - A string that shows an error message if `status` is `failed`.
