@@ -53,6 +53,7 @@ from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
+from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
     JsonDict,
     Requester,
@@ -914,6 +915,21 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     errcode=block_invite_result[0],
                     additional_fields=block_invite_result[1],
                 )
+
+            # check the invitee's configuration and apply rules. Admins on the server can bypass.
+            if not is_requester_admin:
+                invite_config = await self.store.get_invite_config_for_user(target_id)
+                rule = invite_config.get_invite_rule(requester.user.to_string())
+                if rule == InviteRule.BLOCK:
+                    logger.info(
+                        f"Automatically rejecting invite from {target_id} due to the the invite filtering rules of {requester.user}"
+                    )
+                    raise SynapseError(
+                        403,
+                        "You are not permitted to invite this user.",
+                        errcode=Codes.INVITE_BLOCKED,
+                    )
+                # InviteRule.IGNORE is handled at the sync layer.
 
         # An empty prev_events list is allowed as long as the auth_event_ids are present
         if prev_event_ids is not None:

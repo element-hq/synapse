@@ -43,6 +43,7 @@ try:
 
     USE_ICU = True
 except ModuleNotFoundError:
+    # except ModuleNotFoundError:
     USE_ICU = False
 
 from synapse.api.errors import StoreError
