@@ -756,8 +756,11 @@ class FederationSender(AbstractFederationSender):
 
         for destination in destinations:
             queue = self._get_per_destination_queue(destination)
-            if queue is not None:
-                queue.send_pdu(pdu)
+            # We expect `queue` to not be None as we already filtered out
+            # non-whitelisted destinations above.
+            assert queue is not None
+
+            queue.send_pdu(pdu)
 
     async def send_read_receipt(self, receipt: ReadReceipt) -> None:
         """Send a RR to any other servers in the room
