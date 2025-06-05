@@ -501,7 +501,7 @@ class TestInviteFiltering(FederatingHomeserverTestCase):
             SynapseError,
         ).value
         self.assertEqual(f.code, 403)
-    self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
 
     @override_config({"experimental_features": {"msc4155_enabled": False}})
     def test_msc4155_disabled_allow_invite_local(self) -> None:
