@@ -3,6 +3,7 @@ from unittest import TestCase as StdlibTestCase
 import yaml
 
 from synapse.config import ConfigError
+from synapse.config._base import RootConfig
 from synapse.config.api import ApiConfig
 from synapse.types.state import StateFilter
 
@@ -19,7 +20,7 @@ DEFAULT_PREJOIN_STATE_PAIRS = {
 
 class TestRoomPrejoinState(StdlibTestCase):
     def read_config(self, source: str) -> ApiConfig:
-        config = ApiConfig()
+        config = ApiConfig(RootConfig())
         config.read_config(yaml.safe_load(source))
         return config
 

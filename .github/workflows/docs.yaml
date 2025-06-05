@@ -64,7 +64,7 @@ jobs:
         run: echo 'window.SYNAPSE_VERSION = "${{ needs.pre.outputs.branch-version }}";' > ./docs/website_files/version.js
 
       - name: Setup python
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.x"
 
@@ -77,6 +77,18 @@ jobs:
         run: |
           mdbook build
           cp book/welcome_and_overview.html book/index.html
+
+      - name: Prepare and publish schema files
+        run: |
+          sudo apt-get update && sudo apt-get install -y yq
+          mkdir -p book/schema
+          # Remove developer notice before publishing.
+          rm schema/v*/Do\ not\ edit\ files\ in\ this\ folder
+          # Copy schema files that are independent from current Synapse version.
+          cp -r -t book/schema schema/v*/
+          # Convert config schema from YAML source file to JSON.
+          yq < schema/synapse-config.schema.yaml \
+            > book/schema/synapse-config.schema.json
 
       # Deploy to the target directory.
       - name: Deploy to gh pages

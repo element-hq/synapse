@@ -484,6 +484,32 @@ class OidcHandlerTestCase(HomeserverTestCase):
         self.assertEqual(code_verifier, "")
         self.assertEqual(redirect, "http://client/redirect")
 
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "passthrough_authorization_parameters": ["additional_parameter"],
+            }
+        }
+    )
+    def test_passthrough_parameters(self) -> None:
+        """The redirect request has additional parameters, one is authorized, one is not"""
+        req = Mock(spec=["cookies", "args"])
+        req.cookies = []
+        req.args = {}
+        req.args[b"additional_parameter"] = ["a_value".encode("utf-8")]
+        req.args[b"not_authorized_parameter"] = ["any".encode("utf-8")]
+
+        url = urlparse(
+            self.get_success(
+                self.provider.handle_redirect_request(req, b"http://client/redirect")
+            )
+        )
+
+        params = parse_qs(url.query)
+        self.assertEqual(params["additional_parameter"], ["a_value"])
+        self.assertNotIn("not_authorized_parameters", params)
+
     @override_config({"oidc_config": DEFAULT_CONFIG})
     def test_redirect_request_with_code_challenge(self) -> None:
         """The redirect request has the right arguments & generates a valid session cookie."""
@@ -1007,6 +1033,50 @@ class OidcHandlerTestCase(HomeserverTestCase):
         {
             "oidc_config": {
                 **DEFAULT_CONFIG,
+                "redirect_uri": TEST_REDIRECT_URI,
+            }
+        }
+    )
+    def test_code_exchange_ignores_access_token(self) -> None:
+        """
+        Code exchange completes successfully and doesn't validate the `at_hash`
+        (access token hash) field of an ID token when the access token isn't
+        going to be used.
+
+        The access token won't be used in this test because Synapse (currently)
+        only needs it to fetch a user's metadata if it isn't included in the ID
+        token itself.
+
+        Because we have included "openid" in the requested scopes for this IdP
+        (see `SCOPES`), user metadata is be included in the ID token. Thus the
+        access token isn't needed, and it's unnecessary for Synapse to validate
+        the access token.
+
+        This is a regression test for a situation where an upstream identity
+        provider was providing an invalid `at_hash` value, which Synapse errored
+        on, yet Synapse wasn't using the access token for anything.
+        """
+        # Exchange the code against the fake IdP.
+        userinfo = {
+            "sub": "foo",
+            "username": "foo",
+            "phone": "1234567",
+        }
+        with self.fake_server.id_token_override(
+            {
+                "at_hash": "invalid-hash",
+            }
+        ):
+            request, _ = self.start_authorization(userinfo)
+            self.get_success(self.handler.handle_oidc_callback(request))
+
+        # If no error was rendered, then we have success.
+        self.render_error.assert_not_called()
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
                 "user_mapping_provider": {
                     "module": __name__ + ".TestMappingProviderExtra"
                 },
@@ -1383,13 +1453,88 @@ class OidcHandlerTestCase(HomeserverTestCase):
             }
         }
     )
-    def test_attribute_requirements_one_of(self) -> None:
+    def test_attribute_requirements_one_of_succeeds(self) -> None:
         """Test that auth succeeds if userinfo attribute has multiple values and CONTAINS required value"""
         # userinfo with "test": ["bar"] attribute should succeed.
         userinfo = {
             "sub": "tester",
             "username": "tester",
             "test": ["bar"],
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+
+        # check that the auth handler got called as expected
+        self.complete_sso_login.assert_called_once_with(
+            "@tester:test",
+            self.provider.idp_id,
+            request,
+            ANY,
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
+        )
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [
+                    {"attribute": "test", "one_of": ["foo", "bar"]}
+                ],
+            }
+        }
+    )
+    def test_attribute_requirements_one_of_fails(self) -> None:
+        """Test that auth fails if userinfo attribute has multiple values yet
+        DOES NOT CONTAIN a required value
+        """
+        # userinfo with "test": ["something else"] attribute should fail.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "test": ["something else"],
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [{"attribute": "test"}],
+            }
+        }
+    )
+    def test_attribute_requirements_does_not_exist(self) -> None:
+        """OIDC login fails if the required attribute does not exist in the OIDC userinfo response."""
+        # userinfo lacking "test" attribute should fail.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+        }
+        request, _ = self.start_authorization(userinfo)
+        self.get_success(self.handler.handle_oidc_callback(request))
+        self.complete_sso_login.assert_not_called()
+
+    @override_config(
+        {
+            "oidc_config": {
+                **DEFAULT_CONFIG,
+                "attribute_requirements": [{"attribute": "test"}],
+            }
+        }
+    )
+    def test_attribute_requirements_exist(self) -> None:
+        """OIDC login succeeds if the required attribute exist (regardless of value)
+        in the OIDC userinfo response.
+        """
+        # userinfo with "test" attribute and random value should succeed.
+        userinfo = {
+            "sub": "tester",
+            "username": "tester",
+            "test": random_string(5),  # value does not matter
         }
         request, _ = self.start_authorization(userinfo)
         self.get_success(self.handler.handle_oidc_callback(request))

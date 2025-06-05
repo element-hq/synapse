@@ -244,14 +244,47 @@ class SlidingSyncRoomLists:
         # Note: this won't include rooms the user has left themselves. We add back
         # `newly_left` rooms below. This is more efficient than fetching all rooms and
         # then filtering out the old left rooms.
-        room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
-            user_id
+        room_membership_for_user_map = (
+            await self.store.get_sliding_sync_rooms_for_user_from_membership_snapshots(
+                user_id
+            )
         )
+        # To play nice with the rewind logic below, we need to go fetch the rooms the
+        # user has left themselves but only if it changed after the `to_token`.
+        #
+        # If a leave happens *after* the token range, we may have still been joined (or
+        # any non-self-leave which is relevant to sync) to the room before so we need to
+        # include it in the list of potentially relevant rooms and apply our rewind
+        # logic (outside of this function) to see if it's actually relevant.
+        #
+        # We do this separately from
+        # `get_sliding_sync_rooms_for_user_from_membership_snapshots` as those results
+        # are cached and the `to_token` isn't very cache friendly (people are constantly
+        # requesting with new tokens) so we separate it out here.
+        self_leave_room_membership_for_user_map = (
+            await self.store.get_sliding_sync_self_leave_rooms_after_to_token(
+                user_id, to_token
+            )
+        )
+        if self_leave_room_membership_for_user_map:
+            # FIXME: It would be nice to avoid this copy but since
+            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
+            # can't return a mutable value like a `dict`. We make the copy to get a
+            # mutable dict that we can change. We try to only make a copy when necessary
+            # (if we actually need to change something) as in most cases, the logic
+            # doesn't need to run.
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            room_membership_for_user_map.update(self_leave_room_membership_for_user_map)
 
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
         if ignored_users:
-            # TODO: It would be nice to avoid these copies
+            # FIXME: It would be nice to avoid this copy but since
+            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
+            # can't return a mutable value like a `dict`. We make the copy to get a
+            # mutable dict that we can change. We try to only make a copy when necessary
+            # (if we actually need to change something) as in most cases, the logic
+            # doesn't need to run.
             room_membership_for_user_map = dict(room_membership_for_user_map)
             # Make a copy so we don't run into an error: `dictionary changed size during
             # iteration`, when we remove items
@@ -263,11 +296,23 @@ class SlidingSyncRoomLists:
                 ):
                     room_membership_for_user_map.pop(room_id, None)
 
+        (
+            newly_joined_room_ids,
+            newly_left_room_map,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, from_token=from_token, to_token=to_token
+        )
+
         changes = await self._get_rewind_changes_to_current_membership_to_token(
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
         if changes:
-            # TODO: It would be nice to avoid these copies
+            # FIXME: It would be nice to avoid this copy but since
+            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
+            # can't return a mutable value like a `dict`. We make the copy to get a
+            # mutable dict that we can change. We try to only make a copy when necessary
+            # (if we actually need to change something) as in most cases, the logic
+            # doesn't need to run.
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
@@ -278,7 +323,7 @@ class SlidingSyncRoomLists:
                 existing_room = room_membership_for_user_map.get(room_id)
                 if existing_room is not None:
                     # Update room membership events to the point in time of the `to_token`
-                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                    room_for_user = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=change.sender,
                         membership=change.membership,
@@ -290,18 +335,18 @@ class SlidingSyncRoomLists:
                         room_type=existing_room.room_type,
                         is_encrypted=existing_room.is_encrypted,
                     )
-
-        (
-            newly_joined_room_ids,
-            newly_left_room_map,
-        ) = await self._get_newly_joined_and_left_rooms(
-            user_id, from_token=from_token, to_token=to_token
-        )
-        dm_room_ids = await self._get_dm_rooms_for_user(user_id)
+                    if filter_membership_for_sync(
+                        user_id=user_id,
+                        room_membership_for_user=room_for_user,
+                        newly_left=room_id in newly_left_room_map,
+                    ):
+                        room_membership_for_user_map[room_id] = room_for_user
+                    else:
+                        room_membership_for_user_map.pop(room_id, None)
 
         # Add back `newly_left` rooms (rooms left in the from -> to token range).
         #
-        # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include
+        # We do this because `get_sliding_sync_rooms_for_user_from_membership_snapshots(...)` doesn't include
         # rooms that the user left themselves as it's more efficient to add them back
         # here than to fetch all rooms and then filter out the old left rooms. The user
         # only leaves a room once in a blue moon so this barely needs to run.
@@ -310,7 +355,12 @@ class SlidingSyncRoomLists:
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
         if missing_newly_left_rooms:
-            # TODO: It would be nice to avoid these copies
+            # FIXME: It would be nice to avoid this copy but since
+            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
+            # can't return a mutable value like a `dict`. We make the copy to get a
+            # mutable dict that we can change. We try to only make a copy when necessary
+            # (if we actually need to change something) as in most cases, the logic
+            # doesn't need to run.
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 newly_left_room_for_user = newly_left_room_map[room_id]
@@ -327,14 +377,21 @@ class SlidingSyncRoomLists:
                 # If the membership exists, it's just a normal user left the room on
                 # their own
                 if newly_left_room_for_user_sliding_sync is not None:
-                    room_membership_for_user_map[room_id] = (
-                        newly_left_room_for_user_sliding_sync
-                    )
+                    if filter_membership_for_sync(
+                        user_id=user_id,
+                        room_membership_for_user=newly_left_room_for_user_sliding_sync,
+                        newly_left=room_id in newly_left_room_map,
+                    ):
+                        room_membership_for_user_map[room_id] = (
+                            newly_left_room_for_user_sliding_sync
+                        )
+                    else:
+                        room_membership_for_user_map.pop(room_id, None)
 
                     change = changes.get(room_id)
                     if change is not None:
                         # Update room membership events to the point in time of the `to_token`
-                        room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                        room_for_user = RoomsForUserSlidingSync(
                             room_id=room_id,
                             sender=change.sender,
                             membership=change.membership,
@@ -346,6 +403,14 @@ class SlidingSyncRoomLists:
                             room_type=newly_left_room_for_user_sliding_sync.room_type,
                             is_encrypted=newly_left_room_for_user_sliding_sync.is_encrypted,
                         )
+                        if filter_membership_for_sync(
+                            user_id=user_id,
+                            room_membership_for_user=room_for_user,
+                            newly_left=room_id in newly_left_room_map,
+                        ):
+                            room_membership_for_user_map[room_id] = room_for_user
+                        else:
+                            room_membership_for_user_map.pop(room_id, None)
 
                 # If we are `newly_left` from the room but can't find any membership,
                 # then we have been "state reset" out of the room
@@ -367,7 +432,7 @@ class SlidingSyncRoomLists:
                         newly_left_room_for_user.event_pos.to_room_stream_token(),
                     )
 
-                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                    room_for_user = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=newly_left_room_for_user.sender,
                         membership=newly_left_room_for_user.membership,
@@ -378,6 +443,16 @@ class SlidingSyncRoomLists:
                         room_type=room_type,
                         is_encrypted=is_encrypted,
                     )
+                    if filter_membership_for_sync(
+                        user_id=user_id,
+                        room_membership_for_user=room_for_user,
+                        newly_left=room_id in newly_left_room_map,
+                    ):
+                        room_membership_for_user_map[room_id] = room_for_user
+                    else:
+                        room_membership_for_user_map.pop(room_id, None)
+
+        dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
         if sync_config.lists:
             sync_room_map = room_membership_for_user_map
@@ -493,7 +568,12 @@ class SlidingSyncRoomLists:
 
         if sync_config.room_subscriptions:
             with start_active_span("assemble_room_subscriptions"):
-                # TODO: It would be nice to avoid these copies
+                # FIXME: It would be nice to avoid this copy but since
+                # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
+                # can't return a mutable value like a `dict`. We make the copy to get a
+                # mutable dict that we can change. We try to only make a copy when necessary
+                # (if we actually need to change something) as in most cases, the logic
+                # doesn't need to run.
                 room_membership_for_user_map = dict(room_membership_for_user_map)
 
                 # Find which rooms are partially stated and may need to be filtered out
@@ -1040,7 +1120,7 @@ class SlidingSyncRoomLists:
         (
             newly_joined_room_ids,
             newly_left_room_map,
-        ) = await self._get_newly_joined_and_left_rooms(
+        ) = await self._get_newly_joined_and_left_rooms_fallback(
             user_id, to_token=to_token, from_token=from_token
         )
 
@@ -1084,6 +1164,53 @@ class SlidingSyncRoomLists:
 
     @trace
     async def _get_newly_joined_and_left_rooms(
+        self,
+        user_id: str,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
+        """Fetch the sets of rooms that the user newly joined or left in the
+        given token range.
+
+        Note: there may be rooms in the newly left rooms where the user was
+        "state reset" out of the room, and so that room would not be part of the
+        "current memberships" of the user.
+
+        Returns:
+            A 2-tuple of newly joined room IDs and a map of newly_left room
+            IDs to the `RoomsForUserStateReset` entry.
+
+            We're using `RoomsForUserStateReset` but that doesn't necessarily mean the
+            user was state reset of the rooms. It's just that the `event_id`/`sender`
+            are optional and we can't tell the difference between the server leaving the
+            room when the user was the last person participating in the room and left or
+            was state reset out of the room. To actually check for a state reset, you
+            need to check if a membership still exists in the room.
+        """
+
+        newly_joined_room_ids: Set[str] = set()
+        newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
+
+        if not from_token:
+            return newly_joined_room_ids, newly_left_room_map
+
+        changes = await self.store.get_sliding_sync_membership_changes(
+            user_id,
+            from_key=from_token.room_key,
+            to_key=to_token.room_key,
+            excluded_room_ids=set(self.rooms_to_exclude_globally),
+        )
+
+        for room_id, entry in changes.items():
+            if entry.membership == Membership.JOIN:
+                newly_joined_room_ids.add(room_id)
+            elif entry.membership == Membership.LEAVE:
+                newly_left_room_map[room_id] = entry
+
+        return newly_joined_room_ids, newly_left_room_map
+
+    @trace
+    async def _get_newly_joined_and_left_rooms_fallback(
         self,
         user_id: str,
         to_token: StreamToken,
