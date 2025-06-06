@@ -73,7 +73,7 @@ A logger for debugging the user registration process.
 
 Because this can log sensitive information (such as passwords and
 `registration_shared_secret`), we want people to explictly opt-in before seeing anything
-in the logs. Requires explicitely setting `synapse.rest.admin.users.registration_debug`
+in the logs. Requires explicitly setting `synapse.rest.admin.users.registration_debug`
 in the logging configuration and does not inherit the log level from the parent logger.
 """
 # Restore the original logger class
