@@ -26,6 +26,11 @@ The limiters that are currently supported are:
 - `rc_invites.per_user`
 - `rc_invites.per_issuer`
 
+The `RatelimitOverride` return type has the following fields:
+
+- `per_second: float`. The number of actions that can be performed in a second. `0.0` means that ratelimiting is disabled.
+- `burst_count: int`. The number of actions that can be performed before being limited.
+
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `None`, Synapse falls through to the next one. The value of the first
 callback that does not return `None` will be used. If this happens, Synapse will not call

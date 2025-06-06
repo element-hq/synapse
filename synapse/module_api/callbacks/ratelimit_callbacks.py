@@ -31,7 +31,7 @@ class RatelimitOverride:
     """Represents a ratelimit being overridden."""
 
     per_second: float
-    """The number of actions that can be performed in a second. `0.0` mean that ratelimiting is disabled."""
+    """The number of actions that can be performed in a second. `0.0` means that ratelimiting is disabled."""
     burst_count: int
     """How many actions that can be performed before being limited."""
 
