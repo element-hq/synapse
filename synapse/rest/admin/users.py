@@ -59,12 +59,51 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-user_registration_debug_logger = logging.getLogger(
+
+class ExplicitlyConfiguredLogger(logging.Logger):
+    """
+    A custom logger class that only allows logging if the logger is explicitly
+    configured (does not inherit log level from parent).
+    """
+
+    def __init__(self, name, level=logging.NOTSET):
+        super().__init__(name, level)
+
+        self.addFilter(self._filter)
+
+    def _filter(self, record: logging.LogRecord) -> bool:
+        """
+        Only allow logging if the logger is explicitly configured.
+        """
+        # Check if the logger is explicitly configured
+        explicitly_configured_logger = self.manager.loggerDict.get(self.name)
+
+        log_level = logging.NOTSET
+        if isinstance(explicitly_configured_logger, logging.Logger):
+            log_level = explicitly_configured_logger.level
+
+        print(
+            "asdf log_level=%s record_level=%s -> %s",
+            log_level,
+            record.levelno,
+            record.levelno >= log_level,
+        )
+
+        # If the logger is not configured, we don't log anything
+        if log_level == logging.NOTSET:
+            return False
+
+        # Otherwise, follow the normal logging behavior
+        return record.levelno >= log_level
+
+
+user_registration_debug_logger = ExplicitlyConfiguredLogger(
     "synapse.rest.admin.users.registration_debug"
 )
 """
 A logger for debugging the user registration process. This is separate from the main
-logger as it logs sensitive information such as passwords and `registration_shared_secret`.
+logger as it logs sensitive information such as passwords and
+`registration_shared_secret`.
 """
 
 
@@ -98,6 +137,9 @@ class UsersRestServletV2(RestServlet):
         self.admin_handler = hs.get_admin_handler()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
         self._msc3861_enabled = hs.config.experimental.msc3861.enabled
+
+        user_registration_debug_logger.warning("asdf warn test")
+        user_registration_debug_logger.debug("asdf debug test")
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
