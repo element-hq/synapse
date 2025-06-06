@@ -1,0 +1,1 @@
+Migrate `assertEquals` (deprecated) to `assertEqual` in the tests. Contributed by @emmanuel-ferdman.
