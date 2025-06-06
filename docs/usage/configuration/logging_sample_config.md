@@ -14,9 +14,6 @@ It should be named `<SERVERNAME>.log.config` by default.
 Hint: If you're looking for a guide on what each of the fields in the "Processed request" log lines mean,
 see [Request log format](../administration/request_log.md).
 
-Warn: Logging at the `DEBUG` level is very verbose and will include sensitive
-information such as access tokens, passwords, and secrets.
-
 ```yaml
 {{#include ../../sample_log_config.yaml}}
 ```
