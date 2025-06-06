@@ -166,7 +166,7 @@ Synapse is running. Ratelimit callbacks can be registered using the module API's
 <p>The available ratelimit callbacks are:</p>
 <h3 id="get_ratelimit_override_for_user"><a class="header" href="#get_ratelimit_override_for_user"><code>get_ratelimit_override_for_user</code></a></h3>
 <p><em>First introduced in Synapse v1.132.0</em></p>
-<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; Optional[RatelimitOverride]
+<pre><code class="language-python">async def get_ratelimit_override_for_user(user: str, limiter_name: str) -&gt; Optional[synapse.module_api.RatelimitOverride]
 </code></pre>
 <p>Called when constructing a ratelimiter of a particular type for a user. The module can
 return a <code>messages_per_second</code> and <code>burst_count</code> to be used, or <code>None</code> if
@@ -178,6 +178,11 @@ value.</p>
 <li><code>rc_invites.per_room</code></li>
 <li><code>rc_invites.per_user</code></li>
 <li><code>rc_invites.per_issuer</code></li>
+</ul>
+<p>The <code>RatelimitOverride</code> return type has the following fields:</p>
+<ul>
+<li><code>per_second: float</code>. The number of actions that can be performed in a second. <code>0.0</code> means that ratelimiting is disabled.</li>
+<li><code>burst_count: int</code>. The number of actions that can be performed before being limited.</li>
 </ul>
 <p>If multiple modules implement this callback, they will be considered in order. If a
 callback returns <code>None</code>, Synapse falls through to the next one. The value of the first
