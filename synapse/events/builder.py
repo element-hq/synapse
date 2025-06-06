@@ -319,7 +319,6 @@ def create_local_event_from_event_dict(
     if format_version == EventFormatVersions.ROOM_V1_V2:
         event_dict["event_id"] = _create_event_id(clock, hostname)
 
-    event_dict["origin"] = hostname
     event_dict.setdefault("origin_server_ts", time_now)
 
     event_dict.setdefault("unsigned", {})
