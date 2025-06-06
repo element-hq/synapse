@@ -52,6 +52,7 @@ from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, TaskStatus, UserID
 from synapse.types.rest import RequestBodyModel
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -60,51 +61,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ExplicitlyConfiguredLogger(logging.Logger):
-    """
-    A custom logger class that only allows logging if the logger is explicitly
-    configured (does not inherit log level from parent).
-    """
-
-    def __init__(self, name, level=logging.NOTSET):
-        super().__init__(name, level)
-
-        self.addFilter(self._filter)
-
-    def _filter(self, record: logging.LogRecord) -> bool:
-        """
-        Only allow logging if the logger is explicitly configured.
-        """
-        # Check if the logger is explicitly configured
-        explicitly_configured_logger = self.manager.loggerDict.get(self.name)
-
-        log_level = logging.NOTSET
-        if isinstance(explicitly_configured_logger, logging.Logger):
-            log_level = explicitly_configured_logger.level
-
-        print(
-            "asdf log_level=%s record_level=%s -> %s",
-            log_level,
-            record.levelno,
-            record.levelno >= log_level,
-        )
-
-        # If the logger is not configured, we don't log anything
-        if log_level == logging.NOTSET:
-            return False
-
-        # Otherwise, follow the normal logging behavior
-        return record.levelno >= log_level
-
-
-user_registration_debug_logger = ExplicitlyConfiguredLogger(
+original_logger_class = logging.getLoggerClass()
+# Use the custom logger class that only allows logging if the logger is explicitly
+# configured.
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+user_registration_debug_logger = logging.getLogger(
     "synapse.rest.admin.users.registration_debug"
 )
 """
 A logger for debugging the user registration process. This is separate from the main
 logger as it logs sensitive information such as passwords and
-`registration_shared_secret`.
+`registration_shared_secret`
+
+Can only be enabled by explicitly setting `synapse.rest.admin.users.registration_debug`
+in the logging configuration.
 """
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 
 class UsersRestServletV2(RestServlet):

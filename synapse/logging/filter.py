@@ -21,6 +21,8 @@
 import logging
 from typing import Literal
 
+root_logger = logging.getLogger()
+
 
 class MetadataFilter(logging.Filter):
     """Logging filter that adds constant values to each record.
