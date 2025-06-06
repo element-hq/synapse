@@ -53,6 +53,7 @@ class AppservicePingRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.as_api = hs.get_application_service_api()
+        self.scheduler = hs.get_application_service_scheduler()
         self.auth = hs.get_auth()
 
     async def on_POST(
@@ -85,6 +86,10 @@ class AppservicePingRestServlet(RestServlet):
         start = time.monotonic()
         try:
             await self.as_api.ping(requester.app_service, txn_id)
+
+            # We got a OK response, so if the AS needs to be recovered then lets recover it now.
+            # This sets off a task in the background and so is safe to execute and forget.
+            self.scheduler.txn_ctrl.force_retry(requester.app_service)
         except RequestTimedOutError as e:
             raise SynapseError(
                 HTTPStatus.GATEWAY_TIMEOUT,
