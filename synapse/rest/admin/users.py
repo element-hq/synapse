@@ -62,19 +62,19 @@ logger = logging.getLogger(__name__)
 
 
 original_logger_class = logging.getLoggerClass()
-# Use the custom logger class that only allows logging if the logger is explicitly
-# configured.
+# Because this can log sensitive information, use a custom logger class that only allows
+# logging if the logger is explicitly configured.
 logging.setLoggerClass(ExplicitlyConfiguredLogger)
 user_registration_debug_logger = logging.getLogger(
     "synapse.rest.admin.users.registration_debug"
 )
 """
-A logger for debugging the user registration process. This is separate from the main
-logger as it logs sensitive information such as passwords and
-`registration_shared_secret`
+A logger for debugging the user registration process.
 
-Can only be enabled by explicitly setting `synapse.rest.admin.users.registration_debug`
-in the logging configuration.
+Because this can log sensitive information (such as passwords and
+`registration_shared_secret`), we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitely setting `synapse.rest.admin.users.registration_debug`
+in the logging configuration and does not inherit the log level from the parent logger.
 """
 # Restore the original logger class
 logging.setLoggerClass(original_logger_class)
