@@ -44,12 +44,6 @@ from tests.server import ThreadedMemoryReactorClock
 from tests.test_utils.event_injection import inject_member_event
 from tests.unittest import HomeserverTestCase, override_config
 
-try:
-    import icu
-except ImportError:
-    icu = None  # type: ignore
-
-
 ALICE = "@alice:a"
 BOB = "@bob:b"
 BOBBY = "@bobby:a"
@@ -451,11 +445,12 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
 
-        self._restore_use_icu = user_directory.USE_ICU
-        user_directory.USE_ICU = self.use_icu
+        self._restore_parse_words = user_directory._parse_words
+        if not self.use_icu:
+            user_directory._parse_words = user_directory._parse_words_with_regex
 
     def tearDown(self) -> None:
-        user_directory.USE_ICU = self._restore_use_icu
+        user_directory._parse_words = self._restore_parse_words
 
     def test_search_user_dir(self) -> None:
         # normally when alice searches the directory she should just find
@@ -651,14 +646,8 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
 class UserDirectoryStoreTestCaseWithIcu(UserDirectoryStoreTestCase):
     use_icu = True
 
-    if not icu:
-        skip = "Requires PyICU"
-
 
 class UserDirectoryICUTestCase(HomeserverTestCase):
-    if not icu:
-        skip = "Requires PyICU"
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.user_dir_helper = GetUserDirectoryTables(self.store)

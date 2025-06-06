@@ -117,6 +117,13 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.131.0
+
+## ICU bundled with Synapse
+
+Synapse now uses the Rust `icu` library for improved user search. Installing the
+native ICU library on your system is no longer required.
+
 # Upgrading to v1.130.0
 
 ## Documented endpoint which can be delegated to a federation worker
@@ -516,11 +523,11 @@ For all other installation methods, no acction is required.
 This version introduces optional support for an [improved user search dealing with Unicode characters](https://github.com/matrix-org/synapse/pull/14464).
 
 If you want to take advantage of this feature you need to install PyICU,
-the ICU native dependency and its development headers
-so that PyICU can build since no prebuilt wheels are available.
+the ICU native dependency and its development headers so that PyICU can build
+since no prebuilt wheels are available.
 
-You can follow [the PyICU documentation](https://pypi.org/project/PyICU/) to do so,
-and then do `pip install matrix-synapse[user-search]` for a PyPI install.
+You can follow [the PyICU documentation](https://pypi.org/project/PyICU/) to do
+so, and then do `pip install matrix-synapse[user-search]` for a PyPI install.
 
 Docker images and Debian packages need nothing specific as they already
 include or specify ICU as an explicit dependency.
