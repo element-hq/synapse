@@ -477,7 +477,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         ) -> Optional[RatelimitOverride]:
             if user_id == test_user_id:
                 return RatelimitOverride(
-                    messages_per_second=0.1,
+                    per_second=0.1,
                     burst_count=10,
                 )
             return None

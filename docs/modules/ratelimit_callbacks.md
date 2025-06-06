@@ -11,7 +11,7 @@ The available ratelimit callbacks are:
 _First introduced in Synapse v1.132.0_
 
 ```python
-async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> Optional[RatelimitOverride]
+async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> Optional[synapse.module_api.RatelimitOverride]
 ```
 
 Called when constructing a ratelimiter of a particular type for a user. The module can

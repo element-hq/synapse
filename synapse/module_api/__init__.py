@@ -96,6 +96,7 @@ from synapse.module_api.callbacks.media_repository_callbacks import (
 )
 from synapse.module_api.callbacks.ratelimit_callbacks import (
     GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
+    RatelimitOverride,
 )
 from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_EVENT_FOR_SPAM_CALLBACK,
@@ -197,6 +198,7 @@ __all__ = [
     "ProfileInfo",
     "RoomAlias",
     "UserProfile",
+    "RatelimitOverride",
 ]
 
 logger = logging.getLogger(__name__)
@@ -212,16 +214,6 @@ class UserIpAndAgent:
     user_agent: str
     # The time at which this user agent/ip was last seen.
     last_seen: int
-
-
-@attr.s(auto_attribs=True)
-class RatelimitOverride:
-    """Represents a ratelimit being overridden."""
-
-    messages_per_second: float
-    """The number of actions that can be performed in a second. `0.0` mean that ratelimiting is disabled."""
-    burst_count: int
-    """How many actions that can be performed before being limited."""
 
 
 def cached(
