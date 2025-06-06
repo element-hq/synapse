@@ -25,13 +25,6 @@ class ExplicitlyConfiguredLogger(logging.Logger):
         if isinstance(explicitly_configured_logger, logging.Logger):
             log_level = explicitly_configured_logger.level
 
-        print(
-            "asdf log_level=%s record_level=%s -> %s",
-            log_level,
-            record.levelno,
-            record.levelno >= log_level,
-        )
-
         # If the logger is not configured, we don't log anything
         if log_level == logging.NOTSET:
             return False

@@ -42,6 +42,7 @@ from synapse.http.servlet import (
     parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
@@ -52,7 +53,6 @@ from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, TaskStatus, UserID
 from synapse.types.rest import RequestBodyModel
-from synapse.logging.loggers import ExplicitlyConfiguredLogger
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -110,9 +110,6 @@ class UsersRestServletV2(RestServlet):
         self.admin_handler = hs.get_admin_handler()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
         self._msc3861_enabled = hs.config.experimental.msc3861.enabled
-
-        user_registration_debug_logger.warning("asdf warn test")
-        user_registration_debug_logger.debug("asdf debug test")
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
