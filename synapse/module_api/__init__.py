@@ -96,6 +96,7 @@ from synapse.module_api.callbacks.media_repository_callbacks import (
 )
 from synapse.module_api.callbacks.ratelimit_callbacks import (
     GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
+    RatelimitOverride,
 )
 from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_EVENT_FOR_SPAM_CALLBACK,
@@ -197,6 +198,7 @@ __all__ = [
     "ProfileInfo",
     "RoomAlias",
     "UserProfile",
+    "RatelimitOverride",
 ]
 
 logger = logging.getLogger(__name__)
