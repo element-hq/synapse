@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2023 Tulir Asokan
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
