@@ -52,6 +52,7 @@ from synapse.events.snapshot import EventContext
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.state import POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
+from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import ProfileInfo
 from synapse.synapse_rust.push import FilteredPushRules, PushRuleEvaluator
 from synapse.types import JsonValue
@@ -191,9 +192,17 @@ class BulkPushRuleEvaluator:
 
         # if this event is an invite event, we may need to run rules for the user
         # who's been invited, otherwise they won't get told they've been invited
-        if event.type == EventTypes.Member and event.membership == Membership.INVITE:
+        if (
+            event.is_state()
+            and event.type == EventTypes.Member
+            and event.membership == Membership.INVITE
+        ):
             invited = event.state_key
-            if invited and self.hs.is_mine_id(invited) and invited not in local_users:
+            invite_config = await self.store.get_invite_config_for_user(invited)
+            if invite_config.get_invite_rule(event.sender) != InviteRule.ALLOW:
+                # Invite was blocked or ignored, never notify.
+                return {}
+            if self.hs.is_mine_id(invited) and invited not in local_users:
                 local_users.append(invited)
 
         if not local_users:

@@ -1,1 +1,0 @@
-Add lint to ensure we don't add a `CREATE/DROP INDEX` in a schema delta.
