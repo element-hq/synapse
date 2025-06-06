@@ -139,3 +139,6 @@ cargo-fmt
 
 # Ensure type hints are correct.
 mypy
+
+# Generate configuration documentation from the JSON Schema
+./scripts-dev/gen_config_documentation.py schema/synapse-config.schema.yaml > docs/usage/configuration/config_documentation.md
