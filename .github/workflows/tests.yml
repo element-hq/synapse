@@ -525,6 +525,11 @@ jobs:
       - name: Run SyTest
         run: /bootstrap.sh synapse
         working-directory: /src
+        # Prevent failures of this configuration from causing all of CI to
+        # marked as failed. This is useful for testing a new Synapse configuration
+        # in anger without causing sporatic CI failures.
+        continue-on-error: ${{ matrix.job.failure_allowed || false }}
+
       - name: Summarise results.tap
         if: ${{ always() }}
         run: /sytest/scripts/tap_to_gha.pl /logs/results.tap
