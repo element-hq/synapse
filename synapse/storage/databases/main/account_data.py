@@ -34,6 +34,7 @@ from typing import (
 )
 
 from synapse.api.constants import AccountDataTypes
+from synapse.api.errors import Codes, SynapseError
 from synapse.replication.tcp.streams import AccountDataStream
 from synapse.storage._base import db_to_json
 from synapse.storage.database import (
@@ -779,6 +780,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             currently_ignored_users = set(ignored_users_content)
         else:
             currently_ignored_users = set()
+
+        if user_id in currently_ignored_users:
+            raise SynapseError(400, "You cannot ignore yourself", Codes.INVALID_PARAM)
 
         # If the data has not changed, nothing to do.
         if previously_ignored_users == currently_ignored_users:
