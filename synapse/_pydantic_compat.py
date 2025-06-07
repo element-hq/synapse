@@ -48,6 +48,7 @@ if TYPE_CHECKING or HAS_PYDANTIC_V2:
         conint,
         constr,
         parse_obj_as,
+        root_validator,
         validator,
     )
     from pydantic.v1.error_wrappers import ErrorWrapper
@@ -68,6 +69,7 @@ else:
         conint,
         constr,
         parse_obj_as,
+        root_validator,
         validator,
     )
     from pydantic.error_wrappers import ErrorWrapper
@@ -92,4 +94,5 @@ __all__ = (
     "StrictStr",
     "ValidationError",
     "validator",
+    "root_validator",
 )
