@@ -1,0 +1,1 @@
+Fix `KeyError` on background updates when using split main/state databases.
