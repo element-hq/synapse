@@ -565,7 +565,7 @@ class PaginationHandler:
         (
             events,
             next_key,
-            _,
+            limited,
         ) = await self.store.paginate_room_events_by_topological_ordering(
             room_id=room_id,
             from_key=from_token.room_key,
@@ -638,21 +638,23 @@ class PaginationHandler:
                     limit=pagin_config.limit,
                 )
 
-                # If we did backfill something, refetch the events from the database to
-                # catch anything new that might have been added since we last fetched.
-                if did_backfill:
-                    (
-                        events,
-                        next_key,
-                        _,
-                    ) = await self.store.paginate_room_events_by_topological_ordering(
-                        room_id=room_id,
-                        from_key=from_token.room_key,
-                        to_key=to_room_key,
-                        direction=pagin_config.direction,
-                        limit=pagin_config.limit,
-                        event_filter=event_filter,
-                    )
+                # Regardless if we backfilled or not, another worker or even a
+                # simultaneous request may have backfilled for us while we were held
+                # behind the linearizer. This should not have too much additional
+                # database load as it will only be triggered if a backfill *might* have
+                # been needed
+                (
+                    events,
+                    next_key,
+                    limited,
+                ) = await self.store.paginate_room_events_by_topological_ordering(
+                    room_id=room_id,
+                    from_key=from_token.room_key,
+                    to_key=to_room_key,
+                    direction=pagin_config.direction,
+                    limit=pagin_config.limit,
+                    event_filter=event_filter,
+                )
             else:
                 # Otherwise, we can backfill in the background for eventual
                 # consistency's sake but we don't need to block the client waiting
@@ -666,6 +668,15 @@ class PaginationHandler:
                 )
 
         next_token = from_token.copy_and_replace(StreamKeyType.ROOM, next_key)
+
+        # We might have hit some internal filtering first, for example rejected
+        # events. Ensure we return a pagination token then.
+        if not events and limited:
+            return {
+                "chunk": [],
+                "start": await from_token.to_string(self.store),
+                "end": await next_token.to_string(self.store),
+            }
 
         # if no events are returned from pagination, that implies
         # we have reached the end of the available events.
