@@ -1,0 +1,1 @@
+Fixed room summary API incorrectly returning that a room is private in the room summary response when the join rule is omitted by the remote server. Contributed by @nexy7574.
