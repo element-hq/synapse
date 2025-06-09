@@ -1952,7 +1952,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
-            self.repo.create_content(
+            self.repo.create_or_update_content(
                 "text/plain",
                 "test_upload",
                 content,

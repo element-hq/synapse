@@ -285,63 +285,16 @@ class MediaRepository:
             raise NotFoundError("Media ID has expired")
 
     @trace
-    async def update_content(
-        self,
-        media_id: str,
-        media_type: str,
-        upload_name: Optional[str],
-        content: IO,
-        content_length: int,
-        auth_user: UserID,
-    ) -> None:
-        """Update the content of the given media ID.
-
-        Args:
-            media_id: The media ID to replace.
-            media_type: The content type of the file.
-            upload_name: The name of the file, if provided.
-            content: A file like object that is the content to store
-            content_length: The length of the content
-            auth_user: The user_id of the uploader
-        """
-        file_info = FileInfo(server_name=None, file_id=media_id)
-        sha256reader = SHA256TransparentIOReader(content)
-        # This implements all of IO as it has a passthrough
-        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
-        sha256 = sha256reader.hexdigest()
-        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
-        logger.info("Stored local media in file %r", fname)
-
-        if should_quarantine:
-            logger.warn(
-                "Media has been automatically quarantined as it matched existing quarantined media"
-            )
-
-        await self.store.update_local_media(
-            media_id=media_id,
-            media_type=media_type,
-            upload_name=upload_name,
-            media_length=content_length,
-            user_id=auth_user,
-            sha256=sha256,
-            quarantined_by="system" if should_quarantine else None,
-        )
-
-        try:
-            await self._generate_thumbnails(None, media_id, media_id, media_type)
-        except Exception as e:
-            logger.info("Failed to generate thumbnails: %s", e)
-
-    @trace
-    async def create_content(
+    async def create_or_update_content(
         self,
         media_type: str,
         upload_name: Optional[str],
         content: IO,
         content_length: int,
         auth_user: UserID,
+        media_id: Optional[str] = None,
     ) -> MXCUri:
-        """Store uploaded content for a local user and return the mxc URL
+        """Create or update the content of the given media ID.
 
         Args:
             media_type: The content type of the file.
@@ -349,16 +302,20 @@ class MediaRepository:
             content: A file like object that is the content to store
             content_length: The length of the content
             auth_user: The user_id of the uploader
+            media_id: The media ID to update if provided, otherwise creates
+                new media ID.
 
         Returns:
             The mxc url of the stored content
         """
 
-        media_id = random_string(24)
+        is_new_media = media_id is None
+        if media_id is None:
+            media_id = random_string(24)
 
         file_info = FileInfo(server_name=None, file_id=media_id)
-        # This implements all of IO as it has a passthrough
         sha256reader = SHA256TransparentIOReader(content)
+        # This implements all of IO as it has a passthrough
         fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
         sha256 = sha256reader.hexdigest()
         should_quarantine = await self.store.get_is_hash_quarantined(sha256)
@@ -370,16 +327,27 @@ class MediaRepository:
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
 
-        await self.store.store_local_media(
-            media_id=media_id,
-            media_type=media_type,
-            time_now_ms=self.clock.time_msec(),
-            upload_name=upload_name,
-            media_length=content_length,
-            user_id=auth_user,
-            sha256=sha256,
-            quarantined_by="system" if should_quarantine else None,
-        )
+        if is_new_media:
+            await self.store.store_local_media(
+                media_id=media_id,
+                media_type=media_type,
+                time_now_ms=self.clock.time_msec(),
+                upload_name=upload_name,
+                media_length=content_length,
+                user_id=auth_user,
+                sha256=sha256,
+                quarantined_by="system" if should_quarantine else None,
+            )
+        else:
+            await self.store.update_local_media(
+                media_id=media_id,
+                media_type=media_type,
+                upload_name=upload_name,
+                media_length=content_length,
+                user_id=auth_user,
+                sha256=sha256,
+                quarantined_by="system" if should_quarantine else None,
+            )
 
         try:
             await self._generate_thumbnails(None, media_id, media_id, media_type)
