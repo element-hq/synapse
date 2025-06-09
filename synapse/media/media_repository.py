@@ -177,6 +177,13 @@ class MediaRepository:
         else:
             self.url_previewer = None
 
+        # We get the media upload limits and sort them in descending order of
+        # time period, so that we can apply some optimizations.
+        self.media_upload_limits = hs.config.media.media_upload_limits
+        self.media_upload_limits.sort(
+            key=lambda limit: limit.time_period_ms, reverse=True
+        )
+
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
             "update_recently_accessed_media", self._update_recently_accessed
@@ -326,6 +333,35 @@ class MediaRepository:
             logger.warn(
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
+
+        # Check that the user has not exceeded any of the media upload limits.
+
+        # This is the total size of media uploaded by the user in the last
+        # `time_period_ms` milliseconds, or None if we haven't checked yet.
+        uploaded_media_size: Optional[int] = None
+
+        # Note: the media upload limits are sorted so larger time periods are
+        # first.
+        for limit in self.media_upload_limits:
+            # We only need to check the amount of media uploaded by the user in
+            # this latest (smaller) time period if the amount of media uploaded
+            # in a previous (larger) time period is above the limit.
+            #
+            # This optimization means that in the common case where the user
+            # hasn't uploaded much media, we only need to query the database
+            # once.
+            if (
+                uploaded_media_size is None
+                or uploaded_media_size + content_length > limit.max_bytes
+            ):
+                uploaded_media_size = await self.store.get_media_uploaded_size_for_user(
+                    user_id=auth_user.to_string(), time_period_ms=limit.time_period_ms
+                )
+
+            if uploaded_media_size + content_length > limit.max_bytes:
+                raise SynapseError(
+                    400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
+                )
 
         if is_new_media:
             await self.store.store_local_media(

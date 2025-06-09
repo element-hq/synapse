@@ -1034,3 +1034,39 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             "local_media_repository",
             sha256,
         )
+
+    async def get_media_uploaded_size_for_user(
+        self, user_id: str, time_period_ms: int
+    ) -> int:
+        """Get the total size of media uploaded by a user in the last
+        time_period_ms milliseconds.
+
+        Args:
+            user_id: The user ID to check.
+            time_period_ms: The time period in milliseconds to consider.
+
+        Returns:
+            The total size of media uploaded by the user in bytes.
+        """
+
+        sql = """
+            SELECT COALESCE(SUM(media_length), 0)
+            FROM local_media_repository
+            WHERE user_id = ? AND created_ts > ?
+        """
+
+        def _get_media_uploaded_size_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> int:
+            # Calculate the timestamp for the start of the time period
+            start_ts = self._clock.time_msec() - time_period_ms
+            txn.execute(sql, (user_id, start_ts))
+            row = txn.fetchone()
+            if row is None:
+                return 0
+            return row[0]
+
+        return await self.db_pool.runInteraction(
+            "get_media_uploaded_size_for_user",
+            _get_media_uploaded_size_for_user_txn,
+        )
