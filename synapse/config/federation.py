@@ -94,5 +94,21 @@ class FederationConfig(Config):
             2**62,
         )
 
+    def is_domain_allowed_according_to_federation_whitelist(self, domain: str) -> bool:
+        """
+        Returns whether a domain is allowed according to the federation whitelist. If a
+        federation whitelist is not set, all domains are allowed.
+
+        Args:
+            domain: The domain to test.
+
+        Returns:
+            True if the domain is allowed or if a whitelist is not set, False otherwise.
+        """
+        if self.federation_domain_whitelist is None:
+            return True
+
+        return domain in self.federation_domain_whitelist
+
 
 _METRICS_FOR_DOMAINS_SCHEMA = {"type": "array", "items": {"type": "string"}}

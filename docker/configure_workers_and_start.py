@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/local/bin/python
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -202,6 +202,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["federation"],
         "endpoint_patterns": [
+            "^/_matrix/federation/v1/version$",
             "^/_matrix/federation/(v1|v2)/event/",
             "^/_matrix/federation/(v1|v2)/state/",
             "^/_matrix/federation/(v1|v2)/state_ids/",
@@ -351,6 +352,11 @@ def error(txt: str) -> NoReturn:
 
 
 def flush_buffers() -> None:
+    """
+    Python's `print()` buffers output by default, typically waiting until ~8KB
+    accumulates. This method can be used to flush the buffers so we can see the output
+    of any print statements so far.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -376,9 +382,11 @@ def convert(src: str, dst: str, **template_vars: object) -> None:
     #
     # We use append mode in case the files have already been written to by something else
     # (for instance, as part of the instructions in a dockerfile).
+    exists = os.path.isfile(dst)
     with open(dst, "a") as outfile:
         # In case the existing file doesn't end with a newline
-        outfile.write("\n")
+        if exists:
+            outfile.write("\n")
 
         outfile.write(rendered)
 
@@ -604,7 +612,7 @@ def generate_base_homeserver_config() -> None:
     # start.py already does this for us, so just call that.
     # note that this script is copied in in the official, monolith dockerfile
     os.environ["SYNAPSE_HTTP_PORT"] = str(MAIN_PROCESS_HTTP_LISTENER_PORT)
-    subprocess.run(["/usr/local/bin/python", "/start.py", "migrate_config"], check=True)
+    subprocess.run([sys.executable, "/start.py", "migrate_config"], check=True)
 
 
 def parse_worker_types(
@@ -998,6 +1006,7 @@ def generate_worker_files(
         "/healthcheck.sh",
         healthcheck_urls=healthcheck_urls,
     )
+    os.chmod("/healthcheck.sh", 0o755)
 
     # Ensure the logging directory exists
     log_dir = data_dir + "/logs"

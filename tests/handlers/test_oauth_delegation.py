@@ -150,6 +150,16 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         return hs
 
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        # Provision the user and the device we use in the tests.
+        store = homeserver.get_datastores().main
+        self.get_success(store.register_user(USER_ID))
+        self.get_success(
+            store.store_device(USER_ID, DEVICE, initial_device_display_name=None)
+        )
+
     def _set_introspection_returnvalue(self, response_value: Any) -> AsyncMock:
         self._rust_client.post = mock = AsyncMock(
             return_value=json.dumps(response_value).encode("utf-8")
