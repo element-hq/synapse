@@ -1,0 +1,1 @@
+Add `recaptcha_private_key_path` and `recaptcha_public_key_path` config option.
