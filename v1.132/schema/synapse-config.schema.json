@@ -772,6 +772,37 @@
         "24h"
       ]
     },
+    "user_types": {
+      "type": "object",
+      "description": "Configuration settings related to the user types feature.",
+      "properties": {
+        "default_user_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The default user type to use for registering new users when no value has been specified. Defaults to none.",
+          "default": null
+        },
+        "extra_user_types": {
+          "type": "array",
+          "description": "Array of additional user types to allow. These are treated as real users.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "examples": [
+        {
+          "default_user_type": "custom",
+          "extra_user_types": [
+            "custom",
+            "custom2"
+          ]
+        }
+      ]
+    },
     "admin_contact": {
       "type": [
         "string",
