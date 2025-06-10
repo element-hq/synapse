@@ -263,7 +263,8 @@ async def _get_power_level_for_sender(
                     logger.warning(
                         "_get_power_level_for_sender: event %s has no PL in auth_events and "
                         "creator is missing from create event %s",
-                        event_id, aev.event_id
+                        event_id,
+                        aev.event_id,
                     )
                 if creator == event.sender:
                     return 100
