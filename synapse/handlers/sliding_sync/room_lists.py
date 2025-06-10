@@ -636,6 +636,10 @@ class SlidingSyncRoomLists:
 
                     relevant_room_map[room_id] = room_sync_config
 
+        # Remove any rooms that we globally exclude from sync.
+        for room_id in self.rooms_to_exclude_globally:
+            relevant_room_map.pop(room_id, None)
+
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
         relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
