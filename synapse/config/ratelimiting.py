@@ -240,3 +240,9 @@ class RatelimitConfig(Config):
             "rc_delayed_event_mgmt",
             defaults={"per_second": 1, "burst_count": 5},
         )
+
+        self.rc_reports = RatelimitSettings.parse(
+            config,
+            "rc_reports",
+            defaults={"per_second": 1, "burst_count": 5},
+        )

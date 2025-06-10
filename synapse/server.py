@@ -94,6 +94,7 @@ from synapse.handlers.read_marker import ReadMarkerHandler
 from synapse.handlers.receipts import ReceiptsHandler
 from synapse.handlers.register import RegistrationHandler
 from synapse.handlers.relations import RelationsHandler
+from synapse.handlers.reports import ReportsHandler
 from synapse.handlers.room import (
     RoomContextHandler,
     RoomCreationHandler,
@@ -717,6 +718,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_receipts_handler(self) -> ReceiptsHandler:
         return ReceiptsHandler(self)
+
+    @cache_in_self
+    def get_reports_handler(self) -> ReportsHandler:
+        return ReportsHandler(self)
 
     @cache_in_self
     def get_read_marker_handler(self) -> ReadMarkerHandler:
