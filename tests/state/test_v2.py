@@ -865,6 +865,8 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         self.assertEqual(difference, {d.event_id, e.event_id})
 
     def test_get_power_level_for_sender(self) -> None:
+        """Test that we use the correct definition of `creator` depending
+        on room version"""
         store = TestStateResolutionStore({})
         for room_version in [RoomVersions.V10, RoomVersions.V11]:
             create_event = make_event_from_dict(
