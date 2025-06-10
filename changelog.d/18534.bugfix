@@ -1,0 +1,1 @@
+Fixed an issue where Synapse could incorrectly calculate the power level of the creator when there was no power levels event in the room.
