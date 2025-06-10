@@ -1,1 +1,0 @@
-Support configuration of default and extra user types.

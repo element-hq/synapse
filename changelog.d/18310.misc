@@ -1,1 +1,0 @@
-Reduce disk wastage by cleaning up `received_transactions` older than 1 day, rather than 30 days.
