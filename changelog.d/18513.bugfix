@@ -1,1 +1,0 @@
-Support the import of the `RatelimitOverride` type from `synapse.module_api` in modules and rename `messages_per_second` to `per_second`.
