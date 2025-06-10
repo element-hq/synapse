@@ -14,6 +14,11 @@ _First introduced in Synapse v1.132.0_
 async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> Optional[synapse.module_api.RatelimitOverride]
 ```
 
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
+
 Called when constructing a ratelimiter of a particular type for a user. The module can
 return a `messages_per_second` and `burst_count` to be used, or `None` if
 the default settings are adequate. The user is represented by their Matrix user ID
