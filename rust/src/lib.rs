@@ -8,6 +8,7 @@ pub mod acl;
 pub mod errors;
 pub mod events;
 pub mod http;
+pub mod http_client;
 pub mod identifier;
 pub mod matrix_const;
 pub mod push;
@@ -50,6 +51,7 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     acl::register_module(py, m)?;
     push::register_module(py, m)?;
     events::register_module(py, m)?;
+    http_client::register_module(py, m)?;
     rendezvous::register_module(py, m)?;
 
     Ok(())
