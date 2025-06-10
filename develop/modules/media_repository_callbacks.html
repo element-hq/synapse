@@ -168,6 +168,10 @@ using the module API's <code>register_media_repository_callbacks</code> method.<
 <p><em>First introduced in Synapse v1.132.0</em></p>
 <pre><code class="language-python">async def get_media_config_for_user(user_id: str) -&gt; Optional[JsonDict]
 </code></pre>
+<p><strong><span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span></strong></p>
 <p>Called when processing a request from a client for the
 <a href="https://spec.matrix.org/latest/client-server-api/#get_matrixclientv1mediaconfig">media config endpoint</a>.</p>
 <p>The arguments passed to this callback are:</p>
@@ -185,6 +189,10 @@ any of the subsequent implementations of this callback.</p>
 <p><em>First introduced in Synapse v1.132.0</em></p>
 <pre><code class="language-python">async def is_user_allowed_to_upload_media_of_size(user_id: str, size: int) -&gt; bool
 </code></pre>
+<p><strong><span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span></strong></p>
 <p>Called before media is accepted for upload from a user, in case the module needs to
 enforce a different limit for the particular user.</p>
 <p>The arguments passed to this callback are:</p>

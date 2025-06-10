@@ -386,6 +386,10 @@ this callback.</p>
 <p><em>First introduced in Synapse v1.132.0</em></p>
 <pre><code class="language-python">async def user_may_send_state_event(user_id: str, room_id: str, event_type: str, state_key: str, content: JsonDict) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;]
 </code></pre>
+<p><strong><span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span></strong></p>
 <p>Called when processing a request to <a href="https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3roomsroomidstateeventtypestatekey">send state events</a> to a room.</p>
 <p>The arguments passed to this callback are:</p>
 <ul>
