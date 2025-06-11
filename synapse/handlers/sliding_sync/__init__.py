@@ -15,7 +15,17 @@
 import itertools
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    AbstractSet,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from prometheus_client import Histogram
 from typing_extensions import assert_never
@@ -38,6 +48,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -245,11 +256,31 @@ class SlidingSyncHandler:
             to_token=to_token,
         )
 
+        # fetch the user's receipts between the two points: these will be factor
+        # in deciding whether to send the room, since it may have changed their
+        # notification counts
+        receipts = await self.store.get_linearized_receipts_for_user_in_rooms(
+            user_id=user_id,
+            room_ids=interested_rooms.relevant_room_map.keys(),
+            from_key=from_token.stream_token.receipt_key if from_token else None,
+            to_key=to_token.receipt_key,
+        )
+
+        # Filtered subset of `relevant_room_map` for rooms that may have updates
+        # (in the event stream)
+        relevant_rooms_to_send_map = self.room_lists.filter_relevant_rooms_to_send(
+            sync_config.user,
+            previous_connection_state,
+            from_token.stream_token if from_token else None,
+            to_token,
+            interested_rooms.relevant_room_map,
+            receipts,
+        )
+
         lists = interested_rooms.lists
         relevant_room_map = interested_rooms.relevant_room_map
         all_rooms = interested_rooms.all_rooms
         room_membership_for_user_map = interested_rooms.room_membership_for_user_map
-        relevant_rooms_to_send_map = interested_rooms.relevant_rooms_to_send_map
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
@@ -273,6 +304,7 @@ class SlidingSyncHandler:
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
+                room_receipts=receipts[room_id] if room_id in receipts else None,
             )
 
             # Filter out empty room results during incremental sync
@@ -297,6 +329,7 @@ class SlidingSyncHandler:
             actual_room_response_map=rooms,
             from_token=from_token,
             to_token=to_token,
+            user_receipts=receipts,
         )
 
         if has_lists or has_room_subscriptions:
@@ -545,6 +578,7 @@ class SlidingSyncHandler:
         newly_joined: bool,
         newly_left: bool,
         is_dm: bool,
+        room_receipts: Optional[Sequence[ReceiptInRoom]],
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -563,6 +597,8 @@ class SlidingSyncHandler:
             newly_joined: If the user has newly joined the room
             newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
+            room_receipts: Any read receipts from the in question in that room between
+                from_token and to_token
         """
         user = sync_config.user
 
@@ -1335,6 +1371,11 @@ class SlidingSyncHandler:
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
+        unread_notifs = await self.store.get_unread_event_push_actions_by_room_for_user(
+            room_id,
+            sync_config.user.to_string(),
+        )
+
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
@@ -1352,11 +1393,8 @@ class SlidingSyncHandler:
             bump_stamp=bump_stamp,
             joined_count=joined_count,
             invited_count=invited_count,
-            # TODO: These are just dummy values. We could potentially just remove these
-            # since notifications can only really be done correctly on the client anyway
-            # (encrypted rooms).
-            notification_count=0,
-            highlight_count=0,
+            notif_counts=unread_notifs,
+            room_receipts=room_receipts,
         )
 
     @trace
