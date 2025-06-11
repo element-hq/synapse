@@ -461,6 +461,10 @@ class SlidingSyncRoomLists:
                     else:
                         room_membership_for_user_map.pop(room_id, None)
 
+        # Remove any rooms that we globally exclude from sync.
+        for room_id in self.rooms_to_exclude_globally:
+            room_membership_for_user_map.pop(room_id, None)
+
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
         if sync_config.lists:
@@ -635,10 +639,6 @@ class SlidingSyncRoomLists:
                         )
 
                     relevant_room_map[room_id] = room_sync_config
-
-        # Remove any rooms that we globally exclude from sync.
-        for room_id in self.rooms_to_exclude_globally:
-            relevant_room_map.pop(room_id, None)
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)

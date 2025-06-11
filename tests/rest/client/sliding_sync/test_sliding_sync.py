@@ -1660,3 +1660,17 @@ class SlidingSyncTestCase(SlidingSyncBase):
             {room_id_to_include},
             exact=True,
         )
+
+        # Test that the excluded room is not in the list ops
+        # Make sure the list is sorted in the way we expect
+        self.assertListEqual(
+            list(response_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id_to_include],
+                }
+            ],
+            response_body["lists"]["foo-list"],
+        )
