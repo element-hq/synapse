@@ -1656,7 +1656,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # Make sure response only contains room_id_to_include
         self.assertIncludes(
-            set(response_body["rooms"]),
+            set(response_body["rooms"].keys()),
             {room_id_to_include},
             exact=True,
         )
