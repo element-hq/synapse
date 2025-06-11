@@ -143,6 +143,33 @@ class TransportLayerClient:
             destination, path=path, timeout=timeout, try_trailing_slash_on_400=True
         )
 
+    async def get_policy_recommendation_for_pdu(
+        self, destination: str, event: EventBase, timeout: Optional[int] = None
+    ) -> JsonDict:
+        """Requests the policy recommendation for the given pdu from the given policy server.
+
+        Args:
+            destination: The host name of the remote homeserver checking the event.
+            event: The event to check.
+            timeout: How long to try (in ms) the destination for before giving up.
+                None indicates no timeout.
+
+        Returns:
+            The full recommendation object from the remote server.
+        """
+        logger.debug(
+            "get_policy_recommendation_for_pdu dest=%s, event_id=%s",
+            destination,
+            event.event_id,
+        )
+        return await self.client.post_json(
+            destination=destination,
+            path=f"/_matrix/policy/unstable/org.matrix.msc4284/event/{event.event_id}/check",
+            data=event.get_pdu_json(),
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
     async def backfill(
         self, destination: str, room_id: str, event_tuples: Collection[str], limit: int
     ) -> Optional[Union[JsonDict, list]]:

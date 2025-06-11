@@ -59,6 +59,7 @@ from .third_party_event_rules import ThirdPartyRulesConfig
 from .tls import TlsConfig
 from .tracer import TracerConfig
 from .user_directory import UserDirectoryConfig
+from .user_types import UserTypesConfig
 from .voip import VoipConfig
 from .workers import WorkerConfig
 
@@ -107,4 +108,5 @@ class HomeServerConfig(RootConfig):
         ExperimentalConfig,
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
+        UserTypesConfig,
     ]
