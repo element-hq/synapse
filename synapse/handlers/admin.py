@@ -495,7 +495,7 @@ class AdminHandler:
                     )
                 except Exception as ex:
                     logger.info(
-                        f"Redaction of event {event.event_id} failed due to: {ex}"
+                        "Redaction of event %s failed due to: %s", event.event_id, ex
                     )
                     result["failed_redactions"][event.event_id] = str(ex)
                     await self._task_scheduler.update_task(task.id, result=result)

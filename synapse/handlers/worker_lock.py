@@ -272,7 +272,8 @@ class WaitingLock:
         self._retry_interval = max(5, next * 2)
         if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
             logging.warning(
-                f"Lock timeout is getting excessive: {self._retry_interval}s. There may be a deadlock."
+                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)
 
@@ -351,6 +352,7 @@ class WaitingMultiLock:
         self._retry_interval = max(5, next * 2)
         if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
             logging.warning(
-                f"Lock timeout is getting excessive: {self._retry_interval}s. There may be a deadlock."
+                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)

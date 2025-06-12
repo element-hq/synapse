@@ -253,8 +253,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             return 1
 
         logger.debug(
-            "Processing the next %d rooms of %d remaining"
-            % (len(rooms_to_work_on), progress["remaining"])
+            "Processing the next %d rooms of %d remaining",
+            len(rooms_to_work_on),
+            progress["remaining"],
         )
 
         processed_event_count = 0

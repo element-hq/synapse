@@ -328,8 +328,10 @@ class DeleteMediaByDateSize(RestServlet):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only delete local media")
 
         logging.info(
-            "Deleting local media by timestamp: %s, size larger than: %s, keep profile media: %s"
-            % (before_ts, size_gt, keep_profiles)
+            "Deleting local media by timestamp: %s, size larger than: %s, keep profile media: %s",
+            before_ts,
+            size_gt,
+            keep_profiles,
         )
 
         deleted_media, total = await self.media_repository.delete_old_local_media(

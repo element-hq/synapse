@@ -3074,8 +3074,10 @@ class SyncHandler:
                 if batch.limited and since_token:
                     user_id = sync_result_builder.sync_config.user.to_string()
                     logger.debug(
-                        "Incremental gappy sync of %s for user %s with %d state events"
-                        % (room_id, user_id, len(state))
+                        "Incremental gappy sync of %s for user %s with %d state events",
+                        room_id,
+                        user_id,
+                        len(state),
                     )
             elif room_builder.rtype == "archived":
                 archived_room_sync = ArchivedSyncResult(
