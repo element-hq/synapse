@@ -1,6 +1,5 @@
-from synapse.config.homeserver import HomeServerConfig
 from synapse.storage.database import LoggingTransaction
-from synapse.storage.engines import PostgresEngine, BaseDatabaseEngine
+from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine
 
 
 def run_create(
@@ -62,13 +61,13 @@ def run_create(
              INSERT INTO background_updates (ordering, update_name, progress_json) \
              VALUES (?, ?, ?);
          """
-        cur.execute(sqlite3_idx_update_sql, (9206, "redactions_add_redacts_idx", '{}'))
-        cur.execute(sqlite3_idx_update_sql, (9206, "redactions_add_have_censored_ts", '{}'))
+        cur.execute(sqlite3_idx_update_sql, (9206, "redactions_add_redacts_idx", "{}"))
+        cur.execute(
+            sqlite3_idx_update_sql, (9206, "redactions_add_have_censored_ts", "{}")
+        )
 
     # in either case the event_id index needs to be re-created
     idx_sql = """
           INSERT INTO background_updates (ordering, update_name, progress_json) VALUES (?, ?, ?);
     """
-    cur.execute(idx_sql, (9206, "redactions_add_event_id_idx", '{}'))
-
-
+    cur.execute(idx_sql, (9206, "redactions_add_event_id_idx", "{}"))
