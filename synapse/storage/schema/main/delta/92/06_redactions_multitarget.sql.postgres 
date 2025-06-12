@@ -1,7 +1,0 @@
-ALTER TABLE ONLY redactions ADD CONSTRAINT redactions_event_id_redacts_key UNIQUE (event_id, redacts);
-
--- Replace the index we're about to drop
-CREATE INDEX redactions_event_id ON redactions USING btree (event_id);
-
--- Drop the old constraint
-ALTER TABLE ONLY redactions DROP CONSTRAINT redactions_event_id_key;
