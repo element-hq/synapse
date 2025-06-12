@@ -21,7 +21,7 @@
 
 
 from typing import List, Tuple
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from synapse.metrics.jemalloc import JemallocStats
 from synapse.types import JsonDict
@@ -96,7 +96,10 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
 
     @override_config({"caches": {"per_cache_factors": {"mycache": 10}}})
     def test_special_size(self) -> None:
-        cache: LruCache = LruCache(10, "mycache")
+        cache: LruCache = LruCache(
+            10,
+            cache_name="mycache",
+        )
         self.assertEqual(cache.max_size, 100)
 
 
@@ -342,10 +345,9 @@ class MemoryEvictionTestCase(unittest.HomeserverTestCase):
             }
         }
     )
-    @patch("synapse.util.caches.lrucache.get_jemalloc_stats")
-    def test_evict_memory(self, jemalloc_interface: Mock) -> None:
+    def test_evict_memory(self) -> None:
         mock_jemalloc_class = Mock(spec=JemallocStats)
-        jemalloc_interface.return_value = mock_jemalloc_class
+        self.hs.jemalloc_stats = mock_jemalloc_class()
 
         # set the return value of get_stat() to be greater than max_cache_memory_usage
         mock_jemalloc_class.get_stat.return_value = 924288000

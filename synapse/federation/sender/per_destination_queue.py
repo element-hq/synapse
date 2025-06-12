@@ -55,17 +55,6 @@ MAX_EDUS_PER_TRANSACTION = 100
 logger = logging.getLogger(__name__)
 
 
-sent_edus_counter = Counter(
-    "synapse_federation_client_sent_edus", "Total number of EDUs successfully sent"
-)
-
-sent_edus_by_type = Counter(
-    "synapse_federation_client_sent_edus_by_type",
-    "Number of sent EDUs successfully sent, by event type",
-    ["type"],
-)
-
-
 # If the retry interval is larger than this then we enter "catchup" mode
 CATCHUP_RETRY_INTERVAL = 60 * 60 * 1000
 
@@ -163,6 +152,19 @@ class PerDestinationQueue:
 
         # stream_id of last successfully sent device list update.
         self._last_device_list_stream_id = 0
+
+        self.sent_edus_counter = Counter(
+            "synapse_federation_client_sent_edus",
+            "Total number of EDUs successfully sent",
+            registry=hs.metrics_collector_registry,
+        )
+
+        self.sent_edus_by_type = Counter(
+            "synapse_federation_client_sent_edus_by_type",
+            "Number of sent EDUs successfully sent, by event type",
+            ["type"],
+            registry=hs.metrics_collector_registry,
+        )
 
     def __str__(self) -> str:
         return "PerDestinationQueue[%s]" % self._destination
@@ -361,9 +363,9 @@ class PerDestinationQueue:
                     )
 
                     sent_transactions_counter.inc()
-                    sent_edus_counter.inc(len(pending_edus))
+                    self.sent_edus_counter.inc(len(pending_edus))
                     for edu in pending_edus:
-                        sent_edus_by_type.labels(edu.edu_type).inc()
+                        self.sent_edus_by_type.labels(edu.edu_type).inc()
 
         except NotRetryingDestination as e:
             logger.debug(

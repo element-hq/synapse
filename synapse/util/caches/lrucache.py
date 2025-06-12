@@ -50,9 +50,8 @@ from twisted.internet.interfaces import IReactorTime
 
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import wrap_as_background_process
-from synapse.metrics.jemalloc import get_jemalloc_stats
 from synapse.util import Clock, caches
-from synapse.util.caches import CacheMetric, EvictionReason, register_cache
+from synapse.util.caches import CacheMetric, EvictionReason
 from synapse.util.caches.treecache import (
     TreeCache,
     iterate_tree_cache_entry,
@@ -120,7 +119,10 @@ GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 @wrap_as_background_process("LruCache._expire_old_entries")
 async def _expire_old_entries(
-    clock: Clock, expiry_seconds: float, autotune_config: Optional[dict]
+    hs: "HomeServer",
+    clock: Clock,
+    expiry_seconds: float,
+    autotune_config: Optional[dict],
 ) -> None:
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
@@ -141,7 +143,7 @@ async def _expire_old_entries(
     evicting_due_to_memory = False
 
     # determine if we're evicting due to memory
-    jemalloc_interface = get_jemalloc_stats()
+    jemalloc_interface = hs.jemalloc_stats
     if jemalloc_interface and autotune_config:
         try:
             jemalloc_interface.refresh_stats()
@@ -238,6 +240,7 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     clock.looping_call(
         _expire_old_entries,
         30 * 1000,
+        hs,
         clock,
         expiry_time,
         hs.config.caches.cache_autotuning,
@@ -379,10 +382,11 @@ class LruCache(Generic[KT, VT]):
     def __init__(
         self,
         max_size: int,
+        *,
         cache_name: Optional[str] = None,
+        metrics_collection_callback: Optional[Callable[[], None]] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
-        metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
         clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
@@ -395,11 +399,7 @@ class LruCache(Generic[KT, VT]):
             cache_name: The name of this cache, for the prometheus metrics. If unset,
                 no metrics will be reported on this cache.
 
-            cache_type:
-                type of underlying cache to be used. Typically one of dict
-                or TreeCache.
-
-            size_callback:
+                Ignored if `cache_name` is `None`.
 
             metrics_collection_callback:
                 metrics collection callback. This is called early in the metrics
@@ -407,7 +407,13 @@ class LruCache(Generic[KT, VT]):
                 prometheus Registry are collected, so can be used to update any dynamic
                 metrics.
 
-                Ignored if cache_name is None.
+                Ignored if `cache_name` is `None`.
+
+            cache_type:
+                type of underlying cache to be used. Typically one of dict
+                or TreeCache.
+
+            size_callback:
 
             apply_cache_factor_from_config: If true, `max_size` will be
                 multiplied by a cache factor derived from the homeserver config
@@ -457,15 +463,17 @@ class LruCache(Generic[KT, VT]):
         # do yet when we get resized.
         self._on_resize: Optional[Callable[[], None]] = None
 
-        if cache_name is not None:
-            metrics: Optional[CacheMetric] = register_cache(
-                "lru_cache",
-                cache_name,
-                self,
-                collect_callback=metrics_collection_callback,
-            )
-        else:
-            metrics = None
+        # TODO
+        # if cache_name is not None:
+        #     metrics: Optional[CacheMetric] = cache_manager.register_cache(
+        #         "lru_cache",
+        #         cache_name,
+        #         self,
+        #         collect_callback=metrics_collection_callback,
+        #     )
+        # else:
+        #     metrics = None
+        metrics: Optional[CacheMetric] = None
 
         # this is exposed for access from outside this class
         self.metrics = metrics

@@ -23,13 +23,16 @@ import ctypes
 import logging
 import os
 import re
-from typing import Iterable, Literal, Optional, overload
+from typing import TYPE_CHECKING, Iterable, Literal, Optional, overload
 
 import attr
-from prometheus_client import REGISTRY, Metric
+from prometheus_client import REGISTRY, CollectorRegistry, Metric
 
 from synapse.metrics import GaugeMetricFamily
 from synapse.metrics._types import Collector
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -131,24 +134,10 @@ class JemallocStats:
         return self._mallctl(f"stats.{name}")
 
 
-_JEMALLOC_STATS: Optional[JemallocStats] = None
-
-
-def get_jemalloc_stats() -> Optional[JemallocStats]:
-    """Returns an interface to jemalloc, if it is being used.
-
-    Note that this will always return None until `setup_jemalloc_stats` has been
-    called.
-    """
-    return _JEMALLOC_STATS
-
-
-def _setup_jemalloc_stats() -> None:
+def _setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
     """Checks to see if jemalloc is loaded, and hooks up a collector to record
     statistics exposed by jemalloc.
     """
-
-    global _JEMALLOC_STATS
 
     # Try to find the loaded jemalloc shared library, if any. We need to
     # introspect into what is loaded, rather than loading whatever is on the
@@ -157,7 +146,7 @@ def _setup_jemalloc_stats() -> None:
     # We look in `/proc/self/maps`, which only exists on linux.
     if not os.path.exists("/proc/self/maps"):
         logger.debug("Not looking for jemalloc as no /proc/self/maps exist")
-        return
+        return None
 
     # We're looking for a path at the end of the line that includes
     # "libjemalloc".
@@ -173,17 +162,20 @@ def _setup_jemalloc_stats() -> None:
     if not jemalloc_path:
         # No loaded jemalloc was found.
         logger.debug("jemalloc not found")
-        return
+        return None
 
     logger.debug("Found jemalloc at %s", jemalloc_path)
 
     jemalloc_dll = ctypes.CDLL(jemalloc_path)
 
     stats = JemallocStats(jemalloc_dll)
-    _JEMALLOC_STATS = stats
 
     class JemallocCollector(Collector):
         """Metrics for internal jemalloc stats."""
+
+        def __init__(self, registry: Optional[CollectorRegistry] = REGISTRY) -> None:
+            if registry is not None:
+                registry.register(self)
 
         def collect(self) -> Iterable[Metric]:
             stats.refresh_stats()
@@ -230,17 +222,20 @@ def _setup_jemalloc_stats() -> None:
 
             yield g
 
-    REGISTRY.register(JemallocCollector())
+    JemallocCollector(registry=hs.metrics_collector_registry)
 
     logger.debug("Added jemalloc stats")
+    return stats
 
 
-def setup_jemalloc_stats() -> None:
+def setup_jemalloc_stats(hs: "HomeServer") -> Optional[JemallocStats]:
     """Try to setup jemalloc stats, if jemalloc is loaded."""
 
     try:
-        _setup_jemalloc_stats()
+        return _setup_jemalloc_stats(hs)
     except Exception as e:
         # This should only happen if we find the loaded jemalloc library, but
         # fail to load it somehow (e.g. we somehow picked the wrong version).
         logger.info("Failed to setup collector to record jemalloc stats: %s", e)
+
+    return None

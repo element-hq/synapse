@@ -85,8 +85,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_queries_counter = Counter("synapse_federation_client_sent_queries", "", ["type"])
-
 
 PDU_RETRY_TIME_MS = 1 * 60 * 1000
 
@@ -145,6 +143,7 @@ class FederationClient(FederationBase):
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
             clock=self._clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=1000,
             expiry_ms=120 * 1000,
             reset_expiry_on_get=False,
@@ -163,9 +162,17 @@ class FederationClient(FederationBase):
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
             clock=self._clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=1000,
             expiry_ms=5 * 60 * 1000,
             reset_expiry_on_get=False,
+        )
+
+        self.sent_queries_counter = Counter(
+            "synapse_federation_client_sent_queries",
+            "",
+            ["type"],
+            registry=hs.metrics_collector_registry,
         )
 
     def _clear_tried_cache(self) -> None:
@@ -207,7 +214,7 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels(query_type).inc()
+        self.sent_queries_counter.labels(query_type).inc()
 
         return await self.transport_layer.make_query(
             destination,
@@ -229,7 +236,7 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels("client_device_keys").inc()
+        self.sent_queries_counter.labels("client_device_keys").inc()
         return await self.transport_layer.query_client_keys(
             destination, content, timeout
         )
@@ -240,7 +247,7 @@ class FederationClient(FederationBase):
         """Query the device keys for a list of user ids hosted on a remote
         server.
         """
-        sent_queries_counter.labels("user_devices").inc()
+        self.sent_queries_counter.labels("user_devices").inc()
         return await self.transport_layer.query_user_devices(
             destination, user_id, timeout
         )
@@ -262,7 +269,7 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels("client_one_time_keys").inc()
+        self.sent_queries_counter.labels("client_one_time_keys").inc()
 
         # Convert the query with counts into a stable and unstable query and check
         # if attempting to claim more than 1 OTK.

@@ -201,6 +201,7 @@ class UrlPreviewer:
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
             cache_name="url_previews",
             clock=self.clock,
+            cache_manager=hs.get_cache_manager(),
             # don't spider URLs more often than once an hour
             expiry_ms=ONE_HOUR,
         )

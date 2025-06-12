@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, Generic, Tuple, TypeVar, Union
 import attr
 from sortedcontainers import SortedList
 
-from synapse.util.caches import register_cache
+from synapse.util.caches import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,12 @@ VT = TypeVar("VT")
 class TTLCache(Generic[KT, VT]):
     """A key/value cache implementation where each entry has its own TTL"""
 
-    def __init__(self, cache_name: str, timer: Callable[[], float] = time.time):
+    def __init__(
+        self,
+        cache_name: str,
+        cache_manager: CacheManager,
+        timer: Callable[[], float] = time.time,
+    ):
         # map from key to _CacheEntry
         self._data: Dict[KT, _CacheEntry[KT, VT]] = {}
 
@@ -49,7 +54,9 @@ class TTLCache(Generic[KT, VT]):
 
         self._timer = timer
 
-        self._metrics = register_cache("ttl", cache_name, self, resizable=False)
+        self._metrics = cache_manager.register_cache(
+            "ttl", cache_name, self, resizable=False
+        )
 
     def set(self, key: KT, value: VT, ttl: float) -> None:
         """Add/update an entry in the cache

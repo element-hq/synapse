@@ -58,6 +58,7 @@ class DelayedEventsHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
         self._clock = hs.get_clock()
+        self._metrics_collector_registry = hs.metrics_collector_registry
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
 
@@ -159,7 +160,9 @@ class DelayedEventsHandler:
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self._clock, "delayed_events_delta"):
+            with Measure(
+                self._clock, self._metrics_collector_registry, "delayed_events_delta"
+            ):
                 room_max_stream_ordering = self._store.get_room_max_stream_ordering()
                 if self._event_pos == room_max_stream_ordering:
                     return

@@ -25,6 +25,7 @@ from io import BytesIO
 from typing import Callable, Dict, Optional, Tuple
 
 import attr
+from prometheus_client import CollectorRegistry
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IReactorTime
@@ -36,6 +37,7 @@ from twisted.web.iweb import IAgent, IResponse
 from synapse.http.client import BodyExceededMaxSize, read_body_with_max_size
 from synapse.logging.context import make_deferred_yieldable
 from synapse.util import Clock, json_decoder
+from synapse.util.caches import CacheManager
 from synapse.util.caches.ttlcache import TTLCache
 from synapse.util.metrics import Measure
 
@@ -77,10 +79,6 @@ WELL_KNOWN_RETRY_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
 
 
-_well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache("well-known")
-_had_valid_well_known_cache: TTLCache[bytes, bool] = TTLCache("had-valid-well-known")
-
-
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class WellKnownLookupResult:
     delegated_server: Optional[bytes]
@@ -94,20 +92,24 @@ class WellKnownResolver:
         reactor: IReactorTime,
         agent: IAgent,
         user_agent: bytes,
+        metrics_collector_registry: CollectorRegistry,
+        cache_manager: CacheManager,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
         had_well_known_cache: Optional[TTLCache[bytes, bool]] = None,
     ):
         self._reactor = reactor
         self._clock = Clock(reactor)
+        self._metrics_collector_registry = metrics_collector_registry
 
-        if well_known_cache is None:
-            well_known_cache = _well_known_cache
+        self._well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache(
+            "well-known",
+            cache_manager=cache_manager,
+        )
+        self._had_valid_well_known_cache: TTLCache[bytes, bool] = TTLCache(
+            "had-valid-well-known",
+            cache_manager=cache_manager,
+        )
 
-        if had_well_known_cache is None:
-            had_well_known_cache = _had_valid_well_known_cache
-
-        self._well_known_cache = well_known_cache
-        self._had_valid_well_known_cache = had_well_known_cache
         self._well_known_agent = RedirectAgent(agent)
         self.user_agent = user_agent
 
@@ -134,7 +136,9 @@ class WellKnownResolver:
         # TODO: should we linearise so that we don't end up doing two .well-known
         # requests for the same server in parallel?
         try:
-            with Measure(self._clock, "get_well_known"):
+            with Measure(
+                self._clock, self._metrics_collector_registry, "get_well_known"
+            ):
                 result: Optional[bytes]
                 cache_period: float
 
