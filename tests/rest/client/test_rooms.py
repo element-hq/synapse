@@ -5265,3 +5265,93 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self._check_redactions(originals, channel.json_body["chunk"], False)
+
+    def test_MSC4293_redaction_applied_via_kick_api(self) -> None:
+        """
+        Test that MSC4239 field passed through and applied when using /kick
+        """
+        self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
+
+        # bad user send some messages
+        original_ids = []
+        for i in range(15):
+            event = {"body": f"being a menace {i}", "msgtype": "m.text"}
+            res = self.helper.send_event(
+                self.room_id, "m.room.message", event, tok=self.bad_tok, expect_code=200
+            )
+            original_ids.append(res["event_id"])
+
+        # grab original events before kick
+        originals = [self.get_success(self.store.get_event(x)) for x in original_ids]
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{self.room_id}/kick",
+            access_token=self.creator_tok,
+            content={
+                "reason": "being annoying",
+                "org.matrix.msc4293.redact_events": True,
+                "user_id": self.bad_user_id,
+            },
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+
+        filter = json.dumps({"types": [EventTypes.Message]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.room_id}/messages?filter={filter}&limit=50",
+            access_token=self.creator_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self._check_redactions(
+            originals,
+            channel.json_body["chunk"],
+            expect_redaction=True,
+            reason="being annoying",
+        )
+
+    def test_MSC4293_redaction_applied_via_ban_api(self) -> None:
+        """
+        Test that MSC4239 field passed through and applied when using /ban
+        """
+        self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
+
+        # bad user send some messages
+        original_ids = []
+        for i in range(15):
+            event = {"body": f"being a menace {i}", "msgtype": "m.text"}
+            res = self.helper.send_event(
+                self.room_id, "m.room.message", event, tok=self.bad_tok, expect_code=200
+            )
+            original_ids.append(res["event_id"])
+
+        # grab original events before ban
+        originals = [self.get_success(self.store.get_event(x)) for x in original_ids]
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/rooms/{self.room_id}/ban",
+            access_token=self.creator_tok,
+            content={
+                "reason": "being disruptive",
+                "org.matrix.msc4293.redact_events": True,
+                "user_id": self.bad_user_id,
+            },
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)
+
+        filter = json.dumps({"types": [EventTypes.Message]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.room_id}/messages?filter={filter}&limit=50",
+            access_token=self.creator_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self._check_redactions(
+            originals,
+            channel.json_body["chunk"],
+            expect_redaction=True,
+            reason="being disruptive",
+        )

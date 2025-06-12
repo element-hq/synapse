@@ -1087,6 +1087,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         super().__init__(hs)
         self.room_member_handler = hs.get_room_member_handler()
         self.auth = hs.get_auth()
+        self.config = hs.config
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/[join|invite|leave|ban|unban|kick]
@@ -1146,6 +1147,18 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         event_content = None
         if "reason" in content:
             event_content = {"reason": content["reason"]}
+        if self.config.experimental.msc4293_enabled:
+            if "org.matrix.msc4293.redact_events" in content:
+                if event_content:
+                    event_content["org.matrix.msc4293.redact_events"] = content[
+                        "org.matrix.msc4293.redact_events"
+                    ]
+                else:
+                    event_content = {
+                        "org.matrix.msc4293.redact_events": content[
+                            "org.matrix.msc4293.redact_events"
+                        ]
+                    }
 
         try:
             await self.room_member_handler.update_membership(
