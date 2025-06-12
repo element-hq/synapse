@@ -83,6 +83,7 @@ EVICTION_TIMEOUT_SECONDS = 60 * 60
 
 _NEXT_STATE_ID = 1
 
+CREATE_KEY = (EventTypes.Create, "")
 POWER_KEY = (EventTypes.PowerLevels, "")
 
 
