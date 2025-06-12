@@ -96,6 +96,10 @@ class DeactivateAccountHandler:
                 403, "Deactivation of this user is forbidden", Codes.FORBIDDEN
             )
 
+        logger.info(
+            f"{requester.user} requested deactivation of {user_id} erase_data={erase_data} id_server={id_server}"
+        )
+
         # FIXME: Theoretically there is a race here wherein user resets
         # password using threepid.
 
@@ -193,7 +197,6 @@ class DeactivateAccountHandler:
             True,
             by_admin,
         )
-
         return identity_server_supports_unbinding
 
     async def _reject_pending_invites_and_knocks_for_user(self, user_id: str) -> None:
