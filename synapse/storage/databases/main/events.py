@@ -376,6 +376,72 @@ class PersistEventsStore:
 
                 event_counter.labels(event.type, origin_type, origin_entity).inc()
 
+                if self.hs.config.experimental.msc4239_enabled:
+                    if event.type == EventTypes.Member and event.content.get(
+                        "org.matrix.msc4293.redact_events", False
+                    ):
+                        if event.membership != Membership.BAN and not (
+                            event.membership == Membership.LEAVE
+                            and event.sender != event.state_key
+                        ):
+                            return
+                        # check that sender can redact
+                        state_filter = StateFilter.from_types(
+                            [(EventTypes.PowerLevels, "")]
+                        )
+                        state = await self.store.get_partial_filtered_current_state_ids(
+                            event.room_id, state_filter
+                        )
+                        pl_id = state[(EventTypes.PowerLevels, "")]
+                        pl_event_map = await self.store.get_events([pl_id])
+                        pl_event = pl_event_map.get(pl_id)
+                        if pl_event:
+                            sender_level = pl_event.content.get("users", {}).get(
+                                event.sender
+                            )
+                            if sender_level is None:
+                                sender_level = pl_event.content.get("users_default", 0)
+                            redact_level = pl_event.content.get("redact", 50)
+
+                            if sender_level > redact_level:
+                                ids_to_redact = (
+                                    await self.store.get_events_sent_by_user_in_room(
+                                        event.state_key,
+                                        event.room_id,
+                                        limit=1000000,  # arbitrarily large number
+                                        filter=[
+                                            "m.room.member",
+                                            "m.room.message",
+                                            "m.room.encrypted",
+                                        ],
+                                    )
+                                )
+                                if ids_to_redact:
+                                    key_values = [
+                                        (event.event_id, x) for x in ids_to_redact
+                                    ]
+                                    value_values = [
+                                        (self._clock.time_msec(),)
+                                        for x in ids_to_redact
+                                    ]
+                                    await self.db_pool.simple_upsert_many(
+                                        table="redactions",
+                                        key_names=["event_id", "redacts"],
+                                        key_values=key_values,
+                                        value_names=["received_ts"],
+                                        value_values=value_values,
+                                        desc="redact_on_ban_redaction_txn",
+                                    )
+                                    # normally the cache entry for a redacted event would be invalidated
+                                    # by an arriving redaction event, but since we are not creating redaction
+                                    # events we invalidate manually
+                                    for id in ids_to_redact:
+                                        await self.db_pool.runInteraction(
+                                            "invalidate cache",
+                                            self.store.invalidate_get_event_cache_after_txn,
+                                            id,
+                                        )
+
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
                     (room_id,), frozenset(new_forward_extremities)
@@ -2768,9 +2834,8 @@ class PersistEventsStore:
         self.db_pool.simple_upsert_txn(
             txn,
             table="redactions",
-            keyvalues={"event_id": event.event_id},
+            keyvalues={"event_id": event.event_id, "redacts": event.redacts},
             values={
-                "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
             },
         )
