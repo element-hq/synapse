@@ -9,7 +9,6 @@ def run_create(
     """
     Drop unique constraint event_id and add unique constraint (event_id, redacts)
     """
-    print("running upgrade")
     if isinstance(database_engine, PostgresEngine):
         add_constraint_sql = """
         ALTER TABLE ONLY redactions ADD CONSTRAINT redactions_event_id_redacts_key UNIQUE (event_id, redacts);
