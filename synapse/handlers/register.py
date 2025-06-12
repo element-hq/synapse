@@ -506,7 +506,7 @@ class RegistrationHandler:
                             ratelimit=False,
                         )
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _join_rooms(self, user_id: str) -> None:
         """
