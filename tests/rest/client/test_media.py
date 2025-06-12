@@ -1952,7 +1952,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
-            self.repo.create_content(
+            self.repo.create_or_update_content(
                 "text/plain",
                 "test_upload",
                 content,
@@ -2846,3 +2846,124 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
             custom_headers=[("If-None-Match", etag)],
         )
         self.assertEqual(channel3.code, 404)
+
+
+class MediaUploadLimits(unittest.HomeserverTestCase):
+    """
+    This test case simulates a homeserver with media upload limits configured.
+    """
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        # These are the limits that we are testing
+        config["media_upload_limits"] = [
+            {"time_period": "1d", "max_size": "1K"},
+            {"time_period": "1w", "max_size": "3K"},
+        ]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user = self.register_user("user", "pass")
+        self.tok = self.login("user", "pass")
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def upload_media(self, size: int) -> FakeChannel:
+        """Helper to upload media of a given size."""
+        return self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            content=b"0" * size,
+            access_token=self.tok,
+            shorthand=False,
+            content_type=b"text/plain",
+            custom_headers=[("Content-Length", str(size))],
+        )
+
+    def test_upload_under_limit(self) -> None:
+        """Test that uploading media under the limit works."""
+        channel = self.upload_media(67)
+        self.assertEqual(channel.code, 200)
+
+    def test_over_day_limit(self) -> None:
+        """Test that uploading media over the daily limit fails."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 400)
+
+    def test_under_daily_limit(self) -> None:
+        """Test that uploading media under the daily limit fails."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(60 * 60 * 24)  # Advance by one day
+
+        # This will succeed as the daily limit has reset
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(60 * 60 * 24)  # Advance by one day
+
+        # ... and again
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 200)
+
+    def test_over_weekly_limit(self) -> None:
+        """Test that uploading media over the weekly limit fails."""
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(60 * 60 * 24)  # Advance by one day
+
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(2 * 60 * 60 * 24)  # Advance by one day
+
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
+
+        self.reactor.advance(2 * 60 * 60 * 24)  # Advance by one day
+
+        # This will fail as the weekly limit has been exceeded
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 400)
+
+        # Reset the weekly limit by advancing a week
+        self.reactor.advance(7 * 60 * 60 * 24)  # Advance by 7 days
+
+        # This will succeed as the weekly limit has reset
+        channel = self.upload_media(900)
+        self.assertEqual(channel.code, 200)
