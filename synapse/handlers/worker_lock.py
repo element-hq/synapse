@@ -44,6 +44,7 @@ from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.constants import ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
@@ -55,8 +56,6 @@ if TYPE_CHECKING:
 # This is because it is fine to create several events concurrently, since referenced events
 # will not disappear under our feet as long as we don't delete the room.
 NEW_EVENT_DURING_PURGE_LOCK_NAME = "new_event_during_purge_lock"
-
-ONE_MINUTE_SECONDS = 60
 
 
 class WorkerLocksHandler:
