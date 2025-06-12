@@ -475,7 +475,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
-            logging.info("Admin toked used")
+            logger.info("Admin toked used")
             # XXX: that user doesn't exist and won't be provisioned.
             # This is mostly fine for admin calls, but we should also think about doing
             # requesters without a user_id.
