@@ -97,7 +97,11 @@ class DeactivateAccountHandler:
             )
 
         logger.info(
-            f"{requester.user} requested deactivation of {user_id} erase_data={erase_data} id_server={id_server}"
+            "%s requested deactivation of %s erase_data=%s id_server=%s",
+            requester.user,
+            user_id,
+            erase_data,
+            id_server,
         )
 
         # FIXME: Theoretically there is a race here wherein user resets
