@@ -571,4 +571,4 @@ class ExperimentalConfig(Config):
         self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)
 
         # MSC4293: Redact on Kick/Ban
-        self.msc4239_enabled: bool = experimental.get("msc4239_enabled", False)
+        self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)

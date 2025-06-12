@@ -2068,7 +2068,7 @@ class FederationEventHandler:
             soft_failed_event_counter.inc()
             event.internal_metadata.soft_failed = True
 
-        if self._config.experimental.msc4239_enabled:
+        if self._config.experimental.msc4293_enabled:
             # Use already calculated auth events to determine if the event should be redacted due to kick/ban
             if event.type == EventTypes.Message:
                 for auth_event in current_auth_events:

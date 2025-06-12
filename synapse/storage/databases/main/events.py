@@ -376,7 +376,7 @@ class PersistEventsStore:
 
                 event_counter.labels(event.type, origin_type, origin_entity).inc()
 
-                if self.hs.config.experimental.msc4239_enabled:
+                if self.hs.config.experimental.msc4293_enabled:
                     if event.type == EventTypes.Member and event.content.get(
                         "org.matrix.msc4293.redact_events", False
                     ):

@@ -4427,7 +4427,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
         self.federation_event_handler = self.hs.get_federation_event_handler()
 
-        self.hs.config.experimental.msc4239_enabled = True
+        self.hs.config.experimental.msc4293_enabled = True
 
     def _check_redactions(
         self,
