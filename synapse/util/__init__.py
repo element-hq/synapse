@@ -281,8 +281,8 @@ class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
     """
 
     _underlying_map: Mapping[K, V]
-    _mutable_map: Dict[K, V] = attr.field(factory=dict)
-    _deletions: Set[K] = attr.field(factory=set)
+    _mutable_map: Dict[K, V] = attr.ib(factory=dict)
+    _deletions: Set[K] = attr.ib(factory=set)
 
     def __getitem__(self, key: K) -> V:
         if key in self._deletions:
