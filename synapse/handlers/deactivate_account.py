@@ -197,6 +197,7 @@ class DeactivateAccountHandler:
             True,
             by_admin,
         )
+
         return identity_server_supports_unbinding
 
     async def _reject_pending_invites_and_knocks_for_user(self, user_id: str) -> None:
