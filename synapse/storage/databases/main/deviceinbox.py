@@ -62,6 +62,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Update name for the device federation inbox received timestamp index.
+DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE = (
+    "device_federation_inbox_received_ts_index"
+)
+
 
 class DeviceInboxWorkerStore(SQLBaseStore):
     def __init__(
@@ -993,6 +998,13 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
         self.db_pool.updates.register_background_update_handler(
             self.CLEANUP_DEVICE_FEDERATION_OUTBOX,
             self._cleanup_device_federation_outbox,
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name=DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE,
+            index_name="device_federation_inbox_received_ts_index",
+            table="device_federation_inbox",
+            columns=["received_ts"],
         )
 
     async def _background_drop_index_device_inbox(
