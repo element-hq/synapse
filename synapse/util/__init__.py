@@ -272,7 +272,7 @@ V = TypeVar("V")
 @attr.s(slots=True, auto_attribs=True)
 class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
     """A mutable mapping that allows changes to a read-only underlying
-    mapping.
+    mapping. Supports deletions.
 
     This is useful for cases where you want to allow modifications to a mapping
     without changing or copying the original mapping.
@@ -292,11 +292,13 @@ class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
         return self._underlying_map[key]
 
     def __setitem__(self, key: K, value: V) -> None:
-        if key in self._deletions:
-            raise KeyError(key)
+        self._deletions.discard(key)
         self._mutable_map[key] = value
 
     def __delitem__(self, key: K) -> None:
+        if key not in self:
+            raise KeyError(key)
+
         self._deletions.add(key)
         self._mutable_map.pop(key, None)
 
@@ -311,7 +313,9 @@ class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
 
     def __len__(self) -> int:
         count = len(self._underlying_map)
-        count -= len(self._deletions)
+        for key in self._deletions:
+            if key in self._underlying_map:
+                count -= 1
         for key in self._mutable_map:
             if key not in self._deletions and key not in self._underlying_map:
                 count += 1
