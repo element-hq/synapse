@@ -42,6 +42,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     trace,
 )
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.streams import ToDeviceStream
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
@@ -61,6 +62,10 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+# How long to keep messages in the device federation inbox before deleting them.
+DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS = 7 * 24 * 60 * 60 * 1000  # 7 days
 
 # Update name for the device federation inbox received timestamp index.
 DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE = (
@@ -138,6 +143,14 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             min_device_outbox_id,
             prefilled_cache=device_outbox_prefill,
         )
+
+        if hs.config.worker.run_background_tasks:
+            self._clock.looping_call(
+                run_as_background_process,
+                5 * 60 * 1000,  # every five minutes
+                "_delete_old_federation_inbox_rows",
+                self._delete_old_federation_inbox_rows,
+            )
 
     def process_replication_rows(
         self,
@@ -964,6 +977,52 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                     for (device_id, msg) in messages_by_device.items()
                 ],
             )
+
+    async def _delete_old_federation_inbox_rows(self, batch_size: int = 1000) -> None:
+        """Delete old rows from the device_federation_inbox table."""
+
+        # We wait until we have the index on `received_ts`, otherwise the query
+        # will take a very long time.
+        if not await self.db_pool.updates.has_completed_background_update(
+            DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE
+        ):
+            return
+
+        def _delete_old_federation_inbox_rows_txn(txn: LoggingTransaction) -> bool:
+            # We delete at most 100 rows that are older than
+            # DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+            delete_before_ts = (
+                self._clock.time_msec() - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+            )
+            sql = """
+                WITH to_delete AS (
+                    SELECT origin, message_id
+                    FROM device_federation_inbox
+                    WHERE received_ts < ?
+                    ORDER BY received_ts ASC
+                    LIMIT ?
+                )
+                DELETE FROM device_federation_inbox
+                WHERE
+                    (origin, message_id) IN (
+                        SELECT origin, message_id FROM to_delete
+                    )
+            """
+            txn.execute(sql, (delete_before_ts, batch_size))
+            return txn.rowcount < batch_size
+
+        while True:
+            finished = await self.db_pool.runInteraction(
+                "_delete_old_federation_inbox_rows",
+                _delete_old_federation_inbox_rows_txn,
+                db_autocommit=True,  # We don't need to run in a transaction
+            )
+            if finished:
+                return
+
+            # We sleep a bit so that we don't hammer the database in a tight
+            # loop first time we run this.
+            self._clock.sleep(1)
 
 
 class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
