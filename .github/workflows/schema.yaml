@@ -5,6 +5,9 @@ on:
     paths:
       - schema/**
       - docs/usage/configuration/config_documentation.md
+  push:
+    branches: ["develop", "release-*"]
+  workflow_dispatch:
 
 jobs:
   validate-schema:
