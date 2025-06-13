@@ -50,7 +50,9 @@ class InviteRulesConfig:
                         except Exception as e:
                             # If for whatever reason we can't process this, just ignore it.
                             logger.debug(
-                                f"Could not process '{value}' field of invite rule config, ignoring: {e}"
+                                "Could not process '%s' field of invite rule config, ignoring: %s",
+                                value,
+                                e,
                             )
 
         if account_data:

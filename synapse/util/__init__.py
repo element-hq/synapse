@@ -19,10 +19,22 @@
 #
 #
 
+import collections.abc
 import json
 import logging
 import typing
-from typing import Any, Callable, Dict, Generator, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Iterator,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    TypeVar,
+)
 
 import attr
 from immutabledict import immutabledict
@@ -251,3 +263,72 @@ class ExceptionBundle(Exception):
             parts.append(str(e))
         super().__init__("\n  - ".join(parts))
         self.exceptions = exceptions
+
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+@attr.s(slots=True, auto_attribs=True)
+class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
+    """A mutable mapping that allows changes to a read-only underlying
+    mapping. Supports deletions.
+
+    This is useful for cases where you want to allow modifications to a mapping
+    without changing or copying the original mapping.
+
+    Note: the underlying mapping must not change while this proxy is in use.
+    """
+
+    _underlying_map: Mapping[K, V]
+    _mutable_map: Dict[K, V] = attr.ib(factory=dict)
+    _deletions: Set[K] = attr.ib(factory=set)
+
+    def __getitem__(self, key: K) -> V:
+        if key in self._deletions:
+            raise KeyError(key)
+        if key in self._mutable_map:
+            return self._mutable_map[key]
+        return self._underlying_map[key]
+
+    def __setitem__(self, key: K, value: V) -> None:
+        self._deletions.discard(key)
+        self._mutable_map[key] = value
+
+    def __delitem__(self, key: K) -> None:
+        if key not in self:
+            raise KeyError(key)
+
+        self._deletions.add(key)
+        self._mutable_map.pop(key, None)
+
+    def __iter__(self) -> Iterator[K]:
+        for key in self._mutable_map:
+            if key not in self._deletions:
+                yield key
+
+        for key in self._underlying_map:
+            if key not in self._deletions and key not in self._mutable_map:
+                # `key` should not be in both _mutable_map and _deletions
+                assert key not in self._mutable_map
+                yield key
+
+    def __len__(self) -> int:
+        count = len(self._underlying_map)
+        for key in self._deletions:
+            if key in self._underlying_map:
+                count -= 1
+
+        for key in self._mutable_map:
+            # `key` should not be in both _mutable_map and _deletions
+            assert key not in self._deletions
+
+            if key not in self._underlying_map:
+                count += 1
+
+        return count
+
+    def clear(self) -> None:
+        self._underlying_map = {}
+        self._mutable_map.clear()
+        self._deletions.clear()

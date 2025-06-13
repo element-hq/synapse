@@ -51,6 +51,8 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
+logger = logging.getLogger(__name__)
+
 # This lock is used to avoid creating an event while we are purging the room.
 # We take a read lock when creating an event, and a write one when purging a room.
 # This is because it is fine to create several events concurrently, since referenced events

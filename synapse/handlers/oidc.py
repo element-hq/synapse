@@ -563,12 +563,13 @@ class OidcProvider:
                         raise ValueError("Unexpected subject")
                 except Exception:
                     logger.warning(
-                        f"OIDC Back-Channel Logout is enabled for issuer {self.issuer!r} "
+                        "OIDC Back-Channel Logout is enabled for issuer %r "
                         "but it looks like the configured `user_mapping_provider` "
                         "does not use the `sub` claim as subject. If it is the case, "
                         "and you want Synapse to ignore the `sub` claim in OIDC "
                         "Back-Channel Logouts, set `backchannel_logout_ignore_sub` "
-                        "to `true` in the issuer config."
+                        "to `true` in the issuer config.",
+                        self.issuer,
                     )
 
     @property
@@ -826,10 +827,10 @@ class OidcProvider:
             if response.code < 400:
                 logger.debug(
                     "Invalid response from the authorization server: "
-                    'responded with a "{status}" '
-                    "but body has an error field: {error!r}".format(
-                        status=status, error=resp["error"]
-                    )
+                    'responded with a "%s" '
+                    "but body has an error field: %r",
+                    status,
+                    resp["error"],
                 )
 
             description = resp.get("error_description", error)
@@ -1385,7 +1386,8 @@ class OidcProvider:
         # support dynamic registration in Synapse at some point.
         if not self._config.backchannel_logout_enabled:
             logger.warning(
-                f"Received an OIDC Back-Channel Logout request from issuer {self.issuer!r} but it is disabled in config"
+                "Received an OIDC Back-Channel Logout request from issuer %r but it is disabled in config",
+                self.issuer,
             )
 
             # TODO: this responds with a 400 status code, which is what the OIDC
@@ -1797,5 +1799,5 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
                 extras[key] = template.render(user=userinfo).strip()
             except Exception as e:
                 # Log an error and skip this value (don't break login for this).
-                logger.error("Failed to render OIDC extra attribute %s: %s" % (key, e))
+                logger.exception("Failed to render OIDC extra attribute %s: %s", key, e)
         return extras

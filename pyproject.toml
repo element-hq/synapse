@@ -74,6 +74,10 @@ select = [
     "PIE",
     # flake8-executable
     "EXE",
+    # flake8-logging
+    "LOG",
+    # flake8-logging-format
+    "G",
 ]
 
 [tool.ruff.lint.isort]
