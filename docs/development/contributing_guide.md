@@ -29,8 +29,6 @@ easiest way of installing the latest version is to use [rustup](https://rustup.r
 
 Synapse can connect to PostgreSQL via the [psycopg2](https://pypi.org/project/psycopg2/) Python library. Building this library from source requires access to PostgreSQL's C header files. On Debian or Ubuntu Linux, these can be installed with `sudo apt install libpq-dev`.
 
-Synapse bundles the ICU library via Rust, so no additional `libicu` package is required for improved user search.
-
 The source code of Synapse is hosted on GitHub. You will also need [a recent version of git](https://github.com/git-guides/install-git).
 
 For some tests, you will need [a recent version of Docker](https://docs.docker.com/get-docker/).

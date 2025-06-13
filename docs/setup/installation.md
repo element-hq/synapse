@@ -364,8 +364,6 @@ xcode-select --install
 
 Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) for them.
 
-The ICU library is bundled with Synapse and requires no additional setup.
-
 On ARM-based Macs you may also need to install libjpeg and libpq:
 ```sh
  brew install jpeg libpq
