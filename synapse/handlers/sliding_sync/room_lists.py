@@ -74,7 +74,7 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncResult,
 )
 from synapse.types.state import StateFilter
-from synapse.util import ChainMutableMapping
+from synapse.util import MutableOverlayMapping
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -248,7 +248,7 @@ class SlidingSyncRoomLists:
         # `newly_left` rooms below. This is more efficient than fetching all rooms and
         # then filtering out the old left rooms.
         room_membership_for_user_map: MutableMapping[str, RoomsForUserSlidingSync] = (
-            ChainMutableMapping(
+            MutableOverlayMapping(
                 await self.store.get_sliding_sync_rooms_for_user_from_membership_snapshots(
                     user_id
                 )

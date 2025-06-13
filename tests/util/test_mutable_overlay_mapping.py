@@ -15,29 +15,29 @@
 import unittest
 from typing import Dict
 
-from synapse.util import ChainMutableMapping
+from synapse.util import MutableOverlayMapping
 
 
-class TestChainMutableMapping(unittest.TestCase):
-    """Tests for the ChainMutableMapping class."""
+class TestMutableOverlayMapping(unittest.TestCase):
+    """Tests for the MutableOverlayMapping class."""
 
     def test_init(self) -> None:
         """Test initialization with different input types."""
         # Test with empty dict
         empty_dict: Dict[str, int] = {}
-        mapping = ChainMutableMapping(empty_dict)
+        mapping = MutableOverlayMapping(empty_dict)
         self.assertEqual(len(mapping), 0)
 
         # Test with populated dict
         populated_dict = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(populated_dict)
+        mapping = MutableOverlayMapping(populated_dict)
         self.assertEqual(len(mapping), 3)
         self.assertEqual(mapping["a"], 1)
 
     def test_get_item(self) -> None:
         """Test getting items from the mapping."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         # Get from underlying map
         self.assertEqual(mapping["a"], 1)
@@ -50,7 +50,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_set_item(self) -> None:
         """Test setting items in the mapping."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         # Set new key
         mapping["d"] = 4
@@ -67,7 +67,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_del_item(self) -> None:
         """Test deleting items from the mapping."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         # Delete a key
         del mapping["a"]
@@ -84,7 +84,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_len(self) -> None:
         """Test the len() function."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         self.assertEqual(len(mapping), 3)
 
@@ -107,7 +107,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_iteration(self) -> None:
         """Test iteration over the mapping."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         # Add a new key and override an existing one
         mapping["d"] = 4
@@ -129,7 +129,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_clear(self) -> None:
         """Test the clear method."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         # Add a new key and override an existing one
         mapping["d"] = 4
@@ -157,7 +157,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_dict_methods(self) -> None:
         """Test standard dict methods."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         # Test keys, values, and items
         self.assertEqual(set(mapping.keys()), {"a", "b", "c"})
@@ -176,7 +176,7 @@ class TestChainMutableMapping(unittest.TestCase):
     def test_key_presence(self) -> None:
         """Test checking if keys exist in the mapping."""
         underlying = {"a": 1, "b": 2, "c": 3}
-        mapping = ChainMutableMapping(underlying)
+        mapping = MutableOverlayMapping(underlying)
 
         mapping["d"] = 4
         mapping["a"] = 10

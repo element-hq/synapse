@@ -270,7 +270,7 @@ V = TypeVar("V")
 
 
 @attr.s(slots=True, auto_attribs=True)
-class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
+class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
     """A mutable mapping that allows changes to a read-only underlying
     mapping. Supports deletions.
 
