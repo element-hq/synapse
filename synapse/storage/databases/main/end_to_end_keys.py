@@ -42,6 +42,7 @@ import attr
 from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import DeviceKeyAlgorithms
+from synapse.api.errors import Codes, StoreError
 from synapse.appservice import (
     TransactionOneTimeKeysCount,
     TransactionUnusedFallbackKeys,
@@ -1619,9 +1620,16 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
         # returns unicode while encode_canonical_json returns bytes.
         new_key_json = encode_canonical_json(device_keys).decode("utf-8")
 
-        if old_key_json == new_key_json:
-            log_kv({"Message": "Device key already stored."})
-            return False
+        if old_key_json is not None:
+            if old_key_json == new_key_json:
+                log_kv({"Message": "Device key already stored."})
+                return False
+
+            raise StoreError(
+                400,
+                "Device keys for this device have already been uploaded",
+                Codes.INVALID_PARAM,
+            )
 
         self.db_pool.simple_upsert_txn(
             txn,
