@@ -1,0 +1,1 @@
+Fixed a bug introduced in #18534 where non-creators would have their PL calculated incorrectly if there was no PL event in the room.
