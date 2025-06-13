@@ -309,6 +309,8 @@ class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
 
         for key in self._underlying_map:
             if key not in self._deletions and key not in self._mutable_map:
+                # `key` should not be in both _mutable_map and _deletions
+                assert key not in self._mutable_map
                 yield key
 
     def __len__(self) -> int:
@@ -316,9 +318,14 @@ class ChainMutableMapping(collections.abc.MutableMapping[K, V]):
         for key in self._deletions:
             if key in self._underlying_map:
                 count -= 1
+
         for key in self._mutable_map:
-            if key not in self._deletions and key not in self._underlying_map:
+            # `key` should not be in both _mutable_map and _deletions
+            assert key not in self._deletions
+
+            if key not in self._underlying_map:
                 count += 1
+
         return count
 
     def clear(self) -> None:
