@@ -7,6 +7,9 @@ pub fn parse_words(text: &str) -> PyResult<Vec<String>> {
     let segmenter = WordSegmenter::new_auto(WordBreakInvariantOptions::default());
     let mut parts = Vec::new();
     let mut last = 0usize;
+
+    // `segment_str` gives us word boundaries as a vector of indexes. Use that
+    // to build a vector of words, and return.
     for boundary in segmenter.segment_str(text) {
         if boundary > last {
             parts.push(text[last..boundary].to_string());

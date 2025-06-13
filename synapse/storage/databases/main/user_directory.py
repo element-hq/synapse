@@ -1217,7 +1217,7 @@ def _filter_text_for_index(text: str) -> str:
 
 def _parse_query_sqlite(search_term: str) -> str:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
 
@@ -1233,7 +1233,7 @@ def _parse_query_sqlite(search_term: str) -> str:
 
 def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
     """
@@ -1286,10 +1286,12 @@ def _parse_words_with_icu(search_term: str) -> List[str]:
     """
     results = []
     for part in icu.parse_words(search_term):
+        # We want to make sure that we split on `@` and `:` specifically, as
+        # they occur in user IDs.
         for result in re.split(r"[@:]+", part):
             results.append(result.strip())
 
-    # libicu will break up words that have punctuation in them, but to handle
+    # icu will break up words that have punctuation in them, but to handle
     # cases where user IDs have '-', '.' and '_' in them we want to *not* break
     # those into words and instead allow the DB to tokenise them how it wants.
     #
