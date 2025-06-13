@@ -27,9 +27,11 @@ from synapse.media.preview_html import (
 )
 
 from tests import unittest
+from unittest.case import SkipTest
 
 try:
     import lxml
+    from lxml import etree
 except ImportError:
     lxml = None  # type: ignore[assignment]
 
@@ -324,6 +326,9 @@ class OpenGraphFromHtmlTestCase(unittest.TestCase):
 
     def test_no_tree(self) -> None:
         """A valid body with no tree in it."""
+        if etree.LIBXML_VERSION >= (2, 14):
+            raise SkipTest("This test is known to be broken with libxml >= 2.14.")
+
         html = b"\x00"
         tree = decode_body(html, "http://example.com/test.html")
         self.assertIsNone(tree)
