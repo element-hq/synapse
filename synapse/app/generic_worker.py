@@ -118,7 +118,6 @@ class GenericWorkerStore(
     # FIXME(https://github.com/matrix-org/synapse/issues/3714): We need to add
     # UserDirectoryStore as we write directly rather than going via the correct worker.
     UserDirectoryStore,
-    StatsStore,
     UIAuthWorkerStore,
     EndToEndRoomKeyStore,
     PresenceStore,
@@ -154,6 +153,7 @@ class GenericWorkerStore(
     StreamWorkerStore,
     EventsWorkerStore,
     RegistrationWorkerStore,
+    StatsStore,
     SearchStore,
     TransactionWorkerStore,
     LockStore,
