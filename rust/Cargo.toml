@@ -43,7 +43,7 @@ sha2 = "0.10.8"
 serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"
 ulid = "1.1.2"
-icu_segmenter = { version = "2.0", features = ["compiled_data"] }
+icu_segmenter = { version = "2.0" }
 
 [features]
 extension-module = ["pyo3/extension-module"]
