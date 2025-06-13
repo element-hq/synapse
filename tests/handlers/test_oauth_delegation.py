@@ -21,10 +21,11 @@
 
 from http import HTTPStatus
 from io import BytesIO
-from typing import Any, Dict, Optional, Union
+from typing import Any, ClassVar, Dict, Optional, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
+from parameterized.parameterized import parameterized_class
 from signedjson.key import (
     encode_verify_key_base64,
     generate_signing_key,
@@ -40,7 +41,6 @@ from synapse.api.errors import (
     AuthError,
     Codes,
     InvalidClientTokenError,
-    OAuthInsufficientScopeError,
     SynapseError,
 )
 from synapse.appservice import ApplicationService
@@ -72,11 +72,7 @@ JWKS_URI = ISSUER + ".well-known/jwks.json"
 INTROSPECTION_ENDPOINT = ISSUER + "introspect"
 
 SYNAPSE_ADMIN_SCOPE = "urn:synapse:admin:*"
-MATRIX_USER_SCOPE = "urn:matrix:org.matrix.msc2967.client:api:*"
-MATRIX_GUEST_SCOPE = "urn:matrix:org.matrix.msc2967.client:api:guest"
-MATRIX_DEVICE_SCOPE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
 DEVICE = "AABBCCDD"
-MATRIX_DEVICE_SCOPE = MATRIX_DEVICE_SCOPE_PREFIX + DEVICE
 SUBJECT = "abc-def-ghi"
 USERNAME = "test-user"
 USER_ID = "@" + USERNAME + ":" + SERVER_NAME
@@ -106,7 +102,24 @@ async def get_json(url: str) -> JsonDict:
 
 
 @skip_unless(HAS_AUTHLIB, "requires authlib")
+@parameterized_class(
+    ("device_scope_prefix", "api_scope"),
+    [
+        ("urn:matrix:client:device:", "urn:matrix:client:api:*"),
+        (
+            "urn:matrix:org.matrix.msc2967.client:device:",
+            "urn:matrix:org.matrix.msc2967.client:api:*",
+        ),
+    ],
+)
 class MSC3861OAuthDelegation(HomeserverTestCase):
+    device_scope_prefix: ClassVar[str]
+    api_scope: ClassVar[str]
+
+    @property
+    def device_scope(self) -> str:
+        return self.device_scope_prefix + DEVICE
+
     servlets = [
         account.register_servlets,
         devices.register_servlets,
@@ -208,7 +221,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         self.http_client.request = AsyncMock(
             return_value=FakeResponse.json(
                 code=200,
-                payload={"active": True, "scope": " ".join([MATRIX_USER_SCOPE])},
+                payload={"active": True, "scope": " ".join([self.api_scope])},
             )
         )
         request = Mock(args={})
@@ -230,7 +243,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_DEVICE_SCOPE]),
+                    "scope": " ".join([self.device_scope]),
                 },
             )
         )
@@ -277,7 +290,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE]),
+                    "scope": " ".join([SYNAPSE_ADMIN_SCOPE, self.api_scope]),
                     "username": USERNAME,
                 },
             )
@@ -307,9 +320,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join(
-                        [SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE, MATRIX_GUEST_SCOPE]
-                    ),
+                    "scope": " ".join([SYNAPSE_ADMIN_SCOPE, self.api_scope]),
                     "username": USERNAME,
                 },
             )
@@ -339,7 +350,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE]),
+                    "scope": " ".join([self.api_scope]),
                     "username": USERNAME,
                 },
             )
@@ -369,7 +380,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                    "scope": " ".join([self.api_scope, self.device_scope]),
                     "username": USERNAME,
                 },
             )
@@ -399,7 +410,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE]),
+                    "scope": " ".join([self.api_scope]),
                     "device_id": DEVICE,
                     "username": USERNAME,
                 },
@@ -439,9 +450,9 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                     "sub": SUBJECT,
                     "scope": " ".join(
                         [
-                            MATRIX_USER_SCOPE,
-                            f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
-                            f"{MATRIX_DEVICE_SCOPE_PREFIX}DDEEFF",
+                            self.api_scope,
+                            f"{self.device_scope_prefix}AABBCC",
+                            f"{self.device_scope_prefix}DDEEFF",
                         ]
                     ),
                     "username": USERNAME,
@@ -452,68 +463,6 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), AuthError)
-
-    def test_active_guest_not_allowed(self) -> None:
-        """The handler should return an insufficient scope error."""
-
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
-        )
-        request = Mock(args={})
-        request.args[b"access_token"] = [b"mockAccessToken"]
-        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
-        error = self.get_failure(
-            self.auth.get_user_by_req(request), OAuthInsufficientScopeError
-        )
-        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
-        )
-        self._assertParams()
-        self.assertEqual(
-            getattr(error.value, "headers", {})["WWW-Authenticate"],
-            'Bearer error="insufficient_scope", scope="urn:matrix:org.matrix.msc2967.client:api:*"',
-        )
-
-    def test_active_guest_allowed(self) -> None:
-        """The handler should return a requester with guest user rights and a device ID."""
-
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
-        )
-        request = Mock(args={})
-        request.args[b"access_token"] = [b"mockAccessToken"]
-        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
-        requester = self.get_success(
-            self.auth.get_user_by_req(request, allow_guest=True)
-        )
-        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
-        )
-        self._assertParams()
-        self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
-        self.assertEqual(requester.is_guest, True)
-        self.assertEqual(
-            get_awaitable_result(self.auth.is_server_admin(requester)), False
-        )
-        self.assertEqual(requester.device_id, DEVICE)
 
     def test_unavailable_introspection_endpoint(self) -> None:
         """The handler should return an internal server error."""
@@ -562,8 +511,8 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                     "sub": SUBJECT,
                     "scope": " ".join(
                         [
-                            MATRIX_USER_SCOPE,
-                            f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
+                            self.api_scope,
+                            f"{self.device_scope_prefix}AABBCC",
                         ]
                     ),
                     "username": USERNAME,
@@ -613,7 +562,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                    "scope": " ".join([self.api_scope, self.device_scope]),
                     "username": USERNAME,
                 },
             )
@@ -784,7 +733,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 payload={
                     "active": True,
                     "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                    "scope": " ".join([self.api_scope, self.device_scope]),
                     "username": USERNAME,
                 },
             )
@@ -865,7 +814,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                     code=200,
                     payload={
                         "active": True,
-                        "scope": MATRIX_USER_SCOPE,
+                        "scope": self.api_scope,
                         "sub": SUBJECT,
                         "username": USERNAME,
                     },
