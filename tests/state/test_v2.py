@@ -961,25 +961,47 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
                     f"wrong pl for {user_id} on v{room_version.identifier}",
                 )
 
-            # the creator alone without PL is 100
-            got_creator_pl = self.successResultOf(
-                defer.ensureDeferred(
-                    _get_power_level_for_sender(
-                        ROOM_ID,
-                        member_event.event_id,
-                        {
-                            member_event.event_id: member_event,
-                            create_event.event_id: create_event,
-                        },
-                        store,
+            # the creator alone without PL is 100, everyone else is 0
+            want_pls = {
+                ALICE: 100,
+                BOB: 0,
+                CHARLIE: 0,
+            }
+            for user_id, want_pl in want_pls.items():
+                test_event = make_event_from_dict(
+                    {
+                        "room_id": ROOM_ID,
+                        "sender": user_id,
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "content": {"topic": "Test"},
+                        "auth_events": [
+                            create_event.event_id,
+                            member_event.event_id,
+                            pl_event.event_id,
+                        ],
+                        "prev_events": [pl_event.event_id],
+                    },
+                    room_version,
+                )
+                got_pl = self.successResultOf(
+                    defer.ensureDeferred(
+                        _get_power_level_for_sender(
+                            ROOM_ID,
+                            test_event.event_id,
+                            {
+                                test_event.event_id: test_event,
+                                create_event.event_id: create_event,
+                            },
+                            store,
+                        )
                     )
                 )
-            )
-            self.assertEqual(
-                got_creator_pl,
-                100,
-                f"wrong pl for creator with no PL event on v{room_version.identifier}",
-            )
+                self.assertEqual(
+                    got_pl,
+                    want_pl,
+                    f"wrong pl for {user_id} with no PL event on v{room_version.identifier}",
+                )
 
 
 T = TypeVar("T")
