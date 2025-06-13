@@ -1024,13 +1024,10 @@ def get_user_power_level(user_id: str, auth_events: StateMap["EventBase"]) -> in
         the user's power level in this room.
     """
     create_event = auth_events.get(CREATE_KEY)
-    assert (
-        create_event is not None,
-        "A create event in the auth events chain is required to"
-        " calculate user power level correctly, but was not"
-        " found. This indicates a bug",
+    assert create_event is not None, (
+        "A create event in the auth events chain is required to calculate user power level correctly,"
+        " but was not found. This indicates a bug"
     )
-
     power_level_event = get_power_level_event(auth_events)
     if power_level_event:
         level = power_level_event.content.get("users", {}).get(user_id)

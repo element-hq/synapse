@@ -37,7 +37,7 @@ from synapse.appservice import ApplicationService
 from synapse.http import get_request_user_agent
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace
-from synapse.state import POWER_KEY
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.types import Requester, create_requester
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
@@ -222,8 +222,8 @@ class BaseAuth:
             room_id,
             StateFilter.from_types(
                 [
-                    (EventTypes.PowerLevels, ""),
-                    (EventTypes.Create, ""),
+                    POWER_KEY,
+                    CREATE_KEY,
                 ]
             ),
         )
