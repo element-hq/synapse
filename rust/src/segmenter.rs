@@ -1,6 +1,6 @@
-use pyo3::prelude::*;
-use icu_segmenter::WordSegmenter;
 use icu_segmenter::options::WordBreakInvariantOptions;
+use icu_segmenter::WordSegmenter;
+use pyo3::prelude::*;
 
 #[pyfunction]
 pub fn parse_words(text: &str) -> PyResult<Vec<String>> {
