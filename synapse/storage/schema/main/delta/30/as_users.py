@@ -63,8 +63,11 @@ def run_upgrade(
                 if user_id in owned.keys():
                     logger.error(
                         "user_id %s was owned by more than one application"
-                        " service (IDs %s and %s); assigning arbitrarily to %s"
-                        % (user_id, owned[user_id], appservice.id, owned[user_id])
+                        " service (IDs %s and %s); assigning arbitrarily to %s",
+                        user_id,
+                        owned[user_id],
+                        appservice.id,
+                        owned[user_id],
                     )
                 owned.setdefault(appservice.id, []).append(user_id)
 

@@ -331,7 +331,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
                         values={"timestamp": int(self._clock.time_msec())},
                     )
             else:
-                logger.warning("mau limit reserved threepid %s not found in db" % tp)
+                logger.warning("mau limit reserved threepid %s not found in db", tp)
 
     async def upsert_monthly_active_user(self, user_id: str) -> None:
         """Updates or inserts the user into the monthly active user table, which

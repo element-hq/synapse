@@ -460,7 +460,7 @@ class MessageHandler:
             # date from the database in the same database transaction.
             await self.store.expire_event(event_id)
         except Exception as e:
-            logger.error("Could not expire event %s: %r", event_id, e)
+            logger.exception("Could not expire event %s: %r", event_id, e)
 
         # Schedule the expiry of the next event to expire.
         await self._schedule_next_expiry()
@@ -2061,7 +2061,8 @@ class EventCreationHandler:
                 # dependent on _DUMMY_EVENT_ROOM_EXCLUSION_EXPIRY
                 logger.info(
                     "Failed to send dummy event into room %s. Will exclude it from "
-                    "future attempts until cache expires" % (room_id,)
+                    "future attempts until cache expires",
+                    room_id,
                 )
                 now = self.clock.time_msec()
                 self._rooms_to_exclude_from_dummy_event_insertion[room_id] = now
@@ -2120,7 +2121,9 @@ class EventCreationHandler:
             except AuthError:
                 logger.info(
                     "Failed to send dummy event into room %s for user %s due to "
-                    "lack of power. Will try another user" % (room_id, user_id)
+                    "lack of power. Will try another user",
+                    room_id,
+                    user_id,
                 )
         return False
 

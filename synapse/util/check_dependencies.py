@@ -37,6 +37,8 @@ DISTRIBUTION_NAME = "matrix-synapse"
 
 __all__ = ["check_requirements"]
 
+logger = logging.getLogger(__name__)
+
 
 class DependencyException(Exception):
     @property
@@ -211,6 +213,6 @@ def check_requirements(extra: Optional[str] = None) -> None:
 
     if deps_unfulfilled:
         for err in errors:
-            logging.error(err)
+            logger.error(err)
 
         raise DependencyException(deps_unfulfilled)

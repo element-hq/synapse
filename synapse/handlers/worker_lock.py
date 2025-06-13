@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
+logger = logging.getLogger(__name__)
+
 # This lock is used to avoid creating an event while we are purging the room.
 # We take a read lock when creating an event, and a write one when purging a room.
 # This is because it is fine to create several events concurrently, since referenced events
@@ -271,8 +273,9 @@ class WaitingLock:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
         if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
-            logging.warning(
-                f"Lock timeout is getting excessive: {self._retry_interval}s. There may be a deadlock."
+            logger.warning(
+                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)
 
@@ -350,7 +353,8 @@ class WaitingMultiLock:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
         if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
-            logging.warning(
-                f"Lock timeout is getting excessive: {self._retry_interval}s. There may be a deadlock."
+            logger.warning(
+                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)
