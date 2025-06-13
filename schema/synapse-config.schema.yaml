@@ -4643,13 +4643,20 @@ properties:
       - invite
   user_directory:
     type: object
-    description: This setting defines options related to the user directory.
+    description: >-
+      This setting defines options related to the user directory.
+
+
+      *Warning: The Matrix spec requires homeservers to consider at least users
+      the requesting user shares a room with and users who reside in public
+      rooms known to the homeserver in directory searches. Some of the settings
+      below aid performance but are in violation of this requirement.*
     properties:
       enabled:
         type: boolean
         description: >-
-          Defines whether users can search the user directory. If false then
-          empty responses are returned to all queries.
+          Defines whether users can search the user directory. If `false`, then
+          empty responses are returned to all queries (which is not spec-compliant).
         default: true
       search_all_users:
         type: boolean
@@ -4682,7 +4689,9 @@ properties:
         default: false
       exclude_remote_users:
         type: boolean
-        description: If set to true, the search will only return local users.
+        description: >-
+          If set to `true`, the search will only return local users (which is not
+          spec-compliant).
         default: false
       show_locked_users:
         type: boolean
