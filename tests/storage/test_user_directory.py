@@ -35,7 +35,6 @@ from synapse.storage.background_updates import _BackgroundUpdateHandler
 from synapse.storage.databases.main import user_directory
 from synapse.storage.databases.main.user_directory import (
     _parse_words_with_icu,
-    _parse_words_with_regex,
 )
 from synapse.storage.roommember import ProfileInfo
 from synapse.util import Clock
@@ -432,8 +431,6 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
 
 class UserDirectoryStoreTestCase(HomeserverTestCase):
-    use_icu = False
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
 
@@ -446,8 +443,6 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
 
         self._restore_parse_words = user_directory._parse_words
-        if not self.use_icu:
-            user_directory._parse_words = user_directory._parse_words_with_regex
 
     def tearDown(self) -> None:
         user_directory._parse_words = self._restore_parse_words
@@ -643,18 +638,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
     test_search_user_dir_accent_insensitivity.skip = "not supported yet"  # type: ignore
 
 
-class UserDirectoryStoreTestCaseWithIcu(UserDirectoryStoreTestCase):
-    use_icu = True
-
-
 class UserDirectoryICUTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.user_dir_helper = GetUserDirectoryTables(self.store)
 
     def test_icu_word_boundary(self) -> None:
-        """Tests that we correctly detect word boundaries when ICU (International
-        Components for Unicode) support is available.
+        """Tests that we correctly detect word boundaries with ICU
+        (International Components for Unicode).
         """
 
         display_name = "Gáo"
@@ -703,12 +694,3 @@ class UserDirectoryICUTestCase(HomeserverTestCase):
         self.assertEqual(_parse_words_with_icu("user-1"), ["user-1"])
         self.assertEqual(_parse_words_with_icu("user-ab"), ["user-ab"])
         self.assertEqual(_parse_words_with_icu("user.--1"), ["user", "-1"])
-
-    def test_regex_word_boundary_punctuation(self) -> None:
-        """
-        Tests the behaviour of punctuation with the non-ICU tokeniser
-        """
-        self.assertEqual(
-            _parse_words_with_regex("lazy'fox jumped:over the.dog"),
-            ["lazy", "fox", "jumped", "over", "the", "dog"],
-        )
