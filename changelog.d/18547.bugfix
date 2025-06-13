@@ -1,1 +1,1 @@
-Fixed a bug introduced in #18534 where non-creators would have their PL calculated incorrectly if there was no PL event in the room.
+Fix an issue where during state resolution for v11 rooms Synapse would incorrectly calculate the power level of the creator when there was no power levels event in the room.
