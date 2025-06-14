@@ -66,6 +66,7 @@ from synapse.logging.opentracing import (
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
+from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -2549,6 +2550,7 @@ class SyncHandler:
         room_entries: List[RoomSyncResultBuilder] = []
         invited: List[InvitedSyncResult] = []
         knocked: List[KnockedSyncResult] = []
+        invite_config = await self.store.get_invite_config_for_user(user_id)
         for room_id, events in mem_change_events_by_room_id.items():
             # The body of this loop will add this room to at least one of the five lists
             # above. Things get messy if you've e.g. joined, left, joined then left the
@@ -2631,7 +2633,11 @@ class SyncHandler:
             # Only bother if we're still currently invited
             should_invite = last_non_join.membership == Membership.INVITE
             if should_invite:
-                if last_non_join.sender not in ignored_users:
+                if (
+                    last_non_join.sender not in ignored_users
+                    and invite_config.get_invite_rule(last_non_join.sender)
+                    != InviteRule.IGNORE
+                ):
                     invite_room_sync = InvitedSyncResult(room_id, invite=last_non_join)
                     if invite_room_sync:
                         invited.append(invite_room_sync)
@@ -2786,6 +2792,7 @@ class SyncHandler:
             membership_list=Membership.LIST,
             excluded_rooms=sync_result_builder.excluded_room_ids,
         )
+        invite_config = await self.store.get_invite_config_for_user(user_id)
 
         room_entries = []
         invited = []
@@ -2810,6 +2817,8 @@ class SyncHandler:
                 )
             elif event.membership == Membership.INVITE:
                 if event.sender in ignored_users:
+                    continue
+                if invite_config.get_invite_rule(event.sender) == InviteRule.IGNORE:
                     continue
                 invite = await self.store.get_event(event.event_id)
                 invited.append(InvitedSyncResult(room_id=event.room_id, invite=invite))
@@ -3065,8 +3074,10 @@ class SyncHandler:
                 if batch.limited and since_token:
                     user_id = sync_result_builder.sync_config.user.to_string()
                     logger.debug(
-                        "Incremental gappy sync of %s for user %s with %d state events"
-                        % (room_id, user_id, len(state))
+                        "Incremental gappy sync of %s for user %s with %d state events",
+                        room_id,
+                        user_id,
+                        len(state),
                     )
             elif room_builder.rtype == "archived":
                 archived_room_sync = ArchivedSyncResult(

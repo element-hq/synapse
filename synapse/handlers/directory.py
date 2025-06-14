@@ -282,7 +282,7 @@ class DirectoryHandler:
             except RequestSendFailed:
                 raise SynapseError(502, "Failed to fetch alias")
             except CodeMessageException as e:
-                logging.warning(
+                logger.warning(
                     "Error retrieving alias %s -> %s %s", room_alias, e.code, e.msg
                 )
                 if e.code == 404:

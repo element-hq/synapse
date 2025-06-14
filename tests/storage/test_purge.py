@@ -24,6 +24,7 @@ from synapse.api.errors import NotFoundError, SynapseError
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -303,3 +304,156 @@ class PurgeTests(HomeserverTestCase):
             )
         )
         self.assertEqual(len(state_groups), 1)
+
+    def test_clear_unreferenced_state_groups(self) -> None:
+        """Test that any unreferenced state groups are automatically cleaned up."""
+
+        self.helper.send(self.room_id, body="test1")
+        state1 = self.helper.send_state(
+            self.room_id, "org.matrix.test", body={"number": 2}
+        )
+        # Create enough state events to require multiple batches of
+        # mark_unreferenced_state_groups_for_deletion_bg_update to be run.
+        for i in range(200):
+            self.helper.send_state(self.room_id, "org.matrix.test", body={"number": i})
+        self.helper.send(self.room_id, body="test4")
+        last = self.helper.send(self.room_id, body="test5")
+
+        # Create an unreferenced state group that has no prev group.
+        unreferenced_free_state_group = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=None,
+                delta_ids={("org.matrix.test", ""): state1["event_id"]},
+                current_state_ids={("org.matrix.test", ""): ""},
+            )
+        )
+
+        # Create some unreferenced state groups that have a prev group of one of the
+        # existing state groups.
+        prev_group = self.get_success(
+            self.store._get_state_group_for_event(state1["event_id"])
+        )
+        unreferenced_end_state_group = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=prev_group,
+                delta_ids={("org.matrix.test", ""): state1["event_id"]},
+                current_state_ids=None,
+            )
+        )
+        another_unreferenced_end_state_group = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=unreferenced_end_state_group,
+                delta_ids={("org.matrix.test", ""): state1["event_id"]},
+                current_state_ids=None,
+            )
+        )
+
+        # Add some other unreferenced state groups which lead to a referenced state
+        # group.
+        # These state groups should not get deleted.
+        chain_state_group = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=None,
+                delta_ids={("org.matrix.test", ""): ""},
+                current_state_ids={("org.matrix.test", ""): ""},
+            )
+        )
+        chain_state_group_2 = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=chain_state_group,
+                delta_ids={("org.matrix.test", ""): ""},
+                current_state_ids=None,
+            )
+        )
+        referenced_chain_state_group = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=chain_state_group_2,
+                delta_ids={("org.matrix.test", ""): ""},
+                current_state_ids=None,
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "event_to_state_groups",
+                {
+                    "event_id": "$new_event",
+                    "state_group": referenced_chain_state_group,
+                },
+            )
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Advance so that the background job to delete the state groups runs
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
+
+        # We expect that the unreferenced free state group has been deleted.
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_groups",
+                keyvalues={"id": unreferenced_free_state_group},
+                retcol="id",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+
+        # We expect that both unreferenced end state groups have been deleted.
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_groups",
+                keyvalues={"id": unreferenced_end_state_group},
+                retcol="id",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_groups",
+                keyvalues={"id": another_unreferenced_end_state_group},
+                retcol="id",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+
+        # We expect there to now only be one state group for the room, which is
+        # the state group of the last event (as the only outlier).
+        state_groups = self.get_success(
+            self.state_store.db_pool.simple_select_onecol(
+                table="state_groups",
+                keyvalues={"room_id": self.room_id},
+                retcol="id",
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertEqual(len(state_groups), 210)

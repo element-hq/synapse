@@ -1822,7 +1822,7 @@ def _get_test_protocol_factory() -> IProtocolFactory:
 
 def _log_request(request: str) -> None:
     """Implements Factory.log, which is expected by Request.finish"""
-    logger.info(f"Completed request {request}")
+    logger.info("Completed request %s", request)
 
 
 @implementer(IPolicyForHTTPS)

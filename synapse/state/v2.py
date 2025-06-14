@@ -254,7 +254,19 @@ async def _get_power_level_for_sender(
                 room_id, aid, event_map, state_res_store, allow_none=True
             )
             if aev and (aev.type, aev.state_key) == (EventTypes.Create, ""):
-                if aev.content.get("creator") == event.sender:
+                creator = (
+                    aev.sender
+                    if event.room_version.implicit_room_creator
+                    else aev.content.get("creator")
+                )
+                if not creator:
+                    logger.warning(
+                        "_get_power_level_for_sender: event %s has no PL in auth_events and "
+                        "creator is missing from create event %s",
+                        event_id,
+                        aev.event_id,
+                    )
+                if creator == event.sender:
                     return 100
                 break
         return 0

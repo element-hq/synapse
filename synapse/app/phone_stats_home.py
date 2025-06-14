@@ -28,11 +28,25 @@ from prometheus_client import Gauge
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.types import JsonDict
+from synapse.util.constants import ONE_HOUR_SECONDS, ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger("synapse.app.homeserver")
+
+MILLISECONDS_PER_SECOND = 1000
+
+INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS = 5 * ONE_MINUTE_SECONDS
+"""
+We wait 5 minutes to send the first set of stats as the server can be quite busy the
+first few minutes
+"""
+
+PHONE_HOME_INTERVAL_SECONDS = 3 * ONE_HOUR_SECONDS
+"""
+Phone home stats are sent every 3 hours
+"""
 
 # Contains the list of processes we will be monitoring
 # currently either 0 or 1
@@ -157,7 +171,7 @@ async def phone_stats_home(
     stats["log_level"] = logging.getLevelName(log_level)
 
     logger.info(
-        "Reporting stats to %s: %s" % (hs.config.metrics.report_stats_endpoint, stats)
+        "Reporting stats to %s: %s", hs.config.metrics.report_stats_endpoint, stats
     )
     try:
         await hs.get_proxied_http_client().put_json(
@@ -185,12 +199,14 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # If you increase the loop period, the accuracy of user_daily_visits
     # table will decrease
     clock.looping_call(
-        hs.get_datastores().main.generate_user_daily_visits, 5 * 60 * 1000
+        hs.get_datastores().main.generate_user_daily_visits,
+        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
     )
 
     # monthly active user limiting functionality
     clock.looping_call(
-        hs.get_datastores().main.reap_monthly_active_users, 1000 * 60 * 60
+        hs.get_datastores().main.reap_monthly_active_users,
+        ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
@@ -221,7 +237,12 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
-        clock.looping_call(phone_stats_home, 3 * 60 * 60 * 1000, hs, stats)
+        clock.looping_call(
+            phone_stats_home,
+            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+            hs,
+            stats,
+        )
 
         # We need to defer this init for the cases that we daemonize
         # otherwise the process ID we get is that of the non-daemon process
@@ -229,4 +250,6 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
         # We wait 5 minutes to send the first set of stats as the server can
         # be quite busy the first few minutes
-        clock.call_later(5 * 60, phone_stats_home, hs, stats)
+        clock.call_later(
+            INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS, phone_stats_home, hs, stats
+        )

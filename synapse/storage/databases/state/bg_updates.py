@@ -20,7 +20,15 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
@@ -388,8 +396,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     return True, count
 
                 txn.execute(
-                    "SELECT state_group FROM state_group_edges"
-                    " WHERE state_group = ?",
+                    "SELECT state_group FROM state_group_edges WHERE state_group = ?",
                     (state_group,),
                 )
 

@@ -582,9 +582,9 @@ def parse_enum(
             is not one of those allowed values.
     """
     # Assert the enum values are strings.
-    assert all(
-        isinstance(e.value, str) for e in E
-    ), "parse_enum only works with string values"
+    assert all(isinstance(e.value, str) for e in E), (
+        "parse_enum only works with string values"
+    )
     str_value = parse_string(
         request,
         name,

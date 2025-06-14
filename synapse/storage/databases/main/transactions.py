@@ -86,10 +86,10 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
     @wrap_as_background_process("cleanup_transactions")
     async def _cleanup_transactions(self) -> None:
         now = self._clock.time_msec()
-        month_ago = now - 30 * 24 * 60 * 60 * 1000
+        day_ago = now - 24 * 60 * 60 * 1000
 
         def _cleanup_transactions_txn(txn: LoggingTransaction) -> None:
-            txn.execute("DELETE FROM received_transactions WHERE ts < ?", (month_ago,))
+            txn.execute("DELETE FROM received_transactions WHERE ts < ?", (day_ago,))
 
         await self.db_pool.runInteraction(
             "_cleanup_transactions", _cleanup_transactions_txn

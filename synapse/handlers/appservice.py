@@ -465,9 +465,7 @@ class ApplicationServicesHandler:
             service, "read_receipt"
         )
         if new_token is not None and new_token.stream <= from_key:
-            logger.debug(
-                "Rejecting token lower than or equal to stored: %s" % (new_token,)
-            )
+            logger.debug("Rejecting token lower than or equal to stored: %s", new_token)
             return []
 
         from_token = MultiWriterStreamToken(stream=from_key)
@@ -509,9 +507,7 @@ class ApplicationServicesHandler:
             service, "presence"
         )
         if new_token is not None and new_token <= from_key:
-            logger.debug(
-                "Rejecting token lower than or equal to stored: %s" % (new_token,)
-            )
+            logger.debug("Rejecting token lower than or equal to stored: %s", new_token)
             return []
 
         for user in users:

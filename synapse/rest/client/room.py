@@ -64,6 +64,7 @@ from synapse.logging.opentracing import set_tag
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
@@ -198,6 +199,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
+        self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -288,6 +290,25 @@ class RoomStateEventRestServlet(RestServlet):
             set_tag("txn_id", txn_id)
 
         content = parse_json_object_from_request(request)
+
+        is_requester_admin = await self.auth.is_server_admin(requester)
+        if not is_requester_admin:
+            spam_check = (
+                await self._spam_checker_module_callbacks.user_may_send_state_event(
+                    user_id=requester.user.to_string(),
+                    room_id=room_id,
+                    event_type=event_type,
+                    state_key=state_key,
+                    content=content,
+                )
+            )
+            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                raise SynapseError(
+                    403,
+                    "You are not permitted to send the state event",
+                    errcode=spam_check[0],
+                    additional_fields=spam_check[1],
+                )
 
         origin_server_ts = None
         if requester.app_service:
@@ -904,15 +925,15 @@ class RoomEventServlet(RestServlet):
         if include_unredacted_content and not await self.auth.is_server_admin(
             requester
         ):
-            power_level_event = (
-                await self._storage_controllers.state.get_current_state_event(
-                    room_id, EventTypes.PowerLevels, ""
-                )
+            auth_events = await self._storage_controllers.state.get_current_state(
+                room_id,
+                StateFilter.from_types(
+                    [
+                        POWER_KEY,
+                        CREATE_KEY,
+                    ]
+                ),
             )
-
-            auth_events = {}
-            if power_level_event:
-                auth_events[(EventTypes.PowerLevels, "")] = power_level_event
 
             redact_level = event_auth.get_named_level(auth_events, "redact", 50)
             user_level = event_auth.get_user_power_level(
