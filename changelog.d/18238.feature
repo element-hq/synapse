@@ -1,0 +1,1 @@
+Server admins will see [soft failed](https://spec.matrix.org/v1.13/server-server-api/#soft-failure) events over the Client-Server API.
