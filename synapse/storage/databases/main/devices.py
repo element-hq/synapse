@@ -280,6 +280,145 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             "count_devices_by_users", count_devices_by_users_txn, user_ids
         )
 
+    async def store_device(
+        self,
+        user_id: str,
+        device_id: str,
+        initial_device_display_name: Optional[str],
+        auth_provider_id: Optional[str] = None,
+        auth_provider_session_id: Optional[str] = None,
+    ) -> bool:
+        """Ensure the given device is known; add it to the store if not
+
+        Args:
+            user_id: id of user associated with the device
+            device_id: id of device
+            initial_device_display_name: initial displayname of the device.
+                Ignored if device exists.
+            auth_provider_id: The SSO IdP the user used, if any.
+            auth_provider_session_id: The session ID (sid) got from a OIDC login.
+
+        Returns:
+            Whether the device was inserted or an existing device existed with that ID.
+
+        Raises:
+            StoreError: if the device is already in use
+        """
+        try:
+            inserted = await self.db_pool.simple_upsert(
+                "devices",
+                keyvalues={
+                    "user_id": user_id,
+                    "device_id": device_id,
+                },
+                values={},
+                insertion_values={
+                    "display_name": initial_device_display_name,
+                    "hidden": False,
+                },
+                desc="store_device",
+            )
+            await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
+
+            if not inserted:
+                # if the device already exists, check if it's a real device, or
+                # if the device ID is reserved by something else
+                hidden = await self.db_pool.simple_select_one_onecol(
+                    "devices",
+                    keyvalues={"user_id": user_id, "device_id": device_id},
+                    retcol="hidden",
+                )
+                if hidden:
+                    raise StoreError(400, "The device ID is in use", Codes.FORBIDDEN)
+
+            if auth_provider_id and auth_provider_session_id:
+                await self.db_pool.simple_insert(
+                    "device_auth_providers",
+                    values={
+                        "user_id": user_id,
+                        "device_id": device_id,
+                        "auth_provider_id": auth_provider_id,
+                        "auth_provider_session_id": auth_provider_session_id,
+                    },
+                    desc="store_device_auth_provider",
+                )
+
+            return inserted
+        except StoreError:
+            raise
+        except Exception as e:
+            logger.error(
+                "store_device with device_id=%s(%r) user_id=%s(%r)"
+                " display_name=%s(%r) failed: %s",
+                type(device_id).__name__,
+                device_id,
+                type(user_id).__name__,
+                user_id,
+                type(initial_device_display_name).__name__,
+                initial_device_display_name,
+                e,
+            )
+            raise StoreError(500, "Problem storing device.")
+
+    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
+        """Deletes several devices.
+
+        Args:
+            user_id: The ID of the user which owns the devices
+            device_ids: The IDs of the devices to delete
+        """
+
+        def _delete_devices_txn(txn: LoggingTransaction, device_ids: List[str]) -> None:
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="devices",
+                column="device_id",
+                values=device_ids,
+                keyvalues={"user_id": user_id, "hidden": False},
+            )
+
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="device_auth_providers",
+                column="device_id",
+                values=device_ids,
+                keyvalues={"user_id": user_id},
+            )
+            self._invalidate_cache_and_stream_bulk(
+                txn, self.get_device, [(user_id, device_id) for device_id in device_ids]
+            )
+
+        for batch in batch_iter(device_ids, 100):
+            await self.db_pool.runInteraction(
+                "delete_devices", _delete_devices_txn, batch
+            )
+
+    async def update_device(
+        self, user_id: str, device_id: str, new_display_name: Optional[str] = None
+    ) -> None:
+        """Update a device. Only updates the device if it is not marked as
+        hidden.
+
+        Args:
+            user_id: The ID of the user which owns the device
+            device_id: The ID of the device to update
+            new_display_name: new displayname for device; None to leave unchanged
+        Raises:
+            StoreError: if the device is not found
+        """
+        updates = {}
+        if new_display_name is not None:
+            updates["display_name"] = new_display_name
+        if not updates:
+            return None
+        await self.db_pool.simple_update_one(
+            table="devices",
+            keyvalues={"user_id": user_id, "device_id": device_id, "hidden": False},
+            updatevalues=updates,
+            desc="update_device",
+        )
+        await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
+
     @cached()
     async def get_device(
         self, user_id: str, device_id: str
@@ -1767,145 +1906,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
-
-    async def store_device(
-        self,
-        user_id: str,
-        device_id: str,
-        initial_device_display_name: Optional[str],
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
-    ) -> bool:
-        """Ensure the given device is known; add it to the store if not
-
-        Args:
-            user_id: id of user associated with the device
-            device_id: id of device
-            initial_device_display_name: initial displayname of the device.
-                Ignored if device exists.
-            auth_provider_id: The SSO IdP the user used, if any.
-            auth_provider_session_id: The session ID (sid) got from a OIDC login.
-
-        Returns:
-            Whether the device was inserted or an existing device existed with that ID.
-
-        Raises:
-            StoreError: if the device is already in use
-        """
-        try:
-            inserted = await self.db_pool.simple_upsert(
-                "devices",
-                keyvalues={
-                    "user_id": user_id,
-                    "device_id": device_id,
-                },
-                values={},
-                insertion_values={
-                    "display_name": initial_device_display_name,
-                    "hidden": False,
-                },
-                desc="store_device",
-            )
-            await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
-
-            if not inserted:
-                # if the device already exists, check if it's a real device, or
-                # if the device ID is reserved by something else
-                hidden = await self.db_pool.simple_select_one_onecol(
-                    "devices",
-                    keyvalues={"user_id": user_id, "device_id": device_id},
-                    retcol="hidden",
-                )
-                if hidden:
-                    raise StoreError(400, "The device ID is in use", Codes.FORBIDDEN)
-
-            if auth_provider_id and auth_provider_session_id:
-                await self.db_pool.simple_insert(
-                    "device_auth_providers",
-                    values={
-                        "user_id": user_id,
-                        "device_id": device_id,
-                        "auth_provider_id": auth_provider_id,
-                        "auth_provider_session_id": auth_provider_session_id,
-                    },
-                    desc="store_device_auth_provider",
-                )
-
-            return inserted
-        except StoreError:
-            raise
-        except Exception as e:
-            logger.error(
-                "store_device with device_id=%s(%r) user_id=%s(%r)"
-                " display_name=%s(%r) failed: %s",
-                type(device_id).__name__,
-                device_id,
-                type(user_id).__name__,
-                user_id,
-                type(initial_device_display_name).__name__,
-                initial_device_display_name,
-                e,
-            )
-            raise StoreError(500, "Problem storing device.")
-
-    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
-        """Deletes several devices.
-
-        Args:
-            user_id: The ID of the user which owns the devices
-            device_ids: The IDs of the devices to delete
-        """
-
-        def _delete_devices_txn(txn: LoggingTransaction, device_ids: List[str]) -> None:
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="devices",
-                column="device_id",
-                values=device_ids,
-                keyvalues={"user_id": user_id, "hidden": False},
-            )
-
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="device_auth_providers",
-                column="device_id",
-                values=device_ids,
-                keyvalues={"user_id": user_id},
-            )
-            self._invalidate_cache_and_stream_bulk(
-                txn, self.get_device, [(user_id, device_id) for device_id in device_ids]
-            )
-
-        for batch in batch_iter(device_ids, 100):
-            await self.db_pool.runInteraction(
-                "delete_devices", _delete_devices_txn, batch
-            )
-
-    async def update_device(
-        self, user_id: str, device_id: str, new_display_name: Optional[str] = None
-    ) -> None:
-        """Update a device. Only updates the device if it is not marked as
-        hidden.
-
-        Args:
-            user_id: The ID of the user which owns the device
-            device_id: The ID of the device to update
-            new_display_name: new displayname for device; None to leave unchanged
-        Raises:
-            StoreError: if the device is not found
-        """
-        updates = {}
-        if new_display_name is not None:
-            updates["display_name"] = new_display_name
-        if not updates:
-            return None
-        await self.db_pool.simple_update_one(
-            table="devices",
-            keyvalues={"user_id": user_id, "device_id": device_id, "hidden": False},
-            updatevalues=updates,
-            desc="update_device",
-        )
-        await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
 
     async def update_remote_device_list_cache_entry(
         self, user_id: str, device_id: str, content: JsonDict, stream_id: str
