@@ -27,7 +27,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Mapping,
     Optional,
     Set,
@@ -66,7 +65,6 @@ from synapse.types import (
 )
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
@@ -1770,12 +1768,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        # Map of (user_id, device_id) -> bool. If there is an entry that implies
-        # the device exists.
-        self.device_id_exists_cache: LruCache[Tuple[str, str], Literal[True]] = (
-            LruCache(cache_name="device_id_exists", max_size=10000)
-        )
-
     async def store_device(
         self,
         user_id: str,
@@ -1800,10 +1792,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         Raises:
             StoreError: if the device is already in use
         """
-        key = (user_id, device_id)
-        if self.device_id_exists_cache.get(key, None):
-            return False
-
         try:
             inserted = await self.db_pool.simple_upsert(
                 "devices",
@@ -1843,7 +1831,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                     desc="store_device_auth_provider",
                 )
 
-            self.device_id_exists_cache.set(key, True)
             return inserted
         except StoreError:
             raise
@@ -1893,9 +1880,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             await self.db_pool.runInteraction(
                 "delete_devices", _delete_devices_txn, batch
             )
-
-        for device_id in device_ids:
-            self.device_id_exists_cache.invalidate((user_id, device_id))
 
     async def update_device(
         self, user_id: str, device_id: str, new_display_name: Optional[str] = None
@@ -1961,8 +1945,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 table="device_lists_remote_cache",
                 keyvalues={"user_id": user_id, "device_id": device_id},
             )
-
-            txn.call_after(self.device_id_exists_cache.invalidate, (user_id, device_id))
         else:
             self.db_pool.simple_upsert_txn(
                 txn,
