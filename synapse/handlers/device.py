@@ -31,6 +31,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    cast,
 )
 
 from synapse.api import errors
@@ -75,6 +76,8 @@ from synapse.util.retryutils import (
 )
 
 if TYPE_CHECKING:
+    from synapse.app.generic_worker import GenericWorkerStore
+    from synapse.app.homeserver import DataStore
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -86,11 +89,12 @@ DELETE_STALE_DEVICES_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 class DeviceWorkerHandler:
     device_list_updater: "DeviceListWorkerUpdater"
+    store: "GenericWorkerStore"
 
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
         self.hs = hs
-        self.store = hs.get_datastores().main
+        self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()
         self._appservice_handler = hs.get_application_service_handler()
@@ -522,6 +526,7 @@ class DeviceWorkerHandler:
 
 class DeviceHandler(DeviceWorkerHandler):
     device_list_updater: "DeviceListUpdater"
+    store: "DataStore"  # type: ignore[assignment]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
@@ -529,7 +534,6 @@ class DeviceHandler(DeviceWorkerHandler):
         self.federation_sender = hs.get_federation_sender()
         self._account_data_handler = hs.get_account_data_handler()
         self._storage_controllers = hs.get_storage_controllers()
-        self.db_pool = hs.get_datastores().main.db_pool
 
         self._dont_notify_new_devices_for = (
             hs.config.registration.dont_notify_new_devices_for
