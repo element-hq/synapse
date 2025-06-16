@@ -31,6 +31,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError
+from synapse.config._base import RootConfig
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.federation.federation_base import event_from_pdu_json
@@ -690,7 +691,7 @@ class InviteAutoAccepterInternalTestCase(TestCase):
                 "only_from_local_users": True,
             }
         }
-        parsed_config = AutoAcceptInvitesConfig()
+        parsed_config = AutoAcceptInvitesConfig(RootConfig())
         parsed_config.read_config(config)
 
         self.assertTrue(parsed_config.enabled)
@@ -830,7 +831,7 @@ def create_module(
     if config_override is None:
         config_override = {}
 
-    config = AutoAcceptInvitesConfig()
+    config = AutoAcceptInvitesConfig(RootConfig())
     config.read_config(config_override)
 
     return InviteAutoAccepter(config, module_api)

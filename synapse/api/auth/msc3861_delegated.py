@@ -39,16 +39,16 @@ from synapse.api.errors import (
     HttpResponseException,
     InvalidClientTokenError,
     OAuthInsufficientScopeError,
-    StoreError,
     SynapseError,
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
+from synapse.logging.opentracing import active_span, force_tracing, start_active_span
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
-from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
@@ -177,6 +177,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
         self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
+        self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
         # # Token Introspection Cache
         # This remembers what users/devices are represented by which access tokens,
@@ -201,6 +202,8 @@ class MSC3861DelegatedAuth(BaseAuth):
             self._clock,
             "token_introspection",
             timeout_ms=120_000,
+            # don't log because the keys are access tokens
+            enable_logging=False,
         )
 
         self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
@@ -275,7 +278,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         metadata = await self._issuer_metadata.get()
         return metadata.get("introspection_endpoint")
 
-    async def _introspect_token(self, token: str) -> IntrospectionResult:
+    async def _introspect_token(
+        self, token: str, cache_context: ResponseCacheContext[str]
+    ) -> IntrospectionResult:
         """
         Send a token to the introspection endpoint and returns the introspection response
 
@@ -291,6 +296,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         Returns:
             The introspection response
         """
+        # By default, we shouldn't cache the result unless we know it's valid
+        cache_context.should_cache = False
         introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -348,6 +355,8 @@ class MSC3861DelegatedAuth(BaseAuth):
                 "The introspection endpoint returned an invalid JSON response."
             )
 
+        # We had a valid response, so we can cache it
+        cache_context.should_cache = True
         return IntrospectionResult(
             IntrospectionToken(**resp), retrieved_at_ms=self._clock.time_msec()
         )
@@ -356,6 +365,55 @@ class MSC3861DelegatedAuth(BaseAuth):
         return "urn:synapse:admin:*" in requester.scope
 
     async def get_user_by_req(
+        self,
+        request: SynapseRequest,
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester:
+        """Get a registered user's ID.
+
+        Args:
+            request: An HTTP request with an access_token query parameter.
+            allow_guest: If False, will raise an AuthError if the user making the
+                request is a guest.
+            allow_expired: If True, allow the request through even if the account
+                is expired, or session token lifetime has ended. Note that
+                /login will deliver access tokens regardless of expiration.
+
+        Returns:
+            Resolves to the requester
+        Raises:
+            InvalidClientCredentialsError if no user by that token exists or the token
+                is invalid.
+            AuthError if access is denied for the user in the access token
+        """
+        parent_span = active_span()
+        with start_active_span("get_user_by_req"):
+            requester = await self._wrapped_get_user_by_req(
+                request, allow_guest, allow_expired, allow_locked
+            )
+
+            if parent_span:
+                if requester.authenticated_entity in self._force_tracing_for_users:
+                    # request tracing is enabled for this user, so we need to force it
+                    # tracing on for the parent span (which will be the servlet span).
+                    #
+                    # It's too late for the get_user_by_req span to inherit the setting,
+                    # so we also force it on for that.
+                    force_tracing()
+                    force_tracing(parent_span)
+                parent_span.set_tag(
+                    "authenticated_entity", requester.authenticated_entity
+                )
+                parent_span.set_tag("user_id", requester.user.to_string())
+                if requester.device_id is not None:
+                    parent_span.set_tag("device_id", requester.device_id)
+                if requester.app_service is not None:
+                    parent_span.set_tag("appservice_id", requester.app_service.id)
+            return requester
+
+    async def _wrapped_get_user_by_req(
         self,
         request: SynapseRequest,
         allow_guest: bool = False,
@@ -417,7 +475,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
-            logging.info("Admin toked used")
+            logger.info("Admin toked used")
             # XXX: that user doesn't exist and won't be provisioned.
             # This is mostly fine for admin calls, but we should also think about doing
             # requesters without a user_id.
@@ -429,7 +487,7 @@ class MSC3861DelegatedAuth(BaseAuth):
 
         try:
             introspection_result = await self._introspection_cache.wrap(
-                token, self._introspect_token, token
+                token, self._introspect_token, token, cache_context=True
             )
         except Exception:
             logger.exception("Failed to introspect token")
@@ -453,7 +511,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             raise InvalidClientTokenError("No scope in token granting user rights")
 
         # Match via the sub claim
-        sub: Optional[str] = introspection_result.get_sub()
+        sub = introspection_result.get_sub()
         if sub is None:
             raise InvalidClientTokenError(
                 "Invalid sub claim in the introspection result"
@@ -466,29 +524,20 @@ class MSC3861DelegatedAuth(BaseAuth):
             # If we could not find a user via the external_id, it either does not exist,
             # or the external_id was never recorded
 
-            # TODO: claim mapping should be configurable
-            username: Optional[str] = introspection_result.get_username()
-            if username is None or not isinstance(username, str):
+            username = introspection_result.get_username()
+            if username is None:
                 raise AuthError(
                     500,
                     "Invalid username claim in the introspection result",
                 )
             user_id = UserID(username, self._hostname)
 
-            # First try to find a user from the username claim
+            # Try to find a user from the username claim
             user_info = await self.store.get_user_by_id(user_id=user_id.to_string())
             if user_info is None:
-                # If the user does not exist, we should create it on the fly
-                # TODO: we could use SCIM to provision users ahead of time and listen
-                # for SCIM SET events if those ever become standard:
-                # https://datatracker.ietf.org/doc/html/draft-hunt-scim-notify-00
-
-                # TODO: claim mapping should be configurable
-                # If present, use the name claim as the displayname
-                name: Optional[str] = introspection_result.get_name()
-
-                await self.store.register_user(
-                    user_id=user_id.to_string(), create_profile_with_displayname=name
+                raise AuthError(
+                    500,
+                    "User not found",
                 )
 
             # And record the sub as external_id
@@ -528,17 +577,10 @@ class MSC3861DelegatedAuth(BaseAuth):
                     "Invalid device ID in introspection result",
                 )
 
-            # Create the device on the fly if it does not exist
-            try:
-                await self.store.get_device(
-                    user_id=user_id.to_string(), device_id=device_id
-                )
-            except StoreError:
-                await self.store.store_device(
-                    user_id=user_id.to_string(),
-                    device_id=device_id,
-                    initial_device_display_name="OIDC-native client",
-                )
+            # Make sure the device exists
+            await self.store.get_device(
+                user_id=user_id.to_string(), device_id=device_id
+            )
 
         # TODO: there is a few things missing in the requester here, which still need
         # to be figured out, like:

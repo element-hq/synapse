@@ -701,6 +701,12 @@ class FederationServer(FederationBase):
         pdu = event_from_pdu_json(content, room_version)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, pdu.room_id)
+        if await self._spam_checker_module_callbacks.should_drop_federated_event(pdu):
+            logger.info(
+                "Federated event contains spam, dropping %s",
+                pdu.event_id,
+            )
+            raise SynapseError(403, Codes.FORBIDDEN)
         try:
             pdu = await self._check_sigs_and_hash(room_version, pdu)
         except InvalidEventSignatureError as e:
@@ -922,7 +928,8 @@ class FederationServer(FederationBase):
             # joins) or the full state (for full joins).
             # Return a 404 as we would if we weren't in the room at all.
             logger.info(
-                f"Rejecting /send_{membership_type} to %s because it's a partial state room",
+                "Rejecting /send_%s to %s because it's a partial state room",
+                membership_type,
                 room_id,
             )
             raise SynapseError(

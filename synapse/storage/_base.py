@@ -130,7 +130,7 @@ class SQLBaseStore(metaclass=ABCMeta):
                 "_get_rooms_for_local_user_where_membership_is_inner", (user_id,)
             )
             self._attempt_to_invalidate_cache(
-                "get_sliding_sync_rooms_for_user", (user_id,)
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", (user_id,)
             )
 
         # Purge other caches based on room state.
@@ -138,7 +138,9 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
 
     def _invalidate_state_caches_all(self, room_id: str) -> None:
         """Invalidates caches that are based on the current state, but does
@@ -168,7 +170,9 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
 
     def _attempt_to_invalidate_cache(
         self, cache_name: str, key: Optional[Collection[Any]]
@@ -236,5 +240,5 @@ def db_to_json(db_content: Union[memoryview, bytes, bytearray, str]) -> Any:
     try:
         return json_decoder.decode(db_content)
     except Exception:
-        logging.warning("Tried to decode '%r' as JSON and failed", db_content)
+        logger.warning("Tried to decode '%r' as JSON and failed", db_content)
         raise

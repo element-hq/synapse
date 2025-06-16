@@ -124,7 +124,7 @@ class SamlHandler:
         )
 
         # Since SAML sessions timeout it is useful to log when they were created.
-        logger.info("Initiating a new SAML session: %s" % (reqid,))
+        logger.info("Initiating a new SAML session: %s", reqid)
 
         now = self.clock.time_msec()
         self._outstanding_requests_dict[reqid] = Saml2SessionData(

@@ -68,6 +68,14 @@ class SlidingSyncStore(SQLBaseStore):
             columns=("membership_event_id",),
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            index_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            table="sliding_sync_membership_snapshots",
+            columns=("user_id", "event_stream_ordering"),
+            replaces_index="sliding_sync_membership_snapshots_user_id",
+        )
+
     async def get_latest_bump_stamp_for_room(
         self,
         room_id: str,

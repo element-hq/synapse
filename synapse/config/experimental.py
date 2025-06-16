@@ -21,7 +21,7 @@
 
 import enum
 from functools import cache
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import attr
 import attr.validators
@@ -29,7 +29,7 @@ import attr.validators
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
 from synapse.config._base import Config, RootConfig, read_file
-from synapse.types import JsonDict
+from synapse.types import JsonDict, StrSequence
 
 # Determine whether authlib is installed.
 try:
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 
 @cache
-def read_secret_from_file_once(file_path: Any, config_path: Iterable[str]) -> str:
+def read_secret_from_file_once(file_path: Any, config_path: StrSequence) -> str:
     """Returns the memoized secret read from file."""
     return read_file(file_path, config_path).strip()
 
@@ -560,3 +560,12 @@ class ExperimentalConfig(Config):
 
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
+
+        # MSC4263: Preventing MXID enumeration via key queries
+        self.msc4263_limit_key_queries_to_users_who_share_rooms = experimental.get(
+            "msc4263_limit_key_queries_to_users_who_share_rooms",
+            False,
+        )
+
+        # MSC4155: Invite filtering
+        self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)

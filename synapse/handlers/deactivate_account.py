@@ -96,6 +96,14 @@ class DeactivateAccountHandler:
                 403, "Deactivation of this user is forbidden", Codes.FORBIDDEN
             )
 
+        logger.info(
+            "%s requested deactivation of %s erase_data=%s id_server=%s",
+            requester.user,
+            user_id,
+            erase_data,
+            id_server,
+        )
+
         # FIXME: Theoretically there is a race here wherein user resets
         # password using threepid.
 
