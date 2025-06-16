@@ -1111,12 +1111,12 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         }:
             raise AuthError(403, "Guest access not allowed")
 
-        content = parse_json_object_from_request(request, allow_empty_body=True)
+        request_body = parse_json_object_from_request(request, allow_empty_body=True)
 
         if membership_action == "invite" and all(
-            key in content for key in ("medium", "address")
+            key in request_body for key in ("medium", "address")
         ):
-            if not all(key in content for key in ("id_server", "id_access_token")):
+            if not all(key in request_body for key in ("id_server", "id_access_token")):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
                     "`id_server` and `id_access_token` are required when doing 3pid invite",
@@ -1127,12 +1127,12 @@ class RoomMembershipRestServlet(TransactionRestServlet):
                 await self.room_member_handler.do_3pid_invite(
                     room_id,
                     requester.user,
-                    content["medium"],
-                    content["address"],
-                    content["id_server"],
+                    request_body["medium"],
+                    request_body["address"],
+                    request_body["id_server"],
                     requester,
                     txn_id,
-                    content["id_access_token"],
+                    request_body["id_access_token"],
                 )
             except ShadowBanError:
                 # Pretend the request succeeded.
@@ -1141,24 +1141,19 @@ class RoomMembershipRestServlet(TransactionRestServlet):
 
         target = requester.user
         if membership_action in ["invite", "ban", "unban", "kick"]:
-            assert_params_in_dict(content, ["user_id"])
-            target = UserID.from_string(content["user_id"])
+            assert_params_in_dict(request_body, ["user_id"])
+            target = UserID.from_string(request_body["user_id"])
 
         event_content = None
-        if "reason" in content:
-            event_content = {"reason": content["reason"]}
+        if "reason" in request_body:
+            event_content = {"reason": request_body["reason"]}
         if self.config.experimental.msc4293_enabled:
-            if "org.matrix.msc4293.redact_events" in content:
-                if event_content:
-                    event_content["org.matrix.msc4293.redact_events"] = content[
-                        "org.matrix.msc4293.redact_events"
-                    ]
-                else:
-                    event_content = {
-                        "org.matrix.msc4293.redact_events": content[
-                            "org.matrix.msc4293.redact_events"
-                        ]
-                    }
+            if "org.matrix.msc4293.redact_events" in request_body:
+                if event_content is None:
+                    event_content = {}
+                event_content["org.matrix.msc4293.redact_events"] = request_body[
+                    "org.matrix.msc4293.redact_events"
+                ]
 
         try:
             await self.room_member_handler.update_membership(
@@ -1167,7 +1162,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
                 room_id=room_id,
                 action=membership_action,
                 txn_id=txn_id,
-                third_party_signed=content.get("third_party_signed", None),
+                third_party_signed=request_body.get("third_party_signed", None),
                 content=event_content,
             )
         except ShadowBanError:

@@ -4436,31 +4436,57 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         expect_redaction: bool,
         reason: Optional[str] = None,
     ) -> None:
+        """
+        Checks a set of original events against a second set of the same events, pulled
+        from the /messages api. If expect_redaction is true, we expect that the second
+        set of events will be redacted, and the test will fail if that is not the case.
+        Otherwise, verifies that the events have not been redacted and fails if not.
+
+        Args:
+            original_events: A list of the original events sent
+            pulled_events: A list of the same events as the orignal events, fetched
+            over the /messages api
+            expect_redaction: Whether or not the pulled_events should be redacted
+            reason: If the events are expected to be redacted, the expected reason
+            for the redaction
+
+        """
         if expect_redaction:
             redacted_count = 0
             for pulled_event in pulled_events:
                 for old_event in original_events:
-                    if pulled_event["event_id"] == old_event.event_id:
-                        redacted_because = pulled_event.get("redacted_because")
-                        if redacted_because:
-                            content = redacted_because.get("content")
-                            if content:
-                                self.assertEqual(content["reason"], reason)
-                                self.assertEqual(
-                                    content["org.matrix.msc4293.redact_events"], True
-                                )
-                                redacted_count += 1
+                    if pulled_event["event_id"] != old_event.event_id:
+                        continue
+                    # we have a matching event, check that it is redacted
+                    event_content = pulled_event["content"]
+                    if event_content:
+                        self.fail(f"Expected event {pulled_event} to be redacted")
+                    redacting_event = pulled_event.get("redacted_because")
+                    if not redacting_event:
+                        self.fail(
+                            f"Expected event {pulled_event} to have a redacting event."
+                        )
+                    # check that the redacting event records the expected reason, and the
+                    # redact_events flag
+                    content = redacting_event["content"]
+                    self.assertEqual(content["reason"], reason)
+                    self.assertEqual(content["org.matrix.msc4293.redact_events"], True)
+                    redacted_count += 1
+            # all provided events should be redacted
             self.assertEqual(len(original_events), redacted_count)
         else:
             unredacted_events = 0
             for pulled_event in pulled_events:
                 for old_event in original_events:
-                    if pulled_event["event_id"] == old_event.event_id:
-                        redacted_because = pulled_event.get("redacted_because")
-                        if redacted_because:
-                            self.fail("Event should not have been redacted")
-                        self.assertEqual(old_event.content, pulled_event["content"])
-                        unredacted_events += 1
+                    if pulled_event["event_id"] != old_event.event_id:
+                        continue
+                    # we have a matching event, make sure it is not redacted
+                    redacted_because = pulled_event.get("redacted_because")
+                    if redacted_because:
+                        self.fail("Event should not have been redacted")
+                    self.assertEqual(old_event.content, pulled_event["content"])
+                    unredacted_events += 1
+            # all provided events should not have been redacted
             self.assertEqual(unredacted_events, len(original_events))
 
     def test_banning_local_member_with_flag_redacts_their_events(self) -> None:
@@ -4620,7 +4646,10 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
             original = self.get_success(self.store.get_event(message.event_id))
             if not original:
                 self.fail("Expected to find remote message in DB")
-            self.assertEqual(original.unsigned["redacted_by"], ban_event_id)
+            redacted_because = original.unsigned.get("redacted_because")
+            if not redacted_because:
+                self.fail("Did not find redacted_because field")
+            self.assertEqual(redacted_because.event_id, ban_event_id)
 
     def test_unbanning_remote_user_stops_redaction_action(self) -> None:
         bad_user = "@remote_bad_user:" + self.OTHER_SERVER_NAME
