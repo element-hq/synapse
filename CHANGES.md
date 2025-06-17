@@ -1,3 +1,12 @@
+# Synapse 1.132.0 (2025-06-17)
+
+### Improved Documentation
+
+- Improvements to generate config documentation from JSON Schema file. ([\#18522](https://github.com/element-hq/synapse/issues/18522))
+
+
+
+
 # Synapse 1.132.0rc1 (2025-06-10)
 
 ### Features
