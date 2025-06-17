@@ -53,7 +53,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict
-from synapse.util import json_encoder
+from synapse.util import Duration, json_encoder
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -65,10 +65,10 @@ logger = logging.getLogger(__name__)
 
 
 # How long to keep messages in the device federation inbox before deleting them.
-DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS = 7 * 24 * 60 * 60 * 1000  # 7 days
+DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS = 7 * Duration.DAY_MS
 
 # How often to run the task to clean up old device_federation_inbox rows.
-DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS = 5 * 60 * 1000  # every five minutes
+DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS = 5 * Duration.MINUTE_MS
 
 # Update name for the device federation inbox received timestamp index.
 DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE = (
