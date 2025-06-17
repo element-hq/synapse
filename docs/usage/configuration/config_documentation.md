@@ -764,22 +764,23 @@ max_event_delay_duration: 24h
 ---
 ### `user_types`
 
-Configuration settings related to the user types feature.
+*(object)* Configuration settings related to the user types feature.
 
 This setting has the following sub-options:
-* `default_user_type`: The default user type to use for registering new users when no value has been specified.
-  Defaults to none.
-* `extra_user_types`: Array of additional user types to allow. These are treated as real users. Defaults to [].
+
+* `default_user_type` (string|null): The default user type to use for registering new users when no value has been specified. Defaults to none. Defaults to `null`.
+
+* `extra_user_types` (list): Array of additional user types to allow. These are treated as real users. Defaults to `[]`.
 
 Example configuration:
 ```yaml
 user_types:
-    default_user_type: "custom"
-    extra_user_types:
-      - "custom"
-      - "custom2"
+  default_user_type: custom
+  extra_user_types:
+  - custom
+  - custom2
 ```
-
+---
 ## Homeserver blocking
 
 Useful options for Synapse admins.

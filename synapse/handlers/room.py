@@ -698,7 +698,7 @@ class RoomCreationHandler:
         except SynapseError as e:
             # again I'm not really expecting this to fail, but if it does, I'd rather
             # we returned the new room to the client at this point.
-            logger.error("Unable to send updated alias events in old room: %s", e)
+            logger.exception("Unable to send updated alias events in old room: %s", e)
 
         try:
             await self.event_creation_handler.create_and_send_nonmember_event(
@@ -715,7 +715,7 @@ class RoomCreationHandler:
         except SynapseError as e:
             # again I'm not really expecting this to fail, but if it does, I'd rather
             # we returned the new room to the client at this point.
-            logger.error("Unable to send updated alias events in new room: %s", e)
+            logger.exception("Unable to send updated alias events in new room: %s", e)
 
     async def create_room(
         self,

@@ -928,7 +928,8 @@ class FederationServer(FederationBase):
             # joins) or the full state (for full joins).
             # Return a 404 as we would if we weren't in the room at all.
             logger.info(
-                f"Rejecting /send_{membership_type} to %s because it's a partial state room",
+                "Rejecting /send_%s to %s because it's a partial state room",
+                membership_type,
                 room_id,
             )
             raise SynapseError(

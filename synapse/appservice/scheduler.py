@@ -461,7 +461,7 @@ class _TransactionController:
         recoverer = self.recoverers.get(service.id)
         if not recoverer:
             # No need to force a retry on a happy AS.
-            logger.info(f"{service.id} is not in recovery, not forcing retry")
+            logger.info("%s is not in recovery, not forcing retry", service.id)
             return
 
         recoverer.force_retry()

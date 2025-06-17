@@ -922,7 +922,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 rule = invite_config.get_invite_rule(requester.user.to_string())
                 if rule == InviteRule.BLOCK:
                     logger.info(
-                        f"Automatically rejecting invite from {target_id} due to the the invite filtering rules of {requester.user}"
+                        "Automatically rejecting invite from %s due to the the invite filtering rules of %s",
+                        target_id,
+                        requester.user,
                     )
                     raise SynapseError(
                         403,
@@ -1570,7 +1572,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     require_consent=False,
                 )
             except Exception as e:
-                logger.exception("Error kicking guest user: %s" % (e,))
+                logger.exception("Error kicking guest user: %s", e)
 
     async def lookup_room_alias(
         self, room_alias: RoomAlias

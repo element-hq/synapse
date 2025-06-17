@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/v1.131/schema/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.132/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -912,6 +912,24 @@ properties:
     default: null
     examples:
       - 24h
+  user_types:
+    type: object
+    description: >-
+      Configuration settings related to the user types feature.
+    properties:
+      default_user_type:
+        type: ["string", "null"]
+        description: "The default user type to use for registering new users when no value has been specified. Defaults to none."
+        default: null
+      extra_user_types:
+        type: array
+        description: "Array of additional user types to allow. These are treated as real users."
+        items:
+          type: string
+        default: []
+    examples:
+      - default_user_type: "custom"
+        extra_user_types: ["custom", "custom2"]
   admin_contact:
     type: ["string", "null"]
     description: How to reach the server admin, used in `ResourceLimitError`.
