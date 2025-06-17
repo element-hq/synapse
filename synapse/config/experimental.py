@@ -566,3 +566,6 @@ class ExperimentalConfig(Config):
             "msc4263_limit_key_queries_to_users_who_share_rooms",
             False,
         )
+
+        # MSC4155: Invite filtering
+        self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)

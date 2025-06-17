@@ -41,7 +41,7 @@ from synapse.util.stringutils import parse_and_validate_server_name
 from ._base import Config, ConfigError
 from ._util import validate_config
 
-logger = logging.Logger(__name__)
+logger = logging.getLogger(__name__)
 
 DIRECT_TCP_ERROR = """
 Using direct TCP replication for workers is no longer supported.

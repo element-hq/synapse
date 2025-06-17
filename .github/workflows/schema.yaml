@@ -5,6 +5,9 @@ on:
     paths:
       - schema/**
       - docs/usage/configuration/config_documentation.md
+  push:
+    branches: ["develop", "release-*"]
+  workflow_dispatch:
 
 jobs:
   validate-schema:
@@ -51,4 +54,4 @@ jobs:
           > docs/usage/configuration/config_documentation.md
       - name: Error in case of any differences
       # Errors if there are now any modified files (untracked files are ignored).
-        run: 'git diff || ! git status --porcelain=1 | grep "^ M"'
+        run: 'git diff --exit-code'

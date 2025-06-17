@@ -137,6 +137,9 @@ class Codes(str, Enum):
     PROFILE_TOO_LARGE = "M_PROFILE_TOO_LARGE"
     KEY_TOO_LARGE = "M_KEY_TOO_LARGE"
 
+    # Part of MSC4155
+    INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.

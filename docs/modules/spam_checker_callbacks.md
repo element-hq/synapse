@@ -246,6 +246,41 @@ be used. If this happens, Synapse will not call any of the subsequent implementa
 this callback.
 
 
+### `user_may_send_state_event`
+
+_First introduced in Synapse v1.132.0_
+
+```python
+async def user_may_send_state_event(user_id: str, room_id: str, event_type: str, state_key: str, content: JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes"]
+```
+
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
+
+Called when processing a request to [send state events](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3roomsroomidstateeventtypestatekey) to a room.
+
+The arguments passed to this callback are:
+
+* `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`) sending the state event.
+* `room_id`: The ID of the room that the requested state event is being sent to.
+* `event_type`: The requested type of event.
+* `state_key`: The requested state key.
+* `content`: The requested event contents.
+
+The callback must return one of:
+  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
+    decide to reject it.
+  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
+The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
+be used. If this happens, Synapse will not call any of the subsequent implementations of
+this callback.
+
 
 ### `check_username_for_spam`
 
