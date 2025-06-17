@@ -1448,11 +1448,8 @@ class FederationHandlerRegistry:
         # Check if we can route it somewhere else that isn't us
         instances = self._edu_type_to_instance.get(edu_type, ["master"])
         if self._instance_name not in instances:
-            # Pick an instance randomly so that we don't overload one.
-            route_to = random.choice(instances)
-
             await self._send_edu(
-                instance_name=route_to,
+                instances=instances,
                 edu_type=edu_type,
                 origin=origin,
                 content=content,
