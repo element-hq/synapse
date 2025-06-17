@@ -805,11 +805,20 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
 class SlidingSyncRestServlet(RestServlet):
     """
-    API endpoint for MSC3575 Sliding Sync `/sync`. Allows for clients to request a
+    API endpoint for MSC4186 Simplified Sliding Sync `/sync`, which was historically derived
+    from MSC3575 (Sliding Sync; now abandoned). Allows for clients to request a
     subset (sliding window) of rooms, state, and timeline events (just what they need)
     in order to bootstrap quickly and subscribe to only what the client cares about.
     Because the client can specify what it cares about, we can respond quickly and skip
     all of the work we would normally have to do with a sync v2 response.
+
+    Extensions of various features are defined in:
+        - to-device messaging (MSC3885)
+        - end-to-end encryption (MSC3884)
+        - typing notifications (MSC3961)
+        - receipts (MSC3960)
+        - account data (MSC3959)
+        - thread subscriptions (MSC4308)
 
     Request query parameters:
         timeout: How long to wait for new events in milliseconds.
