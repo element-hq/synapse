@@ -67,6 +67,9 @@ logger = logging.getLogger(__name__)
 # How long to keep messages in the device federation inbox before deleting them.
 DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS = 7 * 24 * 60 * 60 * 1000  # 7 days
 
+# How often to run the task to clean up old device_federation_inbox rows.
+DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS = 5 * 60 * 1000  # every five minutes
+
 # Update name for the device federation inbox received timestamp index.
 DEVICE_FEDERATION_INBOX_RECEIVED_INDEX_UPDATE = (
     "device_federation_inbox_received_ts_index"
@@ -147,7 +150,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         if hs.config.worker.run_background_tasks:
             self._clock.looping_call(
                 run_as_background_process,
-                5 * 60 * 1000,  # every five minutes
+                DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
                 self._delete_old_federation_inbox_rows,
             )

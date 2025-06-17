@@ -13,4 +13,4 @@
 
 -- Background update that adds an index to `device_federation_inbox.received_ts`
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9205, 'device_federation_inbox_received_ts_index', '{}');
+  (9206, 'device_federation_inbox_received_ts_index', '{}');
