@@ -73,7 +73,6 @@ from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.module_api import NOT_SPAM
-from synapse.replication.http.federation import ReplicationCleanRoomRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
@@ -159,10 +158,6 @@ class FederationHandler:
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
         self._notifier = hs.get_notifier()
         self._worker_locks = hs.get_worker_locks_handler()
-
-        self._clean_room_for_join_client = ReplicationCleanRoomRestServlet.make_client(
-            hs
-        )
 
         self._room_backfill = Linearizer("room_backfill")
 
@@ -1756,10 +1751,7 @@ class FederationHandler:
         Args:
             room_id
         """
-        if self.config.worker.worker_app:
-            await self._clean_room_for_join_client(room_id)
-        else:
-            await self.store.clean_room_for_join(room_id)
+        await self.store.clean_room_for_join(room_id)
 
     async def get_room_complexity(
         self, remote_room_hosts: List[str], room_id: str
