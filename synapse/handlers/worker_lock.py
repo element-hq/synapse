@@ -44,6 +44,7 @@ from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.constants import ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
@@ -272,7 +273,7 @@ class WaitingLock:
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
+        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self._retry_interval,
@@ -352,7 +353,7 @@ class WaitingMultiLock:
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
+        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
             logger.warning(
                 "Lock timeout is getting excessive: %ss. There may be a deadlock.",
                 self._retry_interval,

@@ -255,7 +255,7 @@ async def _get_power_level_for_sender(
             )
             if aev and (aev.type, aev.state_key) == (EventTypes.Create, ""):
                 creator = (
-                    event.sender
+                    aev.sender
                     if event.room_version.implicit_room_creator
                     else aev.content.get("creator")
                 )
