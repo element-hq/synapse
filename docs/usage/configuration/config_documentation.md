@@ -770,7 +770,7 @@ This setting has the following sub-options:
 
 * `default_user_type` (string|null): The default user type to use for registering new users when no value has been specified. Defaults to none. Defaults to `null`.
 
-* `extra_user_types` (list): Array of additional user types to allow. These are treated as real users. Defaults to `[]`.
+* `extra_user_types` (array): Array of additional user types to allow. These are treated as real users. Defaults to `[]`.
 
 Example configuration:
 ```yaml
