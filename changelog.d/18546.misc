@@ -1,0 +1,1 @@
+Clean up old, unused rows from the `device_federation_inbox` table.
