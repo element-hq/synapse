@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Sequence
+from typing import List, Sequence, cast
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -26,6 +26,7 @@ import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
+from synapse.server_notices.server_notices_manager import ServerNoticesManager
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import JsonDict
 from synapse.util import Clock
@@ -47,7 +48,9 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         self.room_shutdown_handler = hs.get_room_shutdown_handler()
         self.pagination_handler = hs.get_pagination_handler()
-        self.server_notices_manager = self.hs.get_server_notices_manager()
+        self.server_notices_manager = cast(
+            ServerNoticesManager, self.hs.get_server_notices_manager()
+        )
 
         # Create user
         self.admin_user = self.register_user("admin", "pass", admin=True)
@@ -276,7 +279,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         self.assertEqual(messages[0]["sender"], "@notices:test")
 
         # invalidate cache of server notices room_ids
-        self.server_notices_manager.get_or_create_notice_room_for_user.invalidate_all()
+        self.server_notices_manager._get_or_create_notice_room_for_user.invalidate_all()
 
         # send second message
         channel = self.make_request(
@@ -351,7 +354,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # invalidate cache of server notices room_ids
         # if server tries to send to a cached room_id the user gets the message
         # in old room
-        self.server_notices_manager.get_or_create_notice_room_for_user.invalidate_all()
+        self.server_notices_manager._get_or_create_notice_room_for_user.invalidate_all()
 
         # send second message
         channel = self.make_request(
@@ -451,7 +454,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
 
         # invalidate cache of server notices room_ids
         # if server tries to send to a cached room_id it gives an error
-        self.server_notices_manager.get_or_create_notice_room_for_user.invalidate_all()
+        self.server_notices_manager._get_or_create_notice_room_for_user.invalidate_all()
 
         # send second message
         channel = self.make_request(
@@ -532,7 +535,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # simulate a change in server config after a server restart.
         new_display_name = "new display name"
         self.server_notices_manager._config.servernotices.server_notices_mxid_display_name = new_display_name
-        self.server_notices_manager.get_or_create_notice_room_for_user.cache.invalidate_all()
+        self.server_notices_manager._get_or_create_notice_room_for_user.cache.invalidate_all()
 
         self.make_request(
             "POST",
@@ -576,7 +579,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # simulate a change in server config after a server restart.
         new_avatar_url = "test/new-url"
         self.server_notices_manager._config.servernotices.server_notices_mxid_avatar_url = new_avatar_url
-        self.server_notices_manager.get_or_create_notice_room_for_user.cache.invalidate_all()
+        self.server_notices_manager._get_or_create_notice_room_for_user.cache.invalidate_all()
 
         self.make_request(
             "POST",
@@ -689,7 +692,7 @@ class ServerNoticeTestCase(unittest.HomeserverTestCase):
         # simulate a change in server config after a server restart.
         new_avatar_url = "test/new-url"
         self.server_notices_manager._config.servernotices.server_notices_room_avatar_url = new_avatar_url
-        self.server_notices_manager.get_or_create_notice_room_for_user.cache.invalidate_all()
+        self.server_notices_manager._get_or_create_notice_room_for_user.cache.invalidate_all()
 
         self.make_request(
             "POST",
