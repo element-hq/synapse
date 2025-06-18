@@ -605,30 +605,19 @@ class RoomCreationHandler:
         )
 
         # Transfer membership events
-        old_room_member_state_ids = (
-            await self._storage_controllers.state.get_current_state_ids(
-                old_room_id, StateFilter.from_types([(EventTypes.Member, None)])
-            )
-        )
+        ban_event_ids = await self.store.get_ban_event_ids_in_room(old_room_id)
+        ban_events = await self.store.get_events_as_list(ban_event_ids)
 
-        # map from event_id to BaseEvent
-        old_room_member_state_events = await self.store.get_events(
-            old_room_member_state_ids.values()
-        )
-        for old_event in old_room_member_state_events.values():
-            # Only transfer ban events
-            if (
-                "membership" in old_event.content
-                and old_event.content["membership"] == "ban"
-            ):
-                await self.room_member_handler.update_membership(
-                    requester,
-                    UserID.from_string(old_event.state_key),
-                    new_room_id,
-                    "ban",
-                    ratelimit=False,
-                    content=old_event.content,
-                )
+        # Add any banned users to the new room
+        for ban_event in ban_events:
+            await self.room_member_handler.update_membership(
+                requester,
+                UserID.from_string(ban_event.state_key),
+                new_room_id,
+                Membership.BAN,
+                ratelimit=False,
+                content=ban_event.content,
+            )
 
         # XXX invites/joins
         # XXX 3pid invites

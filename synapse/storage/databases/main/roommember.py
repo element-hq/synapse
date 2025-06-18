@@ -1845,6 +1845,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             "_get_room_participation_txn", _get_room_participation_txn, user_id, room_id
         )
 
+    async def get_ban_event_ids_in_room(self, room_id: str) -> StrCollection:
+        """Get all event IDs for ban events in the given room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "room_id": room_id,
+                "type": EventTypes.Member,
+                "membership": Membership.BAN,
+            },
+            retcol="event_id",
+            desc="get_ban_event_ids_in_room",
+        )
+
 
 class RoomMemberBackgroundUpdateStore(SQLBaseStore):
     def __init__(
