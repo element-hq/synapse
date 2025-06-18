@@ -113,7 +113,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 ),
             ],
             sequence_name="device_lists_sequence",
-            writers=["master"],
+            writers=hs.config.worker.writers.device_lists,
         )
 
         device_list_max = self._device_list_id_gen.get_current_token()
