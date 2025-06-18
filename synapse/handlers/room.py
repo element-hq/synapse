@@ -592,7 +592,7 @@ class RoomCreationHandler:
                 additional_fields=spam_check[1],
             )
 
-        await self._send_events_for_new_room(
+        _, last_event_id, _ = await self._send_events_for_new_room(
             requester,
             new_room_id,
             new_room_version,
@@ -606,17 +606,25 @@ class RoomCreationHandler:
 
         # Transfer membership events
         ban_event_ids = await self.store.get_ban_event_ids_in_room(old_room_id)
-        ban_events = await self.store.get_events_as_list(ban_event_ids)
+        if ban_event_ids:
+            ban_events = await self.store.get_events_as_list(ban_event_ids)
 
-        # Add any banned users to the new room
-        for ban_event in ban_events:
-            await self.room_member_handler.update_membership(
-                requester,
-                UserID.from_string(ban_event.state_key),
-                new_room_id,
-                Membership.BAN,
+            # Add any banned users to the new room
+            await self.event_creation_handler.create_and_send_new_client_events(
+                requester=requester,
+                room_id=new_room_id,
+                prev_event_id=last_event_id,
+                event_dicts=[
+                    {
+                        "type": EventTypes.Member,
+                        "state_key": ban_event.state_key,
+                        "room_id": new_room_id,
+                        "sender": requester.user.to_string(),
+                        "content": ban_event.content,
+                    }
+                    for ban_event in ban_events
+                ],
                 ratelimit=False,
-                content=ban_event.content,
             )
 
         # XXX invites/joins
