@@ -1892,6 +1892,33 @@ class ModuleApi:
         """Returns the current server time in milliseconds."""
         return self._clock.time_msec()
 
+    async def send_server_notice(
+        self, user_id: str, type: str, event_content: JsonDict
+    ) -> JsonDict:
+        """Send a server notice to a user.
+
+        Added in Synapse v1.133.0.
+
+        Args:
+            user_id: The full user ID to send the server notice to. This must be a user
+                local to this homeserver.
+            type: The type of event to send. e.g. m.room.message
+            event_content: A dictionary representing the content of the event to send.
+
+        Returns:
+            The event that was sent. If state event deduplication happened, then
+                the previous, duplicate event instead.
+
+        Raises:
+            SynapseError if the event was not allowed.
+        """
+        # Create and send the notice
+        event = await self._hs.get_server_notices_manager().send_notice(
+            user_id=user_id, event_content=event_content, type=type
+        )
+
+        return event
+
 
 class PublicRoomListManager:
     """Contains methods for adding to, removing from and querying whether a room
