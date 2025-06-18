@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from synapse.appservice.api import ApplicationService
     from synapse.storage.databases.main import DataStore, PurgeEventsStore
     from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
+    from synapse.storage.util.id_generators import MultiWriterIdGenerator
 
 
 logger = logging.getLogger(__name__)
@@ -569,6 +570,25 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
                 }
             ),
         )
+
+    @classmethod
+    def from_generator(cls, generator: "MultiWriterIdGenerator") -> Self:
+        """Get the current token out of a MultiWriterIdGenerator"""
+
+        # The `min_pos` is the minimum position that we know all instances
+        # have finished persisting to, so we only care about instances whose
+        # positions are ahead of that. (Instance positions can be behind the
+        # min position as there are times we can work out that the minimum
+        # position is ahead of the naive minimum across all current
+        # positions. See MultiWriterIdGenerator for details)
+        min_pos = generator.get_current_token()
+        positions = {
+            instance: position
+            for instance, position in generator.get_positions().items()
+            if position > min_pos
+        }
+
+        return cls(stream=min_pos, instance_map=immutabledict(positions))
 
 
 @attr.s(frozen=True, slots=True, order=False)
