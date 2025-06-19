@@ -34,9 +34,11 @@ from synapse.events.utils import (
     _split_field,
     clone_event,
     copy_and_fixup_power_levels_contents,
+    format_event_raw,
+    make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
-    serialize_event, format_event_raw, make_config_for_admin,
+    serialize_event,
 )
 from synapse.types import JsonDict, create_requester
 from synapse.util.frozenutils import freeze
@@ -639,9 +641,15 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
 
 
 class SerializeEventTestCase(stdlib_unittest.TestCase):
-    def serialize(self, ev: EventBase, fields: Optional[List[str]], include_admin_metadata = False) -> JsonDict:
+    def serialize(
+        self, ev: EventBase, fields: Optional[List[str]], include_admin_metadata=False
+    ) -> JsonDict:
         return serialize_event(
-            ev, 1479807801915, config=SerializeEventConfig(only_event_fields=fields, include_admin_metadata=as_admin)
+            ev,
+            1479807801915,
+            config=SerializeEventConfig(
+                only_event_fields=fields, include_admin_metadata=as_admin
+            ),
         )
 
     def test_event_fields_works_with_keys(self) -> None:
@@ -775,7 +783,7 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
                     content={"foo": "bar"},
                     internal_metadata={"soft_failed": True},
                 ),
-                []
+                [],
             ),
             {
                 "type": "foo",
@@ -783,7 +791,7 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {},
-            }
+            },
         )
 
         # When asked though, we should set it
@@ -805,7 +813,7 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
                 "room_id": "!foo:bar",
                 "content": {"foo": "bar"},
                 "unsigned": {"io.element.synapse.soft_failed": True},
-            }
+            },
         )
 
     def test_make_serialize_config_for_admin_retains_other_fields(self) -> None:
@@ -818,12 +826,20 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
             include_stripped_room_state=True,  # default False
         )
         admin_config = make_config_for_admin(non_default_config)
-        self.assertEqual(admin_config.as_client_event, non_default_config.as_client_event)
+        self.assertEqual(
+            admin_config.as_client_event, non_default_config.as_client_event
+        )
         self.assertEqual(admin_config.event_format, non_default_config.event_format)
         self.assertEqual(admin_config.requester, non_default_config.requester)
-        self.assertEqual(admin_config.only_event_fields, non_default_config.only_event_fields)
-        self.assertEqual(admin_config.include_stripped_room_state, admin_config.include_stripped_room_state)
+        self.assertEqual(
+            admin_config.only_event_fields, non_default_config.only_event_fields
+        )
+        self.assertEqual(
+            admin_config.include_stripped_room_state,
+            admin_config.include_stripped_room_state,
+        )
         self.assertTrue(admin_config.include_admin_metadata)
+
 
 class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
     def setUp(self) -> None:
