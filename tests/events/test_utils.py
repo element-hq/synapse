@@ -642,7 +642,10 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
 
 class SerializeEventTestCase(stdlib_unittest.TestCase):
     def serialize(
-        self, ev: EventBase, fields: Optional[List[str]], include_admin_metadata: bool=False
+        self,
+        ev: EventBase,
+        fields: Optional[List[str]],
+        include_admin_metadata: bool = False,
     ) -> JsonDict:
         return serialize_event(
             ev,
