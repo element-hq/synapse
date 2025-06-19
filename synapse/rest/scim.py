@@ -81,7 +81,7 @@ logger = logging.getLogger(__name__)
 
 
 def register_scim_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if not hs.config.experimental.msc4098.enabled:
+    if not hs.config.experimental.scim.enabled:
         return
 
     SchemaListServlet(hs).register(http_server)
@@ -152,7 +152,7 @@ class SCIMServlet(RestServlet):
     async def get_scim_external_id(self, user_id: str) -> Optional[str]:
         """Read the external id stored in the special SCIM IDP."""
 
-        scim_idp_id = self.hs.config.experimental.msc4098.idp_id or SCIM_DEFAULT_IDP_ID
+        scim_idp_id = self.hs.config.experimental.scim.idp_id or SCIM_DEFAULT_IDP_ID
         external_ids = await self.store.get_external_ids_by_user(user_id)
         for idp_id, external_id in external_ids:
             if idp_id == scim_idp_id:
@@ -306,7 +306,7 @@ class UserServlet(SCIMServlet):
             external_id = await self.get_scim_external_id(user_id)
             if request_user.external_id != external_id:
                 scim_idp_id = (
-                    self.hs.config.experimental.msc4098.idp_id or SCIM_DEFAULT_IDP_ID
+                    self.hs.config.experimental.scim.idp_id or SCIM_DEFAULT_IDP_ID
                 )
                 if external_id:
                     await self.store.remove_user_external_id(
@@ -457,7 +457,7 @@ class UserListServlet(SCIMServlet):
 
             if request_user.external_id:
                 scim_idp_id = (
-                    self.hs.config.experimental.msc4098.idp_id or SCIM_DEFAULT_IDP_ID
+                    self.hs.config.experimental.scim.idp_id or SCIM_DEFAULT_IDP_ID
                 )
                 await self.store.record_user_external_id(
                     scim_idp_id, request_user.external_id, user_id

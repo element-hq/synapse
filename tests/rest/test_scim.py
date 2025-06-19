@@ -58,7 +58,7 @@ class SCIMExperimentalFeatureTestCase(HomeserverTestCase):
 
         config_dict = {
             "experimental_features": {
-                "msc4098": {
+                "scim": {
                     "enabled": True,
                 },
                 "msc3861": {"enabled": True},
@@ -92,10 +92,8 @@ class UserProvisioningTestCase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
-        msc4098_conf = conf.setdefault("experimental_features", {}).setdefault(
-            "msc4098", {}
-        )
-        msc4098_conf.setdefault("enabled", True)
+        scim_conf = conf.setdefault("experimental_features", {}).setdefault("scim", {})
+        scim_conf.setdefault("enabled", True)
         return conf
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -587,10 +585,8 @@ class SCIMMetadataTestCase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
-        msc4098_conf = conf.setdefault("experimental_features", {}).setdefault(
-            "msc4098", {}
-        )
-        msc4098_conf.setdefault("enabled", True)
+        scim_conf = conf.setdefault("experimental_features", {}).setdefault("scim", {})
+        scim_conf.setdefault("enabled", True)
         return conf
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

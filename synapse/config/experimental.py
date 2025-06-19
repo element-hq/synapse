@@ -366,8 +366,8 @@ class MSC3866Config:
 
 
 @attr.s(auto_attribs=True, frozen=True, slots=True)
-class MSC4098Config:
-    """Configuration for MSC4098 (SCIM provisioning)"""
+class SCIMConfig:
+    """Configuration for SCIM provisioning API."""
 
     # Whether the SCIM provisioning API is enabled.
     enabled: bool = False
@@ -541,18 +541,18 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
-        # MSC4098: SCIM provisioning API
+        # SCIM provisioning API
         try:
-            self.msc4098 = MSC4098Config(**experimental.get("msc4098", {}))
-            if self.msc4098.enabled and self.msc3861.enabled:
+            self.scim = SCIMConfig(**experimental.get("scim", {}))
+            if self.scim.enabled and self.msc3861.enabled:
                 raise ConfigError(
-                    "MSC3861 and MSC4098 are mutually exclusive. Please disable one or the"
+                    "MSC3861 and SCIM are mutually exclusive. Please disable one or the"
                     "other.",
-                    ("experimental", "msc4098"),
+                    ("experimental", "scim"),
                 )
         except ValueError as exc:
             raise ConfigError(
-                "Invalid MSC4098 configuration", ("experimental", "msc4098")
+                "Invalid SCIM configuration", ("experimental", "scim")
             ) from exc
 
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code

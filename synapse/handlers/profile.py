@@ -457,7 +457,7 @@ class ProfileHandler:
             `picture_https_url`.
         """
         if media_repo is None:
-            logger.info(
+            logger.warning(
                 "failed to set user avatar because out-of-process media repositories "
                 "are not supported yet "
             )

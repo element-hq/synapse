@@ -20,7 +20,7 @@ Then it must be explicitly enabled by configuration:
 
 ```yaml
 experimental_features:
-    msc4098:
+    scim:
       enabled: true
       idp_id: <my-provider>
 ```
