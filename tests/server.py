@@ -343,6 +343,8 @@ class FakeSite:
         self,
         resource: IResource,
         reactor: IReactorTime,
+        *,
+        parsePOSTFormSubmission: bool = True,
     ):
         """
 
@@ -351,6 +353,7 @@ class FakeSite:
         """
         self._resource = resource
         self.reactor = reactor
+        self._parsePOSTFormSubmission = parsePOSTFormSubmission
 
     def getResourceFor(self, request: Request) -> IResource:
         return self._resource
