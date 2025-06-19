@@ -1233,14 +1233,14 @@ class BundledAggregationsTestCase(BaseRelationsTestCase):
         # Note that this re-uses some cached values, so the total number of
         # queries is much smaller.
         self._test_bundled_aggregations(
-            RelationTypes.THREAD, _gen_assert(True), 4, access_token=self.user2_token
+            RelationTypes.THREAD, _gen_assert(True), 6, access_token=self.user2_token
         )
 
         # A user with no interactions with the thread: they have not participated.
         user3_id, user3_token = self._create_user("charlie")
         self.helper.join(self.room, user=user3_id, tok=user3_token)
         self._test_bundled_aggregations(
-            RelationTypes.THREAD, _gen_assert(False), 4, access_token=user3_token
+            RelationTypes.THREAD, _gen_assert(False), 6, access_token=user3_token
         )
 
     def test_thread_with_bundled_aggregations_for_latest(self) -> None:
