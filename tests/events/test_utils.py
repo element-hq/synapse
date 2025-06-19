@@ -51,7 +51,12 @@ def MockEvent(**kwargs: Any) -> EventBase:
         kwargs["type"] = "fake_type"
     if "content" not in kwargs:
         kwargs["content"] = {}
-    return make_event_from_dict(kwargs)
+
+    # Move internal metadata out so we can call make_event properly
+    internal_metadata = kwargs.get("internal_metadata")
+    kwargs["internal_metadata"] = None
+
+    return make_event_from_dict(kwargs, internal_metadata_dict=internal_metadata)
 
 
 class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
