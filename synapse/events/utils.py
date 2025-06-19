@@ -603,7 +603,7 @@ class EventClientSerializer:
         # relevant metadata will be when the admin requested it via their admin
         # client config account data. Also, it's "just" some `unsigned` flags, so
         # shouldn't cause much in terms of problems to downstream consumers.
-        if self._store.is_server_admin(config.requester.user):
+        if config.requester is not None and self._store.is_server_admin(config.requester.user):
             config = make_config_for_admin(config)
 
         serialized_event = serialize_event(event, time_now, config=config)
