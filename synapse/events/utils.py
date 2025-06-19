@@ -421,9 +421,28 @@ class SerializeEventConfig:
     # False, that state will be removed from the event before it is returned.
     # Otherwise, it will be kept.
     include_stripped_room_state: bool = False
+    # When True, sets unsigned flags to help clients identify events which
+    # only server admins can see through other configuration. For example,
+    # whether an event was soft failed by the server.
+    include_admin_metadata: bool = False
+
+    # Developer note: when adding properties, update make_config_for_admin() below.
 
 
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
+
+def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfig:
+    return SerializeEventConfig(
+        # Set the options which are only available to server admins
+        include_admin_metadata=True,
+
+        # And copy the rest
+        as_client_event=existing.as_client_event,
+        event_format=existing.event_format,
+        requester=existing.requester,
+        only_event_fields=existing.only_event_fields,
+        include_stripped_room_state=existing.include_stripped_room_state,
+    )
 
 
 def serialize_event(
@@ -528,6 +547,9 @@ def serialize_event(
             d["content"] = dict(d["content"])
             d["content"]["redacts"] = e.redacts
 
+    if config.include_admin_metadata and e.internal_metadata.is_soft_failed():
+        d["unsigned"]["io.element.synapse.soft_failed"] = True
+
     only_event_fields = config.only_event_fields
     if only_event_fields:
         if not isinstance(only_event_fields, list) or not all(
@@ -575,6 +597,13 @@ class EventClientSerializer:
         # To handle the case of presence events and the like
         if not isinstance(event, EventBase):
             return event
+
+        # Force-enable server admin metadata because the only time an event with
+        # relevant metadata will be when the admin requested it via their admin
+        # client config account data. Also, it's "just" some `unsigned` flags, so
+        # shouldn't cause much in terms of problems to downstream consumers.
+        if self._store.is_server_admin(config.requester.user):
+            config = make_config_for_admin(config)
 
         serialized_event = serialize_event(event, time_now, config=config)
 
