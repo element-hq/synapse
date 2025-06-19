@@ -474,7 +474,8 @@ def section(prop: str, values: dict) -> str:
 
 def main() -> None:
     # For Windows: reconfigure the terminal to be UTF-8 for `print()` calls.
-    sys.stdout.reconfigure(encoding='utf-8')
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding='utf-8')
 
     def usage(err_msg: str) -> int:
         script_name = (sys.argv[:1] or ["__main__.py"])[0]
