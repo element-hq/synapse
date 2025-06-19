@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from http import HTTPStatus
 from typing import Collection, ContextManager, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -347,7 +348,15 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # the prev_events used when creating the join event, such that the ban does not
         # precede the join.
         with self._patch_get_latest_events([last_room_creation_event_id]):
-            self.helper.join(room_id, eve, tok=eve_token)
+            self.helper.join(
+                room_id,
+                eve,
+                tok=eve_token,
+                # Previously, this join would succeed but now we expect it to fail at
+                # this point. The rest of the test is for the case when this used to
+                # succeed.
+                expect_code=HTTPStatus.FORBIDDEN,
+            )
 
         # Eve makes a second, incremental sync.
         eve_incremental_sync_after_join: SyncResult = self.get_success(

@@ -170,7 +170,7 @@ class Config:
 
     section: ClassVar[str]
 
-    def __init__(self, root_config: "RootConfig" = None):
+    def __init__(self, root_config: "RootConfig"):
         self.root = root_config
 
         # Get the path to the default Synapse template directory
@@ -221,9 +221,13 @@ class Config:
             The number of milliseconds in the duration.
 
         Raises:
-            TypeError, if given something other than an integer or a string
+            TypeError: if given something other than an integer or a string, or the
+                duration is using an incorrect suffix.
             ValueError: if given a string not of the form described above.
         """
+        # For integers, we prefer to use `type(value) is int` instead of
+        # `isinstance(value, int)` because we want to exclude subclasses of int, such as
+        # bool.
         if type(value) is int:  # noqa: E721
             return value
         elif isinstance(value, str):
@@ -246,9 +250,20 @@ class Config:
             if suffix in sizes:
                 value = value[:-1]
                 size = sizes[suffix]
+            elif suffix.isdigit():
+                #  No suffix is treated as milliseconds.
+                value = value
+                size = 1
+            else:
+                raise TypeError(
+                    f"Bad duration suffix {value} (expected no suffix or one of these suffixes: {sizes.keys()})"
+                )
+
             return int(value) * size
         else:
-            raise TypeError(f"Bad duration {value!r}")
+            raise TypeError(
+                f"Bad duration type {value!r} (expected int or string duration)"
+            )
 
     @staticmethod
     def abspath(file_path: str) -> str:
@@ -430,7 +445,7 @@ class RootConfig:
         return res
 
     @classmethod
-    def invoke_all_static(cls, func_name: str, *args: Any, **kwargs: any) -> None:
+    def invoke_all_static(cls, func_name: str, *args: Any, **kwargs: Any) -> None:
         """
         Invoke a static function on config objects this RootConfig is
         configured to use.
@@ -574,6 +589,14 @@ class RootConfig:
             " Defaults to the directory containing the last config file",
         )
 
+        config_parser.add_argument(
+            "--no-secrets-in-config",
+            dest="secrets_in_config",
+            action="store_false",
+            default=True,
+            help="Reject config options that expect an in-line secret as value.",
+        )
+
         cls.invoke_all_static("add_arguments", config_parser)
 
     @classmethod
@@ -611,7 +634,10 @@ class RootConfig:
 
         config_dict = read_config_files(config_files)
         obj.parse_config_dict(
-            config_dict, config_dir_path=config_dir_path, data_dir_path=data_dir_path
+            config_dict,
+            config_dir_path=config_dir_path,
+            data_dir_path=data_dir_path,
+            allow_secrets_in_config=config_args.secrets_in_config,
         )
 
         obj.invoke_all("read_arguments", config_args)
@@ -637,6 +663,13 @@ class RootConfig:
             metavar="CONFIG_FILE",
             help="Specify config file. Can be given multiple times and"
             " may specify directories containing *.yaml files.",
+        )
+        parser.add_argument(
+            "--no-secrets-in-config",
+            dest="secrets_in_config",
+            action="store_false",
+            default=True,
+            help="Reject config options that expect an in-line secret as value.",
         )
 
         # we nest the mutually-exclusive group inside another group so that the help
@@ -806,14 +839,21 @@ class RootConfig:
             return None
 
         obj.parse_config_dict(
-            config_dict, config_dir_path=config_dir_path, data_dir_path=data_dir_path
+            config_dict,
+            config_dir_path=config_dir_path,
+            data_dir_path=data_dir_path,
+            allow_secrets_in_config=config_args.secrets_in_config,
         )
         obj.invoke_all("read_arguments", config_args)
 
         return obj
 
     def parse_config_dict(
-        self, config_dict: Dict[str, Any], config_dir_path: str, data_dir_path: str
+        self,
+        config_dict: Dict[str, Any],
+        config_dir_path: str,
+        data_dir_path: str,
+        allow_secrets_in_config: bool = True,
     ) -> None:
         """Read the information from the config dict into this Config object.
 
@@ -831,6 +871,7 @@ class RootConfig:
             config_dict,
             config_dir_path=config_dir_path,
             data_dir_path=data_dir_path,
+            allow_secrets_in_config=allow_secrets_in_config,
         )
 
     def generate_missing_files(
@@ -1006,7 +1047,7 @@ class RoutableShardedWorkerHandlingConfig(ShardedWorkerHandlingConfig):
         return self._get_instance(key)
 
 
-def read_file(file_path: Any, config_path: Iterable[str]) -> str:
+def read_file(file_path: Any, config_path: StrSequence) -> str:
     """Check the given file exists, and read it into a string
 
     If it does not, emit an error indicating the problem

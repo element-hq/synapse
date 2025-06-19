@@ -219,6 +219,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     members_changed = set(row.keys[1:])
                     self._invalidate_state_caches(room_id, members_changed)
+                    self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
+                        room_id, token
+                    )
+                    for user_id in members_changed:
+                        self._membership_stream_cache.entity_has_changed(user_id, token)  # type: ignore[attr-defined]
                 elif row.cache_func == PURGE_HISTORY_CACHE_NAME:
                     if row.keys is None:
                         raise Exception(
@@ -236,6 +241,35 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     self._invalidate_caches_for_room_events(room_id)
                     self._invalidate_caches_for_room(room_id)
+                    self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
+                        room_id, token
+                    )
+                    # Note: This code is commented out to improve cache performance.
+                    # While uncommenting would provide complete correctness, our
+                    # automatic forgotten room purge logic (see
+                    # `forgotten_room_retention_period`) means this would frequently
+                    # clear the entire cache (effectively) and probably have a noticable
+                    # impact on the cache hit ratio.
+                    #
+                    # Not updating the cache here is safe because:
+                    #
+                    #  1. `_membership_stream_cache` is only used to indicate the
+                    #     *absence* of changes, i.e. "nothing has changed between tokens
+                    #     X and Y and so return early and don't query the database".
+                    #  2. `_membership_stream_cache` is used when we query data from
+                    #     `current_state_delta_stream` and `room_memberships` but since
+                    #     nothing new is written to the database for those tables when
+                    #     purging/deleting a room (only deleting rows), there is nothing
+                    #     changed to care about.
+                    #
+                    # At worst, the cache might indicate a change at token X, at which
+                    # point, we will query the database and discover nothing is there.
+                    #
+                    # Ideally, we would make it so that we could clear the cache on a
+                    # more granular level but that's a bit complex and fiddly to do with
+                    # room membership.
+                    #
+                    # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
 
@@ -273,8 +307,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     "get_rooms_for_user", (data.state_key,)
                 )
                 self._attempt_to_invalidate_cache(
-                    "get_sliding_sync_rooms_for_user", None
+                    "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
                 )
+                self._membership_stream_cache.entity_has_changed(data.state_key, token)  # type: ignore[attr-defined]
             elif data.type == EventTypes.RoomEncryption:
                 self._attempt_to_invalidate_cache(
                     "get_room_encryption", (data.room_id,)
@@ -284,17 +319,20 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
             if (data.type, data.state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
                 self._attempt_to_invalidate_cache(
-                    "get_sliding_sync_rooms_for_user", None
+                    "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
                 )
         elif row.type == EventsStreamAllStateRow.TypeId:
             assert isinstance(data, EventsStreamAllStateRow)
             # Similar to the above, but the entire caches are invalidated. This is
             # unfortunate for the membership caches, but should recover quickly.
             self._curr_state_delta_stream_cache.entity_has_changed(data.room_id, token)  # type: ignore[attr-defined]
+            self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
             self._attempt_to_invalidate_cache("get_rooms_for_user", None)
             self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
             self._attempt_to_invalidate_cache("get_room_encryption", (data.room_id,))
-            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+            )
         else:
             raise Exception("Unknown events stream row type %s" % (row.type,))
 
@@ -358,7 +396,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 "_get_rooms_for_local_user_where_membership_is_inner", (state_key,)
             )
             self._attempt_to_invalidate_cache(
-                "get_sliding_sync_rooms_for_user", (state_key,)
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+                (state_key,),
             )
 
             self._attempt_to_invalidate_cache(
@@ -377,7 +416,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
 
         if (etype, state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
-            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+            )
 
         if relates_to:
             self._attempt_to_invalidate_cache(
@@ -434,7 +475,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "_get_rooms_for_local_user_where_membership_is_inner", None
         )
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("get_references_for_event", None)
@@ -493,7 +536,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "get_current_hosts_in_room_ordered", (room_id,)
         )
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("_get_membership_from_event_id", None)

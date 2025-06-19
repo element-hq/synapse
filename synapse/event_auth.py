@@ -32,6 +32,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+    Protocol,
     Set,
     Tuple,
     Union,
@@ -41,7 +42,6 @@ from typing import (
 from canonicaljson import encode_canonical_json
 from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
-from typing_extensions import Protocol
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import (
@@ -64,6 +64,7 @@ from synapse.api.room_versions import (
     RoomVersion,
     RoomVersions,
 )
+from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
     MutableStateMap,
@@ -307,6 +308,13 @@ def check_state_dependent_auth_rules(
         return
 
     auth_dict = {(e.type, e.state_key): e for e in auth_events}
+
+    # Later code relies on there being a create event e.g _can_federate, _is_membership_change_allowed
+    # so produce a more intelligible error if we don't have one.
+    if auth_dict.get(CREATE_KEY) is None:
+        raise AuthError(
+            403, f"Event {event.event_id} is missing a create event in auth_events."
+        )
 
     # additional check for m.federate
     creating_domain = get_domain_from_id(event.room_id)
@@ -566,6 +574,7 @@ def _is_membership_change_allowed(
     logger.debug(
         "_is_membership_change_allowed: %s",
         {
+            "caller_membership": caller.membership if caller else None,
             "caller_in_room": caller_in_room,
             "caller_invited": caller_invited,
             "caller_knocked": caller_knocked,
@@ -677,7 +686,8 @@ def _is_membership_change_allowed(
                 and join_rule == JoinRules.KNOCK_RESTRICTED
             )
         ):
-            if not caller_in_room and not caller_invited:
+            # You can only join the room if you are invited or are already in the room.
+            if not (caller_in_room or caller_invited):
                 raise AuthError(403, "You are not invited to this room.")
         else:
             # TODO (erikj): may_join list
@@ -984,8 +994,7 @@ def _check_power_levels(
             if old_level == user_level:
                 raise AuthError(
                     403,
-                    "You don't have permission to remove ops level equal "
-                    "to your own",
+                    "You don't have permission to remove ops level equal to your own",
                 )
 
         # Check if the old and new levels are greater than the user level
@@ -1009,11 +1018,16 @@ def get_user_power_level(user_id: str, auth_events: StateMap["EventBase"]) -> in
         user_id: user's id to look up in power_levels
         auth_events:
             state in force at this point in the room (or rather, a subset of
-            it including at least the create event and power levels event.
+            it including at least the create event, and possibly a power levels event).
 
     Returns:
         the user's power level in this room.
     """
+    create_event = auth_events.get(CREATE_KEY)
+    assert create_event is not None, (
+        "A create event in the auth events chain is required to calculate user power level correctly,"
+        " but was not found. This indicates a bug"
+    )
     power_level_event = get_power_level_event(auth_events)
     if power_level_event:
         level = power_level_event.content.get("users", {}).get(user_id)
@@ -1027,18 +1041,12 @@ def get_user_power_level(user_id: str, auth_events: StateMap["EventBase"]) -> in
     else:
         # if there is no power levels event, the creator gets 100 and everyone
         # else gets 0.
-
-        # some things which call this don't pass the create event: hack around
-        # that.
-        key = (EventTypes.Create, "")
-        create_event = auth_events.get(key)
-        if create_event is not None:
-            if create_event.room_version.implicit_room_creator:
-                creator = create_event.sender
-            else:
-                creator = create_event.content[EventContentFields.ROOM_CREATOR]
-            if creator == user_id:
-                return 100
+        if create_event.room_version.implicit_room_creator:
+            creator = create_event.sender
+        else:
+            creator = create_event.content[EventContentFields.ROOM_CREATOR]
+        if creator == user_id:
+            return 100
         return 0
 
 

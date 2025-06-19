@@ -36,7 +36,13 @@ from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
-from synapse.api.constants import ApprovalNoticeMedium, EventTypes, LoginType, UserTypes
+from synapse.api.constants import (
+    ApprovalNoticeMedium,
+    EventContentFields,
+    EventTypes,
+    LoginType,
+    UserTypes,
+)
 from synapse.api.errors import Codes, HttpResponseException, ResourceLimitError
 from synapse.api.room_versions import RoomVersions
 from synapse.media.filepath import MediaFilePaths
@@ -60,6 +66,7 @@ from synapse.util import Clock
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.test_utils import SMALL_PNG
+from tests.test_utils.event_injection import inject_event
 from tests.unittest import override_config
 
 
@@ -315,6 +322,61 @@ class UserRegisterTestCase(unittest.HomeserverTestCase):
             "username": "a",
             "password": "1234",
             "user_type": "invalid",
+        }
+        channel = self.make_request("POST", self.url, body)
+
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual("Invalid user type", channel.json_body["error"])
+
+    @override_config(
+        {
+            "user_types": {
+                "extra_user_types": ["extra1", "extra2"],
+            }
+        }
+    )
+    def test_extra_user_type(self) -> None:
+        """
+        Check that the extra user type can be used when registering a user.
+        """
+
+        def nonce_mac(user_type: str) -> tuple[str, str]:
+            """
+            Get a nonce and the expected HMAC for that nonce.
+            """
+            channel = self.make_request("GET", self.url)
+            nonce = channel.json_body["nonce"]
+
+            want_mac = hmac.new(key=b"shared", digestmod=hashlib.sha1)
+            want_mac.update(
+                nonce.encode("ascii")
+                + b"\x00alice\x00abc123\x00notadmin\x00"
+                + user_type.encode("ascii")
+            )
+            want_mac_str = want_mac.hexdigest()
+
+            return nonce, want_mac_str
+
+        nonce, mac = nonce_mac("extra1")
+        # Valid user_type
+        body = {
+            "nonce": nonce,
+            "username": "alice",
+            "password": "abc123",
+            "user_type": "extra1",
+            "mac": mac,
+        }
+        channel = self.make_request("POST", self.url, body)
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        nonce, mac = nonce_mac("extra3")
+        # Invalid user_type
+        body = {
+            "nonce": nonce,
+            "username": "alice",
+            "password": "abc123",
+            "user_type": "extra3",
+            "mac": mac,
         }
         channel = self.make_request("POST", self.url, body)
 
@@ -1177,6 +1239,80 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         test_user_type(
             [self.admin_user, support_user_id, regular_user_id, bot_user_id],
             not_user_types=["custom"],
+        )
+
+    @override_config(
+        {
+            "user_types": {
+                "extra_user_types": ["extra1", "extra2"],
+            }
+        }
+    )
+    def test_filter_not_user_types_with_extra(self) -> None:
+        """Tests that the endpoint handles the not_user_types param when extra_user_types are configured"""
+
+        regular_user_id = self.register_user("normalo", "secret")
+
+        extra1_user_id = self.register_user("extra1", "secret")
+        self.make_request(
+            "PUT",
+            "/_synapse/admin/v2/users/" + urllib.parse.quote(extra1_user_id),
+            {"user_type": "extra1"},
+            access_token=self.admin_user_tok,
+        )
+
+        def test_user_type(
+            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+        ) -> None:
+            """Runs a test for the not_user_types param
+            Args:
+                expected_user_ids: Ids of the users that are expected to be returned
+                not_user_types: List of values for the not_user_types param
+            """
+
+            user_type_query = ""
+
+            if not_user_types is not None:
+                user_type_query = "&".join(
+                    [f"not_user_type={u}" for u in not_user_types]
+                )
+
+            test_url = f"{self.url}?{user_type_query}"
+            channel = self.make_request(
+                "GET",
+                test_url,
+                access_token=self.admin_user_tok,
+            )
+
+            self.assertEqual(200, channel.code)
+            self.assertEqual(channel.json_body["total"], len(expected_user_ids))
+            self.assertEqual(
+                expected_user_ids,
+                [u["name"] for u in channel.json_body["users"]],
+            )
+
+        # Request without user_types →  all users expected
+        test_user_type([self.admin_user, extra1_user_id, regular_user_id])
+
+        # Request and exclude extra1 user type
+        test_user_type(
+            [self.admin_user, regular_user_id],
+            not_user_types=["extra1"],
+        )
+
+        # Request and exclude extra1 and extra2 user types
+        test_user_type(
+            [self.admin_user, regular_user_id],
+            not_user_types=["extra1", "extra2"],
+        )
+
+        # Request and exclude empty user types →  only expected the extra1 user
+        test_user_type([extra1_user_id], not_user_types=[""])
+
+        # Request and exclude an unregistered type →  expect all users
+        test_user_type(
+            [self.admin_user, extra1_user_id, regular_user_id],
+            not_user_types=["extra3"],
         )
 
     def test_erasure_status(self) -> None:
@@ -2970,56 +3106,66 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual("@user:test", channel.json_body["name"])
         self.assertTrue(channel.json_body["admin"])
 
+    def set_user_type(self, user_type: Optional[str]) -> None:
+        # Set to user_type
+        channel = self.make_request(
+            "PUT",
+            self.url_other_user,
+            access_token=self.admin_user_tok,
+            content={"user_type": user_type},
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual("@user:test", channel.json_body["name"])
+        self.assertEqual(user_type, channel.json_body["user_type"])
+
+        # Get user
+        channel = self.make_request(
+            "GET",
+            self.url_other_user,
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual("@user:test", channel.json_body["name"])
+        self.assertEqual(user_type, channel.json_body["user_type"])
+
     def test_set_user_type(self) -> None:
         """
         Test changing user type.
         """
 
         # Set to support type
-        channel = self.make_request(
-            "PUT",
-            self.url_other_user,
-            access_token=self.admin_user_tok,
-            content={"user_type": UserTypes.SUPPORT},
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual("@user:test", channel.json_body["name"])
-        self.assertEqual(UserTypes.SUPPORT, channel.json_body["user_type"])
-
-        # Get user
-        channel = self.make_request(
-            "GET",
-            self.url_other_user,
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual("@user:test", channel.json_body["name"])
-        self.assertEqual(UserTypes.SUPPORT, channel.json_body["user_type"])
+        self.set_user_type(UserTypes.SUPPORT)
 
         # Change back to a regular user
+        self.set_user_type(None)
+
+    @override_config({"user_types": {"extra_user_types": ["extra1", "extra2"]}})
+    def test_set_user_type_with_extras(self) -> None:
+        """
+        Test changing user type with extra_user_types configured.
+        """
+
+        # Check that we can still set to support type
+        self.set_user_type(UserTypes.SUPPORT)
+
+        # Check that we can set to an extra user type
+        self.set_user_type("extra2")
+
+        # Change back to a regular user
+        self.set_user_type(None)
+
+        # Try setting to invalid type
         channel = self.make_request(
             "PUT",
             self.url_other_user,
             access_token=self.admin_user_tok,
-            content={"user_type": None},
+            content={"user_type": "extra3"},
         )
 
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual("@user:test", channel.json_body["name"])
-        self.assertIsNone(channel.json_body["user_type"])
-
-        # Get user
-        channel = self.make_request(
-            "GET",
-            self.url_other_user,
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual("@user:test", channel.json_body["name"])
-        self.assertIsNone(channel.json_body["user_type"])
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual("Invalid user type", channel.json_body["error"])
 
     def test_accidental_deactivation_prevention(self) -> None:
         """
@@ -3894,9 +4040,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         image_data1 = SMALL_PNG
         # Resolution: 1×1, MIME type: image/gif, Extension: gif, Size: 35 B
         image_data2 = unhexlify(
-            b"47494638376101000100800100000000"
-            b"ffffff2c00000000010001000002024c"
-            b"01003b"
+            b"47494638376101000100800100000000ffffff2c00000000010001000002024c01003b"
         )
         # Resolution: 1×1, MIME type: image/bmp, Extension: bmp, Size: 54 B
         image_data3 = unhexlify(
@@ -5407,6 +5551,111 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     matches.append((event_id, event))
         # we redacted 6 messages
         self.assertEqual(len(matches), 6)
+
+    def test_redactions_for_remote_user_succeed_with_admin_priv_in_room(self) -> None:
+        """
+        Test that if the admin requester has privileges in a room, redaction requests
+        succeed for a remote user
+        """
+
+        # inject some messages from remote user and collect event ids
+        original_message_ids = []
+        for i in range(5):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=self.rm1,
+                    type="m.room.message",
+                    sender="@remote:remote_server",
+                    content={"msgtype": "m.text", "body": f"nefarious_chatter{i}"},
+                )
+            )
+            original_message_ids.append(event.event_id)
+
+        # send a request to redact a remote user's messages in a room.
+        # the server admin created this room and has admin privilege in room
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/user/@remote:remote_server/redact",
+            content={"rooms": [self.rm1]},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        id = channel.json_body.get("redact_id")
+
+        # check that there were no failed redactions
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("status"), "complete")
+        failed_redactions = channel.json_body.get("failed_redactions")
+        self.assertEqual(failed_redactions, {})
+
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.rm1}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        for event in channel.json_body["chunk"]:
+            for event_id in original_message_ids:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    original_message_ids.remove(event_id)
+                    break
+        # we originally sent 5 messages so 5 should be redacted
+        self.assertEqual(len(original_message_ids), 0)
+
+    def test_redact_redacts_encrypted_messages(self) -> None:
+        """
+        Test that user's encrypted messages are redacted
+        """
+        encrypted_room = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        self.helper.send_state(
+            encrypted_room,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=self.admin_tok,
+        )
+        # join room send some messages
+        originals = []
+        join = self.helper.join(encrypted_room, self.bad_user, tok=self.bad_user_tok)
+        originals.append(join["event_id"])
+        for _ in range(15):
+            res = self.helper.send_event(
+                encrypted_room, "m.room.encrypted", {}, tok=self.bad_user_tok
+            )
+            originals.append(res["event_id"])
+
+        # redact user's events
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": []},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matched = []
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{encrypted_room}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        for event in channel.json_body["chunk"]:
+            for event_id in originals:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    matched.append(event_id)
+        self.assertEqual(len(matched), len(originals))
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):

@@ -310,28 +310,17 @@ sudo dnf install libtiff-devel libjpeg-devel libzip-devel freetype-devel \
 sudo dnf group install "Development Tools"
 ```
 
-##### Red Hat Enterprise Linux / Rocky Linux
+##### Red Hat Enterprise Linux / Rocky Linux / Oracle Linux
 
-*Note: The term "RHEL" below refers to both Red Hat Enterprise Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
+*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
 
 It's recommended to use the latest Python versions.
 
-RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ship with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
+RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ships with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
 
 Python 3.11 and 3.12 are available for both RHEL 8 and 9.
 
 These commands should be run as root user.
-
-RHEL 8
-```bash
-# Enable PowerTools repository
-dnf config-manager --set-enabled powertools
-```
-RHEL 9
-```bash
-# Enable CodeReady Linux Builder repository
-crb enable
-```
 
 Install new version of Python. You only need one of these:
 ```bash

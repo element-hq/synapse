@@ -10,14 +10,15 @@ implementation, written and maintained by `Element <https://element.io>`_.
 `Matrix <https://github.com/matrix-org>`__ is the open standard for
 secure and interoperable real time communications. You can directly run
 and manage the source code in this repository, available under an AGPL
-license. There is no support provided from Element unless you have a
-subscription.
+license (or alternatively under a commercial license from Element).
+There is no support provided by Element unless you have a
+subscription from Element.
 
-Subscription alternative
-========================
+Subscription
+============
 
-Alternatively, for those that need an enterprise-ready solution, Element
-Server Suite (ESS) is `available as a subscription <https://element.io/pricing>`_.
+For those that need an enterprise-ready solution, Element
+Server Suite (ESS) is `available via subscription <https://element.io/pricing>`_.
 ESS builds on Synapse to offer a complete Matrix-based backend including the full
 `Admin Console product <https://element.io/enterprise-functionality/admin-console>`_,
 giving admins the power to easily manage an organization-wide
@@ -248,6 +249,22 @@ Developers might be particularly interested in:
 
 Alongside all that, join our developer community on Matrix:
 `#synapse-dev:matrix.org <https://matrix.to/#/#synapse-dev:matrix.org>`_, featuring real humans!
+
+Copyright and Licensing
+=======================
+
+| Copyright 2014-2017 OpenMarket Ltd
+| Copyright 2017 Vector Creations Ltd
+| Copyright 2017-2025 New Vector Ltd
+|
+
+This software is dual-licensed by New Vector Ltd (Element). It can be used either:
+
+(1) for free under the terms of the GNU Affero General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
+
+(2) under the terms of a paid-for Element Commercial License agreement between you and Element (the terms of which may vary depending on what you and Element have agreed to).
+
+Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
 
 
 .. |support| image:: https://img.shields.io/badge/matrix-community%20support-success

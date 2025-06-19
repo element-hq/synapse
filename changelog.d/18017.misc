@@ -1,1 +1,0 @@
-Disable DB statement timeout when doing a purge room since it can be quite long.

@@ -20,6 +20,7 @@
 #
 #
 import logging
+from threading import Lock
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -163,6 +164,8 @@ class DeviceWorkerHandler:
             raise errors.NotFoundError()
 
         ips = await self.store.get_last_client_ip_by_device(user_id, device_id)
+
+        device = dict(device)
         _update_device_from_client_ips(device, ips)
 
         set_tag("device", str(device))
@@ -1235,7 +1238,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         )
 
         # Attempt to resync out of sync device lists every 30s.
-        self._resync_retry_in_progress = False
+        self._resync_retry_lock = Lock()
         self.clock.looping_call(
             run_as_background_process,
             30 * 1000,
@@ -1417,13 +1420,10 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         """Retry to resync device lists that are out of sync, except if another retry is
         in progress.
         """
-        if self._resync_retry_in_progress:
+        # If the lock can not be acquired we want to always return immediately instead of blocking here
+        if not self._resync_retry_lock.acquire(blocking=False):
             return
-
         try:
-            # Prevent another call of this function to retry resyncing device lists so
-            # we don't send too many requests.
-            self._resync_retry_in_progress = True
             # Get all of the users that need resyncing.
             need_resync = await self.store.get_user_ids_requiring_device_list_resync()
 
@@ -1464,8 +1464,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                         e,
                     )
         finally:
-            # Allow future calls to retry resyncinc out of sync device lists.
-            self._resync_retry_in_progress = False
+            self._resync_retry_lock.release()
 
     async def multi_user_device_resync(
         self, user_ids: List[str], mark_failed_as_stale: bool = True
@@ -1601,7 +1600,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             if prev_stream_id is not None and cached_devices == {
                 d["device_id"]: d for d in devices
             }:
-                logging.info(
+                logger.info(
                     "Skipping device list resync for %s, as our cache matches already",
                     user_id,
                 )

@@ -20,13 +20,11 @@
 #
 
 import logging
-import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
-from synapse.api.urls import CLIENT_API_PREFIX
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -126,16 +124,6 @@ class ReportRoomRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
-
-        # TODO: Remove the unstable variant after 2-3 releases
-        # https://github.com/element-hq/synapse/issues/17373
-        if hs.config.experimental.msc4151_enabled:
-            self.PATTERNS.append(
-                re.compile(
-                    f"^{CLIENT_API_PREFIX}/unstable/org.matrix.msc4151"
-                    "/rooms/(?P<room_id>[^/]*)/report$"
-                )
-            )
 
     class PostBody(RequestBodyModel):
         reason: StrictStr

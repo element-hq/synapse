@@ -170,10 +170,12 @@ class VersionsRestServlet(RestServlet):
                     ),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
-                    # MSC4151: Report room API (Client-Server API)
-                    "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
+                    # Arbitrary key-value profile fields.
+                    "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
+                    # MSC4155: Invite filtering
+                    "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
                 },
             },
         )

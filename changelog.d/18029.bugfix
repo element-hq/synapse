@@ -1,1 +1,0 @@
-Fix a bug preventing the admin redaction endpoint from working on messages from remote users.

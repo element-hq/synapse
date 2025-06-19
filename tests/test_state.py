@@ -31,7 +31,7 @@ from typing import (
     Tuple,
     cast,
 )
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 from twisted.internet import defer
 
@@ -149,7 +149,7 @@ class _DummyStore:
     async def get_partial_state_events(
         self, event_ids: Collection[str]
     ) -> Dict[str, bool]:
-        return {e: False for e in event_ids}
+        return dict.fromkeys(event_ids, False)
 
     async def get_state_group_delta(
         self, name: str
@@ -221,7 +221,16 @@ class Graph:
 class StateTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.dummy_store = _DummyStore()
-        storage_controllers = Mock(main=self.dummy_store, state=self.dummy_store)
+
+        # Add a dummy epoch store that always retruns that we have all the
+        # necessary state groups.
+        dummy_deletion_store = AsyncMock()
+        dummy_deletion_store.check_state_groups_and_bump_deletion.return_value = []
+
+        storage_controllers = Mock(
+            main=self.dummy_store,
+            state=self.dummy_store,
+        )
         hs = Mock(
             spec_set=[
                 "config",
@@ -241,7 +250,10 @@ class StateTestCase(unittest.TestCase):
         )
         clock = cast(Clock, MockClock())
         hs.config = default_config("tesths", True)
-        hs.get_datastores.return_value = Mock(main=self.dummy_store)
+        hs.get_datastores.return_value = Mock(
+            main=self.dummy_store,
+            state_deletion=dummy_deletion_store,
+        )
         hs.get_state_handler.return_value = None
         hs.get_clock.return_value = clock
         hs.get_macaroon_generator.return_value = MacaroonGenerator(

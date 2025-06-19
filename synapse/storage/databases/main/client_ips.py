@@ -20,10 +20,19 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 
 import attr
-from typing_extensions import TypedDict
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore
@@ -641,9 +650,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
 
     @wrap_as_background_process("update_client_ips")
     async def _update_client_ips_batch(self) -> None:
-        assert (
-            self._update_on_this_worker
-        ), "This worker is not designated to update client IPs"
+        assert self._update_on_this_worker, (
+            "This worker is not designated to update client IPs"
+        )
 
         # If the DB pool has already terminated, don't try updating
         if not self.db_pool.is_running():
@@ -662,9 +671,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         txn: LoggingTransaction,
         to_update: Mapping[Tuple[str, str, str], Tuple[str, Optional[str], int]],
     ) -> None:
-        assert (
-            self._update_on_this_worker
-        ), "This worker is not designated to update client IPs"
+        assert self._update_on_this_worker, (
+            "This worker is not designated to update client IPs"
+        )
 
         # Keys and values for the `user_ips` upsert.
         user_ips_keys = []

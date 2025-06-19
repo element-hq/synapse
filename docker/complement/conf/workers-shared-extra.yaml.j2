@@ -85,6 +85,18 @@ rc_invites:
   per_user:
     per_second: 1000
     burst_count: 1000
+  per_issuer:
+    per_second: 1000
+    burst_count: 1000
+
+rc_presence:
+  per_user:
+    per_second: 9999
+    burst_count: 9999
+
+rc_delayed_event_mgmt:
+  per_second: 9999
+  burst_count: 9999
 
 federation_rr_transactions_per_room_per_second: 9999
 
@@ -115,6 +127,8 @@ experimental_features:
   msc3983_appservice_otk_claims: true
   # Proxy key queries to exclusive ASes
   msc3984_appservice_key_query: true
+  # Invite filtering
+  msc4155_enabled: true
 
 server_notices:
   system_mxid_localpart: _server
@@ -129,6 +143,11 @@ max_event_delay_duration: 24h
 # Disable sync cache so that initial `/sync` requests are up-to-date.
 caches:
   sync_response_cache_duration: 0
+
+
+# Complement assumes that it can publish to the room list by default.
+room_list_publication_rules:
+  - action: allow
 
 
 {% include "shared-orig.yaml.j2" %}

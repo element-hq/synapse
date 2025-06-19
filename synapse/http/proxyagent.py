@@ -150,6 +150,12 @@ class ProxyAgent(_AgentBase):
             http_proxy = proxies["http"].encode() if "http" in proxies else None
             https_proxy = proxies["https"].encode() if "https" in proxies else None
             no_proxy = proxies["no"] if "no" in proxies else None
+            logger.debug(
+                "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
+                http_proxy,
+                https_proxy,
+                no_proxy,
+            )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
             http_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
@@ -167,9 +173,9 @@ class ProxyAgent(_AgentBase):
         self._federation_proxy_endpoint: Optional[IStreamClientEndpoint] = None
         self._federation_proxy_credentials: Optional[ProxyCredentials] = None
         if federation_proxy_locations:
-            assert (
-                federation_proxy_credentials is not None
-            ), "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            assert federation_proxy_credentials is not None, (
+                "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            )
 
             endpoints: List[IStreamClientEndpoint] = []
             for federation_proxy_location in federation_proxy_locations:
@@ -296,9 +302,9 @@ class ProxyAgent(_AgentBase):
             parsed_uri.scheme == b"matrix-federation"
             and self._federation_proxy_endpoint
         ):
-            assert (
-                self._federation_proxy_credentials is not None
-            ), "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            assert self._federation_proxy_credentials is not None, (
+                "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            )
 
             # Set a Proxy-Authorization header
             if headers is None:

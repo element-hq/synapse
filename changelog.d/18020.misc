@@ -1,1 +1,0 @@
-Remove some remaining uses of `twisted.internet.defer.returnValue`. Contributed by Colin Watson.

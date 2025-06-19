@@ -383,6 +383,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name=None,
                 filesystem_id="xyz",
+                sha256="abcdefg12345",
             )
         )
 

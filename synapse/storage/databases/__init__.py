@@ -26,6 +26,7 @@ from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import DatabasePool, make_conn
 from synapse.storage.databases.main.events import PersistEventsStore
 from synapse.storage.databases.state import StateGroupDataStore
+from synapse.storage.databases.state.deletion import StateDeletionDataStore
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 
@@ -49,12 +50,14 @@ class Databases(Generic[DataStoreT]):
         main
         state
         persist_events
+        state_deletion
     """
 
     databases: List[DatabasePool]
     main: "DataStore"  # FIXME: https://github.com/matrix-org/synapse/issues/11165: actually an instance of `main_store_class`
     state: StateGroupDataStore
     persist_events: Optional[PersistEventsStore]
+    state_deletion: StateDeletionDataStore
 
     def __init__(self, main_store_class: Type[DataStoreT], hs: "HomeServer"):
         # Note we pass in the main store class here as workers use a different main
@@ -63,6 +66,7 @@ class Databases(Generic[DataStoreT]):
         self.databases = []
         main: Optional[DataStoreT] = None
         state: Optional[StateGroupDataStore] = None
+        state_deletion: Optional[StateDeletionDataStore] = None
         persist_events: Optional[PersistEventsStore] = None
 
         for database_config in hs.config.database.databases:
@@ -114,7 +118,8 @@ class Databases(Generic[DataStoreT]):
                     if state:
                         raise Exception("'state' data store already configured")
 
-                    state = StateGroupDataStore(database, db_conn, hs)
+                    state_deletion = StateDeletionDataStore(database, db_conn, hs)
+                    state = StateGroupDataStore(database, db_conn, hs, state_deletion)
 
                 db_conn.commit()
 
@@ -135,7 +140,7 @@ class Databases(Generic[DataStoreT]):
         if not main:
             raise Exception("No 'main' database configured")
 
-        if not state:
+        if not state or not state_deletion:
             raise Exception("No 'state' database configured")
 
         # We use local variables here to ensure that the databases do not have
@@ -143,3 +148,4 @@ class Databases(Generic[DataStoreT]):
         self.main = main  # type: ignore[assignment]
         self.state = state
         self.persist_events = persist_events
+        self.state_deletion = state_deletion

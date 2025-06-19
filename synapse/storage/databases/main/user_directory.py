@@ -31,6 +31,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypedDict,
     cast,
 )
 
@@ -42,9 +43,8 @@ try:
 
     USE_ICU = True
 except ModuleNotFoundError:
+    # except ModuleNotFoundError:
     USE_ICU = False
-
-from typing_extensions import TypedDict
 
 from synapse.api.errors import StoreError
 from synapse.util.stringutils import non_null_str_or_none
@@ -253,8 +253,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             return 1
 
         logger.debug(
-            "Processing the next %d rooms of %d remaining"
-            % (len(rooms_to_work_on), progress["remaining"])
+            "Processing the next %d rooms of %d remaining",
+            len(rooms_to_work_on),
+            progress["remaining"],
         )
 
         processed_event_count = 0
@@ -583,9 +584,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             retry_counter: number of failures in refreshing the profile so far. Used for
                 exponential backoff calculations.
         """
-        assert not self.hs.is_mine_id(
-            user_id
-        ), "Can't mark a local user as a stale remote user."
+        assert not self.hs.is_mine_id(user_id), (
+            "Can't mark a local user as a stale remote user."
+        )
 
         server_name = UserID.from_string(user_id).domain
 
@@ -1038,11 +1039,11 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 }
         """
 
+        join_args: Tuple[str, ...] = (user_id,)
+
         if self.hs.config.userdirectory.user_directory_search_all_users:
-            join_args = (user_id,)
             where_clause = "user_id != ?"
         else:
-            join_args = (user_id,)
             where_clause = """
                 (
                     EXISTS (select 1 from users_in_public_rooms WHERE user_id = t.user_id)
@@ -1055,6 +1056,14 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
 
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
+
+        # Adjust the JOIN type based on the exclude_remote_users flag (the users
+        # table only contains local users so an inner join is a good way to
+        # to exclude remote users)
+        if self.hs.config.userdirectory.user_directory_exclude_remote_users:
+            join_type = "JOIN"
+        else:
+            join_type = "LEFT JOIN"
 
         # We allow manipulating the ranking algorithm by injecting statements
         # based on config options.
@@ -1087,7 +1096,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM matching_users as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                 ORDER BY
@@ -1116,6 +1125,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_case_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = (
                 (full_query,)
@@ -1143,7 +1153,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM user_directory_search as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                     AND value MATCH ?
@@ -1156,6 +1166,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = join_args + (search_query,) + ordering_arguments + (limit + 1,)
         else:
@@ -1238,7 +1249,13 @@ def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
     search_term = _filter_text_for_index(search_term)
 
     escaped_words = []
-    for word in _parse_words(search_term):
+    for index, word in enumerate(_parse_words(search_term)):
+        if index >= 10:
+            # We limit how many terms we include, as otherwise it can use
+            # excessive database time if people accidentally search for large
+            # strings.
+            break
+
         # Postgres tsvector and tsquery quoting rules:
         # words potentially containing punctuation should be quoted
         # and then existing quotes and backslashes should be doubled

@@ -59,6 +59,7 @@ from synapse.config import (  # noqa: F401
     tls,
     tracer,
     user_directory,
+    user_types,
     voip,
     workers,
 )
@@ -122,6 +123,7 @@ class RootConfig:
     retention: retention.RetentionConfig
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
+    user_types: user_types.UserTypesConfig
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]
@@ -132,7 +134,11 @@ class RootConfig:
     @classmethod
     def invoke_all_static(cls, func_name: str, *args: Any, **kwargs: Any) -> None: ...
     def parse_config_dict(
-        self, config_dict: Dict[str, Any], config_dir_path: str, data_dir_path: str
+        self,
+        config_dict: Dict[str, Any],
+        config_dir_path: str,
+        data_dir_path: str,
+        allow_secrets_in_config: bool = ...,
     ) -> None: ...
     def generate_config(
         self,
@@ -175,7 +181,7 @@ class RootConfig:
 class Config:
     root: RootConfig
     default_template_dir: str
-    def __init__(self, root_config: Optional[RootConfig] = ...) -> None: ...
+    def __init__(self, root_config: RootConfig = ...) -> None: ...
     @staticmethod
     def parse_size(value: Union[str, int]) -> int: ...
     @staticmethod
@@ -208,4 +214,4 @@ class ShardedWorkerHandlingConfig:
 class RoutableShardedWorkerHandlingConfig(ShardedWorkerHandlingConfig):
     def get_instance(self, key: str) -> str: ...  # noqa: F811
 
-def read_file(file_path: Any, config_path: Iterable[str]) -> str: ...
+def read_file(file_path: Any, config_path: StrSequence) -> str: ...

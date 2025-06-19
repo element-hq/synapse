@@ -314,6 +314,15 @@ class StreamChangeCache:
         self._entity_to_key[entity] = stream_pos
         self._evict()
 
+    def all_entities_changed(self, stream_pos: int) -> None:
+        """
+        Mark all entities as changed. This is useful when the cache is invalidated and
+        there may be some potential change for all of the entities.
+        """
+        self._cache.clear()
+        self._entity_to_key.clear()
+        self._earliest_known_stream_pos = stream_pos
+
     def _evict(self) -> None:
         """
         Ensure the cache has not exceeded the maximum size.

@@ -29,8 +29,15 @@ from ._base import Config, ConfigError
 class CaptchaConfig(Config):
     section = "captcha"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         recaptcha_private_key = config.get("recaptcha_private_key")
+        if recaptcha_private_key and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("recaptcha_private_key",),
+            )
         if recaptcha_private_key is not None and not isinstance(
             recaptcha_private_key, str
         ):
@@ -38,6 +45,11 @@ class CaptchaConfig(Config):
         self.recaptcha_private_key = recaptcha_private_key
 
         recaptcha_public_key = config.get("recaptcha_public_key")
+        if recaptcha_public_key and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("recaptcha_public_key",),
+            )
         if recaptcha_public_key is not None and not isinstance(
             recaptcha_public_key, str
         ):
