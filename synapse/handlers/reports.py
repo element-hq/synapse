@@ -46,6 +46,28 @@ class ReportsHandler:
     async def report_user(
         self, requester: Requester, target_user_id: str, reason: str
     ) -> None:
+        """Files a report against a user from a user.
+
+        Rate and size limits are applied to the report. If the user being reported
+        does not belong to this server, the report is ignored. This check is done
+        after the limits to reduce DoS potential.
+
+        If the user being reported belongs to this server, but doesn't exist, we
+        similarly ignore the report. The spec allows us to return an error if we
+        want to, but we choose to hide that user's existence instead.
+
+        If the report is otherwise valid (for a user which exists on our server),
+        we append it to the database for later processing.
+
+        Args:
+            requester - The user filing the report.
+            target_user_id - The user being reported.
+            reason - The user-supplied reason the user is being reported.
+
+        Raises:
+            SynapseError for BAD_REQUEST/BAD_JSON if the reason is too long.
+        """
+
         await self._check_limits(requester)
 
         if len(reason) > 1000:
