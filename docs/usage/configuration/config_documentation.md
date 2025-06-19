@@ -1937,25 +1937,6 @@ rc_delayed_event_mgmt:
   burst_count: 20.0
 ```
 ---
-### `rc_reports`
-
-Ratelimiting settings for reporting content.
-
-This is a ratelimiting option that ratelimits reports made by users
-about content they see.
-
-It defaults to: `per_second: 1`, `burst_count: 5`.
-
-Setting this to a high value allows users to report content quickly, possibly in
-duplicate. This can result in higher database usage.
-
-Example configuration:
-```yaml
-rc_reports:
-  per_second: 2
-  burst_count: 20
-```
----
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
