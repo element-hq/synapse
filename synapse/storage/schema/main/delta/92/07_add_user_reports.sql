@@ -19,3 +19,4 @@ CREATE TABLE user_reports (
     reason TEXT NOT NULL
 );
 CREATE INDEX user_reports_target_user_id ON user_reports(target_user_id); -- for lookups
+CREATE INDEX user_reports_user_id ON user_reports(user_id); -- for lookups
