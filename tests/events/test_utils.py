@@ -53,7 +53,9 @@ def MockEvent(**kwargs: Any) -> EventBase:
         kwargs["content"] = {}
 
     # Move internal metadata out so we can call make_event properly
-    internal_metadata = kwargs.pop("internal_metadata")
+    internal_metadata = kwargs.get("internal_metadata")
+    if internal_metadata is not None:
+        kwargs.pop("internal_metadata")
 
     return make_event_from_dict(kwargs, internal_metadata_dict=internal_metadata)
 
