@@ -117,8 +117,8 @@ async def filter_events_for_client(
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
     if (
         filter_send_to_client
-        and await storage.main.is_server_admin(UserID.from_string(user_id))
         and client_config.return_soft_failed_events
+        and await storage.main.is_server_admin(UserID.from_string(user_id))
     ):
         events = events_before_filtering
     else:
