@@ -1501,6 +1501,45 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             "delete_old_otks_for_next_user_batch", impl
         )
 
+    async def allow_master_cross_signing_key_replacement_without_uia(
+        self, user_id: str, duration_ms: int
+    ) -> Optional[int]:
+        """Mark this user's latest master key as being replaceable without UIA.
+
+        Said replacement will only be permitted for a short time after calling this
+        function. That time period is controlled by the duration argument.
+
+        Returns:
+            None, if there is no such key.
+            Otherwise, the timestamp before which replacement is allowed without UIA.
+        """
+        timestamp = self._clock.time_msec() + duration_ms
+
+        def impl(txn: LoggingTransaction) -> Optional[int]:
+            txn.execute(
+                """
+                UPDATE e2e_cross_signing_keys
+                SET updatable_without_uia_before_ms = ?
+                WHERE stream_id = (
+                    SELECT stream_id
+                    FROM e2e_cross_signing_keys
+                    WHERE user_id = ? AND keytype = 'master'
+                    ORDER BY stream_id DESC
+                    LIMIT 1
+                )
+            """,
+                (timestamp, user_id),
+            )
+            if txn.rowcount == 0:
+                return None
+
+            return timestamp
+
+        return await self.db_pool.runInteraction(
+            "allow_master_cross_signing_key_replacement_without_uia",
+            impl,
+        )
+
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     def __init__(
@@ -1754,43 +1793,4 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
                 for item in signatures
             ],
             desc="add_e2e_signing_key",
-        )
-
-    async def allow_master_cross_signing_key_replacement_without_uia(
-        self, user_id: str, duration_ms: int
-    ) -> Optional[int]:
-        """Mark this user's latest master key as being replaceable without UIA.
-
-        Said replacement will only be permitted for a short time after calling this
-        function. That time period is controlled by the duration argument.
-
-        Returns:
-            None, if there is no such key.
-            Otherwise, the timestamp before which replacement is allowed without UIA.
-        """
-        timestamp = self._clock.time_msec() + duration_ms
-
-        def impl(txn: LoggingTransaction) -> Optional[int]:
-            txn.execute(
-                """
-                UPDATE e2e_cross_signing_keys
-                SET updatable_without_uia_before_ms = ?
-                WHERE stream_id = (
-                    SELECT stream_id
-                    FROM e2e_cross_signing_keys
-                    WHERE user_id = ? AND keytype = 'master'
-                    ORDER BY stream_id DESC
-                    LIMIT 1
-                )
-            """,
-                (timestamp, user_id),
-            )
-            if txn.rowcount == 0:
-                return None
-
-            return timestamp
-
-        return await self.db_pool.runInteraction(
-            "allow_master_cross_signing_key_replacement_without_uia",
-            impl,
         )

@@ -108,6 +108,9 @@ class UserDirectoryHandler(StateDeltasHandler):
         self.is_mine_id = hs.is_mine_id
         self.update_user_directory = hs.config.worker.should_update_user_directory
         self.search_all_users = hs.config.userdirectory.user_directory_search_all_users
+        self.exclude_remote_users = (
+            hs.config.userdirectory.user_directory_exclude_remote_users
+        )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._hs = hs
@@ -746,10 +749,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                     )
                     continue
                 except Exception:
-                    logger.error(
+                    logger.exception(
                         "Failed to refresh profile for %r due to unhandled exception",
                         user_id,
-                        exc_info=True,
                     )
                     await self.store.set_remote_user_profile_in_user_dir_stale(
                         user_id,

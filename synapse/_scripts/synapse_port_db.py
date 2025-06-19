@@ -128,6 +128,7 @@ BOOLEAN_COLUMNS = {
     "pushers": ["enabled"],
     "redactions": ["have_censored"],
     "remote_media_cache": ["authenticated"],
+    "room_memberships": ["participant"],
     "room_stats_state": ["is_federatable"],
     "rooms": ["is_public", "has_auth_chain_index"],
     "sliding_sync_joined_rooms": ["is_encrypted"],
@@ -191,6 +192,11 @@ APPEND_ONLY_TABLES = [
 
 
 IGNORED_TABLES = {
+    # Porting the auto generated sequence in this table is non-trivial.
+    # None of the entries in this list are mandatory for Synapse to keep working.
+    # If state group disk space is an issue after the port, the
+    # `mark_unreferenced_state_groups_for_deletion_bg_update` background task can be run again.
+    "state_groups_pending_deletion",
     # We don't port these tables, as they're a faff and we can regenerate
     # them anyway.
     "user_directory",
@@ -213,6 +219,15 @@ IGNORED_TABLES = {
     # port.
     "worker_read_write_locks_mode",
     "worker_read_write_locks",
+}
+
+
+# These background updates will not be applied upon creation of the postgres database.
+IGNORED_BACKGROUND_UPDATES = {
+    # Reapplying this background update to the postgres database is unnecessary after
+    # already having waited for the SQLite database to complete all running background
+    # updates.
+    "mark_unreferenced_state_groups_for_deletion_bg_update",
 }
 
 
@@ -687,6 +702,20 @@ class Porter:
         # 0 means off. 1 means full. 2 means incremental.
         return autovacuum_setting != 0
 
+    async def remove_ignored_background_updates_from_database(self) -> None:
+        def _remove_delete_unreferenced_state_groups_bg_updates(
+            txn: LoggingTransaction,
+        ) -> None:
+            txn.execute(
+                "DELETE FROM background_updates WHERE update_name = ANY(?)",
+                (list(IGNORED_BACKGROUND_UPDATES),),
+            )
+
+        await self.postgres_store.db_pool.runInteraction(
+            "remove_delete_unreferenced_state_groups_bg_updates",
+            _remove_delete_unreferenced_state_groups_bg_updates,
+        )
+
     async def run(self) -> None:
         """Ports the SQLite database to a PostgreSQL database.
 
@@ -731,6 +760,8 @@ class Porter:
             self.postgres_store = self.build_db_store(
                 self.hs_config.database.get_single_database()
             )
+
+            await self.remove_ignored_background_updates_from_database()
 
             await self.run_background_updates_on_postgres()
 
@@ -1034,7 +1065,7 @@ class Porter:
 
         def get_sent_table_size(txn: LoggingTransaction) -> int:
             txn.execute(
-                "SELECT count(*) FROM sent_transactions" " WHERE ts >= ?", (yesterday,)
+                "SELECT count(*) FROM sent_transactions WHERE ts >= ?", (yesterday,)
             )
             result = txn.fetchone()
             assert result is not None

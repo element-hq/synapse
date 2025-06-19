@@ -117,6 +117,16 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.130.0
+
+## Documented endpoint which can be delegated to a federation worker
+
+The endpoint `^/_matrix/federation/v1/version$` can be delegated to a federation
+worker. This is not new behaviour, but had not been documented yet. The 
+[list of delegatable endpoints](workers.md#synapseappgeneric_worker) has 
+been updated to include it. Make sure to check your reverse proxy rules if you
+are using workers. 
+
 # Upgrading to v1.126.0
 
 ## Room list publication rules change

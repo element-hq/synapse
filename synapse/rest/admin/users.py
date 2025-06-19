@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 import attr
 
 from synapse._pydantic_compat import StrictBool, StrictInt, StrictStr
-from synapse.api.constants import Direction, UserTypes
+from synapse.api.constants import Direction
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
     RestServlet,
@@ -230,6 +230,7 @@ class UserRestServletV2(RestServlet):
         self.registration_handler = hs.get_registration_handler()
         self.pusher_pool = hs.get_pusherpool()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
+        self._all_user_types = hs.config.user_types.all_user_types
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -277,7 +278,7 @@ class UserRestServletV2(RestServlet):
                 assert_params_in_dict(external_id, ["auth_provider", "external_id"])
 
         user_type = body.get("user_type", None)
-        if user_type is not None and user_type not in UserTypes.ALL_USER_TYPES:
+        if user_type is not None and user_type not in self._all_user_types:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid user type")
 
         set_admin_to = body.get("admin", False)
@@ -524,6 +525,7 @@ class UserRegisterServlet(RestServlet):
         self.reactor = hs.get_reactor()
         self.nonces: Dict[str, int] = {}
         self.hs = hs
+        self._all_user_types = hs.config.user_types.all_user_types
 
     def _clear_old_nonces(self) -> None:
         """
@@ -605,7 +607,7 @@ class UserRegisterServlet(RestServlet):
         user_type = body.get("user_type", None)
         displayname = body.get("displayname", None)
 
-        if user_type is not None and user_type not in UserTypes.ALL_USER_TYPES:
+        if user_type is not None and user_type not in self._all_user_types:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid user type")
 
         if "mac" not in body:

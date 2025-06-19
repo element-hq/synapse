@@ -200,9 +200,9 @@ class EventsStream(_StreamFromIdGen):
 
         # we rely on get_all_new_forward_event_rows strictly honouring the limit, so
         # that we know it is safe to just take upper_limit = event_rows[-1][0].
-        assert (
-            len(event_rows) <= target_row_count
-        ), "get_all_new_forward_event_rows did not honour row limit"
+        assert len(event_rows) <= target_row_count, (
+            "get_all_new_forward_event_rows did not honour row limit"
+        )
 
         # if we hit the limit on event_updates, there's no point in going beyond the
         # last stream_id in the batch for the other sources.
