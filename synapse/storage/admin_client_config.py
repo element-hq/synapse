@@ -13,7 +13,4 @@ class AdminClientConfig:
         self.return_soft_failed_events: bool = False
 
         if account_data:
-            # Default to False when non-boolean options are given, for safety.
-            self.return_soft_failed_events = (
-                account_data.get("return_soft_failed_events", False) == True
-            )
+            self.return_soft_failed_events = account_data.get("return_soft_failed_events", False)
