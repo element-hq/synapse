@@ -41,7 +41,7 @@ import attr
 from twisted.web.iweb import IRequest
 from twisted.web.server import Request
 
-from synapse.api.constants import LoginType, ProfileFields
+from synapse.api.constants import LoginType
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError
 from synapse.config.sso import SsoAttributeRequirement
 from synapse.handlers.device import DeviceHandler

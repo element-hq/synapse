@@ -184,7 +184,7 @@ class SCIMServlet(RestServlet):
 
         creation_datetime = datetime.datetime.fromtimestamp(user.creation_ts)
         external_id = await self.get_scim_external_id(user_id)
-        scim_user = User(
+        scim_user : User = User(
             meta=Meta(
                 resource_type="User",
                 created=creation_datetime,
@@ -289,7 +289,7 @@ class UserServlet(SCIMServlet):
         try:
             body = parse_json_object_from_request(request)
             original_user = await self.get_scim_user(user_id)
-            request_user = User.model_validate(
+            request_user : User = User.model_validate(
                 body,
                 scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST,
                 original=original_user,
@@ -436,7 +436,7 @@ class UserListServlet(SCIMServlet):
             await assert_user_is_admin(self.auth, requester)
 
             body = parse_json_object_from_request(request)
-            request_user = User.model_validate(
+            request_user : User = User.model_validate(
                 body, scim_ctx=Context.RESOURCE_CREATION_REQUEST
             )
 
