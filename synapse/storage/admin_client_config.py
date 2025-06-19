@@ -13,4 +13,6 @@ class AdminClientConfig:
         self.return_soft_failed_events: bool = False
 
         if account_data:
-            self.return_soft_failed_events = account_data.get("return_soft_failed_events", False)
+            self.return_soft_failed_events = account_data.get(
+                "return_soft_failed_events", False
+            )
