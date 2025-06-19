@@ -25,6 +25,9 @@ experimental_features:
       idp_id: <my-provider>
 ```
 
+The `idp_id` value should match a value configured for IDP authentication.
+For instance, if an IDP is configured in `oidc_providers` with `foobar` as value for `idp_id`, and the value `scim.idp_id`, then external_ids will be kept sync. By default a `__scim__` value is used.
+
 ## Examples
 
 This sections presents examples of SCIM requests and responses that are supported by the synapse implementation.
