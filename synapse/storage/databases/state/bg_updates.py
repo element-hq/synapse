@@ -396,8 +396,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     return True, count
 
                 txn.execute(
-                    "SELECT state_group FROM state_group_edges"
-                    " WHERE state_group = ?",
+                    "SELECT state_group FROM state_group_edges WHERE state_group = ?",
                     (state_group,),
                 )
 

@@ -71,7 +71,7 @@ class QuarantineMediaInRoom(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        logging.info("Quarantining room: %s", room_id)
+        logger.info("Quarantining room: %s", room_id)
 
         # Quarantine all media in this room
         num_quarantined = await self.store.quarantine_media_ids_in_room(
@@ -98,7 +98,7 @@ class QuarantineMediaByUser(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        logging.info("Quarantining media by user: %s", user_id)
+        logger.info("Quarantining media by user: %s", user_id)
 
         # Quarantine all media this user has uploaded
         num_quarantined = await self.store.quarantine_media_ids_by_user(
@@ -127,7 +127,7 @@ class QuarantineMediaByID(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        logging.info("Quarantining media by ID: %s/%s", server_name, media_id)
+        logger.info("Quarantining media by ID: %s/%s", server_name, media_id)
 
         # Quarantine this media id
         await self.store.quarantine_media_by_id(
@@ -155,7 +155,7 @@ class UnquarantineMediaByID(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        logging.info("Remove from quarantine media by ID: %s/%s", server_name, media_id)
+        logger.info("Remove from quarantine media by ID: %s/%s", server_name, media_id)
 
         # Remove from quarantine this media id
         await self.store.quarantine_media_by_id(server_name, media_id, None)
@@ -177,7 +177,7 @@ class ProtectMediaByID(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        logging.info("Protecting local media by ID: %s", media_id)
+        logger.info("Protecting local media by ID: %s", media_id)
 
         # Protect this media id
         await self.store.mark_local_media_as_safe(media_id, safe=True)
@@ -199,7 +199,7 @@ class UnprotectMediaByID(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        logging.info("Unprotecting local media by ID: %s", media_id)
+        logger.info("Unprotecting local media by ID: %s", media_id)
 
         # Unprotect this media id
         await self.store.mark_local_media_as_safe(media_id, safe=False)
@@ -280,7 +280,7 @@ class DeleteMediaByID(RestServlet):
         if await self.store.get_local_media(media_id) is None:
             raise NotFoundError("Unknown media")
 
-        logging.info("Deleting local media by ID: %s", media_id)
+        logger.info("Deleting local media by ID: %s", media_id)
 
         deleted_media, total = await self.media_repository.delete_local_media_ids(
             [media_id]
@@ -327,9 +327,11 @@ class DeleteMediaByDateSize(RestServlet):
         if server_name is not None and self.server_name != server_name:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only delete local media")
 
-        logging.info(
-            "Deleting local media by timestamp: %s, size larger than: %s, keep profile media: %s"
-            % (before_ts, size_gt, keep_profiles)
+        logger.info(
+            "Deleting local media by timestamp: %s, size larger than: %s, keep profile media: %s",
+            before_ts,
+            size_gt,
+            keep_profiles,
         )
 
         deleted_media, total = await self.media_repository.delete_old_local_media(

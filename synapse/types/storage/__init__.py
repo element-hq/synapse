@@ -52,3 +52,5 @@ class _BackgroundUpdates:
     MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE = (
         "mark_unreferenced_state_groups_for_deletion_bg_update"
     )
+
+    FIXUP_MAX_DEPTH_CAP = "fixup_max_depth_cap"

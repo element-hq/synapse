@@ -207,8 +207,7 @@ class PurgeHistoryRestServlet(RestServlet):
             (stream, topo, _event_id) = r
             token = "t%d-%d" % (topo, stream)
             logger.info(
-                "[purge] purging up to token %s (received_ts %i => "
-                "stream_ordering %i)",
+                "[purge] purging up to token %s (received_ts %i => stream_ordering %i)",
                 token,
                 ts,
                 stream_ordering,

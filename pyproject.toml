@@ -74,6 +74,10 @@ select = [
     "PIE",
     # flake8-executable
     "EXE",
+    # flake8-logging
+    "LOG",
+    # flake8-logging-format
+    "G",
 ]
 
 [tool.ruff.lint.isort]
@@ -97,7 +101,7 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.128.0"
+version = "1.132.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later"
@@ -320,7 +324,7 @@ all = [
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
 # This helps prevents merge conflicts when running a batch of dependabot updates.
-ruff = "0.7.3"
+ruff = "0.11.11"
 # Type checking only works with the pydantic.v1 compat module from pydantic v2
 pydantic = "^2"
 
@@ -385,6 +389,9 @@ build-backend = "poetry.core.masonry.api"
 #  - PyPy on Aarch64 and musllinux on aarch64: too slow to build.
 #    c.f. https://github.com/matrix-org/synapse/pull/14259
 skip = "cp36* cp37* cp38* pp37* pp38* *-musllinux_i686 pp*aarch64 *-musllinux_aarch64"
+# Enable non-default builds.
+# "pypy" used to be included by default up until cibuildwheel 3.
+enable = "pypy"
 
 # We need a rust compiler.
 #

@@ -43,6 +43,7 @@ try:
 
     USE_ICU = True
 except ModuleNotFoundError:
+    # except ModuleNotFoundError:
     USE_ICU = False
 
 from synapse.api.errors import StoreError
@@ -252,8 +253,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             return 1
 
         logger.debug(
-            "Processing the next %d rooms of %d remaining"
-            % (len(rooms_to_work_on), progress["remaining"])
+            "Processing the next %d rooms of %d remaining",
+            len(rooms_to_work_on),
+            progress["remaining"],
         )
 
         processed_event_count = 0
@@ -582,9 +584,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             retry_counter: number of failures in refreshing the profile so far. Used for
                 exponential backoff calculations.
         """
-        assert not self.hs.is_mine_id(
-            user_id
-        ), "Can't mark a local user as a stale remote user."
+        assert not self.hs.is_mine_id(user_id), (
+            "Can't mark a local user as a stale remote user."
+        )
 
         server_name = UserID.from_string(user_id).domain
 
