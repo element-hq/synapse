@@ -648,7 +648,7 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
             ev,
             1479807801915,
             config=SerializeEventConfig(
-                only_event_fields=fields, include_admin_metadata=as_admin
+                only_event_fields=fields, include_admin_metadata=include_admin_metadata
             ),
         )
 
