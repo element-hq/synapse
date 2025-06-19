@@ -36,9 +36,9 @@ from synapse.events.utils import (
     copy_and_fixup_power_levels_contents,
     maybe_upsert_event_field,
     prune_event,
-    serialize_event,
+    serialize_event, format_event_raw, make_config_for_admin,
 )
-from synapse.types import JsonDict
+from synapse.types import JsonDict, create_requester
 from synapse.util.frozenutils import freeze
 
 
@@ -639,9 +639,9 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
 
 
 class SerializeEventTestCase(stdlib_unittest.TestCase):
-    def serialize(self, ev: EventBase, fields: Optional[List[str]]) -> JsonDict:
+    def serialize(self, ev: EventBase, fields: Optional[List[str]], include_admin_metadata = False) -> JsonDict:
         return serialize_event(
-            ev, 1479807801915, config=SerializeEventConfig(only_event_fields=fields)
+            ev, 1479807801915, config=SerializeEventConfig(only_event_fields=fields, include_admin_metadata=as_admin)
         )
 
     def test_event_fields_works_with_keys(self) -> None:
@@ -760,6 +760,70 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
                 ["room_id", 4],  # type: ignore[list-item]
             )
 
+    def test_default_serialize_config_excludes_admin_metadata(self) -> None:
+        # We just really don't want this to be set to True accidentally
+        self.assertFalse(SerializeEventConfig().include_admin_metadata)
+
+    def test_event_flagged_for_admins(self) -> None:
+        # Default behaviour should be *not* to include it
+        self.assertEqual(
+            self.serialize(
+                MockEvent(
+                    type="foo",
+                    event_id="test",
+                    room_id="!foo:bar",
+                    content={"foo": "bar"},
+                    internal_metadata={"soft_failed": True},
+                ),
+                []
+            ),
+            {
+                "type": "foo",
+                "event_id": "test",
+                "room_id": "!foo:bar",
+                "content": {"foo": "bar"},
+                "unsigned": {},
+            }
+        )
+
+        # When asked though, we should set it
+        self.assertEqual(
+            self.serialize(
+                MockEvent(
+                    type="foo",
+                    event_id="test",
+                    room_id="!foo:bar",
+                    content={"foo": "bar"},
+                    internal_metadata={"soft_failed": True},
+                ),
+                [],
+                True,
+            ),
+            {
+                "type": "foo",
+                "event_id": "test",
+                "room_id": "!foo:bar",
+                "content": {"foo": "bar"},
+                "unsigned": {"io.element.synapse.soft_failed": True},
+            }
+        )
+
+    def test_make_serialize_config_for_admin_retains_other_fields(self) -> None:
+        non_default_config = SerializeEventConfig(
+            include_admin_metadata=False,  # should be True in a moment
+            as_client_event=False,  # default True
+            event_format=format_event_raw,  # default format_event_for_client_v1
+            requester=create_requester("@example:example.org"),  # default None
+            only_event_fields=["foo"],  # default None
+            include_stripped_room_state=True,  # default False
+        )
+        admin_config = make_config_for_admin(non_default_config)
+        self.assertEqual(admin_config.as_client_event, non_default_config.as_client_event)
+        self.assertEqual(admin_config.event_format, non_default_config.event_format)
+        self.assertEqual(admin_config.requester, non_default_config.requester)
+        self.assertEqual(admin_config.only_event_fields, non_default_config.only_event_fields)
+        self.assertEqual(admin_config.include_stripped_room_state, admin_config.include_stripped_room_state)
+        self.assertTrue(admin_config.include_admin_metadata)
 
 class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):
     def setUp(self) -> None:
