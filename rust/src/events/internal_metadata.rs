@@ -54,6 +54,7 @@ enum EventInternalMetadataData {
     RecheckRedaction(bool),
     SoftFailed(bool),
     ProactivelySend(bool),
+    PolicyServerSpammy(bool),
     Redacted(bool),
     TxnId(Box<str>),
     TokenId(i64),
@@ -91,6 +92,13 @@ impl EventInternalMetadataData {
             ),
             EventInternalMetadataData::ProactivelySend(o) => (
                 pyo3::intern!(py, "proactively_send"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::PolicyServerSpammy(o) => (
+                pyo3::intern!(py, "policy_server_spammy"),
                 o.into_pyobject(py)
                     .unwrap_infallible()
                     .to_owned()
@@ -151,6 +159,11 @@ impl EventInternalMetadataData {
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             "proactively_send" => EventInternalMetadataData::ProactivelySend(
+                value
+                    .extract()
+                    .with_context(|| format!("'{key_str}' has invalid type"))?,
+            ),
+            "policy_server_spammy" => EventInternalMetadataData::PolicyServerSpammy(
                 value
                     .extract()
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
@@ -425,6 +438,17 @@ impl EventInternalMetadata {
     #[setter]
     fn set_proactively_send(&mut self, obj: bool) {
         set_property!(self, ProactivelySend, obj);
+    }
+
+    #[getter]
+    fn get_policy_server_spammy(&self) -> PyResult<bool> {
+        Ok(get_property_opt!(self, PolicyServerSpammy)
+            .copied()
+            .unwrap_or(false))
+    }
+    #[setter]
+    fn set_policy_server_spammy(&mut self, obj: bool) {
+        set_property!(self, PolicyServerSpammy, obj);
     }
 
     #[getter]
