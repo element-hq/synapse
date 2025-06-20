@@ -349,6 +349,19 @@ class EventsWorkerStore(SQLBaseStore):
             where_clause="type = 'm.room.member'",
         )
 
+        # Added to support efficient reverse lookups on the foreign key
+        # (user_id, device_id) when deleting devices.
+        # We already had a UNIQUE index on these 4 columns but out-of-order
+        # so replace that one.
+        self.db_pool.updates.register_background_index_update(
+            update_name="event_txn_id_device_id_txn_id2",
+            index_name="event_txn_id_device_id_txn_id2",
+            table="event_txn_id_device_id",
+            columns=("user_id", "device_id", "room_id", "txn_id"),
+            unique=True,
+            replaces_index="event_txn_id_device_id_txn_id",
+        )
+
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
             self._un_partial_stated_events_stream_id_gen.get_current_token_for_writer(
@@ -824,9 +837,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         if missing_events_ids:
 
-            async def get_missing_events_from_cache_or_db() -> Dict[
-                str, EventCacheEntry
-            ]:
+            async def get_missing_events_from_cache_or_db() -> (
+                Dict[str, EventCacheEntry]
+            ):
                 """Fetches the events in `missing_event_ids` from the database.
 
                 Also creates entries in `self._current_event_fetches` to allow
