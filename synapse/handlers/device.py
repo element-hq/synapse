@@ -20,6 +20,7 @@
 #
 #
 import logging
+import random
 from threading import Lock
 from typing import (
     TYPE_CHECKING,
@@ -49,6 +50,7 @@ from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
 )
+from synapse.replication.http.devices import ReplicationNotifyDeviceUpdateRestServlet
 from synapse.storage.databases.main.client_ips import DeviceLastConnectionInfo
 from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.databases.main.state_deltas import StateDelta
@@ -112,6 +114,12 @@ class DeviceWorkerHandler:
 
         self._task_scheduler.register_action(
             self._delete_device_messages, DELETE_DEVICE_MSGS_TASK_NAME
+        )
+
+        self._device_list_writers = hs.config.worker.writers.device_lists
+
+        self._notify_device_update_client = (
+            ReplicationNotifyDeviceUpdateRestServlet.make_client(hs)
         )
 
     @trace
@@ -492,6 +500,24 @@ class DeviceWorkerHandler:
         #   https://github.com/matrix-org/synapse/issues/12994
         logger.error(
             "Trying handling device list state for partial join: not supported on workers."
+        )
+
+    @trace
+    @measure_func("notify_device_update")
+    async def notify_device_update(
+        self, user_id: str, device_ids: StrCollection
+    ) -> None:
+        """Notify that a user's device(s) has changed. Pokes the notifier, and
+        remote servers if the user is local.
+
+        Args:
+            user_id: The Matrix ID of the user who's device list has been updated.
+            device_ids: The device IDs that have changed.
+        """
+        await self._notify_device_update_client(
+            instance_name=random.choice(self._device_list_writers),
+            user_id=user_id,
+            device_ids=device_ids,
         )
 
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000

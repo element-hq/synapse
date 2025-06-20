@@ -34,6 +34,50 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ReplicationNotifyDeviceUpdateRestServlet(ReplicationEndpoint):
+    """Notify a device writer that a user's device list has changed.
+
+    Request format:
+
+        POST /_synapse/replication/notify_device_update/:user_id
+
+        {
+            "device_ids": ["JLAFKJWSCS", "JLAFKJWSCS"]
+        }
+    """
+
+    NAME = "notify_device_update"
+    PATH_ARGS = ("user_id",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+        self.store = hs.get_datastores().main
+        self.clock = hs.get_clock()
+
+    @staticmethod
+    async def _serialize_payload(  # type: ignore[override]
+        user_id: str, device_ids: List[str]
+    ) -> JsonDict:
+        return {"device_ids": device_ids}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        device_ids = content["device_ids"]
+
+        span = active_span()
+        if span:
+            span.set_tag("user_id", user_id)
+            span.set_tag("device_ids", f"{device_ids!r}")
+
+        await self.device_handler.notify_device_update(user_id, device_ids)
+
+        return 200, {}
+
+
 class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
     """Ask master to resync the device list for multiple users from the same
     remote server by contacting their server.
@@ -166,5 +210,6 @@ class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
     ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
