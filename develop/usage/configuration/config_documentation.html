@@ -1851,6 +1851,31 @@ shown.</p>
   burst_count: 20.0
 </code></pre>
 <hr />
+<h3 id="rc_reports"><a class="header" href="#rc_reports"><code>rc_reports</code></a></h3>
+<p><em>(object)</em> Ratelimiting settings for reporting content.
+This is a ratelimiting option that ratelimits reports made by users about content they see.
+Setting this to a high value allows users to report content quickly, possibly in duplicate. This can result in higher database usage.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>per_second</code> (number): Maximum number of requests a client can send per second.</p>
+</li>
+<li>
+<p><code>burst_count</code> (number): Maximum number of requests a client can send before being throttled.</p>
+</li>
+</ul>
+<p>Default configuration:</p>
+<pre><code class="language-yaml">rc_reports:
+  per_user:
+    per_second: 1.0
+    burst_count: 5.0
+</code></pre>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_reports:
+  per_second: 2.0
+  burst_count: 20.0
+</code></pre>
+<hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
 <p><em>(integer)</em> Sets outgoing federation transaction frequency for sending read-receipts, per-room.</p>
 <p>If we end up trying to send out more read-receipts, they will get buffered up into fewer transactions.</p>
