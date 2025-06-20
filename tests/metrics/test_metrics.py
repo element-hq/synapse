@@ -18,11 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from importlib import metadata
 from typing import Dict, Protocol, Tuple
-from unittest.mock import patch
 
-from pkg_resources import parse_version
 from prometheus_client.core import Sample
 
 from synapse.metrics import REGISTRY, InFlightGauge, generate_latest
