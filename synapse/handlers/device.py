@@ -279,6 +279,65 @@ class DeviceWorkerHandler:
 
         await self.notify_device_update(user_id, device_ids)
 
+    async def upsert_device(
+        self, user_id: str, device_id: str, display_name: Optional[str] = None
+    ) -> bool:
+        """Create or update a device
+
+        Args:
+            user_id: The user to update devices of.
+            device_id: The device to update.
+            display_name: The new display name for this device.
+
+        Returns:
+            True if the device was created, False if it was updated.
+
+        """
+
+        # Reject a new displayname which is too long.
+        _check_device_name_length(display_name)
+
+        created = await self.store.store_device(
+            user_id,
+            device_id,
+            initial_device_display_name=display_name,
+        )
+
+        if not created:
+            await self.store.update_device(
+                user_id,
+                device_id,
+                new_display_name=display_name,
+            )
+
+        await self.notify_device_update(user_id, [device_id])
+        return created
+
+    async def update_device(self, user_id: str, device_id: str, content: dict) -> None:
+        """Update the given device
+
+        Args:
+            user_id: The user to update devices of.
+            device_id: The device to update.
+            content: body of update request
+        """
+
+        # Reject a new displayname which is too long.
+        new_display_name = content.get("display_name")
+
+        _check_device_name_length(new_display_name)
+
+        try:
+            await self.store.update_device(
+                user_id, device_id, new_display_name=new_display_name
+            )
+            await self.notify_device_update(user_id, [device_id])
+        except errors.StoreError as e:
+            if e.code == 404:
+                raise errors.NotFoundError()
+            else:
+                raise
+
     @trace
     async def get_devices_by_user(self, user_id: str) -> List[JsonDict]:
         """
@@ -761,65 +820,6 @@ class DeviceHandler(DeviceWorkerHandler):
 
         for user_id, user_devices in devices.items():
             await self.delete_devices(user_id, user_devices)
-
-    async def upsert_device(
-        self, user_id: str, device_id: str, display_name: Optional[str] = None
-    ) -> bool:
-        """Create or update a device
-
-        Args:
-            user_id: The user to update devices of.
-            device_id: The device to update.
-            display_name: The new display name for this device.
-
-        Returns:
-            True if the device was created, False if it was updated.
-
-        """
-
-        # Reject a new displayname which is too long.
-        _check_device_name_length(display_name)
-
-        created = await self.store.store_device(
-            user_id,
-            device_id,
-            initial_device_display_name=display_name,
-        )
-
-        if not created:
-            await self.store.update_device(
-                user_id,
-                device_id,
-                new_display_name=display_name,
-            )
-
-        await self.notify_device_update(user_id, [device_id])
-        return created
-
-    async def update_device(self, user_id: str, device_id: str, content: dict) -> None:
-        """Update the given device
-
-        Args:
-            user_id: The user to update devices of.
-            device_id: The device to update.
-            content: body of update request
-        """
-
-        # Reject a new displayname which is too long.
-        new_display_name = content.get("display_name")
-
-        _check_device_name_length(new_display_name)
-
-        try:
-            await self.store.update_device(
-                user_id, device_id, new_display_name=new_display_name
-            )
-            await self.notify_device_update(user_id, [device_id])
-        except errors.StoreError as e:
-            if e.code == 404:
-                raise errors.NotFoundError()
-            else:
-                raise
 
     @trace
     @measure_func("notify_device_update")

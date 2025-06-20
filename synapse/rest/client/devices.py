@@ -91,7 +91,6 @@ class DeleteDevicesRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
         self.device_handler = handler
         self.auth_handler = hs.get_auth_handler()
 
@@ -179,14 +178,6 @@ class DeviceRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
-        # Can only be run on main process, as changes to device lists must
-        # happen on main.
-        if not self._is_main_process:
-            error_message = "DELETE on /devices/ must be routed to main process"
-            logger.error(error_message)
-            raise SynapseError(500, error_message)
-        assert isinstance(self.device_handler, DeviceHandler)
-
         requester = await self.auth.get_user_by_req(request)
 
         try:
@@ -231,14 +222,6 @@ class DeviceRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, device_id: str
     ) -> Tuple[int, JsonDict]:
-        # Can only be run on main process, as changes to device lists must
-        # happen on main.
-        if not self._is_main_process:
-            error_message = "PUT on /devices/ must be routed to main process"
-            logger.error(error_message)
-            raise SynapseError(500, error_message)
-        assert isinstance(self.device_handler, DeviceHandler)
-
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
@@ -595,10 +578,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if (
-        hs.config.worker.worker_app is None
-        and not hs.config.experimental.msc3861.enabled
-    ):
+    if not hs.config.experimental.msc3861.enabled:
         DeleteDevicesRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)
     DeviceRestServlet(hs).register(http_server)

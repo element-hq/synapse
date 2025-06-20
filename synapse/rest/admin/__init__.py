@@ -374,4 +374,5 @@ def register_servlets_for_msc3861_delegation(
     UserRestServletV2(hs).register(http_server)
     UsernameAvailableRestServlet(hs).register(http_server)
     UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
+    DeviceRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)
