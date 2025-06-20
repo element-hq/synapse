@@ -240,6 +240,7 @@ psycopg2cffi = { version = ">=2.8", markers = "platform_python_implementation ==
 psycopg2cffi-compat = { version = "==1.1", markers = "platform_python_implementation == 'PyPy'", optional = true }
 pysaml2 = { version = ">=4.5.0", optional = true }
 authlib = { version = ">=0.15.1", optional = true }
+scim2-models = { version = ">=0.3.5", markers="python_version>='3.9'", optional = true }
 # systemd-python is necessary for logging to the systemd journal via
 # `systemd.journal.JournalHandler`, as is documented in
 # `contrib/systemd/log_config.yaml`.
@@ -263,6 +264,7 @@ matrix-synapse-ldap3 = ["matrix-synapse-ldap3"]
 postgres = ["psycopg2", "psycopg2cffi", "psycopg2cffi-compat"]
 saml2 = ["pysaml2"]
 oidc = ["authlib"]
+scim = ["scim2-models"]
 # systemd-python is necessary for logging to the systemd journal via
 # `systemd.journal.JournalHandler`, as is documented in
 # `contrib/systemd/log_config.yaml`.
