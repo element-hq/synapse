@@ -23,8 +23,8 @@
 from prometheus_client import (
     REGISTRY,
     CollectorRegistry,
-    generate_latest,
     disable_created_metrics,
+    generate_latest,
 )
 
 from twisted.web.resource import Resource
