@@ -94,6 +94,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
             clock=self._clock,
+            cache_manager=hs.get_cache_manager(),
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
         )
@@ -126,8 +127,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_inbox_stream_cache = StreamChangeCache(
-            "DeviceInboxStreamChangeCache",
-            min_device_inbox_id,
+            name="DeviceInboxStreamChangeCache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=min_device_inbox_id,
             prefilled_cache=device_inbox_prefill,
         )
 
@@ -142,8 +144,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_federation_outbox_stream_cache = StreamChangeCache(
-            "DeviceFederationOutboxStreamChangeCache",
-            min_device_outbox_id,
+            name="DeviceFederationOutboxStreamChangeCache",
+            cache_manager=hs.get_cache_manager(),
+            current_stream_pos=min_device_outbox_id,
             prefilled_cache=device_outbox_prefill,
         )
 

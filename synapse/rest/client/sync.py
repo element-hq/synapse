@@ -125,6 +125,8 @@ class SyncRestServlet(RestServlet):
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
             cache_name="sync_valid_filter",
+            # TODO
+            # cache_manager=hs.get_cache_manager(),
         )
 
         # Ratelimiter for presence updates, keyed by requester.

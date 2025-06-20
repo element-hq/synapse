@@ -68,8 +68,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter("synapse_handlers_appservice_events_processed", "")
-
 
 class ApplicationServicesHandler:
     def __init__(self, hs: "HomeServer"):
@@ -79,6 +77,7 @@ class ApplicationServicesHandler:
         self.scheduler = hs.get_application_service_scheduler()
         self.started_scheduler = False
         self.clock = hs.get_clock()
+        self.metrics_collector_registry = hs.metrics_collector_registry
         self.notify_appservices = hs.config.worker.should_notify_appservices
         self.event_sources = hs.get_event_sources()
         self._msc2409_to_device_messages_enabled = (
@@ -93,6 +92,12 @@ class ApplicationServicesHandler:
 
         self._ephemeral_events_linearizer = Linearizer(
             name="appservice_ephemeral_events"
+        )
+
+        self.events_processed_counter = Counter(
+            "synapse_handlers_appservice_events_processed",
+            "",
+            registry=hs.metrics_collector_registry,
         )
 
     def notify_interested_services(self, max_token: RoomStreamToken) -> None:
@@ -120,7 +125,9 @@ class ApplicationServicesHandler:
 
     @wrap_as_background_process("notify_interested_services")
     async def _notify_interested_services(self, max_token: RoomStreamToken) -> None:
-        with Measure(self.clock, "notify_interested_services"):
+        with Measure(
+            self.clock, self.metrics_collector_registry, "notify_interested_services"
+        ):
             self.is_processing = True
             try:
                 upper_bound = -1
@@ -200,7 +207,7 @@ class ApplicationServicesHandler:
                         "appservice_sender"
                     ).set(upper_bound)
 
-                    events_processed_counter.inc(len(events))
+                    self.events_processed_counter.inc(len(events))
 
                     event_processing_loop_room_count.labels("appservice_sender").inc(
                         len(events_by_room)
@@ -329,7 +336,11 @@ class ApplicationServicesHandler:
         users: Collection[Union[str, UserID]],
     ) -> None:
         logger.debug("Checking interested services for %s", stream_key)
-        with Measure(self.clock, "notify_interested_services_ephemeral"):
+        with Measure(
+            self.clock,
+            self.metrics_collector_registry,
+            "notify_interested_services_ephemeral",
+        ):
             for service in services:
                 if stream_key == StreamKeyType.TYPING:
                     # Note that we don't persist the token (via set_appservice_stream_type_pos)

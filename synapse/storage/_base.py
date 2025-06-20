@@ -56,6 +56,8 @@ class SQLBaseStore(metaclass=ABCMeta):
     ):
         self.hs = hs
         self._clock = hs.get_clock()
+        self._metrics_collector_registry = hs.metrics_collector_registry
+        self._metrics_collector_registry = hs.metrics_collector_registry
         self.database_engine = database.engine
         self.db_pool = database
 

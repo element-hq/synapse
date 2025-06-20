@@ -1,0 +1,1 @@
+Refactor metrics to collect in homeserver-specific registry.

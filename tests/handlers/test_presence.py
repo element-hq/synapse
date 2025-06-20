@@ -75,6 +75,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
         self.store = homeserver.get_datastores().main
+        self.presence_handler = homeserver.get_presence_handler()
 
     def test_offline_to_online(self) -> None:
         wheel_timer = Mock()
@@ -87,6 +88,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -134,6 +136,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -184,6 +187,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -232,6 +236,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         new_state = prev_state.copy_and_replace(state=PresenceState.ONLINE)
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -272,6 +277,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         new_state = prev_state.copy_and_replace(state=PresenceState.ONLINE)
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=False,
@@ -311,6 +317,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         new_state = prev_state.copy_and_replace(state=PresenceState.OFFLINE)
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -338,6 +345,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         new_state = prev_state.copy_and_replace(state=PresenceState.UNAVAILABLE)
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -428,6 +436,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         new_state = prev_state.copy_and_replace(state=final_state, last_active_ts=now)
 
         handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,
@@ -491,6 +500,7 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         state, persist_and_notify, federation_ping = handle_update(
+            self.presence_handler,
             prev_state,
             new_state,
             is_mine=True,

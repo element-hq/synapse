@@ -26,6 +26,7 @@ from urllib.request import (  # type: ignore[attr-defined]
 )
 
 from netaddr import AddrFormatError, IPAddress, IPSet
+from prometheus_client import CollectorRegistry
 from zope.interface import implementer
 
 from twisted.internet import defer
@@ -50,6 +51,7 @@ from synapse.http.proxyagent import ProxyAgent
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
+from synapse.util.caches import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,8 @@ class MatrixFederationAgent:
            reactor might have some blocking applied (i.e. for DNS queries),
            but we need unblocked access to the proxy.
 
+        cache_manager: The cache manager to handle metrics
+
         _srv_resolver:
             SrvResolver implementation to use for looking up SRV records. None
             to use a default implementation.
@@ -92,11 +96,14 @@ class MatrixFederationAgent:
 
     def __init__(
         self,
+        *,
         reactor: ISynapseReactor,
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
         ip_blocklist: IPSet,
+        metrics_collector_registry: CollectorRegistry,
+        cache_manager: CacheManager,
         _srv_resolver: Optional[SrvResolver] = None,
         _well_known_resolver: Optional[WellKnownResolver] = None,
     ):
@@ -139,6 +146,8 @@ class MatrixFederationAgent:
                     ip_blocklist=ip_blocklist,
                 ),
                 user_agent=self.user_agent,
+                metrics_collector_registry=metrics_collector_registry,
+                cache_manager=cache_manager,
             )
 
         self._well_known_resolver = _well_known_resolver
