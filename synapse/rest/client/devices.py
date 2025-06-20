@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from synapse._pydantic_compat import Extra, StrictStr
 from synapse.api import errors
 from synapse.api.errors import NotFoundError, SynapseError, UnrecognizedRequestError
-from synapse.handlers.device import DeviceHandler
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -300,7 +299,6 @@ class DehydratedDeviceServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
         self.device_handler = handler
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -360,7 +358,6 @@ class ClaimDehydratedDeviceServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
         self.device_handler = handler
 
     class PostBody(RequestBodyModel):
@@ -500,7 +497,6 @@ class DehydratedDeviceV2Servlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.device_handler = handler
 
@@ -583,10 +579,9 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     DevicesRestServlet(hs).register(http_server)
     DeviceRestServlet(hs).register(http_server)
 
-    if hs.config.worker.worker_app is None:
-        if hs.config.experimental.msc2697_enabled:
-            DehydratedDeviceServlet(hs).register(http_server)
-            ClaimDehydratedDeviceServlet(hs).register(http_server)
-        if hs.config.experimental.msc3814_enabled:
-            DehydratedDeviceV2Servlet(hs).register(http_server)
-            DehydratedDeviceEventsServlet(hs).register(http_server)
+    if hs.config.experimental.msc2697_enabled:
+        DehydratedDeviceServlet(hs).register(http_server)
+        ClaimDehydratedDeviceServlet(hs).register(http_server)
+    if hs.config.experimental.msc3814_enabled:
+        DehydratedDeviceV2Servlet(hs).register(http_server)
+        DehydratedDeviceEventsServlet(hs).register(http_server)
