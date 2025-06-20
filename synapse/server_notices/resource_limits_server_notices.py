@@ -165,7 +165,7 @@ class ResourceLimitsServerNotices:
             user_id, content, EventTypes.Message
         )
 
-        content = {"pinned": [event.event_id]}
+        content = {"pinned": [event["event_id"]]}
         await self._server_notices_manager.send_notice(
             user_id, content, EventTypes.Pinned, ""
         )

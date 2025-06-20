@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023-2024 New Vector, Ltd
+# Copyright (C) 2023-2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -33,6 +33,7 @@ from synapse.replication.http import (
     register,
     send_event,
     send_events,
+    server_notices,
     state,
     streams,
 )
@@ -66,3 +67,4 @@ class ReplicationRestResource(JsonResource):
             register.register_servlets(hs, self)
             devices.register_servlets(hs, self)
             delayed_events.register_servlets(hs, self)
+            server_notices.register_servlets(hs, self)
