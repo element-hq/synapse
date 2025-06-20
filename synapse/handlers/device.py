@@ -128,6 +128,10 @@ class DeviceWorkerHandler:
         )
         self._task_scheduler = hs.get_task_scheduler()
 
+        self._dont_notify_new_devices_for = (
+            hs.config.registration.dont_notify_new_devices_for
+        )
+
         self.device_list_updater = DeviceListWorkerUpdater(hs)
 
         self._task_scheduler.register_action(
@@ -139,6 +143,68 @@ class DeviceWorkerHandler:
         self._notify_device_update_client = (
             ReplicationNotifyDeviceUpdateRestServlet.make_client(hs)
         )
+
+    async def check_device_registered(
+        self,
+        user_id: str,
+        device_id: Optional[str],
+        initial_device_display_name: Optional[str] = None,
+        auth_provider_id: Optional[str] = None,
+        auth_provider_session_id: Optional[str] = None,
+    ) -> str:
+        """
+        If the given device has not been registered, register it with the
+        supplied display name.
+
+        If no device_id is supplied, we make one up.
+
+        Args:
+            user_id:  @user:id
+            device_id: device id supplied by client
+            initial_device_display_name: device display name from client
+            auth_provider_id: The SSO IdP the user used, if any.
+            auth_provider_session_id: The session ID (sid) got from the SSO IdP.
+        Returns:
+            device id (generated if none was supplied)
+        """
+
+        _check_device_name_length(initial_device_display_name)
+
+        # Check if we should send out device lists updates for this new device.
+        notify = user_id not in self._dont_notify_new_devices_for
+
+        if device_id is not None:
+            new_device = await self.store.store_device(
+                user_id=user_id,
+                device_id=device_id,
+                initial_device_display_name=initial_device_display_name,
+                auth_provider_id=auth_provider_id,
+                auth_provider_session_id=auth_provider_session_id,
+            )
+            if new_device:
+                if notify:
+                    await self.notify_device_update(user_id, [device_id])
+            return device_id
+
+        # if the device id is not specified, we'll autogen one, but loop a few
+        # times in case of a clash.
+        attempts = 0
+        while attempts < 5:
+            new_device_id = stringutils.random_string(10).upper()
+            new_device = await self.store.store_device(
+                user_id=user_id,
+                device_id=new_device_id,
+                initial_device_display_name=initial_device_display_name,
+                auth_provider_id=auth_provider_id,
+                auth_provider_session_id=auth_provider_session_id,
+            )
+            if new_device:
+                if notify:
+                    await self.notify_device_update(user_id, [new_device_id])
+                return new_device_id
+            attempts += 1
+
+        raise errors.StoreError(500, "Couldn't generate a device ID.")
 
     @trace
     async def get_devices_by_user(self, user_id: str) -> List[JsonDict]:
@@ -579,10 +645,6 @@ class DeviceHandler(DeviceWorkerHandler):
         self._account_data_handler = hs.get_account_data_handler()
         self._storage_controllers = hs.get_storage_controllers()
 
-        self._dont_notify_new_devices_for = (
-            hs.config.registration.dont_notify_new_devices_for
-        )
-
         self.device_list_updater = DeviceListUpdater(hs, self)
 
         federation_registry = hs.get_federation_registry()
@@ -614,68 +676,6 @@ class DeviceHandler(DeviceWorkerHandler):
                 "delete_stale_devices",
                 self._delete_stale_devices,
             )
-
-    async def check_device_registered(
-        self,
-        user_id: str,
-        device_id: Optional[str],
-        initial_device_display_name: Optional[str] = None,
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
-    ) -> str:
-        """
-        If the given device has not been registered, register it with the
-        supplied display name.
-
-        If no device_id is supplied, we make one up.
-
-        Args:
-            user_id:  @user:id
-            device_id: device id supplied by client
-            initial_device_display_name: device display name from client
-            auth_provider_id: The SSO IdP the user used, if any.
-            auth_provider_session_id: The session ID (sid) got from the SSO IdP.
-        Returns:
-            device id (generated if none was supplied)
-        """
-
-        _check_device_name_length(initial_device_display_name)
-
-        # Check if we should send out device lists updates for this new device.
-        notify = user_id not in self._dont_notify_new_devices_for
-
-        if device_id is not None:
-            new_device = await self.store.store_device(
-                user_id=user_id,
-                device_id=device_id,
-                initial_device_display_name=initial_device_display_name,
-                auth_provider_id=auth_provider_id,
-                auth_provider_session_id=auth_provider_session_id,
-            )
-            if new_device:
-                if notify:
-                    await self.notify_device_update(user_id, [device_id])
-            return device_id
-
-        # if the device id is not specified, we'll autogen one, but loop a few
-        # times in case of a clash.
-        attempts = 0
-        while attempts < 5:
-            new_device_id = stringutils.random_string(10).upper()
-            new_device = await self.store.store_device(
-                user_id=user_id,
-                device_id=new_device_id,
-                initial_device_display_name=initial_device_display_name,
-                auth_provider_id=auth_provider_id,
-                auth_provider_session_id=auth_provider_session_id,
-            )
-            if new_device:
-                if notify:
-                    await self.notify_device_update(user_id, [new_device_id])
-                return new_device_id
-            attempts += 1
-
-        raise errors.StoreError(500, "Couldn't generate a device ID.")
 
     async def _delete_stale_devices(self) -> None:
         """Background task that deletes devices which haven't been accessed for more than

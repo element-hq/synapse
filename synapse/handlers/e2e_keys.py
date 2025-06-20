@@ -35,7 +35,6 @@ from synapse.api.errors import CodeMessageException, Codes, NotFoundError, Synap
 from synapse.handlers.device import DeviceHandler
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
-from synapse.replication.http.devices import ReplicationUploadKeysForUserRestServlet
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -91,12 +90,6 @@ class E2eKeysHandler:
             federation_registry.register_edu_handler(
                 EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
                 edu_updater.incoming_signing_key_update,
-            )
-
-            self.device_key_uploader = self.upload_device_keys_for_user
-        else:
-            self.device_key_uploader = (
-                ReplicationUploadKeysForUserRestServlet.make_client(hs)
             )
 
         # doesn't really work as part of the generic query API, because the
@@ -847,7 +840,7 @@ class E2eKeysHandler:
         # TODO: Validate the JSON to make sure it has the right keys.
         device_keys = keys.get("device_keys", None)
         if device_keys:
-            await self.device_key_uploader(
+            await self.upload_device_keys_for_user(
                 user_id=user_id,
                 device_id=device_id,
                 keys={"device_keys": device_keys},
@@ -904,9 +897,6 @@ class E2eKeysHandler:
             device_keys: the `device_keys` of an /keys/upload request.
 
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         time_now = self.clock.time_msec()
 
         device_keys = keys["device_keys"]
