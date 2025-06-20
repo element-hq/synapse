@@ -1,0 +1,3 @@
+from typing import List
+
+def parse_words(text: str) -> List[str]: ...
