@@ -20,12 +20,24 @@
 #
 #
 
-from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
+from prometheus_client import (
+    REGISTRY,
+    CollectorRegistry,
+    generate_latest,
+    disable_created_metrics,
+)
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
 
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+
+# Sets whether `prometheus_client` should expose `_created`-suffixed metrics for all
+# gauges, histograms and summaries.
+#
+# The motivation for disabling these `_created` metrics is that they're a waste of space
+# as they're not useful but they take up space in Prometheus.
+disable_created_metrics()
 
 
 class MetricsResource(Resource):
