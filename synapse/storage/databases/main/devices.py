@@ -27,7 +27,6 @@ from typing import (
     Dict,
     Iterable,
     List,
-    Literal,
     Mapping,
     Optional,
     Set,
@@ -61,12 +60,12 @@ from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import (
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     StrCollection,
     get_verify_key_from_cross_signing_key,
 )
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
-from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
@@ -86,6 +85,8 @@ BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES = "remove_dup_outbound_pokes"
 
 
 class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
+    _device_list_id_gen: MultiWriterIdGenerator
+
     def __init__(
         self,
         database: DatabasePool,
@@ -115,7 +116,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 ),
             ],
             sequence_name="device_lists_sequence",
-            writers=["master"],
+            writers=hs.config.worker.writers.device_lists,
         )
 
         device_list_max = self._device_list_id_gen.get_current_token()
@@ -240,8 +241,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         for room_id in room_ids:
             self._device_list_room_stream_cache.entity_has_changed(room_id, token)
 
-    def get_device_stream_token(self) -> int:
-        return self._device_list_id_gen.get_current_token()
+    def get_device_stream_token(self) -> MultiWriterStreamToken:
+        return MultiWriterStreamToken.from_generator(self._device_list_id_gen)
 
     def get_device_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._device_list_id_gen
@@ -281,6 +282,145 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         return await self.db_pool.runInteraction(
             "count_devices_by_users", count_devices_by_users_txn, user_ids
         )
+
+    async def store_device(
+        self,
+        user_id: str,
+        device_id: str,
+        initial_device_display_name: Optional[str],
+        auth_provider_id: Optional[str] = None,
+        auth_provider_session_id: Optional[str] = None,
+    ) -> bool:
+        """Ensure the given device is known; add it to the store if not
+
+        Args:
+            user_id: id of user associated with the device
+            device_id: id of device
+            initial_device_display_name: initial displayname of the device.
+                Ignored if device exists.
+            auth_provider_id: The SSO IdP the user used, if any.
+            auth_provider_session_id: The session ID (sid) got from a OIDC login.
+
+        Returns:
+            Whether the device was inserted or an existing device existed with that ID.
+
+        Raises:
+            StoreError: if the device is already in use
+        """
+        try:
+            inserted = await self.db_pool.simple_upsert(
+                "devices",
+                keyvalues={
+                    "user_id": user_id,
+                    "device_id": device_id,
+                },
+                values={},
+                insertion_values={
+                    "display_name": initial_device_display_name,
+                    "hidden": False,
+                },
+                desc="store_device",
+            )
+            await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
+
+            if not inserted:
+                # if the device already exists, check if it's a real device, or
+                # if the device ID is reserved by something else
+                hidden = await self.db_pool.simple_select_one_onecol(
+                    "devices",
+                    keyvalues={"user_id": user_id, "device_id": device_id},
+                    retcol="hidden",
+                )
+                if hidden:
+                    raise StoreError(400, "The device ID is in use", Codes.FORBIDDEN)
+
+            if auth_provider_id and auth_provider_session_id:
+                await self.db_pool.simple_insert(
+                    "device_auth_providers",
+                    values={
+                        "user_id": user_id,
+                        "device_id": device_id,
+                        "auth_provider_id": auth_provider_id,
+                        "auth_provider_session_id": auth_provider_session_id,
+                    },
+                    desc="store_device_auth_provider",
+                )
+
+            return inserted
+        except StoreError:
+            raise
+        except Exception as e:
+            logger.error(
+                "store_device with device_id=%s(%r) user_id=%s(%r)"
+                " display_name=%s(%r) failed: %s",
+                type(device_id).__name__,
+                device_id,
+                type(user_id).__name__,
+                user_id,
+                type(initial_device_display_name).__name__,
+                initial_device_display_name,
+                e,
+            )
+            raise StoreError(500, "Problem storing device.")
+
+    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
+        """Deletes several devices.
+
+        Args:
+            user_id: The ID of the user which owns the devices
+            device_ids: The IDs of the devices to delete
+        """
+
+        def _delete_devices_txn(txn: LoggingTransaction, device_ids: List[str]) -> None:
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="devices",
+                column="device_id",
+                values=device_ids,
+                keyvalues={"user_id": user_id, "hidden": False},
+            )
+
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="device_auth_providers",
+                column="device_id",
+                values=device_ids,
+                keyvalues={"user_id": user_id},
+            )
+            self._invalidate_cache_and_stream_bulk(
+                txn, self.get_device, [(user_id, device_id) for device_id in device_ids]
+            )
+
+        for batch in batch_iter(device_ids, 100):
+            await self.db_pool.runInteraction(
+                "delete_devices", _delete_devices_txn, batch
+            )
+
+    async def update_device(
+        self, user_id: str, device_id: str, new_display_name: Optional[str] = None
+    ) -> None:
+        """Update a device. Only updates the device if it is not marked as
+        hidden.
+
+        Args:
+            user_id: The ID of the user which owns the device
+            device_id: The ID of the device to update
+            new_display_name: new displayname for device; None to leave unchanged
+        Raises:
+            StoreError: if the device is not found
+        """
+        updates = {}
+        if new_display_name is not None:
+            updates["display_name"] = new_display_name
+        if not updates:
+            return None
+        await self.db_pool.simple_update_one(
+            table="devices",
+            keyvalues={"user_id": user_id, "device_id": device_id, "hidden": False},
+            updatevalues=updates,
+            desc="update_device",
+        )
+        await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
 
     @cached()
     async def get_device(
@@ -375,7 +515,11 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             - The list of updates, where each update is a pair of EDU type and
               EDU contents.
         """
-        now_stream_id = self.get_device_stream_token()
+        # Here, we don't use the individual instances positions, as we only
+        # record the last stream position we've sent to a destination. This
+        # means we have to wait for all the writers to catch up before sending
+        # device list updates, which is fine.
+        now_stream_id = self.get_device_stream_token().stream
         if from_stream_id == now_stream_id:
             return now_stream_id, []
 
@@ -874,8 +1018,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     @cancellable
     async def get_all_devices_changed(
         self,
-        from_key: int,
-        to_key: int,
+        from_key: MultiWriterStreamToken,
+        to_key: MultiWriterStreamToken,
     ) -> Set[str]:
         """Get all users whose devices have changed in the given range.
 
@@ -890,7 +1034,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             (exclusive) until `to_key` (inclusive).
         """
 
-        result = self._device_list_stream_cache.get_all_entities_changed(from_key)
+        result = self._device_list_stream_cache.get_all_entities_changed(
+            from_key.stream
+        )
 
         if result.hit:
             # We know which users might have changed devices.
@@ -906,24 +1052,34 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # If the cache didn't tell us anything, we just need to query the full
         # range.
         sql = """
-            SELECT DISTINCT user_id FROM device_lists_stream
+            SELECT user_id, stream_id, instance_name
+            FROM device_lists_stream
             WHERE ? < stream_id AND stream_id <= ?
         """
 
         rows = await self.db_pool.execute(
             "get_all_devices_changed",
             sql,
-            from_key,
-            to_key,
+            from_key.stream,
+            to_key.get_max_stream_pos(),
         )
-        return {u for (u,) in rows}
+        return {
+            user_id
+            for (user_id, stream_id, instance_name) in rows
+            if MultiWriterStreamToken.is_stream_position_in_range(
+                low=from_key,
+                high=to_key,
+                instance_name=instance_name,
+                pos=stream_id,
+            )
+        }
 
     @cancellable
     async def get_users_whose_devices_changed(
         self,
-        from_key: int,
+        from_key: MultiWriterStreamToken,
         user_ids: Collection[str],
-        to_key: Optional[int] = None,
+        to_key: Optional[MultiWriterStreamToken] = None,
     ) -> Set[str]:
         """Get set of users whose devices have changed since `from_key` that
         are in the given list of user_ids.
@@ -943,7 +1099,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # Get set of users who *may* have changed. Users not in the returned
         # list have definitely not changed.
         user_ids_to_check = self._device_list_stream_cache.get_entities_changed(
-            user_ids, from_key
+            user_ids, from_key.stream
         )
 
         # If an empty set was returned, there's nothing to do.
@@ -951,11 +1107,16 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             return set()
 
         if to_key is None:
-            to_key = self._device_list_id_gen.get_current_token()
+            to_key = self.get_device_stream_token()
 
-        def _get_users_whose_devices_changed_txn(txn: LoggingTransaction) -> Set[str]:
+        def _get_users_whose_devices_changed_txn(
+            txn: LoggingTransaction,
+            from_key: MultiWriterStreamToken,
+            to_key: MultiWriterStreamToken,
+        ) -> Set[str]:
             sql = """
-                SELECT DISTINCT user_id FROM device_lists_stream
+                SELECT user_id, stream_id, instance_name
+                FROM device_lists_stream
                 WHERE  ? < stream_id AND stream_id <= ? AND %s
             """
 
@@ -966,17 +1127,32 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 clause, args = make_in_list_sql_clause(
                     txn.database_engine, "user_id", chunk
                 )
-                txn.execute(sql % (clause,), [from_key, to_key] + args)
-                changes.update(user_id for (user_id,) in txn)
+                txn.execute(
+                    sql % (clause,),
+                    [from_key.stream, to_key.get_max_stream_pos()] + args,
+                )
+                changes.update(
+                    user_id
+                    for (user_id, stream_id, instance_name) in txn
+                    if MultiWriterStreamToken.is_stream_position_in_range(
+                        low=from_key,
+                        high=to_key,
+                        instance_name=instance_name,
+                        pos=stream_id,
+                    )
+                )
 
             return changes
 
         return await self.db_pool.runInteraction(
-            "get_users_whose_devices_changed", _get_users_whose_devices_changed_txn
+            "get_users_whose_devices_changed",
+            _get_users_whose_devices_changed_txn,
+            from_key,
+            to_key,
         )
 
     async def get_users_whose_signatures_changed(
-        self, user_id: str, from_key: int
+        self, user_id: str, from_key: MultiWriterStreamToken
     ) -> Set[str]:
         """Get the users who have new cross-signing signatures made by `user_id` since
         `from_key`.
@@ -989,17 +1165,30 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             A set of user IDs with updated signatures.
         """
 
-        if self._user_signature_stream_cache.has_entity_changed(user_id, from_key):
-            sql = """
-                SELECT DISTINCT user_ids FROM user_signature_stream
-                WHERE from_user_id = ? AND stream_id > ?
-            """
-            rows = await self.db_pool.execute(
-                "get_users_whose_signatures_changed", sql, user_id, from_key
-            )
-            return {user for row in rows for user in db_to_json(row[0])}
-        else:
+        if not self._user_signature_stream_cache.has_entity_changed(
+            user_id, from_key.stream
+        ):
             return set()
+
+        sql = """
+            SELECT user_ids, stream_id, instance_name
+            FROM user_signature_stream
+            WHERE from_user_id = ? AND stream_id > ?
+        """
+        rows = await self.db_pool.execute(
+            "get_users_whose_signatures_changed", sql, user_id, from_key
+        )
+        return {
+            user
+            for (user_ids, stream_id, instance_name) in rows
+            if MultiWriterStreamToken.is_stream_position_in_range(
+                low=from_key,
+                high=None,
+                instance_name=instance_name,
+                pos=stream_id,
+            )
+            for user in db_to_json(user_ids)
+        }
 
     async def get_all_device_list_changes_for_remotes(
         self, instance_name: str, last_id: int, current_id: int, limit: int
@@ -1486,7 +1675,10 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     @cancellable
     async def get_device_list_changes_in_rooms(
-        self, room_ids: Collection[str], from_id: int, to_id: int
+        self,
+        room_ids: Collection[str],
+        from_token: MultiWriterStreamToken,
+        to_token: MultiWriterStreamToken,
     ) -> Optional[Set[str]]:
         """Return the set of users whose devices have changed in the given rooms
         since the given stream ID.
@@ -1499,41 +1691,50 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         min_stream_id = await self._get_min_device_lists_changes_in_room()
 
-        if min_stream_id > from_id:
+        # XXX: is that right?
+        if min_stream_id > from_token.stream:
             return None
 
         changed_room_ids = self._device_list_room_stream_cache.get_entities_changed(
-            room_ids, from_id
+            room_ids, from_token.stream
         )
         if not changed_room_ids:
             return set()
 
         sql = """
-            SELECT DISTINCT user_id FROM device_lists_changes_in_room
+            SELECT user_id, stream_id, instance_name
+            FROM device_lists_changes_in_room
             WHERE {clause} AND stream_id > ? AND stream_id <= ?
         """
 
         def _get_device_list_changes_in_rooms_txn(
             txn: LoggingTransaction,
-            clause: str,
-            args: List[Any],
+            chunk: list[str],
         ) -> Set[str]:
-            txn.execute(sql.format(clause=clause), args)
-            return {user_id for (user_id,) in txn}
-
-        changes = set()
-        for chunk in batch_iter(changed_room_ids, 1000):
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", chunk
             )
-            args.append(from_id)
-            args.append(to_id)
+            args.append(from_token.stream)
+            args.append(to_token.get_max_stream_pos())
 
+            txn.execute(sql.format(clause=clause), args)
+            return {
+                user_id
+                for (user_id, stream_id, instance_name) in txn
+                if MultiWriterStreamToken.is_stream_position_in_range(
+                    low=from_token,
+                    high=to_token,
+                    instance_name=instance_name,
+                    pos=stream_id,
+                )
+            }
+
+        changes = set()
+        for chunk in batch_iter(changed_room_ids, 1000):
             changes |= await self.db_pool.runInteraction(
                 "get_device_list_changes_in_rooms",
                 _get_device_list_changes_in_rooms_txn,
-                clause,
-                args,
+                chunk,
             )
 
         return changes
@@ -1770,159 +1971,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        # Map of (user_id, device_id) -> bool. If there is an entry that implies
-        # the device exists.
-        self.device_id_exists_cache: LruCache[Tuple[str, str], Literal[True]] = (
-            LruCache(cache_name="device_id_exists", max_size=10000)
-        )
-
-    async def store_device(
-        self,
-        user_id: str,
-        device_id: str,
-        initial_device_display_name: Optional[str],
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
-    ) -> bool:
-        """Ensure the given device is known; add it to the store if not
-
-        Args:
-            user_id: id of user associated with the device
-            device_id: id of device
-            initial_device_display_name: initial displayname of the device.
-                Ignored if device exists.
-            auth_provider_id: The SSO IdP the user used, if any.
-            auth_provider_session_id: The session ID (sid) got from a OIDC login.
-
-        Returns:
-            Whether the device was inserted or an existing device existed with that ID.
-
-        Raises:
-            StoreError: if the device is already in use
-        """
-        key = (user_id, device_id)
-        if self.device_id_exists_cache.get(key, None):
-            return False
-
-        try:
-            inserted = await self.db_pool.simple_upsert(
-                "devices",
-                keyvalues={
-                    "user_id": user_id,
-                    "device_id": device_id,
-                },
-                values={},
-                insertion_values={
-                    "display_name": initial_device_display_name,
-                    "hidden": False,
-                },
-                desc="store_device",
-            )
-            await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
-
-            if not inserted:
-                # if the device already exists, check if it's a real device, or
-                # if the device ID is reserved by something else
-                hidden = await self.db_pool.simple_select_one_onecol(
-                    "devices",
-                    keyvalues={"user_id": user_id, "device_id": device_id},
-                    retcol="hidden",
-                )
-                if hidden:
-                    raise StoreError(400, "The device ID is in use", Codes.FORBIDDEN)
-
-            if auth_provider_id and auth_provider_session_id:
-                await self.db_pool.simple_insert(
-                    "device_auth_providers",
-                    values={
-                        "user_id": user_id,
-                        "device_id": device_id,
-                        "auth_provider_id": auth_provider_id,
-                        "auth_provider_session_id": auth_provider_session_id,
-                    },
-                    desc="store_device_auth_provider",
-                )
-
-            self.device_id_exists_cache.set(key, True)
-            return inserted
-        except StoreError:
-            raise
-        except Exception as e:
-            logger.error(
-                "store_device with device_id=%s(%r) user_id=%s(%r)"
-                " display_name=%s(%r) failed: %s",
-                type(device_id).__name__,
-                device_id,
-                type(user_id).__name__,
-                user_id,
-                type(initial_device_display_name).__name__,
-                initial_device_display_name,
-                e,
-            )
-            raise StoreError(500, "Problem storing device.")
-
-    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
-        """Deletes several devices.
-
-        Args:
-            user_id: The ID of the user which owns the devices
-            device_ids: The IDs of the devices to delete
-        """
-
-        def _delete_devices_txn(txn: LoggingTransaction, device_ids: List[str]) -> None:
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="devices",
-                column="device_id",
-                values=device_ids,
-                keyvalues={"user_id": user_id, "hidden": False},
-            )
-
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="device_auth_providers",
-                column="device_id",
-                values=device_ids,
-                keyvalues={"user_id": user_id},
-            )
-            self._invalidate_cache_and_stream_bulk(
-                txn, self.get_device, [(user_id, device_id) for device_id in device_ids]
-            )
-
-        for batch in batch_iter(device_ids, 100):
-            await self.db_pool.runInteraction(
-                "delete_devices", _delete_devices_txn, batch
-            )
-
-        for device_id in device_ids:
-            self.device_id_exists_cache.invalidate((user_id, device_id))
-
-    async def update_device(
-        self, user_id: str, device_id: str, new_display_name: Optional[str] = None
-    ) -> None:
-        """Update a device. Only updates the device if it is not marked as
-        hidden.
-
-        Args:
-            user_id: The ID of the user which owns the device
-            device_id: The ID of the device to update
-            new_display_name: new displayname for device; None to leave unchanged
-        Raises:
-            StoreError: if the device is not found
-        """
-        updates = {}
-        if new_display_name is not None:
-            updates["display_name"] = new_display_name
-        if not updates:
-            return None
-        await self.db_pool.simple_update_one(
-            table="devices",
-            keyvalues={"user_id": user_id, "device_id": device_id, "hidden": False},
-            updatevalues=updates,
-            desc="update_device",
-        )
-        await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
-
     async def update_remote_device_list_cache_entry(
         self, user_id: str, device_id: str, content: JsonDict, stream_id: str
     ) -> None:
@@ -1961,8 +2009,6 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 table="device_lists_remote_cache",
                 keyvalues={"user_id": user_id, "device_id": device_id},
             )
-
-            txn.call_after(self.device_id_exists_cache.invalidate, (user_id, device_id))
         else:
             self.db_pool.simple_upsert_txn(
                 txn,
@@ -2061,8 +2107,12 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         context = get_active_span_text_map()
 
         def add_device_changes_txn(
-            txn: LoggingTransaction, stream_ids: List[int]
-        ) -> None:
+            txn: LoggingTransaction,
+        ) -> int:
+            stream_ids = self._device_list_id_gen.get_next_mult_txn(
+                txn, len(device_ids)
+            )
+
             self._add_device_change_to_stream_txn(
                 txn,
                 user_id,
@@ -2079,16 +2129,12 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 context,
             )
 
-        async with self._device_list_id_gen.get_next_mult(
-            len(device_ids)
-        ) as stream_ids:
-            await self.db_pool.runInteraction(
-                "add_device_change_to_stream",
-                add_device_changes_txn,
-                stream_ids,
-            )
+            return stream_ids[-1]
 
-        return stream_ids[-1]
+        return await self.db_pool.runInteraction(
+            "add_device_change_to_stream",
+            add_device_changes_txn,
+        )
 
     def _add_device_change_to_stream_txn(
         self,
