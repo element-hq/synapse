@@ -123,7 +123,9 @@ async def filter_events_for_client(
         )
         and await storage.main.is_server_admin(UserID.from_string(user_id))
     ):
-        if client_config.return_policy_server_spammy_events:
+        # `return_soft_failed_events` implies `return_policy_server_spammy_events`, so
+        # we want to check when they've asked for *just* `return_policy_server_spammy_events`
+        if not client_config.return_soft_failed_events:
             events = [e for e in events if e.internal_metadata.policy_server_spammy]
         else:
             events = events_before_filtering
