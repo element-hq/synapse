@@ -89,6 +89,24 @@ MAX_DEVICE_DISPLAY_NAME_LEN = 100
 DELETE_STALE_DEVICES_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 
+def _check_device_name_length(name: Optional[str]) -> None:
+    """
+    Checks whether a device name is longer than the maximum allowed length.
+
+    Args:
+        name: The name of the device.
+
+    Raises:
+        SynapseError: if the device name is too long.
+    """
+    if name and len(name) > MAX_DEVICE_DISPLAY_NAME_LEN:
+        raise SynapseError(
+            400,
+            "Device display name is too long (max %i)" % (MAX_DEVICE_DISPLAY_NAME_LEN,),
+            errcode=Codes.TOO_LARGE,
+        )
+
+
 class DeviceWorkerHandler:
     device_list_updater: "DeviceListWorkerUpdater"
     store: "GenericWorkerStore"
@@ -597,24 +615,6 @@ class DeviceHandler(DeviceWorkerHandler):
                 self._delete_stale_devices,
             )
 
-    def _check_device_name_length(self, name: Optional[str]) -> None:
-        """
-        Checks whether a device name is longer than the maximum allowed length.
-
-        Args:
-            name: The name of the device.
-
-        Raises:
-            SynapseError: if the device name is too long.
-        """
-        if name and len(name) > MAX_DEVICE_DISPLAY_NAME_LEN:
-            raise SynapseError(
-                400,
-                "Device display name is too long (max %i)"
-                % (MAX_DEVICE_DISPLAY_NAME_LEN,),
-                errcode=Codes.TOO_LARGE,
-            )
-
     async def check_device_registered(
         self,
         user_id: str,
@@ -639,7 +639,7 @@ class DeviceHandler(DeviceWorkerHandler):
             device id (generated if none was supplied)
         """
 
-        self._check_device_name_length(initial_device_display_name)
+        _check_device_name_length(initial_device_display_name)
 
         # Check if we should send out device lists updates for this new device.
         notify = user_id not in self._dont_notify_new_devices_for
@@ -778,7 +778,7 @@ class DeviceHandler(DeviceWorkerHandler):
         """
 
         # Reject a new displayname which is too long.
-        self._check_device_name_length(display_name)
+        _check_device_name_length(display_name)
 
         created = await self.store.store_device(
             user_id,
@@ -808,7 +808,7 @@ class DeviceHandler(DeviceWorkerHandler):
         # Reject a new displayname which is too long.
         new_display_name = content.get("display_name")
 
-        self._check_device_name_length(new_display_name)
+        _check_device_name_length(new_display_name)
 
         try:
             await self.store.update_device(
