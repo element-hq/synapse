@@ -41,9 +41,11 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
     Sets whether prometheus_client should expose `_created`-suffixed metrics for
     all gauges, histograms and summaries.
 
-    There is no programmatic way to disable this without poking at internals;
-    the proper way is to use an environment variable which prometheus_client
-    loads at import time.
+    There is no programmatic way in the old versions of `prometheus_client` to disable
+    this without poking at internals; the proper way in the old `prometheus_client`
+    versions is to use an environment variable which prometheus_client loads at import
+    time OR to use the dedicated `disable_created_metrics()`/`enable_created_metrics()`
+    functions, but these were only added in `prometheus_client` `0.18.0`.
 
     The motivation for disabling these `_created` metrics is that they're
     a waste of space as they're not useful but they take up space in Prometheus.
