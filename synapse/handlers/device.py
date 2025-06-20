@@ -120,6 +120,7 @@ class DeviceWorkerHandler:
         self._appservice_handler = hs.get_application_service_handler()
         self._state_storage = hs.get_storage_controllers().state
         self._auth_handler = hs.get_auth_handler()
+        self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
         self.server_name = hs.hostname
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
@@ -205,6 +206,78 @@ class DeviceWorkerHandler:
             attempts += 1
 
         raise errors.StoreError(500, "Couldn't generate a device ID.")
+
+    @trace
+    async def delete_all_devices_for_user(
+        self, user_id: str, except_device_id: Optional[str] = None
+    ) -> None:
+        """Delete all of the user's devices
+
+        Args:
+            user_id: The user to remove all devices from
+            except_device_id: optional device id which should not be deleted
+        """
+        device_map = await self.store.get_devices_by_user(user_id)
+        device_ids = list(device_map)
+        if except_device_id is not None:
+            device_ids = [d for d in device_ids if d != except_device_id]
+        await self.delete_devices(user_id, device_ids)
+
+    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
+        """Delete several devices
+
+        Args:
+            user_id: The user to delete devices from.
+            device_ids: The list of device IDs to delete
+        """
+        to_device_stream_id = self._event_sources.get_current_token().to_device_key
+
+        try:
+            await self.store.delete_devices(user_id, device_ids)
+        except errors.StoreError as e:
+            if e.code == 404:
+                # no match
+                set_tag("error", True)
+                set_tag("reason", "User doesn't have that device id.")
+            else:
+                raise
+
+        # Delete data specific to each device. Not optimised as it is not
+        # considered as part of a critical path.
+        for device_id in device_ids:
+            await self._auth_handler.delete_access_tokens_for_user(
+                user_id, device_id=device_id
+            )
+            await self.store.delete_e2e_keys_by_device(
+                user_id=user_id, device_id=device_id
+            )
+
+            if self.hs.config.experimental.msc3890_enabled:
+                # Remove any local notification settings for this device in accordance
+                # with MSC3890.
+                await self._account_data_handler.remove_account_data_for_user(
+                    user_id,
+                    f"org.matrix.msc3890.local_notification_settings.{device_id}",
+                )
+
+            # Delete device messages asynchronously and in batches using the task scheduler
+            # We specify an upper stream id to avoid deleting non delivered messages
+            # if an user re-uses a device ID.
+            await self._task_scheduler.schedule_task(
+                DELETE_DEVICE_MSGS_TASK_NAME,
+                resource_id=device_id,
+                params={
+                    "user_id": user_id,
+                    "device_id": device_id,
+                    "up_to_stream_id": to_device_stream_id,
+                },
+            )
+
+        # Pushers are deleted after `delete_access_tokens_for_user` is called so that
+        # modules using `on_logged_out` hook can use them if needed.
+        await self.hs.get_pusherpool().remove_pushers_by_devices(user_id, device_ids)
+
+        await self.notify_device_update(user_id, device_ids)
 
     @trace
     async def get_devices_by_user(self, user_id: str) -> List[JsonDict]:
@@ -642,7 +715,6 @@ class DeviceHandler(DeviceWorkerHandler):
         super().__init__(hs)
 
         self.federation_sender = hs.get_federation_sender()
-        self._account_data_handler = hs.get_account_data_handler()
         self._storage_controllers = hs.get_storage_controllers()
 
         self.device_list_updater = DeviceListUpdater(hs, self)
@@ -689,78 +761,6 @@ class DeviceHandler(DeviceWorkerHandler):
 
         for user_id, user_devices in devices.items():
             await self.delete_devices(user_id, user_devices)
-
-    @trace
-    async def delete_all_devices_for_user(
-        self, user_id: str, except_device_id: Optional[str] = None
-    ) -> None:
-        """Delete all of the user's devices
-
-        Args:
-            user_id: The user to remove all devices from
-            except_device_id: optional device id which should not be deleted
-        """
-        device_map = await self.store.get_devices_by_user(user_id)
-        device_ids = list(device_map)
-        if except_device_id is not None:
-            device_ids = [d for d in device_ids if d != except_device_id]
-        await self.delete_devices(user_id, device_ids)
-
-    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
-        """Delete several devices
-
-        Args:
-            user_id: The user to delete devices from.
-            device_ids: The list of device IDs to delete
-        """
-        to_device_stream_id = self._event_sources.get_current_token().to_device_key
-
-        try:
-            await self.store.delete_devices(user_id, device_ids)
-        except errors.StoreError as e:
-            if e.code == 404:
-                # no match
-                set_tag("error", True)
-                set_tag("reason", "User doesn't have that device id.")
-            else:
-                raise
-
-        # Delete data specific to each device. Not optimised as it is not
-        # considered as part of a critical path.
-        for device_id in device_ids:
-            await self._auth_handler.delete_access_tokens_for_user(
-                user_id, device_id=device_id
-            )
-            await self.store.delete_e2e_keys_by_device(
-                user_id=user_id, device_id=device_id
-            )
-
-            if self.hs.config.experimental.msc3890_enabled:
-                # Remove any local notification settings for this device in accordance
-                # with MSC3890.
-                await self._account_data_handler.remove_account_data_for_user(
-                    user_id,
-                    f"org.matrix.msc3890.local_notification_settings.{device_id}",
-                )
-
-            # Delete device messages asynchronously and in batches using the task scheduler
-            # We specify an upper stream id to avoid deleting non delivered messages
-            # if an user re-uses a device ID.
-            await self._task_scheduler.schedule_task(
-                DELETE_DEVICE_MSGS_TASK_NAME,
-                resource_id=device_id,
-                params={
-                    "user_id": user_id,
-                    "device_id": device_id,
-                    "up_to_stream_id": to_device_stream_id,
-                },
-            )
-
-        # Pushers are deleted after `delete_access_tokens_for_user` is called so that
-        # modules using `on_logged_out` hook can use them if needed.
-        await self.hs.get_pusherpool().remove_pushers_by_devices(user_id, device_ids)
-
-        await self.notify_device_update(user_id, device_ids)
 
     async def upsert_device(
         self, user_id: str, device_id: str, display_name: Optional[str] = None

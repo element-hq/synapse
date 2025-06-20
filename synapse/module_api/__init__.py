@@ -922,8 +922,6 @@ class ModuleApi:
     ) -> Generator["defer.Deferred[Any]", Any, None]:
         """Invalidate an access token for a user
 
-        Can only be called from the main process.
-
         Added in Synapse v0.25.0.
 
         Args:
