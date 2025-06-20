@@ -60,8 +60,11 @@
 
       # beginning of the new metrics listener
       - port: 9000
-        type: metrics
+        type: http
         bind_addresses: ['::1', '127.0.0.1']
+        resources:
+          - names: [metrics]
+            compress: false
     ```
 
 1.  Restart Synapse.

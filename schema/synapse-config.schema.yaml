@@ -451,8 +451,7 @@ properties:
           type: string
           description: >-
             The type of listener. Normally `http`, but other valid options are
-            [`manhole`](../../manhole.md) and
-            [`metrics`](../../metrics-howto.md).
+            [`manhole`](../../manhole.md).
           enum:
             - http
             - manhole
