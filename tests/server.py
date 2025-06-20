@@ -517,8 +517,12 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
 
             tls._get_default_clock = lambda: self
 
-        self.nameResolver = SimpleResolverComplexifier(FakeResolver())
         super().__init__()
+
+        # Override the default name resolver with our fake resolver. This must
+        # happen after `super().__init__()` so that the base class doesn't
+        # overwrite it again.
+        self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
     def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
         raise NotImplementedError()
