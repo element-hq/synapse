@@ -497,7 +497,7 @@ class JsonResource(DirectServeJsonResource):
             key word arguments to pass to the callback
         """
         # At this point the path must be bytes.
-        request_path_bytes: bytes = request.path  # type: ignore
+        request_path_bytes: bytes = request.path
         request_path = request_path_bytes.decode("ascii")
         # Treat HEAD requests as GET requests.
         request_method = request.method

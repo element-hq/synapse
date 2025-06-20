@@ -220,7 +220,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         fetching updates for given stream.
         """
 
-        path: bytes = request.path  # type: ignore
+        path: bytes = request.path
         self.assertRegex(
             path,
             rb"^/_synapse/replication/get_repl_stream_updates/%s/[^/]+$"

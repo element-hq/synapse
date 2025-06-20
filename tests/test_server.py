@@ -226,8 +226,7 @@ class OptionsResourceTests(unittest.TestCase):
             isLeaf = True
 
             def render(self, request: SynapseRequest) -> bytes:
-                # Type-ignore: mypy thinks request.path is Optional[Any], not bytes.
-                return request.path  # type: ignore[return-value]
+                return request.path
 
         # Setup a resource with some children.
         self.resource = OptionsResource()
