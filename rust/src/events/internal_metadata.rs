@@ -97,7 +97,7 @@ impl EventInternalMetadataData {
                     .to_owned()
                     .into_any(),
             ),
-            EventInternalMetadata::PolicyServerSpammy(o) => (
+            EventInternalMetadataData::PolicyServerSpammy(o) => (
                 pyo3::intern!(py, "policy_server_spammy"),
                 o.into_pyobject(py)
                     .unwrap_infallible()
@@ -442,8 +442,9 @@ impl EventInternalMetadata {
 
     #[getter]
     fn get_policy_server_spammy(&self) -> PyResult<bool> {
-        let bool = get_property!(self, PolicyServerSpammy)?;
-        Ok(*bool)
+        Ok(get_property_opt!(self, PolicyServerSpammy)
+            .copied()
+            .unwrap_or(false))
     }
     #[setter]
     fn set_policy_server_spammy(&mut self, obj: bool) {
