@@ -243,7 +243,7 @@ def do_lint() -> Set[str]:
                 importlib.import_module(module_info.name)
             except ModelCheckerException as e:
                 logger.warning(
-                    f"Bad annotation found when importing {module_info.name}"
+                    "Bad annotation found when importing %s", module_info.name
                 )
                 failures.add(format_model_checker_exception(e))
 

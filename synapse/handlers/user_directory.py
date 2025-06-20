@@ -750,10 +750,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                     )
                     continue
                 except Exception:
-                    logger.error(
+                    logger.exception(
                         "Failed to refresh profile for %r due to unhandled exception",
                         user_id,
-                        exc_info=True,
                     )
                     await self.store.set_remote_user_profile_in_user_dir_stale(
                         user_id,

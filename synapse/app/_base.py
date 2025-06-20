@@ -434,8 +434,8 @@ def listen_http(
         # getHost() returns a UNIXAddress which contains an instance variable of 'name'
         # encoded as a byte string. Decode as utf-8 so pretty.
         logger.info(
-            "Synapse now listening on Unix Socket at: "
-            f"{ports[0].getHost().name.decode('utf-8')}"
+            "Synapse now listening on Unix Socket at: %s",
+            ports[0].getHost().name.decode("utf-8"),
         )
 
     return ports

@@ -288,7 +288,7 @@ class UrlPreviewer:
                 og["og:image:width"] = dims["width"]
                 og["og:image:height"] = dims["height"]
             else:
-                logger.warning("Couldn't get dims for %s" % url)
+                logger.warning("Couldn't get dims for %s", url)
 
             # define our OG response for this media
         elif _is_html(media_info.media_type):
@@ -610,7 +610,7 @@ class UrlPreviewer:
             should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
             if should_quarantine:
-                logger.warn(
+                logger.warning(
                     "Media has been automatically quarantined as it matched existing quarantined media"
                 )
 

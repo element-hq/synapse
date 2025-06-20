@@ -28,14 +28,12 @@ from prometheus_client import Gauge
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.types import JsonDict
+from synapse.util.constants import ONE_HOUR_SECONDS, ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger("synapse.app.homeserver")
-
-ONE_MINUTE_SECONDS = 60
-ONE_HOUR_SECONDS = 60 * ONE_MINUTE_SECONDS
 
 MILLISECONDS_PER_SECOND = 1000
 
@@ -173,7 +171,7 @@ async def phone_stats_home(
     stats["log_level"] = logging.getLevelName(log_level)
 
     logger.info(
-        "Reporting stats to %s: %s" % (hs.config.metrics.report_stats_endpoint, stats)
+        "Reporting stats to %s: %s", hs.config.metrics.report_stats_endpoint, stats
     )
     try:
         await hs.get_proxied_http_client().put_json(

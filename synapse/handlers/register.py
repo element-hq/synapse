@@ -506,7 +506,7 @@ class RegistrationHandler:
                             ratelimit=False,
                         )
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _join_rooms(self, user_id: str) -> None:
         """
@@ -596,7 +596,7 @@ class RegistrationHandler:
                 # moving away from bare excepts is a good thing to do.
                 logger.error("Failed to join new user to %r: %r", r, e)
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e, exc_info=True)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _auto_join_rooms(self, user_id: str) -> None:
         """Automatically joins users to auto join rooms - creating the room in the first place

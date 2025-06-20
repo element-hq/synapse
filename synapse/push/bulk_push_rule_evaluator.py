@@ -50,7 +50,7 @@ from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
 from synapse.events.snapshot import EventContext
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.state import POWER_KEY
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import ProfileInfo
@@ -248,6 +248,7 @@ class BulkPushRuleEvaluator:
             StateFilter.from_types(event_types)
         )
         pl_event_id = prev_state_ids.get(POWER_KEY)
+        create_event_id = prev_state_ids.get(CREATE_KEY)
 
         # fastpath: if there's a power level event, that's all we need, and
         # not having a power level event is an extreme edge case
@@ -270,6 +271,26 @@ class BulkPushRuleEvaluator:
                 if auth_event:
                     auth_events_dict[auth_event_id] = auth_event
             auth_events = {(e.type, e.state_key): e for e in auth_events_dict.values()}
+            if auth_events.get(CREATE_KEY) is None:
+                # if the event being checked is the create event, use its own permissions
+                if event.type == EventTypes.Create and event.get_state_key() == "":
+                    auth_events[CREATE_KEY] = event
+                else:
+                    auth_events[
+                        CREATE_KEY
+                    ] = await self.store.get_create_event_for_room(event.room_id)
+
+        # if we are evaluating the create event, then use itself to determine power levels.
+        if event.type == EventTypes.Create and event.get_state_key() == "":
+            auth_events[CREATE_KEY] = event
+        else:
+            # if we aren't processing the create event, create_event_id should always be set
+            assert create_event_id is not None
+            create_event = event_id_to_event.get(create_event_id)
+            if create_event:
+                auth_events[CREATE_KEY] = create_event
+            else:
+                auth_events[CREATE_KEY] = await self.store.get_event(create_event_id)
 
         sender_level = get_user_power_level(event.sender, auth_events)
 

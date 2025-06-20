@@ -1604,7 +1604,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             if prev_stream_id is not None and cached_devices == {
                 d["device_id"]: d for d in devices
             }:
-                logging.info(
+                logger.info(
                     "Skipping device list resync for %s, as our cache matches already",
                     user_id,
                 )

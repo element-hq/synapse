@@ -1230,12 +1230,16 @@ class SsoHandler:
             if expected_user_id is not None and user_id != expected_user_id:
                 logger.error(
                     "Received a logout notification from SSO provider "
-                    f"{auth_provider_id!r} for the user {expected_user_id!r}, but with "
-                    f"a session ID ({auth_provider_session_id!r}) which belongs to "
-                    f"{user_id!r}. This may happen when the SSO provider user mapper "
+                    "%r for the user %r, but with "
+                    "a session ID (%r) which belongs to "
+                    "%r. This may happen when the SSO provider user mapper "
                     "uses something else than the standard attribute as mapping ID. "
                     "For OIDC providers, set `backchannel_logout_ignore_sub` to `true` "
-                    "in the provider config if that is the case."
+                    "in the provider config if that is the case.",
+                    auth_provider_id,
+                    expected_user_id,
+                    auth_provider_session_id,
+                    user_id,
                 )
                 continue
 
