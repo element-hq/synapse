@@ -32,11 +32,6 @@ from tests.unittest import HomeserverTestCase, override_config
     ("sync_endpoint", "experimental_features"),
     [
         ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
     ],
 )
 class SendToDeviceTestCase(HomeserverTestCase):
