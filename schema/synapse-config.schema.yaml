@@ -2185,6 +2185,23 @@ properties:
     examples:
       - per_second: 2.0
         burst_count: 20.0
+  rc_reports:
+    $ref: "#/$defs/rc"
+    description: >-
+      Ratelimiting settings for reporting content.
+
+      This is a ratelimiting option that ratelimits reports made by users
+      about content they see.
+
+      Setting this to a high value allows users to report content quickly, possibly in
+      duplicate. This can result in higher database usage.
+    default:
+      per_user:
+        per_second: 1.0
+        burst_count: 5.0
+    examples:
+      - per_second: 2.0
+        burst_count: 20.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
