@@ -1111,6 +1111,7 @@ class EventCreationHandler:
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)
                 if not policy_allowed:
+                    event.internal_metadata.policy_server_spammy = True
                     logger.warning(
                         "Event not allowed by policy server, rejecting %s",
                         event.event_id,
