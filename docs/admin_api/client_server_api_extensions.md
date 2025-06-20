@@ -37,3 +37,15 @@ in the event's `unsigned` content like so:
 ```
 
 Default: `false`
+
+## See events marked spammy by policy servers
+
+Learn more about policy servers from [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
+
+Similar to `return_soft_failed_events`, clients logged in with admin accounts can see events which were
+flagged by the policy server as spammy (and thus soft failed) by setting `return_policy_server_spammy_events`
+to `true`. If `return_soft_failed_events` is `true`, then `return_policy_server_spammy_events` is implied
+`true`. When `false`, the normal behaviour of Client-Server API endpoints is retained (unless `return_soft_failed_events`
+is `true`, per above).
+
+Default: `false`

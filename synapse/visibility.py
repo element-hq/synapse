@@ -117,10 +117,13 @@ async def filter_events_for_client(
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
     if (
         filter_send_to_client
-        and client_config.return_soft_failed_events
+        and (client_config.return_soft_failed_events or client_config.return_policy_server_spammy_events)
         and await storage.main.is_server_admin(UserID.from_string(user_id))
     ):
-        events = events_before_filtering
+        if client_config.return_policy_server_spammy_events:
+            events = [e for e in events if e.internal_metadata.policy_server_spammy]
+        else:
+            events = events_before_filtering
     else:
         events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     if len(events_before_filtering) != len(events):
