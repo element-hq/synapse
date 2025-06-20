@@ -184,7 +184,7 @@ class Ratelimiter:
             )
 
             if module_override:
-                rate_hz = module_override.messages_per_second
+                rate_hz = module_override.per_second
                 burst_count = module_override.burst_count
 
         # Override default values if set

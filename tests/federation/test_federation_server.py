@@ -45,6 +45,8 @@ from synapse.util import Clock
 from tests import unittest
 from tests.unittest import override_config
 
+logger = logging.getLogger(__name__)
+
 
 class FederationServerTests(unittest.FederatingHomeserverTestCase):
     servlets = [
@@ -252,7 +254,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:
         e = _create_acl_event({"allow": ["*"], "deny": ["evil.com"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -266,7 +268,7 @@ class ServerACLsTestCase(unittest.TestCase):
 
     def test_block_ip_literals(self) -> None:
         e = _create_acl_event({"allow_ip_literals": False, "allow": ["*"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 

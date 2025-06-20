@@ -1895,7 +1895,7 @@ def load_single_legacy_password_auth_provider(
     try:
         provider = module(config=config, account_handler=api)
     except Exception as e:
-        logger.error("Error while initializing %r: %s", module, e)
+        logger.exception("Error while initializing %r: %s", module, e)
         raise
 
     # All methods that the module provides should be async, but this wasn't enforced
@@ -2428,7 +2428,7 @@ class PasswordAuthProvider:
             except CancelledError:
                 raise
             except Exception as e:
-                logger.error("Module raised an exception in is_3pid_allowed: %s", e)
+                logger.exception("Module raised an exception in is_3pid_allowed: %s", e)
                 raise SynapseError(code=500, msg="Internal Server Error")
 
         return True

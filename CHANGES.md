@@ -1,3 +1,47 @@
+# Synapse 1.132.0 (2025-06-17)
+
+### Improved Documentation
+
+- Improvements to generate config documentation from JSON Schema file. ([\#18522](https://github.com/element-hq/synapse/issues/18522))
+
+
+
+
+# Synapse 1.132.0rc1 (2025-06-10)
+
+### Features
+
+- Add support for [MSC4155](https://github.com/matrix-org/matrix-spec-proposals/pull/4155) Invite Filtering. ([\#18288](https://github.com/element-hq/synapse/issues/18288))
+- Add experimental `user_may_send_state_event` module API callback. ([\#18455](https://github.com/element-hq/synapse/issues/18455))
+- Add experimental `get_media_config_for_user` and `is_user_allowed_to_upload_media_of_size` module API callbacks that allow overriding of media repository maximum upload size. ([\#18457](https://github.com/element-hq/synapse/issues/18457))
+- Add experimental `get_ratelimit_override_for_user` module API callback that allows overriding of per-user ratelimits. ([\#18458](https://github.com/element-hq/synapse/issues/18458))
+- Pass `room_config` argument to `user_may_create_room` spam checker module callback. ([\#18486](https://github.com/element-hq/synapse/issues/18486))
+- Support configuration of default and extra user types. ([\#18456](https://github.com/element-hq/synapse/issues/18456))
+- Successful requests to `/_matrix/app/v1/ping` will now force Synapse to reattempt delivering transactions to appservices. ([\#18521](https://github.com/element-hq/synapse/issues/18521))
+- Support the import of the `RatelimitOverride` type from `synapse.module_api` in modules and rename `messages_per_second` to `per_second`. ([\#18513](https://github.com/element-hq/synapse/issues/18513))
+
+### Bugfixes
+
+- Remove destinations from sending if not whitelisted. ([\#18484](https://github.com/element-hq/synapse/issues/18484))
+- Fixed room summary API incorrectly returning that a room is private in the room summary response when the join rule is omitted by the remote server. Contributed by @nexy7574. ([\#18493](https://github.com/element-hq/synapse/issues/18493))
+- Prevent users from adding themselves to their own user ignore list. ([\#18508](https://github.com/element-hq/synapse/issues/18508))
+
+### Improved Documentation
+
+- Generate config documentation from JSON Schema file. ([\#17892](https://github.com/element-hq/synapse/issues/17892))
+- Mention `CAP_NET_BIND_SERVICE` as an alternative to running Synapse as root in order to bind to a privileged port. ([\#18408](https://github.com/element-hq/synapse/issues/18408))
+- Surface hidden Admin API documentation regarding fetching of scheduled tasks. ([\#18516](https://github.com/element-hq/synapse/issues/18516))
+- Mark the new module APIs in this release as experimental. ([\#18536](https://github.com/element-hq/synapse/issues/18536))
+
+### Internal Changes
+
+- Mark dehydrated devices in the [List All User Devices Admin API](https://element-hq.github.io/synapse/latest/admin_api/user_admin_api.html#list-all-devices). ([\#18252](https://github.com/element-hq/synapse/issues/18252))
+- Reduce disk wastage by cleaning up `received_transactions` older than 1 day, rather than 30 days. ([\#18310](https://github.com/element-hq/synapse/issues/18310))
+- Distinguish all vs local events being persisted in the "Event Send Time Quantiles" graph (Grafana). ([\#18510](https://github.com/element-hq/synapse/issues/18510))
+
+
+
+
 # Synapse 1.131.0 (2025-06-03)
 
 No significant changes since 1.131.0rc1.

@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/v1.131/schema/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.132/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -912,6 +912,24 @@ properties:
     default: null
     examples:
       - 24h
+  user_types:
+    type: object
+    description: >-
+      Configuration settings related to the user types feature.
+    properties:
+      default_user_type:
+        type: ["string", "null"]
+        description: "The default user type to use for registering new users when no value has been specified. Defaults to none."
+        default: null
+      extra_user_types:
+        type: array
+        description: "Array of additional user types to allow. These are treated as real users."
+        items:
+          type: string
+        default: []
+    examples:
+      - default_user_type: "custom"
+        extra_user_types: ["custom", "custom2"]
   admin_contact:
     type: ["string", "null"]
     description: How to reach the server admin, used in `ResourceLimitError`.
@@ -2160,6 +2178,23 @@ properties:
       management requests often (such as repeatedly restarting a delayed event
       with a short timeout, or restarting several different delayed events all
       at once) without the risk of being ratelimited.
+    default:
+      per_user:
+        per_second: 1.0
+        burst_count: 5.0
+    examples:
+      - per_second: 2.0
+        burst_count: 20.0
+  rc_reports:
+    $ref: "#/$defs/rc"
+    description: >-
+      Ratelimiting settings for reporting content.
+
+      This is a ratelimiting option that ratelimits reports made by users
+      about content they see.
+
+      Setting this to a high value allows users to report content quickly, possibly in
+      duplicate. This can result in higher database usage.
     default:
       per_user:
         per_second: 1.0
