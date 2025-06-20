@@ -126,7 +126,7 @@ async def filter_events_for_client(
         # `return_soft_failed_events` implies `return_policy_server_spammy_events`, so
         # we want to check when they've asked for *just* `return_policy_server_spammy_events`
         if not client_config.return_soft_failed_events:
-            events = [e for e in events if e.internal_metadata.policy_server_spammy]
+            events = [e for e in events if not e.internal_metadata.is_soft_failed() or e.internal_metadata.policy_server_spammy]
         else:
             events = events_before_filtering
     else:
