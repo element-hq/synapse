@@ -286,22 +286,6 @@ class SynapseHomeServer(HomeServer):
                     raise ConfigError(
                         "Can not use a unix socket for manhole at this time."
                     )
-            elif listener.type == "metrics":
-                if not self.config.metrics.enable_metrics:
-                    logger.warning(
-                        "Metrics listener configured, but enable_metrics is not True!"
-                    )
-                else:
-                    if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
-                        )
-                    else:
-                        raise ConfigError(
-                            "Can not use a unix socket for metrics at this time."
-                        )
-
             else:
                 # this shouldn't happen, as the listener type should have been checked
                 # during parsing
