@@ -977,7 +977,7 @@ class DeviceHandler(DeviceWorkerHandler):
 
             while True:
                 self._handle_new_device_update_new_data = False
-                max_stream_id = self.store.get_device_stream_token()
+                max_stream_id = self.store.get_device_stream_token().stream
                 rows = await self.store.get_uncoverted_outbound_room_pokes(
                     stream_id, room_id
                 )

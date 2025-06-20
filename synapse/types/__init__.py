@@ -1000,7 +1000,9 @@ class StreamToken:
     account_data_key: int
     push_rules_key: int
     to_device_key: int
-    device_list_key: int
+    device_list_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
     # Note that the groups key is no longer used and may have bogus values.
     groups_key: int
     un_partial_stated_rooms_key: int
@@ -1041,7 +1043,7 @@ class StreamToken:
                 account_data_key=int(account_data_key),
                 push_rules_key=int(push_rules_key),
                 to_device_key=int(to_device_key),
-                device_list_key=int(device_list_key),
+                device_list_key=await MultiWriterStreamToken.parse(store, receipt_key),
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
             )
@@ -1060,7 +1062,7 @@ class StreamToken:
                 str(self.account_data_key),
                 str(self.push_rules_key),
                 str(self.to_device_key),
-                str(self.device_list_key),
+                await self.device_list_key.to_string(store),
                 # Note that the groups key is no longer used, but it is still
                 # serialized so that there will not be confusion in the future
                 # if additional tokens are added.
@@ -1181,7 +1183,16 @@ class StreamToken:
 
 
 StreamToken.START = StreamToken(
-    RoomStreamToken(stream=0), 0, 0, MultiWriterStreamToken(stream=0), 0, 0, 0, 0, 0, 0
+    room_key=RoomStreamToken(stream=0),
+    presence_key=0,
+    typing_key=0,
+    receipt_key=MultiWriterStreamToken(stream=0),
+    account_data_key=0,
+    push_rules_key=0,
+    to_device_key=0,
+    device_list_key=MultiWriterStreamToken(stream=0),
+    groups_key=0,
+    un_partial_stated_rooms_key=0,
 )
 
 

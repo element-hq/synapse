@@ -59,7 +59,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, MultiWriterStreamToken
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.cancellation import cancellable
@@ -145,7 +145,12 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         Returns:
             (stream_id, devices)
         """
-        now_stream_id = self.get_device_stream_token()
+        # Here, we don't use the individual instances positions, as we *need* to
+        # give out the stream_id as an integer in the federation API.
+        # This means that we'll potentially return the same data twice with a
+        # different stream_id, and invalidate cache more often than necessary,
+        # which is fine overall.
+        now_stream_id = self.get_device_stream_token().stream
 
         # We need to be careful with the caching here, as we need to always
         # return *all* persisted devices, however there may be a lag between a
@@ -164,8 +169,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             # have to check for potential invalidations after the
             # `now_stream_id`.
             sql = """
-                SELECT user_id FROM device_lists_stream
+                SELECT 1
+                FROM device_lists_stream
                 WHERE stream_id >= ? AND user_id = ?
+                LIMIT 1
             """
             rows = await self.db_pool.execute(
                 "get_e2e_device_keys_for_federation_query_check",
@@ -1117,7 +1124,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     @abc.abstractmethod
-    def get_device_stream_token(self) -> int:
+    def get_device_stream_token(self) -> MultiWriterStreamToken:
         """Get the current stream id from the _device_list_id_gen"""
         ...
 
