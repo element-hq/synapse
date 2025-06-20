@@ -42,6 +42,7 @@ from synapse.http.servlet import (
     parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
@@ -58,6 +59,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+original_logger_class = logging.getLoggerClass()
+# Because this can log sensitive information, use a custom logger class that only allows
+# logging if the logger is explicitly configured.
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+user_registration_debug_logger = logging.getLogger(
+    "synapse.rest.admin.users.registration_debug"
+)
+"""
+A logger for debugging the user registration process.
+
+Because this can log sensitive information (such as passwords and
+`registration_shared_secret`), we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitly setting `synapse.rest.admin.users.registration_debug`
+in the logging configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 
 class UsersRestServletV2(RestServlet):
@@ -635,6 +655,13 @@ class UserRegisterServlet(RestServlet):
         want_mac = want_mac_builder.hexdigest()
 
         if not hmac.compare_digest(want_mac.encode("ascii"), got_mac.encode("ascii")):
+            user_registration_debug_logger.debug(
+                "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
+                got_mac,
+                want_mac,
+                self.hs.config.registration.registration_shared_secret,
+                body,
+            )
             raise SynapseError(HTTPStatus.FORBIDDEN, "HMAC incorrect")
 
         should_issue_refresh_token = body.get("refresh_token", False)
