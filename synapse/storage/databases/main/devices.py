@@ -86,6 +86,7 @@ BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES = "remove_dup_outbound_pokes"
 
 class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     _device_list_id_gen: MultiWriterIdGenerator
+    _instance_name: str
 
     def __init__(
         self,
@@ -117,6 +118,10 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             ],
             sequence_name="device_lists_sequence",
             writers=hs.config.worker.writers.device_lists,
+        )
+
+        self._is_device_list_writer = (
+            self._instance_name in hs.config.worker.writers.device_lists
         )
 
         device_list_max = self._device_list_id_gen.get_current_token()
@@ -896,6 +901,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         Returns:
             The new stream ID.
         """
+        if not self._is_device_list_writer:
+            raise Exception("Can only be called on device list writers")
 
         async with self._device_list_id_gen.get_next() as stream_id:
             await self.db_pool.runInteraction(
@@ -1802,175 +1809,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             desc="get_destinations_for_device",
         )
 
-
-class DeviceBackgroundUpdateStore(SQLBaseStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-
-        self._instance_name = hs.get_instance_name()
-
-        self.db_pool.updates.register_background_index_update(
-            "device_lists_stream_idx",
-            index_name="device_lists_stream_user_id",
-            table="device_lists_stream",
-            columns=["user_id", "device_id"],
-        )
-
-        # create a unique index on device_lists_remote_cache
-        self.db_pool.updates.register_background_index_update(
-            "device_lists_remote_cache_unique_idx",
-            index_name="device_lists_remote_cache_unique_id",
-            table="device_lists_remote_cache",
-            columns=["user_id", "device_id"],
-            unique=True,
-        )
-
-        # And one on device_lists_remote_extremeties
-        self.db_pool.updates.register_background_index_update(
-            "device_lists_remote_extremeties_unique_idx",
-            index_name="device_lists_remote_extremeties_unique_idx",
-            table="device_lists_remote_extremeties",
-            columns=["user_id"],
-            unique=True,
-        )
-
-        # once they complete, we can remove the old non-unique indexes.
-        self.db_pool.updates.register_background_update_handler(
-            DROP_DEVICE_LIST_STREAMS_NON_UNIQUE_INDEXES,
-            self._drop_device_list_streams_non_unique_indexes,
-        )
-
-        # clear out duplicate device list outbound pokes
-        self.db_pool.updates.register_background_update_handler(
-            BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES,
-            self._remove_duplicate_outbound_pokes,
-        )
-
-        self.db_pool.updates.register_background_index_update(
-            "device_lists_changes_in_room_by_room_index",
-            index_name="device_lists_changes_in_room_by_room_idx",
-            table="device_lists_changes_in_room",
-            columns=["room_id", "stream_id"],
-        )
-
-    async def _drop_device_list_streams_non_unique_indexes(
-        self, progress: JsonDict, batch_size: int
-    ) -> int:
-        def f(conn: LoggingDatabaseConnection) -> None:
-            txn = conn.cursor()
-            txn.execute("DROP INDEX IF EXISTS device_lists_remote_cache_id")
-            txn.execute("DROP INDEX IF EXISTS device_lists_remote_extremeties_id")
-            txn.close()
-
-        await self.db_pool.runWithConnection(f)
-        await self.db_pool.updates._end_background_update(
-            DROP_DEVICE_LIST_STREAMS_NON_UNIQUE_INDEXES
-        )
-        return 1
-
-    async def _remove_duplicate_outbound_pokes(
-        self, progress: JsonDict, batch_size: int
-    ) -> int:
-        # for some reason, we have accumulated duplicate entries in
-        # device_lists_outbound_pokes, which makes prune_outbound_device_list_pokes less
-        # efficient.
-        #
-        # For each duplicate, we delete all the existing rows and put one back.
-
-        last_row = progress.get(
-            "last_row",
-            {"stream_id": 0, "destination": "", "user_id": "", "device_id": ""},
-        )
-
-        def _txn(txn: LoggingTransaction) -> int:
-            clause, args = make_tuple_comparison_clause(
-                [
-                    ("stream_id", last_row["stream_id"]),
-                    ("destination", last_row["destination"]),
-                    ("user_id", last_row["user_id"]),
-                    ("device_id", last_row["device_id"]),
-                ]
-            )
-            sql = f"""
-                SELECT stream_id, destination, user_id, device_id, MAX(ts) AS ts
-                FROM device_lists_outbound_pokes
-                WHERE {clause}
-                GROUP BY stream_id, destination, user_id, device_id
-                HAVING count(*) > 1
-                ORDER BY stream_id, destination, user_id, device_id
-                LIMIT ?
-                """
-            txn.execute(sql, args + [batch_size])
-            rows = txn.fetchall()
-
-            stream_id, destination, user_id, device_id = None, None, None, None
-            for stream_id, destination, user_id, device_id, _ in rows:
-                self.db_pool.simple_delete_txn(
-                    txn,
-                    "device_lists_outbound_pokes",
-                    {
-                        "stream_id": stream_id,
-                        "destination": destination,
-                        "user_id": user_id,
-                        "device_id": device_id,
-                    },
-                )
-
-                self.db_pool.simple_insert_txn(
-                    txn,
-                    "device_lists_outbound_pokes",
-                    {
-                        "stream_id": stream_id,
-                        "instance_name": self._instance_name,
-                        "destination": destination,
-                        "user_id": user_id,
-                        "device_id": device_id,
-                        "sent": False,
-                    },
-                )
-
-            if rows:
-                self.db_pool.updates._background_update_progress_txn(
-                    txn,
-                    BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES,
-                    {
-                        "last_row": {
-                            "stream_id": stream_id,
-                            "destination": destination,
-                            "user_id": user_id,
-                            "device_id": device_id,
-                        }
-                    },
-                )
-
-            return len(rows)
-
-        rows = await self.db_pool.runInteraction(
-            BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES, _txn
-        )
-
-        if not rows:
-            await self.db_pool.updates._end_background_update(
-                BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES
-            )
-
-        return rows
-
-
-class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-
     async def update_remote_device_list_cache_entry(
         self, user_id: str, device_id: str, content: JsonDict, stream_id: str
     ) -> None:
@@ -2101,6 +1939,9 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             The maximum stream ID of device list updates that were added to the database, or
             None if no updates were added.
         """
+        if not self._is_device_list_writer:
+            raise Exception("Can only be called on device list writers")
+
         if not device_ids:
             return None
 
@@ -2333,6 +2174,8 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             A list of user ID, device ID, room ID, stream ID and optional opentracing
             context, in order of ascending (stream ID, room ID).
         """
+        if not self._is_device_list_writer:
+            raise Exception("Can only be called on device list writers")
 
         sql = """
             SELECT user_id, device_id, room_id, stream_id, opentracing_context
@@ -2386,6 +2229,9 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         """Queue the device update to be sent to the given set of hosts,
         calculated from the room ID.
         """
+        if not self._is_device_list_writer:
+            raise Exception("Can only be called on device list writers")
+
         if not hosts:
             return
 
@@ -2414,6 +2260,8 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         """Add a device list update to the table tracking remote device list
         updates during partial joins.
         """
+        if not self._is_device_list_writer:
+            raise Exception("Can only be called on device list writers")
 
         async with self._device_list_id_gen.get_next() as stream_id:
             await self.db_pool.simple_upsert(
@@ -2506,3 +2354,176 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             },
             desc="set_device_change_last_converted_pos",
         )
+
+
+class DeviceBackgroundUpdateStore(SQLBaseStore):
+    _instance_name: str
+
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self._instance_name = hs.get_instance_name()
+
+        self.db_pool.updates.register_background_index_update(
+            "device_lists_stream_idx",
+            index_name="device_lists_stream_user_id",
+            table="device_lists_stream",
+            columns=["user_id", "device_id"],
+        )
+
+        # create a unique index on device_lists_remote_cache
+        self.db_pool.updates.register_background_index_update(
+            "device_lists_remote_cache_unique_idx",
+            index_name="device_lists_remote_cache_unique_id",
+            table="device_lists_remote_cache",
+            columns=["user_id", "device_id"],
+            unique=True,
+        )
+
+        # And one on device_lists_remote_extremeties
+        self.db_pool.updates.register_background_index_update(
+            "device_lists_remote_extremeties_unique_idx",
+            index_name="device_lists_remote_extremeties_unique_idx",
+            table="device_lists_remote_extremeties",
+            columns=["user_id"],
+            unique=True,
+        )
+
+        # once they complete, we can remove the old non-unique indexes.
+        self.db_pool.updates.register_background_update_handler(
+            DROP_DEVICE_LIST_STREAMS_NON_UNIQUE_INDEXES,
+            self._drop_device_list_streams_non_unique_indexes,
+        )
+
+        # clear out duplicate device list outbound pokes
+        self.db_pool.updates.register_background_update_handler(
+            BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES,
+            self._remove_duplicate_outbound_pokes,
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            "device_lists_changes_in_room_by_room_index",
+            index_name="device_lists_changes_in_room_by_room_idx",
+            table="device_lists_changes_in_room",
+            columns=["room_id", "stream_id"],
+        )
+
+    async def _drop_device_list_streams_non_unique_indexes(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        def f(conn: LoggingDatabaseConnection) -> None:
+            txn = conn.cursor()
+            txn.execute("DROP INDEX IF EXISTS device_lists_remote_cache_id")
+            txn.execute("DROP INDEX IF EXISTS device_lists_remote_extremeties_id")
+            txn.close()
+
+        await self.db_pool.runWithConnection(f)
+        await self.db_pool.updates._end_background_update(
+            DROP_DEVICE_LIST_STREAMS_NON_UNIQUE_INDEXES
+        )
+        return 1
+
+    async def _remove_duplicate_outbound_pokes(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        # for some reason, we have accumulated duplicate entries in
+        # device_lists_outbound_pokes, which makes prune_outbound_device_list_pokes less
+        # efficient.
+        #
+        # For each duplicate, we delete all the existing rows and put one back.
+
+        last_row = progress.get(
+            "last_row",
+            {"stream_id": 0, "destination": "", "user_id": "", "device_id": ""},
+        )
+
+        def _txn(txn: LoggingTransaction) -> int:
+            clause, args = make_tuple_comparison_clause(
+                [
+                    ("stream_id", last_row["stream_id"]),
+                    ("destination", last_row["destination"]),
+                    ("user_id", last_row["user_id"]),
+                    ("device_id", last_row["device_id"]),
+                ]
+            )
+            sql = f"""
+                SELECT stream_id, destination, user_id, device_id, MAX(ts) AS ts
+                FROM device_lists_outbound_pokes
+                WHERE {clause}
+                GROUP BY stream_id, destination, user_id, device_id
+                HAVING count(*) > 1
+                ORDER BY stream_id, destination, user_id, device_id
+                LIMIT ?
+                """
+            txn.execute(sql, args + [batch_size])
+            rows = txn.fetchall()
+
+            stream_id, destination, user_id, device_id = None, None, None, None
+            for stream_id, destination, user_id, device_id, _ in rows:
+                self.db_pool.simple_delete_txn(
+                    txn,
+                    "device_lists_outbound_pokes",
+                    {
+                        "stream_id": stream_id,
+                        "destination": destination,
+                        "user_id": user_id,
+                        "device_id": device_id,
+                    },
+                )
+
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    "device_lists_outbound_pokes",
+                    {
+                        "stream_id": stream_id,
+                        "instance_name": self._instance_name,
+                        "destination": destination,
+                        "user_id": user_id,
+                        "device_id": device_id,
+                        "sent": False,
+                    },
+                )
+
+            if rows:
+                self.db_pool.updates._background_update_progress_txn(
+                    txn,
+                    BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES,
+                    {
+                        "last_row": {
+                            "stream_id": stream_id,
+                            "destination": destination,
+                            "user_id": user_id,
+                            "device_id": device_id,
+                        }
+                    },
+                )
+
+            return len(rows)
+
+        rows = await self.db_pool.runInteraction(
+            BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES, _txn
+        )
+
+        if not rows:
+            await self.db_pool.updates._end_background_update(
+                BG_UPDATE_REMOVE_DUP_OUTBOUND_POKES
+            )
+
+        return rows
+
+
+class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
+    _instance_name: str
+
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
