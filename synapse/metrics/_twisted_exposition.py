@@ -21,10 +21,10 @@
 #
 
 import logging
+
 from prometheus_client import (
     REGISTRY,
     CollectorRegistry,
-    disable_created_metrics,
     generate_latest,
 )
 
