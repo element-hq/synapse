@@ -988,9 +988,6 @@ class E2eKeysHandler:
             user_id: the user uploading the keys
             keys: the signing keys
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         # if a master key is uploaded, then check it.  Otherwise, load the
         # stored master key, to check signatures on other keys
         if "master_key" in keys:
@@ -1081,9 +1078,6 @@ class E2eKeysHandler:
         Raises:
             SynapseError: if the signatures dict is not valid.
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         failures = {}
 
         # signatures to be stored.  Each item will be a SignatureListItem

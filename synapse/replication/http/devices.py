@@ -78,6 +78,48 @@ class ReplicationNotifyDeviceUpdateRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+class ReplicationNotifyUserSignatureUpdateRestServlet(ReplicationEndpoint):
+    """Notify a device writer that a user have made new signatures of other users.
+
+    Request format:
+
+        POST /_synapse/replication/notify_user_signature_update/:from_user_id
+
+        {
+            "user_ids": ["@alice:example.org", "@bob:example.org", ...]
+        }
+    """
+
+    NAME = "notify_user_signature_update"
+    PATH_ARGS = ("from_user_id",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+        self.store = hs.get_datastores().main
+        self.clock = hs.get_clock()
+
+    @staticmethod
+    async def _serialize_payload(from_user_id: str, user_ids: List[str]) -> JsonDict:  # type: ignore[override]
+        return {"user_ids": user_ids}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, from_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        user_ids = content["user_ids"]
+
+        span = active_span()
+        if span:
+            span.set_tag("from_user_id", from_user_id)
+            span.set_tag("user_ids", f"{user_ids!r}")
+
+        await self.device_handler.notify_user_signature_update(from_user_id, user_ids)
+
+        return 200, {}
+
+
 class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
     """Ask master to resync the device list for multiple users from the same
     remote server by contacting their server.
@@ -211,5 +253,6 @@ class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
+    ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
     ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
     ReplicationUploadKeysForUserRestServlet(hs).register(http_server)

@@ -50,7 +50,10 @@ from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
 )
-from synapse.replication.http.devices import ReplicationNotifyDeviceUpdateRestServlet
+from synapse.replication.http.devices import (
+    ReplicationNotifyDeviceUpdateRestServlet,
+    ReplicationNotifyUserSignatureUpdateRestServlet,
+)
 from synapse.storage.databases.main.client_ips import DeviceLastConnectionInfo
 from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.databases.main.state_deltas import StateDelta
@@ -143,6 +146,9 @@ class DeviceWorkerHandler:
 
         self._notify_device_update_client = (
             ReplicationNotifyDeviceUpdateRestServlet.make_client(hs)
+        )
+        self._notify_user_signature_update_client = (
+            ReplicationNotifyUserSignatureUpdateRestServlet.make_client(hs)
         )
 
     async def check_device_registered(
@@ -830,6 +836,23 @@ class DeviceWorkerHandler:
             instance_name=random.choice(self._device_list_writers),
             user_id=user_id,
             device_ids=device_ids,
+        )
+
+    async def notify_user_signature_update(
+        self,
+        from_user_id: str,
+        user_ids: List[str],
+    ) -> None:
+        """Notify a device writer that a user have made new signatures of other users.
+
+        Args:
+            from_user_id: The Matrix ID of the user who's signatures have been updated.
+            user_ids: The Matrix IDs of the users that have changed.
+        """
+        await self._notify_user_signature_update_client(
+            instance_name=random.choice(self._device_list_writers),
+            from_user_id=from_user_id,
+            user_ids=user_ids,
         )
 
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000
