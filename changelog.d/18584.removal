@@ -1,0 +1,1 @@
+Remove `metrics` listener (serves metrics at `/metrics`) type in favor of `http` listener with `metrics` resource (serves metrics at `/_synapse/metrics`).
