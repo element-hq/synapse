@@ -306,6 +306,15 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "device_lists": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$"
+        ],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "typing": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -412,16 +421,17 @@ def add_worker_roles_to_shared_config(
     # streams
     instance_map = shared_config.setdefault("instance_map", {})
 
-    # This is a list of the stream_writers that there can be only one of. Events can be
-    # sharded, and therefore doesn't belong here.
-    singular_stream_writers = [
+    # This is a list of the stream_writers.
+    stream_writers = {
         "account_data",
+        "events",
+        "device_lists",
         "presence",
         "receipts",
         "to_device",
         "typing",
         "push_rules",
-    ]
+    }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
     # roles, check each.
@@ -434,25 +444,13 @@ def add_worker_roles_to_shared_config(
     if "event_persister" in worker_types_set:
         # Event persisters write to the events stream, so we need to update
         # the list of event stream writers
-        shared_config.setdefault("stream_writers", {}).setdefault("events", []).append(
-            worker_name
-        )
+        worker_types_set.add("events")
 
-        # Map of stream writer instance names to host/ports combos
-        if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
-            instance_map[worker_name] = {
-                "path": f"/run/worker.{worker_port}",
-            }
-        else:
-            instance_map[worker_name] = {
-                "host": "localhost",
-                "port": worker_port,
-            }
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
     for worker in worker_types_set:
-        if worker in singular_stream_writers:
+        if worker in stream_writers:
             shared_config.setdefault("stream_writers", {}).setdefault(
                 worker, []
             ).append(worker_name)
