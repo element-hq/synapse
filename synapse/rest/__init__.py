@@ -22,7 +22,7 @@ import logging
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
 from synapse.http.server import HttpServer, JsonResource
-from synapse.rest import admin
+from synapse.rest import admin, scim
 from synapse.rest.client import (
     account,
     account_data,
@@ -123,6 +123,10 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     rendezvous.register_servlets,
     auth_metadata.register_servlets,
 )
+
+if scim.HAS_SCIM2:
+    CLIENT_SERVLET_FUNCTIONS += (scim.register_scim_servlets,)
+
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
     "client": CLIENT_SERVLET_FUNCTIONS,
