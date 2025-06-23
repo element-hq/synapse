@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from prometheus_client import CollectorRegistry, Counter
+from prometheus_client import REGISTRY, CollectorRegistry, Counter
 
 
 class BlockMetrics:
@@ -80,7 +80,9 @@ class HomeserverMetricsManager:
     """
 
     def __init__(self) -> None:
-        self.metrics_collector_registry = CollectorRegistry(auto_describe=True)
+        # TODO: use `self.metrics_collector_registry = CollectorRegistry(auto_describe=True)`
+        # once we refactor our metrics endpoints to use the specified registry.
+        self.metrics_collector_registry = REGISTRY
 
         self.block_metrics = BlockMetrics(
             metrics_collector_registry=self.metrics_collector_registry,
