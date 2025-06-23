@@ -254,5 +254,8 @@ class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
-    ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
-    ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
+
+    # XXX: only register those on device writers
+    if hs.get_instance_name() in hs.config.worker.writers.device_lists:
+        ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
+        ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
