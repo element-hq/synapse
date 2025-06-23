@@ -12,7 +12,23 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+from typing import Protocol
+
 from prometheus_client import REGISTRY, CollectorRegistry, Counter
+
+from synapse.metrics import InFlightGauge
+
+
+# This is dynamically created in InFlightGauge.__init__.
+class BlockInFlightMetric(Protocol):
+    """
+    Sub-metrics used for the `InFlightGauge` for blocks.
+    """
+
+    real_time_max: float
+    """The longest observed duration of any single execution of this block, in seconds."""
+    real_time_sum: float
+    """The cumulative time spent executing this block across all calls, in seconds."""
 
 
 class BlockMetrics:
@@ -70,6 +86,15 @@ class BlockMetrics:
             registry=metrics_collector_registry,
         )
         """seconds spent waiting for a db connection, in this block"""
+
+        self.in_flight: InFlightGauge[BlockInFlightMetric] = InFlightGauge(
+            "synapse_util_metrics_block_in_flight",
+            "",
+            labels=["block_name"],
+            # Matches the fields in the `BlockInFlightMetric`
+            sub_metrics=["real_time_max", "real_time_sum"],
+        )
+        """Tracks the number of blocks currently active"""
 
 
 class HomeserverMetricsManager:

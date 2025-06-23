@@ -41,26 +41,13 @@ from synapse.logging.context import (
     LoggingContext,
     current_context,
 )
-from synapse.metrics import InFlightGauge
-from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
+from synapse.metrics.homeserver_metrics_manager import (
+    BlockInFlightMetric,
+    HomeserverMetricsManager,
+)
 from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
-
-
-# This is dynamically created in InFlightGauge.__init__.
-class _InFlightMetric(Protocol):
-    real_time_max: float
-    real_time_sum: float
-
-
-# Tracks the number of blocks currently active
-in_flight: InFlightGauge[_InFlightMetric] = InFlightGauge(
-    "synapse_util_metrics_block_in_flight",
-    "",
-    labels=["block_name"],
-    sub_metrics=["real_time_max", "real_time_sum"],
-)
 
 
 P = ParamSpec("P")
@@ -153,7 +140,9 @@ class Measure:
 
         self.start = self.clock.time()
         self._logging_context.__enter__()
-        in_flight.register((self.name,), self._update_in_flight)
+        self.metrics_manager.block_metrics.in_flight.register(
+            (self.name,), self._update_in_flight
+        )
 
         logger.debug("Entering block %s", self.name)
 
@@ -173,7 +162,9 @@ class Measure:
         duration = self.clock.time() - self.start
         usage = self.get_resource_usage()
 
-        in_flight.unregister((self.name,), self._update_in_flight)
+        self.metrics_manager.block_metrics.in_flight.unregister(
+            (self.name,), self._update_in_flight
+        )
         self._logging_context.__exit__(exc_type, exc_val, exc_tb)
 
         try:
@@ -206,7 +197,7 @@ class Measure:
         """
         return self._logging_context.get_resource_usage()
 
-    def _update_in_flight(self, metrics: _InFlightMetric) -> None:
+    def _update_in_flight(self, metrics: BlockInFlightMetric) -> None:
         """Gets called when processing in flight metrics"""
         assert self.start is not None
         duration = self.clock.time() - self.start
