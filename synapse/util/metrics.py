@@ -33,7 +33,7 @@ from typing import (
     TypeVar,
 )
 
-from prometheus_client import CollectorRegistry, Counter, Metric
+from prometheus_client import CollectorRegistry, Metric
 from typing_extensions import Concatenate, ParamSpec
 
 from synapse.logging.context import (
@@ -42,35 +42,10 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.metrics import InFlightGauge
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
-
-block_counter = Counter("synapse_util_metrics_block_count", "", ["block_name"])
-
-block_timer = Counter("synapse_util_metrics_block_time_seconds", "", ["block_name"])
-
-block_ru_utime = Counter(
-    "synapse_util_metrics_block_ru_utime_seconds", "", ["block_name"]
-)
-
-block_ru_stime = Counter(
-    "synapse_util_metrics_block_ru_stime_seconds", "", ["block_name"]
-)
-
-block_db_txn_count = Counter(
-    "synapse_util_metrics_block_db_txn_count", "", ["block_name"]
-)
-
-# seconds spent waiting for db txns, excluding scheduling time, in this block
-block_db_txn_duration = Counter(
-    "synapse_util_metrics_block_db_txn_duration_seconds", "", ["block_name"]
-)
-
-# seconds spent waiting for a db connection, in this block
-block_db_sched_duration = Counter(
-    "synapse_util_metrics_block_db_sched_duration_seconds", "", ["block_name"]
-)
 
 
 # This is dynamically created in InFlightGauge.__init__.
@@ -141,12 +116,15 @@ def measure_func(
 class Measure:
     __slots__ = [
         "clock",
+        "metrics_manager",
         "name",
         "_logging_context",
         "start",
     ]
 
-    def __init__(self, clock: Clock, name: str) -> None:
+    def __init__(
+        self, clock: Clock, name: str, metrics_manager: HomeserverMetricsManager
+    ) -> None:
         """
         Args:
             clock: An object with a "time()" method, which returns the current
@@ -154,6 +132,7 @@ class Measure:
             name: The name of the metric to report.
         """
         self.clock = clock
+        self.metrics_manager = metrics_manager
         self.name = name
         curr_context = current_context()
         if not curr_context:
@@ -198,13 +177,25 @@ class Measure:
         self._logging_context.__exit__(exc_type, exc_val, exc_tb)
 
         try:
-            block_counter.labels(self.name).inc()
-            block_timer.labels(self.name).inc(duration)
-            block_ru_utime.labels(self.name).inc(usage.ru_utime)
-            block_ru_stime.labels(self.name).inc(usage.ru_stime)
-            block_db_txn_count.labels(self.name).inc(usage.db_txn_count)
-            block_db_txn_duration.labels(self.name).inc(usage.db_txn_duration_sec)
-            block_db_sched_duration.labels(self.name).inc(usage.db_sched_duration_sec)
+            self.metrics_manager.block_metrics.block_counter.labels(self.name).inc()
+            self.metrics_manager.block_metrics.block_timer.labels(self.name).inc(
+                duration
+            )
+            self.metrics_manager.block_metrics.block_ru_utime.labels(self.name).inc(
+                usage.ru_utime
+            )
+            self.metrics_manager.block_metrics.block_ru_stime.labels(self.name).inc(
+                usage.ru_stime
+            )
+            self.metrics_manager.block_metrics.block_db_txn_count.labels(self.name).inc(
+                usage.db_txn_count
+            )
+            self.metrics_manager.block_metrics.block_db_txn_duration.labels(
+                self.name
+            ).inc(usage.db_txn_duration_sec)
+            self.metrics_manager.block_metrics.block_db_sched_duration.labels(
+                self.name
+            ).inc(usage.db_sched_duration_sec)
         except ValueError:
             logger.warning("Failed to save metrics! Usage: %s", usage)
 

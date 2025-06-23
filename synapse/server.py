@@ -129,6 +129,7 @@ from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
 from synapse.notifier import Notifier, ReplicationNotifier
@@ -309,6 +310,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+
+        self.metrics_manager = HomeserverMetricsManager()
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
