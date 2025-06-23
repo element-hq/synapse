@@ -1451,9 +1451,6 @@ class E2eKeysHandler:
             A tuple of the retrieved key content, the key's ID and the matching VerifyKey.
             If the key cannot be retrieved, all values in the tuple will instead be None.
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         try:
             remote_result = await self.federation.query_user_devices(
                 user.domain, user.to_string()
