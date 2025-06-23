@@ -108,6 +108,9 @@ SLIDING_SYNC_RELEVANT_STATE_SET = (
     (EventTypes.Tombstone, ""),
 )
 
+# An arbitrarily large number
+MAX_EVENTS = 1000000
+
 
 @attr.s(slots=True, auto_attribs=True)
 class DeltaState:
@@ -405,7 +408,10 @@ class PersistEventsStore:
                     sender_level = pl_event.content.get("users", {}).get(event.sender)
                     if sender_level is None:
                         sender_level = pl_event.content.get("users_default", 0)
-                    redact_level = pl_event.content.get("redact", 50)
+
+                    redact_level = pl_event.content.get("redact")
+                    if not redact_level:
+                        redact_level = pl_event.content.get("events_default", 0)
 
                     room_redaction_level = pl_event.content.get("events", {}).get(
                         "m.room.redaction"
@@ -417,14 +423,7 @@ class PersistEventsStore:
                     if sender_level > redact_level:
                         ids_to_redact = (
                             await self.store.get_events_sent_by_user_in_room(
-                                event.state_key,
-                                event.room_id,
-                                limit=1000000,  # arbitrarily large number
-                                filter=[
-                                    EventTypes.Member,
-                                    EventTypes.Message,
-                                    EventTypes.Encrypted,
-                                ],
+                                event.state_key, event.room_id, limit=MAX_EVENTS
                             )
                         )
                         if not ids_to_redact:

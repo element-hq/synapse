@@ -2071,75 +2071,59 @@ class FederationEventHandler:
         if not self._config.experimental.msc4293_enabled:
             return
         # Use already calculated auth events to determine if the event should be redacted due to kick/ban
-        pl_event = None
-        for auth_e in current_auth_events:
-            if auth_e.type == EventTypes.PowerLevels:
-                pl_event = auth_e
+        state_map = {}
+        for auth_event in current_auth_events:
+            state_map[(auth_event.type, auth_event.state_key)] = auth_event
+
+        for auth_event in current_auth_events:
+            if auth_event.get("state_key") is None:
+                continue
+            if (
+                auth_event.type != EventTypes.Member
+                or auth_event.state_key != event.sender
+            ):
+                continue
+            if auth_event.membership not in [Membership.LEAVE, Membership.BAN]:
+                continue
+            # self-bans currently are not authorized so we don't check for that
+            # case
+            if (
+                auth_event.membership == Membership.LEAVE
+                and auth_event.sender == auth_event.state_key
+            ):
+                continue
+            # we have a ban or kick for this sender,
+            # check for redaction flag and apply if found
+            autoredact = auth_event.content.get(
+                "org.matrix.msc4293.redact_events", False
+            )
+            if not autoredact or not isinstance(autoredact, bool):
+                continue
+
+            # check that the sender of the kick/ban can redact
+            room_version_obj = KNOWN_ROOM_VERSIONS[room_version]
+            if event_auth.check_redaction(room_version_obj, event, state_map):
+                # copy through the redacting event
+                event.unsigned["redacted_because"] = auth_event.get_dict()
+                await self._store.db_pool.simple_upsert(
+                    table="redactions",
+                    keyvalues={
+                        "event_id": auth_event.event_id,
+                        "redacts": event.event_id,
+                    },
+                    values={"received_ts": self._clock.time_msec()},
+                    insertion_values={
+                        "event_id": auth_event.event_id,
+                        "redacts": event.event_id,
+                        "received_ts": self._clock.time_msec(),
+                    },
+                )
+                await self._store.db_pool.runInteraction(
+                    "invalidate cache",
+                    self._store.invalidate_get_event_cache_after_txn,
+                    event.event_id,
+                )
                 break
-        # this should never happen but just in case
-        if pl_event is None:
-            return
-        if event.type in [EventTypes.Message, EventTypes.Encrypted, EventTypes.Member]:
-            for auth_event in current_auth_events:
-                if auth_event.get("state_key") is None:
-                    continue
-                if (
-                    auth_event.type != EventTypes.Member
-                    or auth_event.state_key != event.sender
-                ):
-                    continue
-                if auth_event.membership not in [Membership.LEAVE, Membership.BAN]:
-                    continue
-                # self-bans currently are not authorized so we don't check for that
-                # case
-                if (
-                    auth_event.membership == Membership.LEAVE
-                    and auth_event.sender == auth_event.state_key
-                ):
-                    continue
-                # we have a ban or kick for this sender,
-                # check for redaction flag and apply if found
-                autoredact = auth_event.content.get(
-                    "org.matrix.msc4293.redact_events", False
-                )
-                if not autoredact or not isinstance(autoredact, bool):
-                    continue
-
-                # check that the sender of the kick/ban can redact
-                sender_level = pl_event.content.get("users", {}).get(auth_event.sender)
-                if sender_level is None:
-                    sender_level = pl_event.content.get("users_default", 0)
-
-                redact_level = pl_event.content.get("redact", 50)
-                room_redaction_level = pl_event.content.get("events", {}).get(
-                    "m.room.redaction"
-                )
-                if room_redaction_level:
-                    if sender_level < room_redaction_level:
-                        continue
-
-                if sender_level > redact_level:
-                    # copy through the redacting event
-                    event.unsigned["redacted_because"] = auth_event.get_dict()
-                    await self._store.db_pool.simple_upsert(
-                        table="redactions",
-                        keyvalues={
-                            "event_id": auth_event.event_id,
-                            "redacts": event.event_id,
-                        },
-                        values={"received_ts": self._clock.time_msec()},
-                        insertion_values={
-                            "event_id": auth_event.event_id,
-                            "redacts": event.event_id,
-                            "received_ts": self._clock.time_msec(),
-                        },
-                    )
-                    await self._store.db_pool.runInteraction(
-                        "invalidate cache",
-                        self._store.invalidate_get_event_cache_after_txn,
-                        event.event_id,
-                    )
-                    break
 
     async def _load_or_fetch_auth_events_for_event(
         self, destination: Optional[str], event: EventBase
