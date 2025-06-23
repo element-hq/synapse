@@ -151,6 +151,12 @@ class DeviceWorkerHandler:
             ReplicationNotifyUserSignatureUpdateRestServlet.make_client(hs)
         )
 
+        if hs.get_instance_name() not in self._device_list_writers:
+            hs.get_federation_registry().register_instances_for_edu(
+                EduTypes.DEVICE_LIST_UPDATE,
+                self._device_list_writers,
+            )
+
     async def check_device_registered(
         self,
         user_id: str,
