@@ -164,10 +164,7 @@ $ poetry cache clear --all .
 # including the wheel artifacts which is not covered by the above command
 # (see https://github.com/python-poetry/poetry/issues/10304)
 #
-# This is necessary in order to rebuild or fetch new wheels. For example, if you update
-# the `icu` library in on your system, you will need to rebuild the PyICU Python package
-# in order to incorporate the correct dynamically linked library locations otherwise you
-# will run into errors like: `ImportError: libicui18n.so.75: cannot open shared object file: No such file or directory`
+# This is necessary in order to rebuild or fetch new wheels.
 $ rm -rf $(poetry config cache-dir)
 ```
 
