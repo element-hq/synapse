@@ -32,6 +32,10 @@ class BlockInFlightMetric(Protocol):
 
 
 class BlockMetrics:
+    """
+    Metrics to see the number of and how much time is spend in various blocks of code.
+    """
+
     def __init__(
         self,
         metrics_collector_registry: CollectorRegistry,
@@ -49,6 +53,7 @@ class BlockMetrics:
             ["block_name"],
             registry=metrics_collector_registry,
         )
+        """The cumulative time spent executing this block across all calls, in seconds."""
 
         self.block_ru_utime = Counter(
             "synapse_util_metrics_block_ru_utime_seconds",
@@ -56,6 +61,7 @@ class BlockMetrics:
             ["block_name"],
             registry=metrics_collector_registry,
         )
+        """Resource usage: user CPU time in seconds used in this block"""
 
         self.block_ru_stime = Counter(
             "synapse_util_metrics_block_ru_stime_seconds",
@@ -63,6 +69,7 @@ class BlockMetrics:
             ["block_name"],
             registry=metrics_collector_registry,
         )
+        """Resource usage: system CPU time in seconds used in this block"""
 
         self.block_db_txn_count = Counter(
             "synapse_util_metrics_block_db_txn_count",
@@ -70,6 +77,7 @@ class BlockMetrics:
             ["block_name"],
             registry=metrics_collector_registry,
         )
+        """Number of database transactions completed in this block"""
 
         self.block_db_txn_duration = Counter(
             "synapse_util_metrics_block_db_txn_duration_seconds",
@@ -77,7 +85,7 @@ class BlockMetrics:
             ["block_name"],
             registry=metrics_collector_registry,
         )
-        """seconds spent waiting for db txns, excluding scheduling time, in this block"""
+        """Seconds spent waiting for database txns, excluding scheduling time, in this block"""
 
         self.block_db_sched_duration = Counter(
             "synapse_util_metrics_block_db_sched_duration_seconds",
@@ -85,7 +93,7 @@ class BlockMetrics:
             ["block_name"],
             registry=metrics_collector_registry,
         )
-        """seconds spent waiting for a db connection, in this block"""
+        """Seconds spent waiting for a db connection, in this block"""
 
         self.in_flight: InFlightGauge[BlockInFlightMetric] = InFlightGauge(
             "synapse_util_metrics_block_in_flight",
@@ -94,7 +102,7 @@ class BlockMetrics:
             # Matches the fields in the `BlockInFlightMetric`
             sub_metrics=["real_time_max", "real_time_sum"],
         )
-        """Tracks the number of blocks currently active"""
+        """Tracks the number of blocks currently running and their real time usage."""
 
 
 class HomeserverMetricsManager:
