@@ -96,7 +96,7 @@ def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
     if hasattr(prometheus_client.metrics, "_use_created"):
         prometheus_client.metrics._use_created = new_value
     else:
-        logger.error(
+        raise Exception(
             "Can't disable `_created` metrics in prometheus_client (brittle hack broken?)"
         )
 
