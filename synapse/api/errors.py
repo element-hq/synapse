@@ -306,6 +306,20 @@ class UserDeactivatedError(SynapseError):
         )
 
 
+class UserLockedError(SynapseError):
+    """The error returned to the client when the user attempted to access an
+    authenticated endpoint, but the account has been locked.
+    """
+
+    def __init__(self):
+        super().__init__(
+            code=HTTPStatus.UNAUTHORIZED,
+            msg="User account has been locked",
+            errcode=Codes.USER_LOCKED,
+            additional_fields={"soft_logout": True},
+        )
+
+
 class FederationDeniedError(SynapseError):
     """An error raised when the server tries to federate with a server which
     is not on its federation whitelist.
