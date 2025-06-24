@@ -25,6 +25,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Union,
@@ -45,6 +46,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import start_active_span, trace
+from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.storage.databases.main.state import (
     ROOM_UNKNOWN_SENTINEL,
     Sentinel as StateSentinel,
@@ -105,10 +107,6 @@ class SlidingSyncInterestedRooms:
         lists: A mapping from list name to the list result for the response
         relevant_room_map: A map from rooms that match the sync request to
             their room sync config.
-        relevant_rooms_to_send_map: Subset of `relevant_room_map` that
-            includes the rooms that *may* have relevant updates. Rooms not
-            in this map will definitely not have room updates (though
-            extensions may have updates in these rooms).
         newly_joined_rooms: The set of rooms that were joined in the token range
             and the user is still joined to at the end of this range.
         newly_left_rooms: The set of rooms that we left in the token range
@@ -118,7 +116,6 @@ class SlidingSyncInterestedRooms:
 
     lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     relevant_room_map: Mapping[str, RoomSyncConfig]
-    relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig]
     all_rooms: Set[str]
     room_membership_for_user_map: Mapping[str, RoomsForUserType]
 
@@ -131,7 +128,6 @@ class SlidingSyncInterestedRooms:
         return SlidingSyncInterestedRooms(
             lists={},
             relevant_room_map={},
-            relevant_rooms_to_send_map={},
             all_rooms=set(),
             room_membership_for_user_map={},
             newly_joined_rooms=set(),
@@ -608,16 +604,9 @@ class SlidingSyncRoomLists:
 
                     relevant_room_map[room_id] = room_sync_config
 
-        # Filtered subset of `relevant_room_map` for rooms that may have updates
-        # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
-        )
-
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
-            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
             all_rooms=all_rooms,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
@@ -796,16 +785,9 @@ class SlidingSyncRoomLists:
 
                     relevant_room_map[room_id] = room_sync_config
 
-        # Filtered subset of `relevant_room_map` for rooms that may have updates
-        # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
-            previous_connection_state, from_token, relevant_room_map
-        )
-
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
-            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
             all_rooms=all_rooms,
             room_membership_for_user_map=room_membership_for_user_map,
             newly_joined_rooms=newly_joined_room_ids,
@@ -813,18 +795,21 @@ class SlidingSyncRoomLists:
             dm_room_ids=dm_room_ids,
         )
 
-    async def _filter_relevant_rooms_to_send(
+    def filter_relevant_rooms_to_send(
         self,
+        user_id: UserID,
         previous_connection_state: PerConnectionState,
         from_token: Optional[StreamToken],
-        relevant_room_map: Dict[str, RoomSyncConfig],
-    ) -> Dict[str, RoomSyncConfig]:
+        to_token: StreamToken,
+        relevant_room_map: Mapping[str, RoomSyncConfig],
+        receipts: Mapping[str, Sequence[ReceiptInRoom]],
+    ) -> Mapping[str, RoomSyncConfig]:
         """Filters the `relevant_room_map` down to those rooms that may have
         updates we need to fetch and return."""
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map: Dict[str, RoomSyncConfig] = relevant_room_map
+        relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig] = relevant_room_map
         if relevant_room_map:
             with start_active_span("filter_relevant_rooms_to_send"):
                 if from_token:
@@ -875,6 +860,11 @@ class SlidingSyncRoomLists:
                         )
                     )
                     rooms_should_send.update(rooms_that_have_updates)
+
+                    # Any rooms with receipts should be considered for sending as their
+                    # notification counts may have changed.
+                    rooms_should_send.update(receipts.keys())
+
                     relevant_rooms_to_send_map = {
                         room_id: room_sync_config
                         for room_id, room_sync_config in relevant_room_map.items()
