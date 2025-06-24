@@ -69,8 +69,8 @@ HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 class CombinedRegistryProxy:
     """
-    Wrapper around the global Prometheus metric registry so we can also include our
-    homeserver-specific metrics.
+    Wrapper that combines multiple Prometheus `CollectorRegistry` instances, presenting
+    them as a single unified registry when collecting metrics.
 
     Usage:
     ```python
@@ -78,6 +78,9 @@ class CombinedRegistryProxy:
         homeserver_metrics_collector_registry,
         prometheus_client.REGISTRY
     ])
+    # Cheeky cast but matches the signature of a `CollectorRegistry` instance enough
+    # for it to be usable in the contexts in which we use it.
+    # TODO Do something nicer about this.
     registry = cast(CollectorRegistry, combined_registry_proxy)
     ```
     """
