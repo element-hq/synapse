@@ -54,8 +54,11 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class HasClock(Protocol):
+class HasClockAndMetricsManager(Protocol):
+    # Used to measure functions
     clock: Clock
+    # Used to namespace the metrics to the given homeserver
+    metrics_manager: HomeserverMetricsManager
 
 
 def measure_func(
@@ -81,12 +84,14 @@ def measure_func(
     """
 
     def wrapper(
-        func: Callable[Concatenate[HasClock, P], Awaitable[R]],
+        func: Callable[Concatenate[HasClockAndMetricsManager, P], Awaitable[R]],
     ) -> Callable[P, Awaitable[R]]:
         block_name = func.__name__ if name is None else name
 
         @wraps(func)
-        async def measured_func(self: HasClock, *args: P.args, **kwargs: P.kwargs) -> R:
+        async def measured_func(
+            self: HasClockAndMetricsManager, *args: P.args, **kwargs: P.kwargs
+        ) -> R:
             with Measure(self.clock, self.metrics_manager, block_name):
                 r = await func(self, *args, **kwargs)
             return r
