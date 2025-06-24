@@ -60,7 +60,7 @@ from synapse.http.server import (
     StaticResource,
 )
 from synapse.logging.context import LoggingContext
-from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
+from synapse.metrics import METRICS_PREFIX, MetricsResource
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
 from synapse.rest.health import HealthResource
@@ -252,7 +252,9 @@ class SynapseHomeServer(HomeServer):
             resources[SERVER_KEY_PREFIX] = KeyResource(self)
 
         if name == "metrics" and self.config.metrics.enable_metrics:
-            metrics_resource: Resource = MetricsResource(RegistryProxy)
+            metrics_resource: Resource = MetricsResource(
+                metrics_manager=self.get_metrics_manager()
+            )
             if compress:
                 metrics_resource = gz_wrap(metrics_resource)
             resources[METRICS_PREFIX] = metrics_resource
@@ -296,6 +298,7 @@ class SynapseHomeServer(HomeServer):
                         _base.listen_metrics(
                             listener.bind_addresses,
                             listener.port,
+                            self.get_metrics_manager(),
                         )
                     else:
                         raise ConfigError(

@@ -30,6 +30,7 @@ from typing import (
     Dict,
     Generic,
     Iterable,
+    List,
     Mapping,
     Optional,
     Set,
@@ -37,7 +38,6 @@ from typing import (
     Type,
     TypeVar,
     Union,
-    cast,
 )
 
 import attr
@@ -67,19 +67,31 @@ all_gauges: Dict[str, Collector] = {}
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 
-class _RegistryProxy:
-    @staticmethod
-    def collect() -> Iterable[Metric]:
-        for metric in REGISTRY.collect():
-            if not metric.name.startswith("__"):
+class CombinedRegistryProxy:
+    """
+    Wrapper around the global Prometheus metric registry so we can also include our
+    homeserver-specific metrics.
+
+    Usage:
+    ```python
+    combined_registry_proxy = CombinedRegistryProxy([
+        homeserver_metrics_collector_registry,
+        prometheus_client.REGISTRY
+    ])
+    registry = cast(CollectorRegistry, combined_registry_proxy)
+    ```
+    """
+
+    def __init__(
+        self,
+        registry_list: List[CollectorRegistry],
+    ):
+        self.registry_list = registry_list
+
+    def collect(self) -> Iterable[Metric]:
+        for registry in self.registry_list:
+            for metric in registry.collect():
                 yield metric
-
-
-# A little bit nasty, but collect() above is static so a Protocol doesn't work.
-# _RegistryProxy matches the signature of a CollectorRegistry instance enough
-# for it to be usable in the contexts in which we use it.
-# TODO Do something nicer about this.
-RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
 
 
 @attr.s(slots=True, hash=True, auto_attribs=True)

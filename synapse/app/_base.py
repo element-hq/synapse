@@ -76,6 +76,7 @@ from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -283,18 +284,38 @@ def register_start(
     reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
 
 
-def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
+def listen_metrics(
+    bind_addresses: StrCollection, port: int, metrics_manager: HomeserverMetricsManager
+) -> None:
     """
     Start Prometheus metrics server.
     """
-    from prometheus_client import start_http_server as start_http_server_prometheus
+    from prometheus_client import (
+        REGISTRY,
+        CollectorRegistry,
+        start_http_server as start_http_server_prometheus,
+    )
 
-    from synapse.metrics import RegistryProxy
+    from synapse.metrics import CombinedRegistryProxy
+
+    combined_registry_proxy = CombinedRegistryProxy(
+        [
+            # TODO: Remove `REGISTRY` once all metrics have been migrated to the
+            # homeserver specific metrics collector registry, see
+            # https://github.com/element-hq/synapse/issues/18592
+            REGISTRY,
+            metrics_manager.metrics_collector_registry,
+        ]
+    )
+    # Cheeky cast but matches the signature of a `CollectorRegistry` instance enough
+    # for it to be usable in the contexts in which we use it.
+    # TODO Do something nicer about this.
+    registry = cast(CollectorRegistry, combined_registry_proxy)
 
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
         _set_prometheus_client_use_created_metrics(False)
-        start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
+        start_http_server_prometheus(port, addr=host, registry=registry)
 
 
 def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:

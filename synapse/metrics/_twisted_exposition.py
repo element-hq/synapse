@@ -20,10 +20,15 @@
 #
 #
 
-from prometheus_client import REGISTRY, CollectorRegistry, generate_latest
+from typing import TYPE_CHECKING
+
+from prometheus_client import REGISTRY, generate_latest
 
 from twisted.web.resource import Resource
 from twisted.web.server import Request
+
+if TYPE_CHECKING:
+    from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
@@ -35,11 +40,20 @@ class MetricsResource(Resource):
 
     isLeaf = True
 
-    def __init__(self, registry: CollectorRegistry = REGISTRY):
-        self.registry = registry
+    def __init__(self, metrics_manager: "HomeserverMetricsManager"):
+        self.metrics_manager = metrics_manager
 
     def render_GET(self, request: Request) -> bytes:
         request.setHeader(b"Content-Type", CONTENT_TYPE_LATEST.encode("ascii"))
-        response = generate_latest(self.registry)
+        # While we're in the middle of the refactor of metrics in Synapse, we need to
+        # merge the metrics from the global registry and the homeserver specific metrics
+        # collector registry.
+        #
+        # TODO: Remove `generate_latest(REGISTRY)` once all homeserver metrics have been
+        # migrated to the homeserver specific metrics collector registry, see
+        # https://github.com/element-hq/synapse/issues/18592
+        response = generate_latest(REGISTRY) + generate_latest(
+            self.metrics_manager.metrics_collector_registry
+        )
         request.setHeader(b"Content-Length", str(len(response)))
         return response

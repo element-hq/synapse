@@ -14,7 +14,7 @@
 
 from typing import Protocol
 
-from prometheus_client import REGISTRY, CollectorRegistry, Counter
+from prometheus_client import CollectorRegistry, Counter
 
 from synapse.metrics import InFlightGauge
 
@@ -113,9 +113,7 @@ class HomeserverMetricsManager:
     """
 
     def __init__(self) -> None:
-        # TODO: use `self.metrics_collector_registry = CollectorRegistry(auto_describe=True)`
-        # once we refactor our metrics endpoints to use the specified registry.
-        self.metrics_collector_registry = REGISTRY
+        self.metrics_collector_registry = CollectorRegistry(auto_describe=True)
 
         self.block_metrics = BlockMetrics(
             metrics_collector_registry=self.metrics_collector_registry,
