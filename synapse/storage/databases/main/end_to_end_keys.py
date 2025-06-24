@@ -120,6 +120,20 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             self.hs.config.federation.allow_device_name_lookup_over_federation
         )
 
+        self._cross_signing_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="e2e_cross_signing_keys",
+            instance_name=self._instance_name,
+            tables=[
+                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
+            ],
+            sequence_name="e2e_cross_signing_keys_sequence",
+            # No one reads the stream positions, so we're allowed to have an empty list of writers
+            writers=[],
+        )
+
     def process_replication_rows(
         self,
         stream_name: str,
@@ -1587,29 +1601,6 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
         )
 
-
-class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-
-        self._cross_signing_id_gen = MultiWriterIdGenerator(
-            db_conn=db_conn,
-            db=database,
-            notifier=hs.get_replication_notifier(),
-            stream_name="e2e_cross_signing_keys",
-            instance_name=self._instance_name,
-            tables=[
-                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
-            ],
-            sequence_name="e2e_cross_signing_keys_sequence",
-            writers=["master"],
-        )
-
     async def set_e2e_device_keys(
         self, user_id: str, device_id: str, time_now: int, device_keys: JsonDict
     ) -> bool:
@@ -1801,3 +1792,13 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
             ],
             desc="add_e2e_signing_key",
         )
+
+
+class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)

@@ -1450,9 +1450,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if keys:
             device_keys = keys.get("device_keys", None)
             if device_keys:
-                # Type ignore - this function is defined on EndToEndKeyStore which we do
-                # have access to due to hs.get_datastore() "magic"
-                self._set_e2e_device_keys_txn(  # type: ignore[attr-defined]
+                self._set_e2e_device_keys_txn(
                     txn, user_id, device_id, time, device_keys
                 )
 
