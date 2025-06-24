@@ -79,6 +79,7 @@ class ApplicationServicesHandler:
         self.scheduler = hs.get_application_service_scheduler()
         self.started_scheduler = False
         self.clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
         self.notify_appservices = hs.config.worker.should_notify_appservices
         self.event_sources = hs.get_event_sources()
         self._msc2409_to_device_messages_enabled = (
@@ -120,7 +121,7 @@ class ApplicationServicesHandler:
 
     @wrap_as_background_process("notify_interested_services")
     async def _notify_interested_services(self, max_token: RoomStreamToken) -> None:
-        with Measure(self.clock, "notify_interested_services"):
+        with Measure(self.clock, self.metrics_manager, "notify_interested_services"):
             self.is_processing = True
             try:
                 upper_bound = -1
@@ -329,7 +330,9 @@ class ApplicationServicesHandler:
         users: Collection[Union[str, UserID]],
     ) -> None:
         logger.debug("Checking interested services for %s", stream_key)
-        with Measure(self.clock, "notify_interested_services_ephemeral"):
+        with Measure(
+            self.clock, self.metrics_manager, "notify_interested_services_ephemeral"
+        ):
             for service in services:
                 if stream_key == StreamKeyType.TYPING:
                     # Note that we don't persist the token (via set_appservice_stream_type_pos)

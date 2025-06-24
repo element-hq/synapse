@@ -80,6 +80,7 @@ class ReplicationStreamer:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
         self.notifier = hs.get_notifier()
         self._instance_name = hs.get_instance_name()
 
@@ -155,7 +156,9 @@ class ReplicationStreamer:
             while self.pending_updates:
                 self.pending_updates = False
 
-                with Measure(self.clock, "repl.stream.get_updates"):
+                with Measure(
+                    self.clock, self.metrics_manager, "repl.stream.get_updates"
+                ):
                     all_streams = self.streams
 
                     if self._replication_torture_level is not None:

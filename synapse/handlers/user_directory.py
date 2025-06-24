@@ -104,6 +104,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         self._storage_controllers = hs.get_storage_controllers()
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
         self.notifier = hs.get_notifier()
         self.is_mine_id = hs.is_mine_id
         self.update_user_directory = hs.config.worker.should_update_user_directory
@@ -237,7 +238,7 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "user_dir_delta"):
+            with Measure(self.clock, self.metrics_manager, "user_dir_delta"):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
                 if self.pos == room_max_stream_ordering:
                     return

@@ -80,6 +80,7 @@ class ReplicationSendEventRestServlet(ReplicationEndpoint):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
@@ -121,7 +122,7 @@ class ReplicationSendEventRestServlet(ReplicationEndpoint):
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, event_id: str
     ) -> Tuple[int, JsonDict]:
-        with Measure(self.clock, "repl_send_event_parse"):
+        with Measure(self.clock, self.metrics_manager, "repl_send_event_parse"):
             event_dict = content["event"]
             room_ver = KNOWN_ROOM_VERSIONS[content["room_version"]]
             internal_metadata = content["internal_metadata"]

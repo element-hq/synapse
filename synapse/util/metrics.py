@@ -64,7 +64,7 @@ def measure_func(
     """Decorate an async method with a `Measure` context manager.
 
     The Measure is created using `self.clock`; it should only be used to decorate
-    methods in classes defining an instance-level `clock` attribute.
+    methods in classes defining an instance-level `clock` and `metrics_manager` attribute.
 
     Usage:
 
@@ -87,7 +87,7 @@ def measure_func(
 
         @wraps(func)
         async def measured_func(self: HasClock, *args: P.args, **kwargs: P.kwargs) -> R:
-            with Measure(self.clock, block_name):
+            with Measure(self.clock, self.metrics_manager, block_name):
                 r = await func(self, *args, **kwargs)
             return r
 
@@ -110,7 +110,10 @@ class Measure:
     ]
 
     def __init__(
-        self, clock: Clock, name: str, metrics_manager: HomeserverMetricsManager
+        self,
+        clock: Clock,
+        metrics_manager: HomeserverMetricsManager,
+        name: str,
     ) -> None:
         """
         Args:

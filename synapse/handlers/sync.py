@@ -337,6 +337,7 @@ class SyncHandler:
         self._push_rules_handler = hs.get_push_rules_handler()
         self.event_sources = hs.get_event_sources()
         self.clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
         self.state = hs.get_state_handler()
         self.auth_blocking = hs.get_auth_blocking()
         self._storage_controllers = hs.get_storage_controllers()
@@ -710,7 +711,7 @@ class SyncHandler:
 
         sync_config = sync_result_builder.sync_config
 
-        with Measure(self.clock, "ephemeral_by_room"):
+        with Measure(self.clock, self.metrics_manager, "ephemeral_by_room"):
             typing_key = since_token.typing_key if since_token else 0
 
             room_ids = sync_result_builder.joined_room_ids
@@ -783,7 +784,7 @@ class SyncHandler:
                 and current token to send down to clients.
             newly_joined_room
         """
-        with Measure(self.clock, "load_filtered_recents"):
+        with Measure(self.clock, self.metrics_manager, "load_filtered_recents"):
             timeline_limit = sync_config.filter_collection.timeline_limit()
             block_all_timeline = (
                 sync_config.filter_collection.blocks_all_room_timeline()
@@ -1174,7 +1175,7 @@ class SyncHandler:
         # updates even if they occurred logically before the previous event.
         # TODO(mjark) Check for new redactions in the state events.
 
-        with Measure(self.clock, "compute_state_delta"):
+        with Measure(self.clock, self.metrics_manager, "compute_state_delta"):
             # The memberships needed for events in the timeline.
             # Only calculated when `lazy_load_members` is on.
             members_to_fetch: Optional[Set[str]] = None
@@ -1791,7 +1792,7 @@ class SyncHandler:
             # the DB.
             return RoomNotifCounts.empty()
 
-        with Measure(self.clock, "unread_notifs_for_room_id"):
+        with Measure(self.clock, self.metrics_manager, "unread_notifs_for_room_id"):
             return await self.store.get_unread_event_push_actions_by_room_for_user(
                 room_id,
                 sync_config.user.to_string(),

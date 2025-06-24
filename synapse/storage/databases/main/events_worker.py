@@ -226,6 +226,7 @@ class EventsWorkerStore(SQLBaseStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+        self.metrics_manager = hs.metrics_manager
 
         self._stream_id_gen: MultiWriterIdGenerator
         self._backfill_id_gen: MultiWriterIdGenerator
@@ -1233,7 +1234,7 @@ class EventsWorkerStore(SQLBaseStore):
                 to event row. Note that it may well contain additional events that
                 were not part of this request.
         """
-        with Measure(self._clock, "_fetch_event_list"):
+        with Measure(self._clock, self.metrics_manager, "_fetch_event_list"):
             try:
                 events_to_fetch = {
                     event_id for events, _ in event_list for event_id in events

@@ -100,6 +100,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+        self.metrics_manager = hs.metrics_manager
 
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 
@@ -983,7 +984,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         `_get_user_ids_from_membership_event_ids` for any uncached events.
         """
 
-        with Measure(self._clock, "get_joined_user_ids_from_state"):
+        with Measure(
+            self._clock, self.metrics_manager, "get_joined_user_ids_from_state"
+        ):
             users_in_room = set()
             member_event_ids = [
                 e_id for key, e_id in state.items() if key[0] == EventTypes.Member

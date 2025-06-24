@@ -79,6 +79,7 @@ class ReplicationDataHandler:
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
         self._clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
         self._streams = hs.get_replication_streams()
         self._instance_name = hs.get_instance_name()
         self._typing_handler = hs.get_typing_handler()
@@ -342,7 +343,9 @@ class ReplicationDataHandler:
         waiting_list.add((position, deferred))
 
         # We measure here to get in flight counts and average waiting time.
-        with Measure(self._clock, "repl.wait_for_stream_position"):
+        with Measure(
+            self._clock, self.metrics_manager, "repl.wait_for_stream_position"
+        ):
             logger.info(
                 "Waiting for repl stream %r to reach %s (%s); currently at: %s",
                 stream_name,

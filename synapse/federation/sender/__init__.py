@@ -378,6 +378,7 @@ class FederationSender(AbstractFederationSender):
         self._storage_controllers = hs.get_storage_controllers()
 
         self.clock = hs.get_clock()
+        self.metrics_manager = hs.metrics_manager
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
 
@@ -657,7 +658,9 @@ class FederationSender(AbstractFederationSender):
                     logger.debug(
                         "Handling %i events in room %s", len(events), events[0].room_id
                     )
-                    with Measure(self.clock, "handle_room_events"):
+                    with Measure(
+                        self.clock, self.metrics_manager, "handle_room_events"
+                    ):
                         for event in events:
                             await handle_event(event)
 
