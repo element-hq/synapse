@@ -72,11 +72,11 @@ class E2eKeysHandler:
         self.clock = hs.get_clock()
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._task_scheduler = hs.get_task_scheduler()
+        self._device_lists_writers = hs.config.worker.writers.device_lists
 
         federation_registry = hs.get_federation_registry()
 
-        is_master = hs.config.worker.worker_app is None
-        if is_master:
+        if hs.get_instance_name() in self._device_lists_writers:
             edu_updater = SigningKeyEduUpdater(hs)
 
             # Only register this edu handler on master as it requires writing
@@ -90,6 +90,15 @@ class E2eKeysHandler:
             federation_registry.register_edu_handler(
                 EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
                 edu_updater.incoming_signing_key_update,
+            )
+        else:
+            federation_registry.register_instances_for_edu(
+                EduTypes.SIGNING_KEY_UPDATE,
+                self._device_lists_writers,
+            )
+            federation_registry.register_instances_for_edu(
+                EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
+                self._device_lists_writers,
             )
 
         # doesn't really work as part of the generic query API, because the
