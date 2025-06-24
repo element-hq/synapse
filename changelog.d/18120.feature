@@ -1,1 +1,0 @@
-Add support for the [MSC4260 user report API](https://github.com/matrix-org/matrix-spec-proposals/pull/4260).
