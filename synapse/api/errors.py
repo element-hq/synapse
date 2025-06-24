@@ -311,7 +311,7 @@ class UserLockedError(SynapseError):
     authenticated endpoint, but the account has been locked.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             code=HTTPStatus.UNAUTHORIZED,
             msg="User account has been locked",
