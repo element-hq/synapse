@@ -66,8 +66,9 @@ def measure_func(
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Decorate an async method with a `Measure` context manager.
 
-    The Measure is created using `self.clock`; it should only be used to decorate
-    methods in classes defining an instance-level `clock` and `metrics_manager` attribute.
+    The Measure is created using `self.clock` and `self.metrics_manager`; it should only
+    be used to decorate methods in classes defining an instance-level `clock` and
+    `metrics_manager` attribute.
 
     Usage:
 
