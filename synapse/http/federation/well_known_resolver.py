@@ -35,6 +35,7 @@ from twisted.web.iweb import IAgent, IResponse
 
 from synapse.http.client import BodyExceededMaxSize, read_body_with_max_size
 from synapse.logging.context import make_deferred_yieldable
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.util import Clock, json_decoder
 from synapse.util.caches.ttlcache import TTLCache
 from synapse.util.metrics import Measure
@@ -92,6 +93,7 @@ class WellKnownResolver:
     def __init__(
         self,
         reactor: IReactorTime,
+        metrics_manager: HomeserverMetricsManager,
         agent: IAgent,
         user_agent: bytes,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
@@ -99,6 +101,7 @@ class WellKnownResolver:
     ):
         self._reactor = reactor
         self._clock = Clock(reactor)
+        self.metrics_manager = metrics_manager
 
         if well_known_cache is None:
             well_known_cache = _well_known_cache

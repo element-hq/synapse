@@ -59,6 +59,7 @@ from synapse.logging.context import (
     LoggingContextOrSentinel,
     current_context,
 )
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.types import ISynapseReactor
 from synapse.util.caches.ttlcache import TTLCache
 
@@ -82,6 +83,8 @@ class MatrixFederationAgentTests(unittest.TestCase):
         self._config = config = HomeServerConfig()
         config.parse_config_dict(config_dict, "", "")
 
+        self.metrics_manager = HomeserverMetricsManager()
+
         self.tls_factory = FederationPolicyForHTTPS(config)
 
         self.well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache(
@@ -92,6 +95,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         )
         self.well_known_resolver = WellKnownResolver(
             self.reactor,
+            self.metrics_manager,
             Agent(self.reactor, contextFactory=self.tls_factory),
             b"test-agent",
             well_known_cache=self.well_known_cache,
@@ -270,6 +274,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         """
         return MatrixFederationAgent(
             reactor=cast(ISynapseReactor, self.reactor),
+            metrics_manager=self.metrics_manager,
             tls_client_options_factory=self.tls_factory,
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
@@ -1012,6 +1017,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         tls_factory = FederationPolicyForHTTPS(config)
         agent = MatrixFederationAgent(
             reactor=self.reactor,
+            metrics_manager=self.metrics_manager,
             tls_client_options_factory=tls_factory,
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
@@ -1019,6 +1025,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
                 cast(ISynapseReactor, self.reactor),
+                self.metrics_manager,
                 Agent(self.reactor, contextFactory=tls_factory),
                 b"test-agent",
                 well_known_cache=self.well_known_cache,

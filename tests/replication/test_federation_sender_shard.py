@@ -36,6 +36,7 @@ from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import EventBase, make_event_from_dict
 from synapse.handlers.typing import TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.rest.admin import register_servlets_for_client_rest_resource
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -69,6 +70,7 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
         reactor, _ = get_clock()
         self.matrix_federation_agent = MatrixFederationAgent(
             reactor,
+            metrics_manager=HomeserverMetricsManager(),
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,

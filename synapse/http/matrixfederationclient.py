@@ -406,6 +406,7 @@ class MatrixFederationHttpClient:
         self.server_name = hs.hostname
 
         self.reactor = hs.get_reactor()
+        self.metrics_manager = hs.metrics_manager
 
         user_agent = hs.version_string
         if hs.config.server.user_agent_suffix:
@@ -418,6 +419,7 @@ class MatrixFederationHttpClient:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
                 self.reactor,
+                self.metrics_manager,
                 tls_client_options_factory,
                 user_agent.encode("ascii"),
                 hs.config.server.federation_ip_range_allowlist,

@@ -48,6 +48,7 @@ from synapse.http.federation.srv_resolver import Server, SrvResolver
 from synapse.http.federation.well_known_resolver import WellKnownResolver
 from synapse.http.proxyagent import ProxyAgent
 from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
 
@@ -93,6 +94,7 @@ class MatrixFederationAgent:
     def __init__(
         self,
         reactor: ISynapseReactor,
+        metrics_manager: HomeserverMetricsManager,
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
@@ -128,6 +130,7 @@ class MatrixFederationAgent:
         if _well_known_resolver is None:
             _well_known_resolver = WellKnownResolver(
                 reactor,
+                metrics_manager,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(
                         reactor,
