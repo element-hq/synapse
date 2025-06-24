@@ -526,6 +526,11 @@ class DeviceHandler(DeviceWorkerHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_manager = (
+            hs.metrics_manager
+        )  # nb must be called this for @measure_func
+
         self.federation_sender = hs.get_federation_sender()
         self._account_data_handler = hs.get_account_data_handler()
         self._storage_controllers = hs.get_storage_controllers()
@@ -1214,9 +1219,13 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
         self.store = hs.get_datastores().main
         self.federation = hs.get_federation_client()
-        self.clock = hs.get_clock()
         self.device_handler = device_handler
         self._notifier = hs.get_notifier()
+
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_manager = (
+            hs.metrics_manager
+        )  # nb must be called this for @measure_func
 
         self._remote_edu_linearizer = Linearizer(name="remote_device_list")
         self._resync_linearizer = Linearizer(name="remote_device_resync")

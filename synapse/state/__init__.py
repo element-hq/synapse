@@ -189,10 +189,13 @@ class StateHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.hs = hs
         self.store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
-        self.hs = hs
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_manager = (
+            hs.metrics_manager
+        )  # nb must be called this for @measure_func
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._storage_controllers = hs.get_storage_controllers()
         self._events_shard_config = hs.config.worker.events_shard_config

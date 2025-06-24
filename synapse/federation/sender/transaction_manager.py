@@ -60,6 +60,9 @@ class TransactionManager:
     def __init__(self, hs: "synapse.server.HomeServer"):
         self._server_name = hs.hostname
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
+        self.metrics_manager = (
+            hs.metrics_manager
+        )  # nb must be called this for @measure_func
         self._store = hs.get_datastores().main
         self._transaction_actions = TransactionActions(self._store)
         self._transport_layer = hs.get_federation_transport_client()
