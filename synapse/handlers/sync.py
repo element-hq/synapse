@@ -337,7 +337,7 @@ class SyncHandler:
         self._push_rules_handler = hs.get_push_rules_handler()
         self.event_sources = hs.get_event_sources()
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.state = hs.get_state_handler()
         self.auth_blocking = hs.get_auth_blocking()
         self._storage_controllers = hs.get_storage_controllers()

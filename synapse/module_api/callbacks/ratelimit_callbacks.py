@@ -44,7 +44,7 @@ GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK = Callable[
 class RatelimitModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self._get_ratelimit_override_for_user_callbacks: List[
             GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
         ] = []

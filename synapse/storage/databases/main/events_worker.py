@@ -226,7 +226,7 @@ class EventsWorkerStore(SQLBaseStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
 
         self._stream_id_gen: MultiWriterIdGenerator
         self._backfill_id_gen: MultiWriterIdGenerator

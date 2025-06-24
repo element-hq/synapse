@@ -100,7 +100,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
 
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 

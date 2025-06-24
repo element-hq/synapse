@@ -749,7 +749,7 @@ class PresenceHandler(BasePresenceHandler):
         super().__init__(hs)
         self.wheel_timer: WheelTimer[str] = WheelTimer()
         self.notifier = hs.get_notifier()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
 
         federation_registry = hs.get_federation_registry()
 
@@ -1763,7 +1763,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         self.get_presence_handler = hs.get_presence_handler
         self.get_presence_router = hs.get_presence_router
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.store = hs.get_datastores().main
 
     async def get_new_events(

@@ -338,7 +338,7 @@ class EventsPersistenceStorageController:
         self.persist_events_store = stores.persist_events
 
         self._clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self._instance_name = hs.get_instance_name()
         self.is_mine_id = hs.is_mine_id
         self._event_persist_queue = _EventPeristenceQueue(

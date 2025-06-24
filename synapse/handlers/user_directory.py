@@ -104,7 +104,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         self._storage_controllers = hs.get_storage_controllers()
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.notifier = hs.get_notifier()
         self.is_mine_id = hs.is_mine_id
         self.update_user_directory = hs.config.worker.should_update_user_directory

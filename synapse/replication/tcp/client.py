@@ -79,7 +79,7 @@ class ReplicationDataHandler:
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
         self._clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self._streams = hs.get_replication_streams()
         self._instance_name = hs.get_instance_name()
         self._typing_handler = hs.get_typing_handler()

@@ -378,7 +378,7 @@ class FederationSender(AbstractFederationSender):
         self._storage_controllers = hs.get_storage_controllers()
 
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
 

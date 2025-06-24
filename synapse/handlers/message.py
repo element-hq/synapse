@@ -485,7 +485,7 @@ class EventCreationHandler:
         self.event_builder_factory = hs.get_event_builder_factory()
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.metrics_manager = (
-            hs.metrics_manager
+            hs.get_metrics_manager()
         )  # nb must be called this for @measure_func
         self.profile_handler = hs.get_profile_handler()
         self.server_name = hs.hostname

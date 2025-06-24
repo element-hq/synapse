@@ -311,8 +311,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
-        self.metrics_manager = HomeserverMetricsManager()
-
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
 
@@ -416,6 +414,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_clock(self) -> Clock:
         return Clock(self._reactor)
+
+    @cache_in_self
+    def get_metrics_manager(self) -> HomeserverMetricsManager:
+        return HomeserverMetricsManager()
 
     def get_datastores(self) -> Databases:
         if not self.datastores:

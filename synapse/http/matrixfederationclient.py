@@ -406,7 +406,7 @@ class MatrixFederationHttpClient:
         self.server_name = hs.hostname
 
         self.reactor = hs.get_reactor()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
 
         user_agent = hs.version_string
         if hs.config.server.user_agent_suffix:
@@ -453,7 +453,7 @@ class MatrixFederationHttpClient:
         )
 
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self._store = hs.get_datastores().main
         self.version_string_bytes = hs.version_string.encode("ascii")
         self.default_timeout_seconds = hs.config.federation.client_timeout_ms / 1000

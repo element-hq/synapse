@@ -32,7 +32,7 @@ IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK = Callable[[str, int], Awaitabl
 class MediaRepositoryModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self._get_media_config_for_user_callbacks: List[
             GET_MEDIA_CONFIG_FOR_USER_CALLBACK
         ] = []

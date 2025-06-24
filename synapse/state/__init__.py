@@ -194,7 +194,7 @@ class StateHandler:
         self._state_storage_controller = hs.get_storage_controllers().state
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.metrics_manager = (
-            hs.metrics_manager
+            hs.get_metrics_manager()
         )  # nb must be called this for @measure_func
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._storage_controllers = hs.get_storage_controllers()
@@ -635,7 +635,7 @@ class StateResolutionHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
 
         self.resolve_linearizer = Linearizer(name="state_resolve_lock")
 

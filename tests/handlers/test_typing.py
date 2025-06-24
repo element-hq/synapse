@@ -101,7 +101,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         self.mock_federation_client.agent = MatrixFederationAgent(
             reactor=reactor,
             # After we get access to the `hs` homeserver instance, we can replace the federation agent
-            metrics_manager=hs.metrics_manager,
+            metrics_manager=hs.get_metrics_manager(),
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,

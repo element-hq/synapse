@@ -79,7 +79,7 @@ class ApplicationServicesHandler:
         self.scheduler = hs.get_application_service_scheduler()
         self.started_scheduler = False
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.notify_appservices = hs.config.worker.should_notify_appservices
         self.event_sources = hs.get_event_sources()
         self._msc2409_to_device_messages_enabled = (

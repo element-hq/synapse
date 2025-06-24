@@ -58,7 +58,7 @@ class DelayedEventsHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
         self._clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
 

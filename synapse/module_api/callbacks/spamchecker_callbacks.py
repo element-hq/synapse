@@ -340,7 +340,7 @@ class SpamCheckerModuleApiCallbacks:
 
     def __init__(self, hs: "synapse.server.HomeServer") -> None:
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
 
         self._check_event_for_spam_callbacks: List[CHECK_EVENT_FOR_SPAM_CALLBACK] = []
         self._should_drop_federated_event_callbacks: List[

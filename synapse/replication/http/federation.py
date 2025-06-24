@@ -79,7 +79,7 @@ class ReplicationFederationSendEventsRestServlet(ReplicationEndpoint):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.federation_event_handler = hs.get_federation_event_handler()
 
     @staticmethod

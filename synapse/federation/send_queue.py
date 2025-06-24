@@ -73,7 +73,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         self.notifier = hs.get_notifier()
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name

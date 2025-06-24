@@ -505,7 +505,7 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
     def __init__(self, hs: "HomeServer"):
         self._main_store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        self.metrics_manager = hs.metrics_manager
+        self.metrics_manager = hs.get_metrics_manager()
         # We can't call get_typing_handler here because there's a cycle:
         #
         #   Typing -> Notifier -> TypingNotificationEventSource -> Typing
