@@ -898,7 +898,14 @@ class DeviceHandler(DeviceWorkerHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        self.federation_sender = hs.get_federation_sender()
+        # We only need to poke the federation sender explicitly if its on the
+        # same instance. Other federation sender instances will get notified by
+        # `synapse.app.generic_worker.FederationSenderHandler` when it sees it
+        # in the device lists stream.
+        self.federation_sender = None
+        if hs.should_send_federation():
+            self.federation_sender = hs.get_federation_sender()
+
         self._storage_controllers = hs.get_storage_controllers()
 
         self.device_list_updater = DeviceListUpdater(hs, self)
@@ -1097,7 +1104,7 @@ class DeviceHandler(DeviceWorkerHandler):
                     # Notify replication that we've updated the device list stream.
                     self.notifier.notify_replication()
 
-                    if hosts:
+                    if hosts and self.federation_sender:
                         logger.info(
                             "Sending device list update notif for %r to: %r",
                             user_id,
@@ -1217,9 +1224,10 @@ class DeviceHandler(DeviceWorkerHandler):
 
         # Notify things that device lists need to be sent out.
         self.notifier.notify_replication()
-        await self.federation_sender.send_device_messages(
-            potentially_changed_hosts, immediate=False
-        )
+        if self.federation_sender:
+            await self.federation_sender.send_device_messages(
+                potentially_changed_hosts, immediate=False
+            )
 
 
 def _update_device_from_client_ips(
