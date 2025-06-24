@@ -456,7 +456,9 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
                 # Kick off a bunch of event fetches but do not pump the reactor
                 event_deferreds = []
                 for event_id in self.event_ids:
-                    event_deferreds.append(ensureDeferred(self.store.get_event(event_id)))
+                    event_deferreds.append(
+                        ensureDeferred(self.store.get_event(event_id))
+                    )
 
                 # We should have maxed out on event fetcher threads
                 self.assertEqual(self.store._event_fetch_ongoing, EVENT_QUEUE_THREADS)
