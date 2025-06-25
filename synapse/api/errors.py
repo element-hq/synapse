@@ -527,7 +527,11 @@ class InvalidCaptchaError(SynapseError):
 
 
 class LimitExceededError(SynapseError):
-    """A client has sent too many requests and is being throttled."""
+    """A client has sent too many requests and is being throttled.
+
+    Args:
+        pause: Optional time in seconds to pause before responding to the client.
+    """
 
     def __init__(
         self,
