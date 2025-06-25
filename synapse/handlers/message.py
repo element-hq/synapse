@@ -76,7 +76,13 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import json_decoder, json_encoder, log_failure, unwrapFirstError
+from synapse.util import (
+    Duration,
+    json_decoder,
+    json_encoder,
+    log_failure,
+    unwrapFirstError,
+)
 from synapse.util.async_helpers import Linearizer, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.metrics import measure_func
@@ -506,7 +512,13 @@ class EventCreationHandler:
 
         # We limit concurrent event creation for a room to 1. This prevents state resolution
         # from occurring when sending bursts of events to a local room
-        self.limiter = Linearizer(max_count=1, name="room_event_creation_limit")
+        self.limiter = Linearizer(
+            max_count=1,
+            name="room_event_creation_limit",
+            # We timeout queued requests after 90 seconds, as the client will
+            # likely have timed out by then.
+            timeout=90 * Duration.SECOND_MS,
+        )
 
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
 

@@ -59,7 +59,8 @@ class Duration:
     """Helper class that holds constants for common time durations in
     milliseconds."""
 
-    MINUTE_MS = 60 * 1000
+    SECOND_MS = 1000
+    MINUTE_MS = 60 * SECOND_MS
     HOUR_MS = 60 * MINUTE_MS
     DAY_MS = 24 * HOUR_MS
 
