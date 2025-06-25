@@ -150,6 +150,44 @@ class ReportRoomRestServlet(RestServlet):
         return 200, {}
 
 
+class ReportUserRestServlet(RestServlet):
+    """This endpoint lets clients report a user for abuse.
+
+    Introduced by MSC4260: https://github.com/matrix-org/matrix-spec-proposals/pull/4260
+    """
+
+    PATTERNS = list(
+        client_patterns(
+            "/users/(?P<target_user_id>[^/]*)/report$",
+            releases=("v3",),
+            unstable=False,
+            v1=False,
+        )
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
+        self.store = hs.get_datastores().main
+        self.handler = hs.get_reports_handler()
+
+    class PostBody(RequestBodyModel):
+        reason: StrictStr
+
+    async def on_POST(
+        self, request: SynapseRequest, target_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        await self.handler.report_user(requester, target_user_id, body.reason)
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
     ReportRoomRestServlet(hs).register(http_server)
+    ReportUserRestServlet(hs).register(http_server)

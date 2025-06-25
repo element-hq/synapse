@@ -62,7 +62,7 @@ def pick_username_resource(hs: "HomeServer") -> Resource:
 
 class AvailabilityCheckResource(DirectServeJsonResource):
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
 
     async def _async_render_GET(self, request: Request) -> Tuple[int, JsonDict]:
@@ -78,7 +78,7 @@ class AvailabilityCheckResource(DirectServeJsonResource):
 
 class AccountDetailsResource(DirectServeHtmlResource):
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
 
         def template_search_dirs() -> Generator[str, None, None]:

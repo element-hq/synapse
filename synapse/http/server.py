@@ -67,6 +67,7 @@ from twisted.web.util import redirectTo
 from synapse.api.errors import (
     CodeMessageException,
     Codes,
+    LimitExceededError,
     RedirectException,
     SynapseError,
     UnrecognizedRequestError,
@@ -74,7 +75,7 @@ from synapse.api.errors import (
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
-from synapse.util import json_encoder
+from synapse.util import Clock, json_encoder
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
 from synapse.util.iterutils import chunk_seq
@@ -308,9 +309,10 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             context from the request the servlet is handling.
     """
 
-    def __init__(self, extract_context: bool = False):
+    def __init__(self, clock: Clock, extract_context: bool = False):
         super().__init__()
 
+        self._clock = clock
         self._extract_context = extract_context
 
     def render(self, request: "SynapseRequest") -> int:
@@ -329,7 +331,12 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             request.request_metrics.name = self.__class__.__name__
 
             with trace_servlet(request, self._extract_context):
-                callback_return = await self._async_render(request)
+                try:
+                    callback_return = await self._async_render(request)
+                except LimitExceededError as e:
+                    if e.pause:
+                        self._clock.sleep(e.pause)
+                    raise
 
                 if callback_return is not None:
                     code, response = callback_return
@@ -393,8 +400,10 @@ class DirectServeJsonResource(_AsyncResource):
     formatting responses and errors as JSON.
     """
 
-    def __init__(self, canonical_json: bool = False, extract_context: bool = False):
-        super().__init__(extract_context)
+    def __init__(
+        self, clock: Clock, canonical_json: bool = False, extract_context: bool = False
+    ):
+        super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
 
     def _send_response(
@@ -450,8 +459,8 @@ class JsonResource(DirectServeJsonResource):
         canonical_json: bool = True,
         extract_context: bool = False,
     ):
-        super().__init__(canonical_json, extract_context)
         self.clock = hs.get_clock()
+        super().__init__(self.clock, canonical_json, extract_context)
         # Map of path regex -> method -> callback.
         self._routes: Dict[Pattern[str], Dict[bytes, _PathEntry]] = {}
         self.hs = hs
@@ -497,7 +506,7 @@ class JsonResource(DirectServeJsonResource):
             key word arguments to pass to the callback
         """
         # At this point the path must be bytes.
-        request_path_bytes: bytes = request.path  # type: ignore
+        request_path_bytes: bytes = request.path
         request_path = request_path_bytes.decode("ascii")
         # Treat HEAD requests as GET requests.
         request_method = request.method

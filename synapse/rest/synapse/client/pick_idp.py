@@ -44,7 +44,7 @@ class PickIdpResource(DirectServeHtmlResource):
     """
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
         self._sso_login_idp_picker_template = (
             hs.config.sso.sso_login_idp_picker_template

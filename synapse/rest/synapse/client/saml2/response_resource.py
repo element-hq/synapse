@@ -35,7 +35,7 @@ class SAML2ResponseResource(DirectServeHtmlResource):
     isLeaf = 1
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
         self._saml_handler = hs.get_saml_handler()
         self._sso_handler = hs.get_sso_handler()
 
