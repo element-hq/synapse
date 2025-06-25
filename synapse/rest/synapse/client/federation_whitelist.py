@@ -44,7 +44,7 @@ class FederationWhitelistResource(DirectServeJsonResource):
     PATH = "/_synapse/client/v1/config/federation_whitelist"
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
 
         self._federation_whitelist = hs.config.federation.federation_domain_whitelist
 

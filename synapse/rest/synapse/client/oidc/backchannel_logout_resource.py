@@ -35,7 +35,7 @@ class OIDCBackchannelLogoutResource(DirectServeJsonResource):
     isLeaf = 1
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
         self._oidc_handler = hs.get_oidc_handler()
 
     async def _async_render_POST(self, request: SynapseRequest) -> None:
