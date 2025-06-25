@@ -58,6 +58,7 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
+from synapse.metrics.homeserver_metrics_manager import HomeserverMetricsManager
 from synapse.notifier import ReplicationNotifier
 from synapse.storage.database import DatabasePool, LoggingTransaction, make_conn
 from synapse.storage.databases.main import FilteringWorkerStore
@@ -308,12 +309,16 @@ class Store(
 class MockHomeserver:
     def __init__(self, config: HomeServerConfig):
         self.clock = Clock(reactor)
+        self.metrics_manager = HomeserverMetricsManager()
         self.config = config
         self.hostname = config.server.server_name
         self.version_string = SYNAPSE_VERSION
 
     def get_clock(self) -> Clock:
         return self.clock
+
+    def get_metrics_manager(self) -> HomeserverMetricsManager:
+        return self.metrics_manager
 
     def get_reactor(self) -> ISynapseReactor:
         return reactor
