@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RUST_VERSION: 1.85.1
+  RUST_VERSION: 1.87.0
 
 jobs:
   check_repo:

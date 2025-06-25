@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RUST_VERSION: 1.85.1
+  RUST_VERSION: 1.87.0
 
 jobs:
   # Job to detect what has changed so we don't run e.g. Rust checks on PRs that

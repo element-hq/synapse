@@ -9,7 +9,7 @@ on:
 env:
   # We use nightly so that `fmt` correctly groups together imports, and
   # clippy correctly fixes up the benchmarks.
-  RUST_VERSION: nightly-2022-12-01
+  RUST_VERSION: nightly-2025-06-24
 
 jobs:
   fixup:
