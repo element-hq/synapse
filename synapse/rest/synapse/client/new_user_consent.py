@@ -48,7 +48,7 @@ class NewUserConsentResource(DirectServeHtmlResource):
     """
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
         self._server_name = hs.hostname
         self._consent_version = hs.config.consent.user_consent_version
