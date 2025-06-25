@@ -94,6 +94,10 @@ from synapse.module_api.callbacks.media_repository_callbacks import (
     GET_MEDIA_CONFIG_FOR_USER_CALLBACK,
     IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK,
 )
+from synapse.module_api.callbacks.ratelimit_callbacks import (
+    GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
+    RatelimitOverride,
+)
 from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_EVENT_FOR_SPAM_CALLBACK,
     CHECK_LOGIN_FOR_SPAM_CALLBACK,
@@ -194,6 +198,7 @@ __all__ = [
     "ProfileInfo",
     "RoomAlias",
     "UserProfile",
+    "RatelimitOverride",
 ]
 
 logger = logging.getLogger(__name__)
@@ -367,6 +372,20 @@ class ModuleApi:
             on_legacy_admin_request=on_legacy_admin_request,
         )
 
+    def register_ratelimit_callbacks(
+        self,
+        *,
+        get_ratelimit_override_for_user: Optional[
+            GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        ] = None,
+    ) -> None:
+        """Registers callbacks for ratelimit capabilities.
+        Added in Synapse v1.132.0.
+        """
+        return self._callbacks.ratelimit.register_callbacks(
+            get_ratelimit_override_for_user=get_ratelimit_override_for_user,
+        )
+
     def register_media_repository_callbacks(
         self,
         *,
@@ -376,7 +395,7 @@ class ModuleApi:
         ] = None,
     ) -> None:
         """Registers callbacks for media repository capabilities.
-        Added in Synapse v1.x.x.
+        Added in Synapse v1.132.0.
         """
         return self._callbacks.media_repository.register_callbacks(
             get_media_config_for_user=get_media_config_for_user,

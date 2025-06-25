@@ -1818,7 +1818,7 @@ class FederationClient(FederationBase):
             )
             return timestamp_to_event_response
         except SynapseError as e:
-            logger.warn(
+            logger.warning(
                 "timestamp_to_event(room_id=%s, timestamp=%s, direction=%s): encountered error when trying to fetch from destinations: %s",
                 room_id,
                 timestamp,

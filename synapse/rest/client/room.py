@@ -64,6 +64,7 @@ from synapse.logging.opentracing import set_tag
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
@@ -924,15 +925,15 @@ class RoomEventServlet(RestServlet):
         if include_unredacted_content and not await self.auth.is_server_admin(
             requester
         ):
-            power_level_event = (
-                await self._storage_controllers.state.get_current_state_event(
-                    room_id, EventTypes.PowerLevels, ""
-                )
+            auth_events = await self._storage_controllers.state.get_current_state(
+                room_id,
+                StateFilter.from_types(
+                    [
+                        POWER_KEY,
+                        CREATE_KEY,
+                    ]
+                ),
             )
-
-            auth_events = {}
-            if power_level_event:
-                auth_events[(EventTypes.PowerLevels, "")] = power_level_event
 
             redact_level = event_auth.get_named_level(auth_events, "redact", 50)
             user_level = event_auth.get_user_power_level(

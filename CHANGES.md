@@ -1,3 +1,86 @@
+# Synapse 1.133.0rc1 (2025-06-24)
+
+### Features
+
+- Add support for the [MSC4260 user report API](https://github.com/matrix-org/matrix-spec-proposals/pull/4260). ([\#18120](https://github.com/element-hq/synapse/issues/18120))
+
+### Bugfixes
+
+- Fix an issue where, during state resolution for v11 rooms, Synapse would incorrectly calculate the power level of the creator when there was no power levels event in the room. ([\#18534](https://github.com/element-hq/synapse/issues/18534), [\#18547](https://github.com/element-hq/synapse/issues/18547))
+- Fix long-standing bug where sliding sync did not honour the `room_id_to_include` config option. ([\#18535](https://github.com/element-hq/synapse/issues/18535))
+- Fix an issue where "Lock timeout is getting excessive" warnings would be logged even when the lock timeout was <10 minutes. ([\#18543](https://github.com/element-hq/synapse/issues/18543))
+- Fix an issue where Synapse could calculate the wrong power level for the creator of the room if there was no power levels event. ([\#18545](https://github.com/element-hq/synapse/issues/18545))
+
+### Improved Documentation
+
+- Generate config documentation from JSON Schema file. ([\#18528](https://github.com/element-hq/synapse/issues/18528))
+- Fix typo in user type documentation. ([\#18568](https://github.com/element-hq/synapse/issues/18568))
+
+### Internal Changes
+
+- Increase performance of introspecting access tokens when using delegated auth. ([\#18357](https://github.com/element-hq/synapse/issues/18357), [\#18561](https://github.com/element-hq/synapse/issues/18561))
+- Log user deactivations. ([\#18541](https://github.com/element-hq/synapse/issues/18541))
+- Enable [`flake8-logging`](https://docs.astral.sh/ruff/rules/#flake8-logging-log) and [`flake8-logging-format`](https://docs.astral.sh/ruff/rules/#flake8-logging-format-g) rules in Ruff and fix related issues throughout the codebase. ([\#18542](https://github.com/element-hq/synapse/issues/18542))
+- Clean up old, unused rows from the `device_federation_inbox` table. ([\#18546](https://github.com/element-hq/synapse/issues/18546))
+- Run config schema CI on develop and release branches. ([\#18551](https://github.com/element-hq/synapse/issues/18551))
+- Add support for Twisted `25.5.0`+ releases. ([\#18577](https://github.com/element-hq/synapse/issues/18577))
+- Update PyO3 to version 0.25. ([\#18578](https://github.com/element-hq/synapse/issues/18578))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/setup-python from 5.5.0 to 5.6.0. ([\#18555](https://github.com/element-hq/synapse/issues/18555))
+* Bump base64 from 0.21.7 to 0.22.1. ([\#18559](https://github.com/element-hq/synapse/issues/18559))
+* Bump dawidd6/action-download-artifact from 9 to 11. ([\#18556](https://github.com/element-hq/synapse/issues/18556))
+* Bump headers from 0.4.0 to 0.4.1. ([\#18529](https://github.com/element-hq/synapse/issues/18529))
+* Bump requests from 2.32.2 to 2.32.4. ([\#18533](https://github.com/element-hq/synapse/issues/18533))
+* Bump types-requests from 2.32.0.20250328 to 2.32.4.20250611. ([\#18558](https://github.com/element-hq/synapse/issues/18558))
+
+# Synapse 1.132.0 (2025-06-17)
+
+### Improved Documentation
+
+- Improvements to generate config documentation from JSON Schema file. ([\#18522](https://github.com/element-hq/synapse/issues/18522))
+
+
+
+
+# Synapse 1.132.0rc1 (2025-06-10)
+
+### Features
+
+- Add support for [MSC4155](https://github.com/matrix-org/matrix-spec-proposals/pull/4155) Invite Filtering. ([\#18288](https://github.com/element-hq/synapse/issues/18288))
+- Add experimental `user_may_send_state_event` module API callback. ([\#18455](https://github.com/element-hq/synapse/issues/18455))
+- Add experimental `get_media_config_for_user` and `is_user_allowed_to_upload_media_of_size` module API callbacks that allow overriding of media repository maximum upload size. ([\#18457](https://github.com/element-hq/synapse/issues/18457))
+- Add experimental `get_ratelimit_override_for_user` module API callback that allows overriding of per-user ratelimits. ([\#18458](https://github.com/element-hq/synapse/issues/18458))
+- Pass `room_config` argument to `user_may_create_room` spam checker module callback. ([\#18486](https://github.com/element-hq/synapse/issues/18486))
+- Support configuration of default and extra user types. ([\#18456](https://github.com/element-hq/synapse/issues/18456))
+- Successful requests to `/_matrix/app/v1/ping` will now force Synapse to reattempt delivering transactions to appservices. ([\#18521](https://github.com/element-hq/synapse/issues/18521))
+- Support the import of the `RatelimitOverride` type from `synapse.module_api` in modules and rename `messages_per_second` to `per_second`. ([\#18513](https://github.com/element-hq/synapse/issues/18513))
+
+### Bugfixes
+
+- Remove destinations from sending if not whitelisted. ([\#18484](https://github.com/element-hq/synapse/issues/18484))
+- Fixed room summary API incorrectly returning that a room is private in the room summary response when the join rule is omitted by the remote server. Contributed by @nexy7574. ([\#18493](https://github.com/element-hq/synapse/issues/18493))
+- Prevent users from adding themselves to their own user ignore list. ([\#18508](https://github.com/element-hq/synapse/issues/18508))
+
+### Improved Documentation
+
+- Generate config documentation from JSON Schema file. ([\#17892](https://github.com/element-hq/synapse/issues/17892))
+- Mention `CAP_NET_BIND_SERVICE` as an alternative to running Synapse as root in order to bind to a privileged port. ([\#18408](https://github.com/element-hq/synapse/issues/18408))
+- Surface hidden Admin API documentation regarding fetching of scheduled tasks. ([\#18516](https://github.com/element-hq/synapse/issues/18516))
+- Mark the new module APIs in this release as experimental. ([\#18536](https://github.com/element-hq/synapse/issues/18536))
+
+### Internal Changes
+
+- Mark dehydrated devices in the [List All User Devices Admin API](https://element-hq.github.io/synapse/latest/admin_api/user_admin_api.html#list-all-devices). ([\#18252](https://github.com/element-hq/synapse/issues/18252))
+- Reduce disk wastage by cleaning up `received_transactions` older than 1 day, rather than 30 days. ([\#18310](https://github.com/element-hq/synapse/issues/18310))
+- Distinguish all vs local events being persisted in the "Event Send Time Quantiles" graph (Grafana). ([\#18510](https://github.com/element-hq/synapse/issues/18510))
+
+
+
+
 # Synapse 1.131.0 (2025-06-03)
 
 No significant changes since 1.131.0rc1.

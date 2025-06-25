@@ -286,6 +286,10 @@ class AccountDataTypes:
     IGNORED_USER_LIST: Final = "m.ignored_user_list"
     TAG: Final = "m.tag"
     PUSH_RULES: Final = "m.push_rules"
+    # MSC4155: Invite filtering
+    MSC4155_INVITE_PERMISSION_CONFIG: Final = (
+        "org.matrix.msc4155.invite_permission_config"
+    )
 
 
 class HistoryVisibility:
