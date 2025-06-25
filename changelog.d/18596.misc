@@ -1,0 +1,1 @@
+Update to Rust 1.87.0 in CI, and bump the pinned commit of the `dtolnay/rust-toolchain` GitHub Action to `b3b07ba8b418998c39fb20f53e8b695cdcc8de1b`.
