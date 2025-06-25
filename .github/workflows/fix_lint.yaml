@@ -6,6 +6,11 @@ name: Attempt to automatically fix linting errors
 on:
   workflow_dispatch:
 
+env:
+  # We use nightly so that `fmt` correctly groups together imports, and
+  # clippy correctly fixes up the benchmarks.
+  RUST_VERSION: nightly-2022-12-01
+
 jobs:
   fixup:
     name: Fix up
@@ -18,9 +23,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@56f84321dbccf38fb67ce29ab63e4754056677e0 # master (rust 1.85.1)
         with:
-          # We use nightly so that `fmt` correctly groups together imports, and
-          # clippy correctly fixes up the benchmarks.
-          toolchain: nightly-2022-12-01
+          toolchain: ${{ env.RUST_VERSION }}
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
 
