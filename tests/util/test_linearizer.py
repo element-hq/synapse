@@ -24,6 +24,7 @@ from typing import Hashable, Protocol, Tuple
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred
 
+from synapse.api.errors import SynapseError
 from synapse.logging.context import LoggingContext, current_context
 from synapse.util.async_helpers import Linearizer
 
@@ -255,3 +256,87 @@ class LinearizerTestCase(unittest.TestCase):
         )
         unblock3()
         self.successResultOf(d3)
+
+    def test_timeout(self) -> None:
+        """Test the `Linearizer` timeout behaviour."""
+        linearizer = Linearizer(
+            clock=self.clock,
+            timeout=10_000,
+            limit_error_code=999,
+        )
+        key = object()
+        d1, acquired_d1, unblock1 = self._start_task(linearizer, key)
+        self.assertTrue(acquired_d1.called)
+
+        # Create a second task, waiting for the first task.
+        d2, acquired_d2, _ = self._start_task(linearizer, key)
+        self.assertFalse(acquired_d2.called)
+        self.assertFalse(d2.called)
+
+        # Wait for the timeout to occur.
+        self.reactor.advance(20_000)
+
+        # We should have received a timeout error for the second task, and *not*
+        # acquired the lock.
+        f = self.failureResultOf(d2, SynapseError)
+        self.assertEqual(f.value.code, 999)
+        self.assertFalse(acquired_d2.called)
+
+        # The first task should still be running.
+        self.assertFalse(d1.called)
+
+        # Create a third task, waiting for the first task.
+        d3, acquired_d3, _ = self._start_task(linearizer, key)
+        self.assertFalse(acquired_d3.called)
+        self.assertFalse(acquired_d2.called)
+
+        # Unblock the first task.
+        unblock1()
+        self.successResultOf(d1)
+        self.assertFalse(acquired_d2.called)
+
+        # The third task should have started running.
+        self.assertTrue(acquired_d3.called)
+
+    def test_max_queue_size(self) -> None:
+        """Test the `Linearizer` max queue size behaviour."""
+        linearizer = Linearizer(
+            clock=self.clock,
+            max_queue_size=2,
+            limit_error_code=999,
+        )
+        key = object()
+
+        # Start three tasks.
+        d1, acquired_d1, unblock1 = self._start_task(linearizer, key)
+        d2, acquired_d2, unblock2 = self._start_task(linearizer, key)
+        d3, _, unblock3 = self._start_task(linearizer, key)
+        d4, _, _ = self._start_task(linearizer, key)
+
+        self.assertTrue(acquired_d1.called)
+        self.assertFalse(d1.called)
+        self.assertFalse(d2.called)
+        self.assertFalse(d3.called)
+
+        # The fourth task should have been rejected.
+        self.failureResultOf(d4, SynapseError)
+
+        # Unblock the first task.
+        unblock1()
+
+        # Second task should now be running.
+        self.assertTrue(acquired_d2.called)
+
+        # Adding one more task should succeed, but further tasks should be rejected.
+        d5, acquired_d5, _ = self._start_task(linearizer, key)
+        self.assertFalse(d5.called)
+
+        d6, _, _ = self._start_task(linearizer, key)
+        self.failureResultOf(d6, SynapseError)
+
+        # Unblock the second and third task should cause the fifth task to start running.
+        unblock2()
+        self.assertTrue(d2.called)
+        unblock3()
+        self.assertTrue(d3.called)
+        self.assertTrue(acquired_d5.called)
