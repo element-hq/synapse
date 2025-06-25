@@ -159,11 +159,7 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        from synapse.handlers.device import DeviceHandler
-
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_list_updater = handler.device_list_updater
+        self.device_list_updater = hs.get_device_handler().device_list_updater
 
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
@@ -190,31 +186,7 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
 
 
 class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
-    """Ask master to upload keys for the user and send them out over federation to
-    update other servers.
-
-    For now, only the master is permitted to handle key upload requests;
-    any worker can handle key query requests (since they're read-only).
-
-    Calls to e2e_keys_handler.upload_keys_for_user(user_id, device_id, keys) on
-    the main process to accomplish this.
-
-    Request format for this endpoint (borrowed and expanded from KeyUploadServlet):
-
-        POST /_synapse/replication/upload_keys_for_user
-
-    {
-        "user_id": "<user_id>",
-        "device_id": "<device_id>",
-        "keys": {
-            ....this part can be found in KeyUploadServlet in rest/client/keys.py....
-            or as defined in https://spec.matrix.org/v1.4/client-server-api/#post_matrixclientv3keysupload
-        }
-    }
-
-    Response is equivalent to ` /_matrix/client/v3/keys/upload` found in KeyUploadServlet
-
-    """
+    """Unused endpoint, kept for backwards compatibility during rollout."""
 
     NAME = "upload_keys_for_user"
     PATH_ARGS = ()
@@ -254,8 +226,5 @@ class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
-
-    # XXX: only register those on device writers
-    if hs.get_instance_name() in hs.config.worker.writers.device_lists:
-        ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
-        ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
+    ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
+    ReplicationUploadKeysForUserRestServlet(hs).register(http_server)

@@ -1251,12 +1251,14 @@ class DeviceListWorkerUpdater:
             ReplicationMultiUserDevicesResyncRestServlet,
         )
 
+        self._device_lists_writers = hs.config.worker.writers.device_lists
         self._multi_user_device_resync_client = (
             ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
         )
 
     async def multi_user_device_resync(
-        self, user_ids: List[str], mark_failed_as_stale: bool = True
+        self,
+        user_ids: List[str],
     ) -> Dict[str, Optional[JsonMapping]]:
         """
         Like `user_device_resync` but operates on multiple users **from the same origin**
@@ -1265,14 +1267,15 @@ class DeviceListWorkerUpdater:
         Returns:
             Dict from User ID to the same Dict as `user_device_resync`.
         """
-        # mark_failed_as_stale is not sent. Ensure this doesn't break expectations.
-        assert mark_failed_as_stale
 
         if not user_ids:
             # Shortcut empty requests
             return {}
 
-        return await self._multi_user_device_resync_client(user_ids=user_ids)
+        return await self._multi_user_device_resync_client(
+            instance_name=random.choice(self._device_lists_writers),
+            user_ids=user_ids,
+        )
 
 
 class DeviceListUpdater(DeviceListWorkerUpdater):
