@@ -52,6 +52,7 @@ from synapse.metrics.background_process_metrics import (
 )
 from synapse.replication.http.devices import (
     ReplicationHandleNewDeviceUpdateRestServlet,
+    ReplicationMultiUserDevicesResyncRestServlet,
     ReplicationNotifyDeviceUpdateRestServlet,
     ReplicationNotifyUserSignatureUpdateRestServlet,
 )
@@ -145,6 +146,10 @@ class DeviceWorkerHandler:
 
         self._device_list_writers = hs.config.worker.writers.device_lists
 
+        # There are a few things we only handle on a single writer because of
+        # linearizers in the DeviceListUpdater
+        self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
+
         self._notify_device_update_client = (
             ReplicationNotifyDeviceUpdateRestServlet.make_client(hs)
         )
@@ -155,11 +160,10 @@ class DeviceWorkerHandler:
             ReplicationHandleNewDeviceUpdateRestServlet.make_client(hs)
         )
 
-        if hs.get_instance_name() not in self._device_list_writers:
-            hs.get_federation_registry().register_instances_for_edu(
-                EduTypes.DEVICE_LIST_UPDATE,
-                self._device_list_writers,
-            )
+        hs.get_federation_registry().register_instances_for_edu(
+            EduTypes.DEVICE_LIST_UPDATE,
+            [self._main_device_list_writer],
+        )
 
     async def check_device_registered(
         self,
@@ -904,7 +908,6 @@ class DeviceWorkerHandler:
 
 
 class DeviceHandler(DeviceWorkerHandler):
-    device_list_updater: "DeviceListUpdater"
     store: "DataStore"  # type: ignore[assignment]
 
     def __init__(self, hs: "HomeServer"):
@@ -920,19 +923,10 @@ class DeviceHandler(DeviceWorkerHandler):
 
         self._storage_controllers = hs.get_storage_controllers()
 
-        self.device_list_updater = DeviceListUpdater(hs, self)
-
-        federation_registry = hs.get_federation_registry()
-
-        federation_registry.register_edu_handler(
-            EduTypes.DEVICE_LIST_UPDATE,
-            self.device_list_updater.incoming_device_list_update,
-        )
-
-        # Whether this writer should be the one doing the _handle_new_device_update_async
-        # This is handled by the first device writer to avoid cross-worker locks.
-        self._should_handle_new_device_update = (
-            hs.get_instance_name() == self._device_list_writers[0]
+        # There are a few things that are only handled on the main device list
+        # writer to avoid cross-worker locks
+        self._is_main_device_list_writer = (
+            hs.get_instance_name() == self._main_device_list_writer
         )
 
         # Whether `_handle_new_device_update_async` is currently processing.
@@ -942,9 +936,14 @@ class DeviceHandler(DeviceWorkerHandler):
         # processing.
         self._handle_new_device_update_new_data = False
 
-        if self._should_handle_new_device_update:
+        if self._main_device_list_writer:
             # On start up check if there are any updates pending.
             hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
+            self.device_list_updater = DeviceListUpdater(hs, self)
+            hs.get_federation_registry().register_edu_handler(
+                EduTypes.DEVICE_LIST_UPDATE,
+                self.device_list_updater.incoming_device_list_update,
+            )
 
         self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
 
@@ -1034,7 +1033,7 @@ class DeviceHandler(DeviceWorkerHandler):
         )
 
     async def handle_new_device_update(self) -> None:
-        if not self._should_handle_new_device_update:
+        if not self._is_main_device_list_writer:
             return await super().handle_new_device_update()
 
         self._handle_new_device_update_async()
@@ -1048,7 +1047,7 @@ class DeviceHandler(DeviceWorkerHandler):
         This happens in the background so as not to block the original request
         that generated the device update.
         """
-        assert self._should_handle_new_device_update
+        assert self._is_main_device_list_writer
 
         if self._handle_new_device_update_is_processing:
             self._handle_new_device_update_new_data = True
@@ -1275,11 +1274,9 @@ class DeviceListWorkerUpdater:
     "Handles incoming device list updates from federation and contacts the main process over replication"
 
     def __init__(self, hs: "HomeServer"):
-        from synapse.replication.http.devices import (
-            ReplicationMultiUserDevicesResyncRestServlet,
-        )
-
-        self._device_lists_writers = hs.config.worker.writers.device_lists
+        self.store = hs.get_datastores().main
+        self._notifier = hs.get_notifier()
+        self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
         self._multi_user_device_resync_client = (
             ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
         )
@@ -1301,20 +1298,91 @@ class DeviceListWorkerUpdater:
             return {}
 
         return await self._multi_user_device_resync_client(
-            instance_name=random.choice(self._device_lists_writers),
+            instance_name=self._main_device_list_writer,
             user_ids=user_ids,
         )
+
+    async def process_cross_signing_key_update(
+        self,
+        user_id: str,
+        master_key: Optional[JsonDict],
+        self_signing_key: Optional[JsonDict],
+    ) -> List[str]:
+        """Process the given new master and self-signing key for the given remote user.
+
+        Args:
+            user_id: The ID of the user these keys are for.
+            master_key: The dict of the cross-signing master key as returned by the
+                remote server.
+            self_signing_key: The dict of the cross-signing self-signing key as returned
+                by the remote server.
+
+        Return:
+            The device IDs for the given keys.
+        """
+        device_ids = []
+
+        current_keys_map = await self.store.get_e2e_cross_signing_keys_bulk([user_id])
+        current_keys = current_keys_map.get(user_id) or {}
+
+        if master_key and master_key != current_keys.get("master"):
+            await self.store.set_e2e_cross_signing_key(user_id, "master", master_key)
+            _, verify_key = get_verify_key_from_cross_signing_key(master_key)
+            # verify_key is a VerifyKey from signedjson, which uses
+            # .version to denote the portion of the key ID after the
+            # algorithm and colon, which is the device ID
+            device_ids.append(verify_key.version)
+        if self_signing_key and self_signing_key != current_keys.get("self_signing"):
+            await self.store.set_e2e_cross_signing_key(
+                user_id, "self_signing", self_signing_key
+            )
+            _, verify_key = get_verify_key_from_cross_signing_key(self_signing_key)
+            device_ids.append(verify_key.version)
+
+        return device_ids
+
+    async def handle_room_un_partial_stated(self, room_id: str) -> None:
+        """Handles sending appropriate device list updates in a room that has
+        gone from partial to full state.
+        """
+
+        pending_updates = (
+            await self.store.get_pending_remote_device_list_updates_for_room(room_id)
+        )
+
+        for user_id, device_id in pending_updates:
+            logger.info(
+                "Got pending device list update in room %s: %s / %s",
+                room_id,
+                user_id,
+                device_id,
+            )
+            position = await self.store.add_device_change_to_streams(
+                user_id,
+                [device_id],
+                room_ids=[room_id],
+            )
+
+            if not position:
+                # This should only happen if there are no updates, which
+                # shouldn't happen when we've passed in a non-empty set of
+                # device IDs.
+                continue
+
+            self._notifier.on_new_event(
+                StreamKeyType.DEVICE_LIST, position, rooms=[room_id]
+            )
 
 
 class DeviceListUpdater(DeviceListWorkerUpdater):
     "Handles incoming device list updates from federation and updates the DB"
 
     def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
-        self.store = hs.get_datastores().main
+        super().__init__(hs)
+
         self.federation = hs.get_federation_client()
         self.clock = hs.get_clock()
         self.device_handler = device_handler
-        self._notifier = hs.get_notifier()
 
         self._remote_edu_linearizer = Linearizer(name="remote_device_list")
         self._resync_linearizer = Linearizer(name="remote_device_resync")
@@ -1738,74 +1806,3 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._seen_updates[user_id] = {stream_id}
 
         return result, False
-
-    async def process_cross_signing_key_update(
-        self,
-        user_id: str,
-        master_key: Optional[JsonDict],
-        self_signing_key: Optional[JsonDict],
-    ) -> List[str]:
-        """Process the given new master and self-signing key for the given remote user.
-
-        Args:
-            user_id: The ID of the user these keys are for.
-            master_key: The dict of the cross-signing master key as returned by the
-                remote server.
-            self_signing_key: The dict of the cross-signing self-signing key as returned
-                by the remote server.
-
-        Return:
-            The device IDs for the given keys.
-        """
-        device_ids = []
-
-        current_keys_map = await self.store.get_e2e_cross_signing_keys_bulk([user_id])
-        current_keys = current_keys_map.get(user_id) or {}
-
-        if master_key and master_key != current_keys.get("master"):
-            await self.store.set_e2e_cross_signing_key(user_id, "master", master_key)
-            _, verify_key = get_verify_key_from_cross_signing_key(master_key)
-            # verify_key is a VerifyKey from signedjson, which uses
-            # .version to denote the portion of the key ID after the
-            # algorithm and colon, which is the device ID
-            device_ids.append(verify_key.version)
-        if self_signing_key and self_signing_key != current_keys.get("self_signing"):
-            await self.store.set_e2e_cross_signing_key(
-                user_id, "self_signing", self_signing_key
-            )
-            _, verify_key = get_verify_key_from_cross_signing_key(self_signing_key)
-            device_ids.append(verify_key.version)
-
-        return device_ids
-
-    async def handle_room_un_partial_stated(self, room_id: str) -> None:
-        """Handles sending appropriate device list updates in a room that has
-        gone from partial to full state.
-        """
-
-        pending_updates = (
-            await self.store.get_pending_remote_device_list_updates_for_room(room_id)
-        )
-
-        for user_id, device_id in pending_updates:
-            logger.info(
-                "Got pending device list update in room %s: %s / %s",
-                room_id,
-                user_id,
-                device_id,
-            )
-            position = await self.store.add_device_change_to_streams(
-                user_id,
-                [device_id],
-                room_ids=[room_id],
-            )
-
-            if not position:
-                # This should only happen if there are no updates, which
-                # shouldn't happen when we've passed in a non-empty set of
-                # device IDs.
-                continue
-
-            self.device_handler.notifier.on_new_event(
-                StreamKeyType.DEVICE_LIST, position, rooms=[room_id]
-            )
