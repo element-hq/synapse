@@ -223,8 +223,39 @@ class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
         return 200, results
 
 
+class ReplicationHandleNewDeviceUpdateRestServlet(ReplicationEndpoint):
+    """Wake up a device writer to send local device list changes as federation outbound pokes.
+
+    Request format:
+
+        POST /_synapse/replication/handle_new_device_update
+
+        {}
+    """
+
+    NAME = "handle_new_device_update"
+    PATH_ARGS = ()
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+
+    @staticmethod
+    async def _serialize_payload() -> JsonDict:  # type: ignore[override]
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict
+    ) -> Tuple[int, JsonDict]:
+        await self.device_handler.handle_new_device_update()
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
     ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
+    ReplicationHandleNewDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationUploadKeysForUserRestServlet(hs).register(http_server)

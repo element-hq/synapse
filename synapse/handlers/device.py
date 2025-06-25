@@ -51,6 +51,7 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.replication.http.devices import (
+    ReplicationHandleNewDeviceUpdateRestServlet,
     ReplicationNotifyDeviceUpdateRestServlet,
     ReplicationNotifyUserSignatureUpdateRestServlet,
 )
@@ -149,6 +150,9 @@ class DeviceWorkerHandler:
         )
         self._notify_user_signature_update_client = (
             ReplicationNotifyUserSignatureUpdateRestServlet.make_client(hs)
+        )
+        self._handle_new_device_update_client = (
+            ReplicationHandleNewDeviceUpdateRestServlet.make_client(hs)
         )
 
         if hs.get_instance_name() not in self._device_list_writers:
@@ -861,6 +865,14 @@ class DeviceWorkerHandler:
             user_ids=user_ids,
         )
 
+    async def handle_new_device_update(self) -> None:
+        """Wake up a device writer to send local device list changes as federation outbound pokes."""
+        # This is only sent to the first device writer to avoid cross-worker
+        # locks in _handle_new_device_update_async.
+        await self._handle_new_device_update_client(
+            instance_name=self._device_list_writers[0],
+        )
+
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000
     DEVICE_MSGS_DELETE_SLEEP_MS = 100
 
@@ -917,6 +929,12 @@ class DeviceHandler(DeviceWorkerHandler):
             self.device_list_updater.incoming_device_list_update,
         )
 
+        # Whether this writer should be the one doing the _handle_new_device_update_async
+        # This is handled by the first device writer to avoid cross-worker locks.
+        self._should_handle_new_device_update = (
+            hs.get_instance_name() == self._device_list_writers[0]
+        )
+
         # Whether `_handle_new_device_update_async` is currently processing.
         self._handle_new_device_update_is_processing = False
 
@@ -924,8 +942,9 @@ class DeviceHandler(DeviceWorkerHandler):
         # processing.
         self._handle_new_device_update_new_data = False
 
-        # On start up check if there are any updates pending.
-        hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
+        if self._should_handle_new_device_update:
+            # On start up check if there are any updates pending.
+            hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
 
         self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
 
@@ -994,7 +1013,7 @@ class DeviceHandler(DeviceWorkerHandler):
 
         # We may need to do some processing asynchronously for local user IDs.
         if self.hs.is_mine_id(user_id):
-            self._handle_new_device_update_async()
+            await self.handle_new_device_update()
 
     async def notify_user_signature_update(
         self, from_user_id: str, user_ids: List[str]
@@ -1014,6 +1033,13 @@ class DeviceHandler(DeviceWorkerHandler):
             StreamKeyType.DEVICE_LIST, position, users=[from_user_id]
         )
 
+    async def handle_new_device_update(self) -> None:
+        if not self._should_handle_new_device_update:
+            return await super().handle_new_device_update()
+
+        self._handle_new_device_update_async()
+        return
+
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
         """Called when we have a new local device list update that we need to
@@ -1022,6 +1048,8 @@ class DeviceHandler(DeviceWorkerHandler):
         This happens in the background so as not to block the original request
         that generated the device update.
         """
+        assert self._should_handle_new_device_update
+
         if self._handle_new_device_update_is_processing:
             self._handle_new_device_update_new_data = True
             return
