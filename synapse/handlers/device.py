@@ -947,10 +947,10 @@ class DeviceHandler(DeviceWorkerHandler):
 
         self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
 
-        # Ideally we would run this on a worker and condition this on the
-        # "run_background_tasks_on" setting, but this would mean making the notification
-        # of device list changes over federation work on workers, which is nontrivial.
-        if self._delete_stale_devices_after is not None:
+        if (
+            hs.config.worker.run_background_tasks
+            and self._delete_stale_devices_after is not None
+        ):
             self.clock.looping_call(
                 run_as_background_process,
                 DELETE_STALE_DEVICES_INTERVAL_MS,
