@@ -67,6 +67,7 @@ from twisted.web.util import redirectTo
 from synapse.api.errors import (
     CodeMessageException,
     Codes,
+    LimitExceededError,
     RedirectException,
     SynapseError,
     UnrecognizedRequestError,
@@ -330,7 +331,12 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             request.request_metrics.name = self.__class__.__name__
 
             with trace_servlet(request, self._extract_context):
-                callback_return = await self._async_render(request)
+                try:
+                    callback_return = await self._async_render(request)
+                except LimitExceededError as e:
+                    if e.pause:
+                        self._clock.sleep(e.pause)
+                    raise
 
                 if callback_return is not None:
                     code, response = callback_return
