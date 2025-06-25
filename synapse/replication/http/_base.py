@@ -23,7 +23,17 @@ import logging
 import re
 import urllib.parse
 from inspect import signature
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Dict, List, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+)
 
 from prometheus_client import Counter, Gauge
 
@@ -85,7 +95,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
     Requests can be sent by calling the client returned by `make_client`.
     Requests are sent to master process by default, but can be sent to other
-    named processes by specifying an `instance_name` keyword argument.
+    named processes by specifying an `instances` keyword argument.
 
     Attributes:
         NAME (str): A name for the endpoint, added to the path as well as used
@@ -126,15 +136,14 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                 hs.get_clock(), "repl." + self.NAME, timeout_ms=30 * 60 * 1000
             )
 
-        # We reserve `instance_name` as a parameter to sending requests, so we
+        # We reserve `instances` as a parameter to sending requests, so we
         # assert here that sub classes don't try and use the name.
-        assert "instance_name" not in self.PATH_ARGS, (
-            "`instance_name` is a reserved parameter name"
+        assert "instances" not in self.PATH_ARGS, (
+            "`instances` is a reserved parameter name"
         )
         assert (
-            "instance_name"
-            not in signature(self.__class__._serialize_payload).parameters
-        ), "`instance_name` is a reserved parameter name"
+            "instances" not in signature(self.__class__._serialize_payload).parameters
+        ), "`instances` is a reserved parameter name"
 
         assert self.METHOD in ("PUT", "POST", "GET")
 
@@ -163,8 +172,9 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
         raise RuntimeError("Invalid Authorization header.")
 
+    @staticmethod
     @abc.abstractmethod
-    async def _serialize_payload(**kwargs) -> JsonDict:
+    async def _serialize_payload(**kwargs: Any) -> JsonDict:
         """Static method that is called when creating a request.
 
         Concrete implementations should have explicit parameters (rather than
@@ -196,13 +206,16 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
         """Create a client that makes requests.
 
         Returns a callable that accepts the same parameters as
-        `_serialize_payload`, and also accepts an optional `instance_name`
-        parameter to specify which instance to hit (the instance must be in
-        the `instance_map` config).
+        `_serialize_payload`, and also accepts an optional `instances` parameter
+        to specify which instances to hit (the instances must be in the
+        `instance_map` config).
         """
         clock = hs.get_clock()
         client = hs.get_replication_client()
         local_instance_name = hs.get_instance_name()
+
+        # This is the current index on the instance pool, so that we round-robin between instances
+        instance_pool_index = 0
 
         instance_map = hs.config.worker.instance_map
 
@@ -216,19 +229,24 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
         @trace_with_opname("outgoing_replication_request")
         async def send_request(
-            *, instance_name: str = MAIN_PROCESS_INSTANCE_NAME, **kwargs: Any
+            *, instances: Optional[list[str]] = None, **kwargs: Any
         ) -> Any:
             # We have to pull these out here to avoid circular dependencies...
             streams = hs.get_replication_command_handler().get_streams_to_replicate()
             replication = hs.get_replication_data_handler()
 
+            # If no instances were given, route to the main process
+            instances = instances or [MAIN_PROCESS_INSTANCE_NAME]
+
             with outgoing_gauge.track_inprogress():
-                if instance_name == local_instance_name:
-                    raise Exception("Trying to send HTTP request to self")
-                if instance_name not in instance_map:
-                    raise Exception(
-                        "Instance %r not in 'instance_map' config" % (instance_name,)
-                    )
+                for instance_name in instances:
+                    if instance_name == local_instance_name:
+                        raise Exception("Trying to send HTTP request to self")
+                    if instance_name not in instance_map:
+                        raise Exception(
+                            "Instance %r not in 'instance_map' config"
+                            % (instance_name,)
+                        )
 
                 data = await cls._serialize_payload(**kwargs)
 
@@ -273,15 +291,6 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                         "Unknown METHOD on %s replication endpoint" % (cls.NAME,)
                     )
 
-                # Hard code a special scheme to show this only used for replication. The
-                # instance_name will be passed into the ReplicationEndpointFactory to
-                # determine connection details from the instance_map.
-                uri = "synapse-replication://%s/_synapse/replication/%s/%s" % (
-                    instance_name,
-                    cls.NAME,
-                    "/".join(url_args),
-                )
-
                 headers: Dict[bytes, List[bytes]] = {}
                 # Add an authorization header, if configured.
                 if replication_secret:
@@ -292,10 +301,30 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                     # Keep track of attempts made so we can bail if we don't manage to
                     # connect to the target after N tries.
                     attempts = 0
+
                     # We keep retrying the same request for timeouts. This is so that we
                     # have a good idea that the request has either succeeded or failed
                     # on the master, and so whether we should clean up or not.
                     while True:
+                        # We're modifying the variable on the upper scope. Note
+                        # that this isn't thread-safe, but we likely don't
+                        # really care if the round-robin isn't perfect.
+                        nonlocal instance_pool_index
+                        instance_pool_index += 1
+                        chosen_instance_name = instances[
+                            instance_pool_index % len(instances)
+                        ]
+
+                        # Hard code a special scheme to show this only used for
+                        # replication. The instance_name will be passed into the
+                        # ReplicationEndpointFactory to determine connection
+                        # details from the instance_map.
+                        uri = "synapse-replication://%s/_synapse/replication/%s/%s" % (
+                            chosen_instance_name,
+                            cls.NAME,
+                            "/".join(url_args),
+                        )
+
                         try:
                             result = await request_func(uri, data, headers=headers)
                             break
@@ -324,6 +353,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
                             await clock.sleep(delay)
                             attempts += 1
+
                 except HttpResponseException as e:
                     # We convert to SynapseError as we know that it was a SynapseError
                     # on the main process that we should send to the client. (And
@@ -333,7 +363,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                 except Exception as e:
                     _outgoing_request_counter.labels(cls.NAME, "ERR").inc()
                     raise SynapseError(
-                        502, f"Failed to talk to {instance_name} process"
+                        502, f"Failed to talk to {instances} process"
                     ) from e
 
                 _outgoing_request_counter.labels(cls.NAME, 200).inc()
@@ -343,7 +373,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                     _STREAM_POSITION_KEY, {}
                 ).items():
                     await replication.wait_for_stream_position(
-                        instance_name=instance_name,
+                        instance_name=chosen_instance_name,
                         stream_name=stream_name,
                         position=position,
                     )
