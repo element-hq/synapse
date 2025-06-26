@@ -111,7 +111,6 @@ Called when processing an invitation received over federation. Unlike `user_may_
 this callback receives the entire event, including any stripped state in the `unsigned`
 section, not just the room and user IDs.
 
-
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
     decide to reject it.
