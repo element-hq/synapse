@@ -91,12 +91,19 @@ class WellKnownResolver:
 
     def __init__(
         self,
+        server_name: str,
         reactor: IReactorTime,
         agent: IAgent,
         user_agent: bytes,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
         had_well_known_cache: Optional[TTLCache[bytes, bool]] = None,
     ):
+        """
+        Args:
+            server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
+        """
+
+        self.server_name = server_name
         self._reactor = reactor
         self._clock = Clock(reactor)
 
@@ -135,7 +142,11 @@ class WellKnownResolver:
         # requests for the same server in parallel?
         try:
             with Measure(
-                self._clock, name="get_well_known", server_name=self.server_name
+                self._clock,
+                name="get_well_known",
+                # This should be our homeserver where the the code is running (used to
+                # label metrics)
+                server_name=self.server_name,
             ):
                 result: Optional[bytes]
                 cache_period: float

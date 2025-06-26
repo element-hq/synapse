@@ -417,6 +417,7 @@ class MatrixFederationHttpClient:
         if hs.get_instance_name() in outbound_federation_restricted_to:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
+                self.server_name,
                 self.reactor,
                 tls_client_options_factory,
                 user_agent.encode("ascii"),
