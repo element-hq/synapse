@@ -82,9 +82,6 @@ class TestResourceLimitsServerNotices(unittest.HomeserverTestCase):
 
         self.user_id = "@user_id:test"
 
-        self._rlsn._server_notices_manager.get_or_create_notice_room_for_user = (
-            AsyncMock(return_value="!something:localhost")
-        )
         self._rlsn._server_notices_manager.maybe_get_notice_room_for_user = AsyncMock(
             return_value="!something:localhost"
         )
@@ -297,8 +294,10 @@ class TestResourceLimitsServerNoticesWithRealRooms(unittest.HomeserverTestCase):
         # Now lets get the last load of messages in the service notice room and
         # check that there is only one server notice
         room_id = self.get_success(
-            self.server_notices_manager.get_or_create_notice_room_for_user(self.user_id)
+            self.server_notices_manager.maybe_get_notice_room_for_user(self.user_id)
         )
+
+        assert room_id is not None, "No server notices room found"
 
         token = self.event_source.get_current_token()
         events, _ = self.get_success(
