@@ -10332,6 +10332,7 @@ this callback.</p>
 <p>Called when processing an invitation, both when one is created locally or when
 receiving an invite over federation. Both inviter and invitee are represented by
 their Matrix user ID (e.g. <code>@alice:example.com</code>).</p>
+<p>Note that federated invites will call <code>federated_user_may_invite</code> before this callback.</p>
 <p>The callback must return one of:</p>
 <ul>
 <li>
@@ -10354,6 +10355,27 @@ callback returns <code>synapse.module_api.NOT_SPAM</code>, Synapse falls through
 The value of the first callback that does not return <code>synapse.module_api.NOT_SPAM</code> will
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.</p>
+<h3 id="federated_user_may_invite"><a class="header" href="#federated_user_may_invite"><code>federated_user_may_invite</code></a></h3>
+<p><em>First introduced in Synapse v1.133.0</em></p>
+<pre><code class="language-python">async def federated_user_may_invite(event: &quot;synapse.events.EventBase&quot;) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;, bool]
+</code></pre>
+<p>Called when processing an invitation received over federation. Unlike <code>user_may_invite</code>,
+this callback receives the entire event, including any stripped state in the <code>unsigned</code>
+section, not just the room and user IDs.</p>
+<p>The callback must return one of:</p>
+<ul>
+<li><code>synapse.module_api.NOT_SPAM</code>, to allow the operation. Other callbacks may still 
+decide to reject it.</li>
+<li><code>synapse.module_api.errors.Codes</code> to reject the operation with an error code. In case
+of doubt, <code>synapse.module_api.errors.Codes.FORBIDDEN</code> is a good error code.</li>
+</ul>
+<p>If multiple modules implement this callback, they will be considered in order. If a
+callback returns <code>synapse.module_api.NOT_SPAM</code>, Synapse falls through to the next one.
+The value of the first callback that does not return <code>synapse.module_api.NOT_SPAM</code> will
+be used. If this happens, Synapse will not call any of the subsequent implementations of
+this callback.</p>
+<p>If all of the callbacks return <code>synapse.module_api.NOT_SPAM</code>, Synapse will also fall
+through to the <code>user_may_invite</code> callback before approving the invite.</p>
 <h3 id="user_may_send_3pid_invite"><a class="header" href="#user_may_send_3pid_invite"><code>user_may_send_3pid_invite</code></a></h3>
 <p><em>First introduced in Synapse v1.45.0</em></p>
 <p><em>Changed in Synapse v1.62.0: <code>synapse.module_api.NOT_SPAM</code> and <code>synapse.module_api.errors.Codes</code> can be returned by this callback. Returning a boolean is now deprecated.</em> </p>
