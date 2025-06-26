@@ -41,35 +41,53 @@ from synapse.logging.context import (
     LoggingContext,
     current_context,
 )
-from synapse.metrics import InFlightGauge
+from synapse.metrics import InFlightGauge, INSTANCE_LABEL_NAME
 from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
 
-block_counter = Counter("synapse_util_metrics_block_count", "", ["block_name"])
+block_counter = Counter(
+    "synapse_util_metrics_block_count",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
+)
 
-block_timer = Counter("synapse_util_metrics_block_time_seconds", "", ["block_name"])
+block_timer = Counter(
+    "synapse_util_metrics_block_time_seconds",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
+)
 
 block_ru_utime = Counter(
-    "synapse_util_metrics_block_ru_utime_seconds", "", ["block_name"]
+    "synapse_util_metrics_block_ru_utime_seconds",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 
 block_ru_stime = Counter(
-    "synapse_util_metrics_block_ru_stime_seconds", "", ["block_name"]
+    "synapse_util_metrics_block_ru_stime_seconds",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 
 block_db_txn_count = Counter(
-    "synapse_util_metrics_block_db_txn_count", "", ["block_name"]
+    "synapse_util_metrics_block_db_txn_count",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 
 # seconds spent waiting for db txns, excluding scheduling time, in this block
 block_db_txn_duration = Counter(
-    "synapse_util_metrics_block_db_txn_duration_seconds", "", ["block_name"]
+    "synapse_util_metrics_block_db_txn_duration_seconds",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 
 # seconds spent waiting for a db connection, in this block
 block_db_sched_duration = Counter(
-    "synapse_util_metrics_block_db_sched_duration_seconds", "", ["block_name"]
+    "synapse_util_metrics_block_db_sched_duration_seconds",
+    "",
+    labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 
 
@@ -83,7 +101,7 @@ class _InFlightMetric(Protocol):
 in_flight: InFlightGauge[_InFlightMetric] = InFlightGauge(
     "synapse_util_metrics_block_in_flight",
     "",
-    labels=["block_name"],
+    labels=["block_name", INSTANCE_LABEL_NAME],
     sub_metrics=["real_time_max", "real_time_sum"],
 )
 
@@ -142,19 +160,24 @@ class Measure:
     __slots__ = [
         "clock",
         "name",
+        "server_name",
         "_logging_context",
         "start",
     ]
 
-    def __init__(self, clock: Clock, name: str) -> None:
+    def __init__(self, clock: Clock, name: str, server_name: str) -> None:
         """
         Args:
             clock: An object with a "time()" method, which returns the current
                 time in seconds.
-            name: The name of the metric to report.
+            name: The name of the metric to report (the block name) (used to label the
+                metric).
+            server_name: The server name that this Measure is associated with (used to
+                label the metric).
         """
         self.clock = clock
         self.name = name
+        self.server_name = server_name
         curr_context = current_context()
         if not curr_context:
             logger.warning(
@@ -174,7 +197,7 @@ class Measure:
 
         self.start = self.clock.time()
         self._logging_context.__enter__()
-        in_flight.register((self.name,), self._update_in_flight)
+        in_flight.register((self.name, self.server_name), self._update_in_flight)
 
         logger.debug("Entering block %s", self.name)
 
@@ -194,17 +217,31 @@ class Measure:
         duration = self.clock.time() - self.start
         usage = self.get_resource_usage()
 
-        in_flight.unregister((self.name,), self._update_in_flight)
+        in_flight.unregister((self.name, self.server_name), self._update_in_flight)
         self._logging_context.__exit__(exc_type, exc_val, exc_tb)
 
         try:
-            block_counter.labels(self.name).inc()
-            block_timer.labels(self.name).inc(duration)
-            block_ru_utime.labels(self.name).inc(usage.ru_utime)
-            block_ru_stime.labels(self.name).inc(usage.ru_stime)
-            block_db_txn_count.labels(self.name).inc(usage.db_txn_count)
-            block_db_txn_duration.labels(self.name).inc(usage.db_txn_duration_sec)
-            block_db_sched_duration.labels(self.name).inc(usage.db_sched_duration_sec)
+            block_counter.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc()
+            block_timer.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc(duration)
+            block_ru_utime.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc(usage.ru_utime)
+            block_ru_stime.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc(usage.ru_stime)
+            block_db_txn_count.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc(usage.db_txn_count)
+            block_db_txn_duration.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc(usage.db_txn_duration_sec)
+            block_db_sched_duration.labels(
+                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
+            ).inc(usage.db_sched_duration_sec)
         except ValueError:
             logger.warning("Failed to save metrics! Usage: %s", usage)
 
