@@ -2282,6 +2282,11 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         the room.
         """
 
+        # The device list stream is a multi-writer stream, but when we partially
+        # join a room, we only record the minimum stream ID. This means that we
+        # may be returning a device update that was already sent through
+        # federation here in case of concurrent writes. This is absolutely fine,
+        # sending a device update multiple times through federation is safe
         min_device_stream_id = await self.db_pool.simple_select_one_onecol(
             table="partial_state_rooms",
             keyvalues={
