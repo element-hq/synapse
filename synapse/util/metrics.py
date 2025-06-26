@@ -92,16 +92,23 @@ block_db_sched_duration = Counter(
 
 
 # This is dynamically created in InFlightGauge.__init__.
-class _InFlightMetric(Protocol):
+class _BlockInFlightMetric(Protocol):
+    """
+    Sub-metrics used for the `InFlightGauge` for blocks.
+    """
+
     real_time_max: float
+    """The longest observed duration of any single execution of this block, in seconds."""
     real_time_sum: float
+    """The cumulative time spent executing this block across all calls, in seconds."""
 
 
 # Tracks the number of blocks currently active
-in_flight: InFlightGauge[_InFlightMetric] = InFlightGauge(
+in_flight: InFlightGauge[_BlockInFlightMetric] = InFlightGauge(
     "synapse_util_metrics_block_in_flight",
     "",
     labels=["block_name", INSTANCE_LABEL_NAME],
+    # Matches the fields in the `_BlockInFlightMetric`
     sub_metrics=["real_time_max", "real_time_sum"],
 )
 
@@ -266,7 +273,7 @@ class Measure:
         """
         return self._logging_context.get_resource_usage()
 
-    def _update_in_flight(self, metrics: _InFlightMetric) -> None:
+    def _update_in_flight(self, metrics: _BlockInFlightMetric) -> None:
         """Gets called when processing in flight metrics"""
         assert self.start is not None
         duration = self.clock.time() - self.start
