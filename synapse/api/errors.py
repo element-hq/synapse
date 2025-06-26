@@ -527,7 +527,11 @@ class InvalidCaptchaError(SynapseError):
 
 
 class LimitExceededError(SynapseError):
-    """A client has sent too many requests and is being throttled."""
+    """A client has sent too many requests and is being throttled.
+
+    Args:
+        pause: Optional time in seconds to pause before responding to the client.
+    """
 
     def __init__(
         self,
@@ -535,6 +539,7 @@ class LimitExceededError(SynapseError):
         code: int = 429,
         retry_after_ms: Optional[int] = None,
         errcode: str = Codes.LIMIT_EXCEEDED,
+        pause: Optional[float] = None,
     ):
         # Use HTTP header Retry-After to enable library-assisted retry handling.
         headers = (
@@ -545,6 +550,7 @@ class LimitExceededError(SynapseError):
         super().__init__(code, "Too Many Requests", errcode, headers=headers)
         self.retry_after_ms = retry_after_ms
         self.limiter_name = limiter_name
+        self.pause = pause
 
     def error_dict(self, config: Optional["HomeServerConfig"]) -> "JsonDict":
         return cs_error(self.msg, self.errcode, retry_after_ms=self.retry_after_ms)
