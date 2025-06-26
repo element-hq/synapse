@@ -253,9 +253,41 @@ class ReplicationHandleNewDeviceUpdateRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+class ReplicationDeviceHandleRoomUnPartialStated(ReplicationEndpoint):
+    """Handles sending appropriate device list updates in a room that has
+    gone from partial to full state.
+
+    Request format:
+
+        POST /_synapse/replication/device_handle_room_un_partial_stated/:room_id
+
+        {}
+    """
+
+    NAME = "device_handle_room_un_partial_stated"
+    PATH_ARGS = ("room_id",)
+    CACHE = True
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+
+    @staticmethod
+    async def _serialize_payload(room_id: str) -> JsonDict:  # type: ignore[override]
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, room_id: str
+    ) -> Tuple[int, JsonDict]:
+        await self.device_handler.handle_room_un_partial_stated(room_id)
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
     ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
     ReplicationHandleNewDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
+    ReplicationDeviceHandleRoomUnPartialStated(hs).register(http_server)

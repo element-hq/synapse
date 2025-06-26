@@ -51,6 +51,7 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.replication.http.devices import (
+    ReplicationDeviceHandleRoomUnPartialStated,
     ReplicationHandleNewDeviceUpdateRestServlet,
     ReplicationMultiUserDevicesResyncRestServlet,
     ReplicationNotifyDeviceUpdateRestServlet,
@@ -158,6 +159,9 @@ class DeviceWorkerHandler:
         )
         self._handle_new_device_update_client = (
             ReplicationHandleNewDeviceUpdateRestServlet.make_client(hs)
+        )
+        self._handle_room_un_partial_stated_client = (
+            ReplicationDeviceHandleRoomUnPartialStated.make_client(hs)
         )
 
         hs.get_federation_registry().register_instances_for_edu(
@@ -828,10 +832,9 @@ class DeviceWorkerHandler:
         gone from partial to full state.
         """
 
-        # TODO(faster_joins): worker mode support
-        #   https://github.com/matrix-org/synapse/issues/12994
-        logger.error(
-            "Trying handling device list state for partial join: not supported on workers."
+        await self._handle_room_un_partial_stated_client(
+            instance_name=random.choice(self._device_list_writers),
+            room_id=room_id,
         )
 
     @trace
