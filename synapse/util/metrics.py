@@ -41,7 +41,7 @@ from synapse.logging.context import (
     LoggingContext,
     current_context,
 )
-from synapse.metrics import InFlightGauge, INSTANCE_LABEL_NAME
+from synapse.metrics import INSTANCE_LABEL_NAME, InFlightGauge
 from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
@@ -110,8 +110,16 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class HasClock(Protocol):
+class HasClockAndServerName(Protocol):
     clock: Clock
+    """
+    Used to measure functions
+    """
+    server_name: str
+    """
+    The homeserver name that this Measure is associated with (used to label the metric)
+    (`hs.hostname`).
+    """
 
 
 def measure_func(
@@ -119,8 +127,9 @@ def measure_func(
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
     """Decorate an async method with a `Measure` context manager.
 
-    The Measure is created using `self.clock`; it should only be used to decorate
-    methods in classes defining an instance-level `clock` attribute.
+    The Measure is created using `self.clock` and `self.server_name; it should only be
+    used to decorate methods in classes defining an instance-level `clock` and
+    `server_name` attributes.
 
     Usage:
 
@@ -134,16 +143,21 @@ def measure_func(
         with Measure(...):
             ...
 
+    Args:
+        name: The name of the metric to report (the block name) (used to label the
+            metric). Defaults to the name of the decorated function.
     """
 
     def wrapper(
-        func: Callable[Concatenate[HasClock, P], Awaitable[R]],
+        func: Callable[Concatenate[HasClockAndServerName, P], Awaitable[R]],
     ) -> Callable[P, Awaitable[R]]:
         block_name = func.__name__ if name is None else name
 
         @wraps(func)
-        async def measured_func(self: HasClock, *args: P.args, **kwargs: P.kwargs) -> R:
-            with Measure(self.clock, block_name):
+        async def measured_func(
+            self: HasClockAndServerName, *args: P.args, **kwargs: P.kwargs
+        ) -> R:
+            with Measure(self.clock, name=block_name, server_name=self.server_name):
                 r = await func(self, *args, **kwargs)
             return r
 
@@ -165,15 +179,15 @@ class Measure:
         "start",
     ]
 
-    def __init__(self, clock: Clock, name: str, server_name: str) -> None:
+    def __init__(self, clock: Clock, *, name: str, server_name: str) -> None:
         """
         Args:
             clock: An object with a "time()" method, which returns the current
                 time in seconds.
             name: The name of the metric to report (the block name) (used to label the
                 metric).
-            server_name: The server name that this Measure is associated with (used to
-                label the metric).
+            server_name: The homeserver name that this Measure is associated with (used to
+                label the metric) (`hs.hostname`).
         """
         self.clock = clock
         self.name = name
