@@ -189,7 +189,8 @@ class StateHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self.hs = hs
