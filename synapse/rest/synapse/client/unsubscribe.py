@@ -38,7 +38,7 @@ class UnsubscribeResource(DirectServeHtmlResource):
     SUCCESS_HTML = b"<html><body>You have been unsubscribed</body><html>"
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
         self.notifier = hs.get_notifier()
         self.auth = hs.get_auth()
         self.pusher_pool = hs.get_pusherpool()
