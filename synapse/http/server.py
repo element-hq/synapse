@@ -582,6 +582,17 @@ class DirectServeHtmlResource(_AsyncResource):
     # The error template to use for this resource
     ERROR_TEMPLATE = HTML_ERROR_TEMPLATE
 
+    def __init__(
+        self,
+        extract_context: bool = False,
+        # Clock is optional as this class is exposed to the module API.
+        clock: Optional[Clock] = None,
+    ):
+        if clock is None:
+            clock = Clock(cast(IReactorTime, reactor))
+
+        super().__init__(clock, extract_context)
+
     def _send_response(
         self,
         request: "SynapseRequest",
