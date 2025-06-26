@@ -134,7 +134,9 @@ class WellKnownResolver:
         # TODO: should we linearise so that we don't end up doing two .well-known
         # requests for the same server in parallel?
         try:
-            with Measure(self._clock, "get_well_known"):
+            with Measure(
+                self._clock, name="get_well_known", server_name=self.server_name
+            ):
                 result: Optional[bytes]
                 cache_period: float
 

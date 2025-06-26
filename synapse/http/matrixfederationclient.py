@@ -697,7 +697,11 @@ class MatrixFederationHttpClient:
                     outgoing_requests_counter.labels(request.method).inc()
 
                     try:
-                        with Measure(self.clock, "outbound_request"):
+                        with Measure(
+                            self.clock,
+                            name="outbound_request",
+                            server_name=self.server_name,
+                        ):
                             # we don't want all the fancy cookie and redirect handling
                             # that treq.request gives: just use the raw Agent.
 
