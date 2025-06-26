@@ -51,30 +51,35 @@ block_counter = Counter(
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""The number of times this block has been called."""
 
 block_timer = Counter(
     "synapse_util_metrics_block_time_seconds",
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""The cumulative time spent executing this block across all calls, in seconds."""
 
 block_ru_utime = Counter(
     "synapse_util_metrics_block_ru_utime_seconds",
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""Resource usage: user CPU time in seconds used in this block"""
 
 block_ru_stime = Counter(
     "synapse_util_metrics_block_ru_stime_seconds",
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""Resource usage: system CPU time in seconds used in this block"""
 
 block_db_txn_count = Counter(
     "synapse_util_metrics_block_db_txn_count",
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""Number of database transactions completed in this block"""
 
 # seconds spent waiting for db txns, excluding scheduling time, in this block
 block_db_txn_duration = Counter(
@@ -82,6 +87,7 @@ block_db_txn_duration = Counter(
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""Seconds spent waiting for database txns, excluding scheduling time, in this block"""
 
 # seconds spent waiting for a db connection, in this block
 block_db_sched_duration = Counter(
@@ -89,6 +95,7 @@ block_db_sched_duration = Counter(
     "",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
+"""Seconds spent waiting for a db connection, in this block"""
 
 
 # This is dynamically created in InFlightGauge.__init__.
