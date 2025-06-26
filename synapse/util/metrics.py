@@ -46,6 +46,8 @@ from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
 
+# Metrics to see the number of and how much time is spend in various blocks of code.
+#
 block_counter = Counter(
     "synapse_util_metrics_block_count",
     "",
