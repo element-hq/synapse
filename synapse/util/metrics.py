@@ -251,29 +251,16 @@ class Measure:
         self._logging_context.__exit__(exc_type, exc_val, exc_tb)
 
         try:
-            block_counter.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc()
-            block_timer.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc(duration)
-            block_ru_utime.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc(usage.ru_utime)
-            block_ru_stime.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc(usage.ru_stime)
-            block_db_txn_count.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc(usage.db_txn_count)
-            block_db_txn_duration.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc(usage.db_txn_duration_sec)
-            block_db_sched_duration.labels(
-                block_name=self.name, INSTANCE_LABEL_NAME=self.server_name
-            ).inc(usage.db_sched_duration_sec)
-        except ValueError:
-            logger.warning("Failed to save metrics! Usage: %s", usage)
+            labels = {"block_name": self.name, INSTANCE_LABEL_NAME: self.server_name}
+            block_counter.labels(**labels).inc()
+            block_timer.labels(**labels).inc(duration)
+            block_ru_utime.labels(**labels).inc(usage.ru_utime)
+            block_ru_stime.labels(**labels).inc(usage.ru_stime)
+            block_db_txn_count.labels(**labels).inc(usage.db_txn_count)
+            block_db_txn_duration.labels(**labels).inc(usage.db_txn_duration_sec)
+            block_db_sched_duration.labels(**labels).inc(usage.db_sched_duration_sec)
+        except ValueError as exc:
+            logger.warning("Failed to save metrics! Usage: %s Error: %s", usage, exc)
 
     def get_resource_usage(self) -> ContextResourceUsage:
         """Get the resources used within this Measure block
