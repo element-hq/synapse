@@ -325,7 +325,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             request.write(b"response")
             request.finish()
 
-        res = WrapHtmlRequestHandlerTests.TestResource(self.clock)
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -345,7 +345,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
         async def callback(request: SynapseRequest, **kwargs: object) -> None:
             raise RedirectException(b"/look/an/eagle", 301)
 
-        res = WrapHtmlRequestHandlerTests.TestResource(self.clock)
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -367,7 +367,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             e.cookies.append(b"session=yespls")
             raise e
 
-        res = WrapHtmlRequestHandlerTests.TestResource(self.clock)
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -388,7 +388,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             request.write(b"response")
             request.finish()
 
-        res = WrapHtmlRequestHandlerTests.TestResource(self.clock)
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -418,7 +418,7 @@ class CancellableDirectServeHtmlResource(DirectServeHtmlResource):
     ERROR_TEMPLATE = "{code} {msg}"
 
     def __init__(self, clock: Clock):
-        super().__init__(clock)
+        super().__init__(clock=clock)
         self.clock = clock
 
     @cancellable

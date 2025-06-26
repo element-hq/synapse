@@ -78,7 +78,7 @@ class AvailabilityCheckResource(DirectServeJsonResource):
 
 class AccountDetailsResource(DirectServeHtmlResource):
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
 
         def template_search_dirs() -> Generator[str, None, None]:

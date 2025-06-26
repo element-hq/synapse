@@ -81,7 +81,7 @@ class ConsentResource(DirectServeHtmlResource):
     """
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
 
         self.hs = hs
         self.store = hs.get_datastores().main
