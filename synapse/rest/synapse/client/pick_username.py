@@ -62,7 +62,7 @@ def pick_username_resource(hs: "HomeServer") -> Resource:
 
 class AvailabilityCheckResource(DirectServeJsonResource):
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
 
     async def _async_render_GET(self, request: Request) -> Tuple[int, JsonDict]:

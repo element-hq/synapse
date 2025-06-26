@@ -401,7 +401,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
 
 class CancellableDirectServeJsonResource(DirectServeJsonResource):
     def __init__(self, clock: Clock):
-        super().__init__(clock)
+        super().__init__(clock=clock)
         self.clock = clock
 
     @cancellable

@@ -53,7 +53,7 @@ class AdditionalResource(DirectServeJsonResource):
             hs: homeserver
             handler: function to be called to handle the request.
         """
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
         self._handler = handler
 
     async def _async_render(self, request: Request) -> Optional[Tuple[int, Any]]:

@@ -42,6 +42,7 @@ from typing import (
     Protocol,
     Tuple,
     Union,
+    cast,
 )
 
 import attr
@@ -49,8 +50,9 @@ import jinja2
 from canonicaljson import encode_canonical_json
 from zope.interface import implementer
 
-from twisted.internet import defer, interfaces
+from twisted.internet import defer, interfaces, reactor
 from twisted.internet.defer import CancelledError
+from twisted.internet.interfaces import IReactorTime
 from twisted.python import failure
 from twisted.web import resource
 
@@ -401,8 +403,15 @@ class DirectServeJsonResource(_AsyncResource):
     """
 
     def __init__(
-        self, clock: Clock, canonical_json: bool = False, extract_context: bool = False
+        self,
+        canonical_json: bool = False,
+        extract_context: bool = False,
+        # Clock is optional as this class is exposed to the module API.
+        clock: Optional[Clock] = None,
     ):
+        if clock is None:
+            clock = Clock(cast(IReactorTime, reactor))
+
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
 
@@ -460,7 +469,7 @@ class JsonResource(DirectServeJsonResource):
         extract_context: bool = False,
     ):
         self.clock = hs.get_clock()
-        super().__init__(self.clock, canonical_json, extract_context)
+        super().__init__(canonical_json, extract_context, clock=self.clock)
         # Map of path regex -> method -> callback.
         self._routes: Dict[Pattern[str], Dict[bytes, _PathEntry]] = {}
         self.hs = hs

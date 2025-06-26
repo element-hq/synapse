@@ -30,7 +30,7 @@ class MSC4108RendezvousSessionResource(DirectServeJsonResource):
     isLeaf = True
 
     def __init__(self, hs: "HomeServer") -> None:
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
         self._handler = hs.get_rendezvous_handler()
 
     async def _async_render_GET(self, request: SynapseRequest) -> None:
