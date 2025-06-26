@@ -124,7 +124,7 @@ The value of the first callback that does not return `synapse.module_api.NOT_SPA
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
 
-If none of the callbacks return `synapse.module_api.NOT_SPAM`, Synapse will also fall
+If all of the callbacks return `synapse.module_api.NOT_SPAM`, Synapse will also fall
 through to the `user_may_invite` callback before approving the invite.
 
 
