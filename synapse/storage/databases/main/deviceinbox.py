@@ -85,6 +85,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
+        self.server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         # Map of (user_id, device_id) to the last stream_id that has been
@@ -93,6 +94,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             Tuple[str, Optional[str]], int
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,

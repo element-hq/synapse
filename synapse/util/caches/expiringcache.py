@@ -46,7 +46,9 @@ VT = TypeVar("VT")
 class ExpiringCache(Generic[KT, VT]):
     def __init__(
         self,
+        *,
         cache_name: str,
+        server_name: str,
         clock: Clock,
         max_len: int = 0,
         expiry_ms: int = 0,
@@ -84,7 +86,10 @@ class ExpiringCache(Generic[KT, VT]):
         self.iterable = iterable
 
         self.metrics = register_cache(
-            cache_type="expiring", cache_name=cache_name, cache=self
+            cache_type="expiring",
+            cache_name=cache_name,
+            cache=self,
+            server_name=server_name,
         )
 
         if not self._expiry_ms:

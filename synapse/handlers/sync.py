@@ -329,6 +329,7 @@ class E2eeSyncResult:
 
 class SyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.hs_config = hs.config
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
@@ -361,8 +362,9 @@ class SyncHandler:
         self.lazy_loaded_members_cache: ExpiringCache[
             Tuple[str, Optional[str]], LruCache[str, str]
         ] = ExpiringCache(
-            "lazy_loaded_members_cache",
-            self.clock,
+            cache_name="lazy_loaded_members_cache",
+            server_name=self.server_name,
+            clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )

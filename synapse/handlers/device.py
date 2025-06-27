@@ -1212,6 +1212,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     "Handles incoming device list updates from federation and updates the DB"
 
     def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.federation = hs.get_federation_client()
         self.clock = hs.get_clock()
@@ -1231,6 +1232,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         # resyncs.
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
             cache_name="device_update_edu",
+            server_name=self.server_name,
             clock=self.clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
