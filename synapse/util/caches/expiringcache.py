@@ -58,7 +58,7 @@ class ExpiringCache(Generic[KT, VT]):
         """
         Args:
             cache_name: Name of this cache, used for logging.
-            server_name: server_name: The homeserver name that this cache is associated
+            server_name: The homeserver name that this cache is associated
                 with (used to label the metric) (`hs.hostname`).
             clock
             max_len: Max size of dict. If the dict grows larger than this

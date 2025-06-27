@@ -83,7 +83,7 @@ class StreamChangeCache:
         """
         Args:
             name
-            server_name: server_name: The homeserver name that this cache is associated with
+            server_name: The homeserver name that this cache is associated with
                 (used to label the metric) (`hs.hostname`).
             current_stream_pos
             max_size

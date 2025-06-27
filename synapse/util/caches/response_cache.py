@@ -114,7 +114,7 @@ class ResponseCache(Generic[KV]):
         Args:
             clock
             name
-            server_name: server_name: The homeserver name that this cache is associated
+            server_name: The homeserver name that this cache is associated
                 with (used to label the metric) (`hs.hostname`).
             timeout_ms
             enable_logging

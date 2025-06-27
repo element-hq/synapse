@@ -219,7 +219,7 @@ def register_cache(
         cache_name: name of the cache
         cache: cache itself, which must implement __len__(), and may optionally implement
              a max_size property
-        server_name: server_name: The homeserver name that this cache is associated with
+        server_name: The homeserver name that this cache is associated with
             (used to label the metric) (`hs.hostname`).
         collect_callback: If given, a function which is called during metric
             collection to update additional metrics.

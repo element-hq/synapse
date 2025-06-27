@@ -200,6 +200,8 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
 
     def __init__(
         self,
+        *,
+        server_name: str,
         orig: Callable[..., Any],
         max_entries: int = 1000,
         num_args: Optional[int] = None,
@@ -217,6 +219,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
             cache_context=cache_context,
             name=name,
         )
+        self.server_name = server_name
 
         if tree and self.num_args < 2:
             raise RuntimeError(
@@ -233,6 +236,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
     ) -> Callable[..., "defer.Deferred[Any]"]:
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
+            server_name=self.server_name,
             max_entries=self.max_entries,
             tree=self.tree,
             iterable=self.iterable,
@@ -479,6 +483,7 @@ class _CachedFunctionDescriptor:
     """Helper for `@cached`, we name it so that we can hook into it with mypy
     plugin."""
 
+    server_name: str
     max_entries: int
     num_args: Optional[int]
     uncached_args: Optional[Collection[str]]
@@ -490,7 +495,8 @@ class _CachedFunctionDescriptor:
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
-            orig,
+            server_name=self.server_name,
+            orig=orig,
             max_entries=self.max_entries,
             num_args=self.num_args,
             uncached_args=self.uncached_args,

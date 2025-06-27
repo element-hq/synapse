@@ -50,7 +50,7 @@ class TTLCache(Generic[KT, VT]):
         """
         Args:
             cache_name
-            server_name: server_name: The homeserver name that this cache is associated with
+            server_name: The homeserver name that this cache is associated with
                 (used to label the metric) (`hs.hostname`).
             timer: Function used to get the current time in seconds since the epoch.
         """
