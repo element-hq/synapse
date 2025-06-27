@@ -15,6 +15,7 @@
 
 from typing import Optional
 
+from synapse.api.constants import EventContentFields, MTextFields
 from synapse.types import JsonDict
 from synapse.util.stringutils import random_string
 
@@ -40,21 +41,25 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     Returns:
         A string representing the plain text topic.
     """
-    topic = content.get("topic")
+    topic = content.get(EventContentFields.TOPIC)
 
-    m_topic = content.get("m.topic")
+    m_topic = content.get(EventContentFields.M_TOPIC)
     if not m_topic:
         return topic
 
-    m_text = m_topic.get("m.text")
+    m_text = m_topic.get(EventContentFields.M_TEXT)
     if not m_text:
         return topic
 
     representation = next(
-        (r for r in m_text if "mimetype" not in r or r["mimetype"] == "text/plain"),
+        (
+            r
+            for r in m_text
+            if MTextFields.MIMETYPE not in r or r[MTextFields.MIMETYPE] == "text/plain"
+        ),
         None,
     )
-    if not representation or "body" not in representation:
+    if not representation or MTextFields.BODY not in representation:
         return topic
 
-    return representation["body"]
+    return representation[MTextFields.BODY]

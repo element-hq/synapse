@@ -251,12 +251,24 @@ class EventContentFields:
 
     TOMBSTONE_SUCCESSOR_ROOM: Final = "replacement_room"
 
+    # Used in m.room.topic events.
+    TOPIC: Final = "topic"
+    M_TOPIC: Final = "m.topic"
+    M_TEXT: Final = "m.text"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
 
     # Requesting user's membership, per MSC4115
     MEMBERSHIP: Final = "membership"
+
+
+class MTextFields:
+    """Fields found inside m.text content blocks."""
+
+    BODY: Final = "body"
+    MIMETYPE: Final = "mimetype"
 
 
 class RoomTypes:

@@ -51,6 +51,7 @@ from synapse.api.constants import (
     HistoryVisibility,
     JoinRules,
     Membership,
+    MTextFields,
     RoomCreationPreset,
     RoomEncryptionAlgorithms,
     RoomTypes,
@@ -1296,8 +1297,13 @@ class RoomCreationHandler:
             topic = room_config["topic"]
             topic_event, topic_context = await create_event(
                 EventTypes.Topic,
-                # The mimetype property defaults to text/plain if omitted.
-                {"topic": topic, "m.topic": {"m.text": [{"body": topic}]}},
+                {
+                    EventContentFields.TOPIC: topic,
+                    EventContentFields.M_TOPIC: {
+                        # The mimetype property defaults to text/plain if omitted.
+                        EventContentFields.M_TEXT: [{MTextFields.BODY: topic}]
+                    },
+                },
                 True,
             )
             events_to_send.append((topic_event, topic_context))
