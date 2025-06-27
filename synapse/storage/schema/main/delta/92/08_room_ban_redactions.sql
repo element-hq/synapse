@@ -12,9 +12,9 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 CREATE TABLE room_ban_redactions(
-    room_id string NOT NULL,
-    user_id string NOT NULL,
-    redacting_event_id string NOT NULL,
+    room_id text NOT NULL,
+    user_id text NOT NULL,
+    redacting_event_id text NOT NULL,
     redact_end_ordering bigint DEFAULT NULL, -- stream ordering after which redactions are not applied
     CONSTRAINT room_ban_redaction_uniqueness UNIQUE (room_id, user_id)
 );
