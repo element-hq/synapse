@@ -144,6 +144,7 @@ class FederationClient(FederationBase):
         # (which server we pulled the event from)
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=1000,
             expiry_ms=120 * 1000,
