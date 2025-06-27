@@ -1296,6 +1296,7 @@ class RoomCreationHandler:
             topic = room_config["topic"]
             topic_event, topic_context = await create_event(
                 EventTypes.Topic,
+                # The mimetype property defaults to text/plain if omitted.
                 {"topic": topic, "m.topic": {"m.text": [{"body": topic}]}},
                 True,
             )
