@@ -459,9 +459,9 @@ class LruCache(Generic[KT, VT]):
 
         if cache_name is not None:
             metrics: Optional[CacheMetric] = register_cache(
-                "lru_cache",
-                cache_name,
-                self,
+                cache_type="lru_cache",
+                cache_name=cache_name,
+                cache=self,
                 collect_callback=metrics_collection_callback,
             )
         else:

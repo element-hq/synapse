@@ -114,7 +114,9 @@ class ResponseCache(Generic[KV]):
         self.timeout_sec = timeout_ms / 1000.0
 
         self._name = name
-        self._metrics = register_cache("response_cache", name, self, resizable=False)
+        self._metrics = register_cache(
+            cache_type="response_cache", cache_name=name, cache=self, resizable=False
+        )
         self._enable_logging = enable_logging
 
     def size(self) -> int:

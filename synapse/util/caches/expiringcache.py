@@ -83,7 +83,9 @@ class ExpiringCache(Generic[KT, VT]):
 
         self.iterable = iterable
 
-        self.metrics = register_cache("expiring", cache_name, self)
+        self.metrics = register_cache(
+            cache_type="expiring", cache_name=cache_name, cache=self
+        )
 
         if not self._expiry_ms:
             # Don't bother starting the loop if things never expire

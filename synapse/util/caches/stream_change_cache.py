@@ -96,7 +96,10 @@ class StreamChangeCache:
 
         self.name = name
         self.metrics = caches.register_cache(
-            "cache", self.name, self._cache, resize_callback=self.set_cache_factor
+            cache_type="cache",
+            cache_name=self.name,
+            cache=self._cache,
+            resize_callback=self.set_cache_factor,
         )
 
         if prefilled_cache:

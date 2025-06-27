@@ -49,7 +49,9 @@ class TTLCache(Generic[KT, VT]):
 
         self._timer = timer
 
-        self._metrics = register_cache("ttl", cache_name, self, resizable=False)
+        self._metrics = register_cache(
+            cache_type="ttl", cache_name=cache_name, cache=self, resizable=False
+        )
 
     def set(self, key: KT, value: VT, ttl: float) -> None:
         """Add/update an entry in the cache
