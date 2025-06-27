@@ -97,9 +97,23 @@ class MatrixFederationAgent:
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
         ip_blocklist: IPSet,
+        server_name: str,
         _srv_resolver: Optional[SrvResolver] = None,
         _well_known_resolver: Optional[WellKnownResolver] = None,
     ):
+        """
+        Args:
+            reactor
+            tls_client_options_factory
+            user_agent
+            ip_allowlist
+            ip_blocklist
+            server_name: The homeserver name running this resolver
+                (used to label metrics) (`hs.hostname`).
+            _srv_resolver
+            _well_known_resolver
+        """
+
         # proxy_reactor is not blocklisting reactor
         proxy_reactor = reactor
 
@@ -139,6 +153,7 @@ class MatrixFederationAgent:
                     ip_blocklist=ip_blocklist,
                 ),
                 user_agent=self.user_agent,
+                server_name=server_name,
             )
 
         self._well_known_resolver = _well_known_resolver

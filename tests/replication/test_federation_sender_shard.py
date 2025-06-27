@@ -73,6 +73,7 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            server_name="test_server",
         )
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

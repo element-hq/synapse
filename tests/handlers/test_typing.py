@@ -91,6 +91,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            server_name="test_server",
         )
 
         # the tests assume that we are starting at unix time 1000
