@@ -494,7 +494,7 @@ Options for each entry include:
 
 * `bind_addresses` (array|null): A list of local addresses to listen on. The default is "all local interfaces".
 
-* `type` (string): The type of listener. Normally `http`, but other valid options are [`manhole`](../../manhole.md) and [`metrics`](../../metrics-howto.md).
+* `type` (string): The type of listener. Normally `http`, but other valid options are [`manhole`](../../manhole.md).
 
 * `tls` (boolean): Set to true to enable TLS for this listener. Will use the TLS key/cert specified in tls_private_key_path/tls_certificate_path.
 
