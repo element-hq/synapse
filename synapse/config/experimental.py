@@ -567,5 +567,8 @@ class ExperimentalConfig(Config):
             False,
         )
 
+        # MSC4267: Automatically forgetting rooms on leave
+        self.msc4267_enabled: bool = experimental.get("msc4267_enabled", False)
+
         # MSC4155: Invite filtering
         self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)
