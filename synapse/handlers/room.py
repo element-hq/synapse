@@ -1921,6 +1921,13 @@ class RoomShutdownHandler:
             logger.info("Shutting down room %r", room_id)
 
         users = await self.store.get_local_users_related_to_room(room_id)
+
+        # When deleting a room, we want to store the local membership state so that we
+        # can still send synthetic leaves down sync after the room has been purged (if indeed it has).
+        # We must do this prior to kicking as otherwise the current_state_events
+        # table will be empty.
+        await self.store.store_deleted_room_members(room_id)
+
         for user_id, membership in users:
             # If the user is not in the room (or is banned), nothing to do.
             if membership not in (Membership.JOIN, Membership.INVITE, Membership.KNOCK):
