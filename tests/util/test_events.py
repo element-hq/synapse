@@ -79,6 +79,27 @@ class EventsTestCase(unittest.TestCase):
         )
         self.assertEqual("foobar", topic)
 
+    def test_get_plain_text_topic_rich_topic_with_invalid_plain_text_representation(
+        self,
+    ) -> None:
+        # Legacy topic and rich topic with invalid plain text representation, expect legacy topic
+        topic = get_plain_text_topic_from_event_content(
+            {"topic": "shenanigans", "m.topic": {"m.text": [{"body": 1337}]}}
+        )
+        self.assertEqual("shenanigans", topic)
+
+    def test_get_plain_text_topic_rich_topic_with_invalid_and_second_valid_plain_text_representation(
+        self,
+    ) -> None:
+        # Legacy topic and rich topic with invalid and second valid plain text representation, expect second plain text representation
+        topic = get_plain_text_topic_from_event_content(
+            {
+                "topic": "shenanigans",
+                "m.topic": {"m.text": [{"body": 1337}, {"body": "foobar"}]},
+            }
+        )
+        self.assertEqual("foobar", topic)
+
     def test_get_plain_text_topic_rich_topic_with_plain_text_and_other_representation(
         self,
     ) -> None:

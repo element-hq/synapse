@@ -52,15 +52,21 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     if not m_text:
         return topic
 
+    # Find the first `text/plain` topic ("Receivers SHOULD use the first representation in the array that they understand.")
     representation = next(
         (
             r
             for r in m_text
-            if MTextFields.MIMETYPE not in r or r[MTextFields.MIMETYPE] == "text/plain"
+            if (
+                MTextFields.MIMETYPE not in r or r[MTextFields.MIMETYPE] == "text/plain"
+            )
+            and MTextFields.BODY in r
+            # Scrutinize user input
+            and isinstance(r[MTextFields.BODY], str)
         ),
         None,
     )
-    if not representation or MTextFields.BODY not in representation:
+    if not representation:
         return topic
 
     return representation[MTextFields.BODY]
