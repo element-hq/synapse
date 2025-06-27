@@ -1962,28 +1962,6 @@ class RoomBackgroundUpdateStore(RoomWorkerStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self.db_pool.updates.register_background_index_update(
-            "redactions_add_event_id_idx",
-            "redactions_event_id",
-            "redactions",
-            ["event_id"],
-        )
-
-        self.db_pool.updates.register_background_index_update(
-            "redactions_add_redacts_idx",
-            "redactions_redacts",
-            "redactions",
-            ["redacts"],
-        )
-
-        self.db_pool.updates.register_background_index_update(
-            "redactions_add_have_censored_ts",
-            "redactions_have_censored_ts",
-            "redactions",
-            ["received_ts"],
-            where_clause="NOT have_censored",
-        )
-
         self.db_pool.updates.register_background_update_handler(
             "insert_room_retention",
             self._background_insert_retention,
