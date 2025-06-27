@@ -282,7 +282,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             "count_devices_by_users", count_devices_by_users_txn, user_ids
         )
 
-    @cached()
+    @cached(tree=True)
     async def get_device(
         self, user_id: str, device_id: str
     ) -> Optional[Mapping[str, Any]]:
@@ -1885,11 +1885,13 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 values=device_ids,
                 keyvalues={"user_id": user_id},
             )
-            self._invalidate_cache_and_stream_bulk(
-                txn, self.get_device, [(user_id, device_id) for device_id in device_ids]
-            )
 
-        for batch in batch_iter(device_ids, 100):
+            # We're bulk deleting devices potentially many devices at once, so
+            # let's not invalidate the cache for each device individually.
+            # Instead, we will invalidate the cache for the user as a whole.
+            self._invalidate_cache_and_stream(txn, self.get_device, (user_id,))
+
+        for batch in batch_iter(device_ids, 5000):
             await self.db_pool.runInteraction(
                 "delete_devices", _delete_devices_txn, batch
             )
