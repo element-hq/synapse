@@ -698,9 +698,6 @@ class DeviceHandler(DeviceWorkerHandler):
         # Delete data specific to each device. Not optimised as it is not
         # considered as part of a critical path.
         for device_id in device_ids:
-            await self._auth_handler.delete_access_tokens_for_user(
-                user_id, device_id=device_id
-            )
             if self.hs.config.experimental.msc3890_enabled:
                 # Remove any local notification settings for this device in accordance
                 # with MSC3890.
@@ -721,6 +718,10 @@ class DeviceHandler(DeviceWorkerHandler):
                     "up_to_stream_id": to_device_stream_id,
                 },
             )
+
+        await self._auth_handler.delete_access_tokens_for_devices(
+            user_id, device_ids=device_ids
+        )
 
         # Pushers are deleted after `delete_access_tokens_for_user` is called so that
         # modules using `on_logged_out` hook can use them if needed.
