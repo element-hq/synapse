@@ -36,7 +36,8 @@ def generate_fake_event_id() -> str:
 def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     """
     Given the content of an m.room.topic event returns the plain text topic
-    representation if any exists.
+    representation from m.topic if any exists. Otherwise returns the value
+    of the topic field.
 
     Returns:
         A string representing the plain text topic.
