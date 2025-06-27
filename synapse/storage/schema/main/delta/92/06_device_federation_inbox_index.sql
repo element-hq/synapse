@@ -11,6 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add a background update to delete any unreferenced state groups
+-- Background update that adds an index to `device_federation_inbox.received_ts`
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8902, 'delete_unreferenced_state_groups_bg_update', '{}');
+  (9206, 'device_federation_inbox_received_ts_index', '{}');

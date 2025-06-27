@@ -170,7 +170,7 @@ class Config:
 
     section: ClassVar[str]
 
-    def __init__(self, root_config: "RootConfig" = None):
+    def __init__(self, root_config: "RootConfig"):
         self.root = root_config
 
         # Get the path to the default Synapse template directory
@@ -445,7 +445,7 @@ class RootConfig:
         return res
 
     @classmethod
-    def invoke_all_static(cls, func_name: str, *args: Any, **kwargs: any) -> None:
+    def invoke_all_static(cls, func_name: str, *args: Any, **kwargs: Any) -> None:
         """
         Invoke a static function on config objects this RootConfig is
         configured to use.
@@ -1047,7 +1047,7 @@ class RoutableShardedWorkerHandlingConfig(ShardedWorkerHandlingConfig):
         return self._get_instance(key)
 
 
-def read_file(file_path: Any, config_path: Iterable[str]) -> str:
+def read_file(file_path: Any, config_path: StrSequence) -> str:
     """Check the given file exists, and read it into a string
 
     If it does not, emit an error indicating the problem

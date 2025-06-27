@@ -19,9 +19,10 @@
 #
 #
 
+import json
 from http import HTTPStatus
 from io import BytesIO
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
@@ -33,12 +34,11 @@ from signedjson.key import (
 from signedjson.sign import sign_json
 
 from twisted.test.proto_helpers import MemoryReactor
-from twisted.web.http_headers import Headers
-from twisted.web.iweb import IResponse
 
 from synapse.api.errors import (
     AuthError,
     Codes,
+    HttpResponseException,
     InvalidClientTokenError,
     OAuthInsufficientScopeError,
     SynapseError,
@@ -52,7 +52,7 @@ from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests.server import FakeChannel
-from tests.test_utils import FakeResponse, get_awaitable_result
+from tests.test_utils import get_awaitable_result
 from tests.unittest import HomeserverTestCase, override_config, skip_unless
 from tests.utils import HAS_AUTHLIB, checked_cast, mock_getRawHeaders
 
@@ -145,11 +145,30 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         self.auth = checked_cast(MSC3861DelegatedAuth, hs.get_auth())
 
+        self._rust_client = Mock(spec=["post"])
+        self.auth._rust_http_client = self._rust_client
+
         return hs
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        # Provision the user and the device we use in the tests.
+        store = homeserver.get_datastores().main
+        self.get_success(store.register_user(USER_ID))
+        self.get_success(
+            store.store_device(USER_ID, DEVICE, initial_device_display_name=None)
+        )
+
+    def _set_introspection_returnvalue(self, response_value: Any) -> AsyncMock:
+        self._rust_client.post = mock = AsyncMock(
+            return_value=json.dumps(response_value).encode("utf-8")
+        )
+        return mock
 
     def _assertParams(self) -> None:
         """Assert that the request parameters are correct."""
-        params = parse_qs(self.http_client.request.call_args[1]["data"].decode("utf-8"))
+        params = parse_qs(self._rust_client.post.call_args[1]["request_body"])
         self.assertEqual(params["token"], ["mockAccessToken"])
         self.assertEqual(params["client_id"], [CLIENT_ID])
         self.assertEqual(params["client_secret"], [CLIENT_SECRET])
@@ -157,128 +176,125 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_inactive_token(self) -> None:
         """The handler should return a 403 where the token is inactive."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={"active": False},
-            )
-        )
+        self._set_introspection_returnvalue({"active": False})
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
 
     def test_active_no_scope(self) -> None:
         """The handler should return a 403 where no scope is given."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={"active": True},
-            )
-        )
+        self._set_introspection_returnvalue({"active": True})
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
 
     def test_active_user_no_subject(self) -> None:
         """The handler should return a 500 when no subject is present."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={"active": True, "scope": " ".join([MATRIX_USER_SCOPE])},
-            )
+        self._set_introspection_returnvalue(
+            {"active": True, "scope": " ".join([MATRIX_USER_SCOPE])}
         )
+
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
 
     def test_active_no_user_scope(self) -> None:
         """The handler should return a 500 when no subject is present."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_DEVICE_SCOPE]),
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_DEVICE_SCOPE]),
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
 
     def test_active_admin_not_user(self) -> None:
         """The handler should raise when the scope has admin right but not user."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([SYNAPSE_ADMIN_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([SYNAPSE_ADMIN_SCOPE]),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
 
     def test_active_admin(self) -> None:
         """The handler should return a requester with admin rights."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE]),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
         self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
@@ -291,26 +307,26 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_active_admin_highest_privilege(self) -> None:
         """The handler should resolve to the most permissive scope."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join(
-                        [SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE, MATRIX_GUEST_SCOPE]
-                    ),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join(
+                    [SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE, MATRIX_GUEST_SCOPE]
+                ),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
         self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
@@ -323,24 +339,24 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_active_user(self) -> None:
         """The handler should return a requester with normal user rights."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_USER_SCOPE]),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
         self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
@@ -353,24 +369,62 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_active_user_with_device(self) -> None:
         """The handler should return a requester with normal user rights and a device ID."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         requester = self.get_success(self.auth.get_user_by_req(request))
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
+        )
+        self._assertParams()
+        self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
+        self.assertEqual(requester.is_guest, False)
+        self.assertEqual(
+            get_awaitable_result(self.auth.is_server_admin(requester)), False
+        )
+        self.assertEqual(requester.device_id, DEVICE)
+
+    def test_active_user_with_device_explicit_device_id(self) -> None:
+        """The handler should return a requester with normal user rights and a device ID, given explicitly, as supported by MAS 0.15+"""
+
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_USER_SCOPE]),
+                "device_id": DEVICE,
+                "username": USERNAME,
+            }
+        )
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_user_by_req(request))
+        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
+        )
+        # It should have called with the 'X-MAS-Supports-Device-Id: 1' header
+        self.assertEqual(
+            self._rust_client.post.call_args[1]["headers"].get(
+                "X-MAS-Supports-Device-Id",
+            ),
+            "1",
         )
         self._assertParams()
         self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
@@ -383,22 +437,19 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_multiple_devices(self) -> None:
         """The handler should raise an error if multiple devices are found in the scope."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join(
-                        [
-                            MATRIX_USER_SCOPE,
-                            f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
-                            f"{MATRIX_DEVICE_SCOPE_PREFIX}DDEEFF",
-                        ]
-                    ),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join(
+                    [
+                        MATRIX_USER_SCOPE,
+                        f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
+                        f"{MATRIX_DEVICE_SCOPE_PREFIX}DDEEFF",
+                    ]
+                ),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
@@ -408,16 +459,13 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_active_guest_not_allowed(self) -> None:
         """The handler should return an insufficient scope error."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
@@ -426,8 +474,11 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             self.auth.get_user_by_req(request), OAuthInsufficientScopeError
         )
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
         self.assertEqual(
@@ -438,16 +489,13 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_active_guest_allowed(self) -> None:
         """The handler should return a requester with guest user rights and a device ID."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "username": USERNAME,
+            }
         )
         request = Mock(args={})
         request.args[b"access_token"] = [b"mockAccessToken"]
@@ -456,8 +504,11 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             self.auth.get_user_by_req(request, allow_guest=True)
         )
         self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self.http_client.request.assert_called_once_with(
-            method="POST", uri=INTROSPECTION_ENDPOINT, data=ANY, headers=ANY
+        self._rust_client.post.assert_called_once_with(
+            url=INTROSPECTION_ENDPOINT,
+            response_limit=ANY,
+            request_body=ANY,
+            headers=ANY,
         )
         self._assertParams()
         self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
@@ -474,32 +525,66 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
 
         # The introspection endpoint is returning an error.
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse(code=500, body=b"Internal Server Error")
-        )
-        error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
-        self.assertEqual(error.value.code, 503)
-
-        # The introspection endpoint request fails.
-        self.http_client.request = AsyncMock(side_effect=Exception())
-        error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
-        self.assertEqual(error.value.code, 503)
-
-        # The introspection endpoint does not return a JSON object.
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200, payload=["this is an array", "not an object"]
+        self._rust_client.post = AsyncMock(
+            side_effect=HttpResponseException(
+                code=500, msg="Internal Server Error", response=b"{}"
             )
         )
         error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
         self.assertEqual(error.value.code, 503)
 
-        # The introspection endpoint does not return valid JSON.
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse(code=200, body=b"this is not valid JSON")
-        )
+        # The introspection endpoint request fails.
+        self._rust_client.post = AsyncMock(side_effect=Exception())
         error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
         self.assertEqual(error.value.code, 503)
+
+        # The introspection endpoint does not return a JSON object.
+        self._set_introspection_returnvalue(["this is an array", "not an object"])
+
+        error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
+        self.assertEqual(error.value.code, 503)
+
+        # The introspection endpoint does not return valid JSON.
+        self._set_introspection_returnvalue("this is not valid JSON")
+
+        error = self.get_failure(self.auth.get_user_by_req(request), SynapseError)
+        self.assertEqual(error.value.code, 503)
+
+    def test_cached_expired_introspection(self) -> None:
+        """The handler should raise an error if the introspection response gives
+        an expiry time, the introspection response is cached and then the entry is
+        re-requested after it has expired."""
+
+        introspection_mock = self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join(
+                    [
+                        MATRIX_USER_SCOPE,
+                        f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
+                    ]
+                ),
+                "username": USERNAME,
+                "expires_in": 60,
+            }
+        )
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"mockAccessToken"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+
+        # The first CS-API request causes a successful introspection
+        self.get_success(self.auth.get_user_by_req(request))
+        self.assertEqual(introspection_mock.call_count, 1)
+
+        # Sleep for 60 seconds so the token expires.
+        self.reactor.advance(60.0)
+
+        # Now the CS-API request fails because the token expired
+        self.get_failure(self.auth.get_user_by_req(request), InvalidClientTokenError)
+        # Ensure another introspection request was not sent
+        self.assertEqual(introspection_mock.call_count, 1)
 
     def make_device_keys(self, user_id: str, device_id: str) -> JsonDict:
         # We only generate a master key to simplify the test.
@@ -521,16 +606,13 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
     def test_cross_signing(self) -> None:
         """Try uploading device keys with OAuth delegation enabled."""
 
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "username": USERNAME,
+            }
         )
         keys_upload_body = self.make_device_keys(USER_ID, DEVICE)
         channel = self.make_request(
@@ -692,16 +774,13 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         # Because we still support those endpoints with ASes, it checks the
         # access token before returning 404
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(
-                code=200,
-                payload={
-                    "active": True,
-                    "sub": SUBJECT,
-                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
-                    "username": USERNAME,
-                },
-            )
+        self._set_introspection_returnvalue(
+            {
+                "active": True,
+                "sub": SUBJECT,
+                "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "username": USERNAME,
+            },
         )
 
         self.expect_unrecognized("POST", "/_matrix/client/v3/delete_devices", auth=True)
@@ -734,9 +813,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
     def test_admin_token(self) -> None:
         """The handler should return a requester with admin rights when admin_token is used."""
-        self.http_client.request = AsyncMock(
-            return_value=FakeResponse.json(code=200, payload={"active": False}),
-        )
+        self._set_introspection_returnvalue({"active": False})
 
         request = Mock(args={})
         request.args[b"access_token"] = [b"admin_token_value"]
@@ -753,7 +830,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         )
 
         # There should be no call to the introspection endpoint
-        self.http_client.request.assert_not_called()
+        self._rust_client.post.assert_not_called()
 
     @override_config({"mau_stats_only": True})
     def test_request_tracking(self) -> None:
@@ -766,28 +843,23 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         known_token = "token-token-GOOD-:)"
 
         async def mock_http_client_request(
-            method: str,
-            uri: str,
-            data: Optional[bytes] = None,
-            headers: Optional[Headers] = None,
-        ) -> IResponse:
+            url: str, request_body: str, **kwargs: Any
+        ) -> bytes:
             """Mocked auth provider response."""
-            assert method == "POST"
-            token = parse_qs(data)[b"token"][0].decode("utf-8")
+            token = parse_qs(request_body)["token"][0]
             if token == known_token:
-                return FakeResponse.json(
-                    code=200,
-                    payload={
+                return json.dumps(
+                    {
                         "active": True,
                         "scope": MATRIX_USER_SCOPE,
                         "sub": SUBJECT,
                         "username": USERNAME,
                     },
-                )
+                ).encode("utf-8")
 
-            return FakeResponse.json(code=200, payload={"active": False})
+            return json.dumps({"active": False}).encode("utf-8")
 
-        self.http_client.request = mock_http_client_request
+        self._rust_client.post = mock_http_client_request
 
         EXAMPLE_IPV4_ADDR = "123.123.123.123"
         EXAMPLE_USER_AGENT = "httprettygood"

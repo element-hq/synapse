@@ -794,6 +794,7 @@ A response body like the following is returned:
     "results": [
         {
             "delete_id": "delete_id1",
+            "room_id": "!roomid:example.com",
             "status": "failed",
             "error": "error message",
             "shutdown_room": {
@@ -804,6 +805,7 @@ A response body like the following is returned:
             }
         }, {
             "delete_id": "delete_id2",
+            "room_id": "!roomid:example.com",
             "status": "purging",
             "shutdown_room": {
                 "kicked_users": [
@@ -842,6 +844,8 @@ A response body like the following is returned:
 ```json
 {
     "status": "purging",
+    "delete_id": "bHkCNQpHqOaFhPtK",
+    "room_id": "!roomid:example.com",
     "shutdown_room": {
         "kicked_users": [
             "@foobar:example.com"
@@ -869,7 +873,8 @@ The following fields are returned in the JSON response body:
 - `results` - An array of objects, each containing information about one task.
   This field is omitted from the result when you query by `delete_id`.
   Task objects contain the following fields:
-  - `delete_id` - The ID for this purge if you query by `room_id`.
+  - `delete_id` - The ID for this purge
+  - `room_id` - The ID of the room being deleted
   - `status` - The status will be one of:
     - `shutting_down` - The process is removing users from the room.
     - `purging` - The process is purging the room and event data from database.

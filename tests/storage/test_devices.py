@@ -211,9 +211,9 @@ class DeviceStoreTestCase(HomeserverTestCase):
         even if that means leaving an earlier batch one EDU short of the limit.
         """
 
-        assert self.hs.is_mine_id(
-            "@user_id:test"
-        ), "Test not valid: this MXID should be considered local"
+        assert self.hs.is_mine_id("@user_id:test"), (
+            "Test not valid: this MXID should be considered local"
+        )
 
         self.get_success(
             self.store.set_e2e_cross_signing_key(

@@ -117,6 +117,16 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.130.0
+
+## Documented endpoint which can be delegated to a federation worker
+
+The endpoint `^/_matrix/federation/v1/version$` can be delegated to a federation
+worker. This is not new behaviour, but had not been documented yet. The 
+[list of delegatable endpoints](workers.md#synapseappgeneric_worker) has 
+been updated to include it. Make sure to check your reverse proxy rules if you
+are using workers. 
+
 # Upgrading to v1.126.0
 
 ## Room list publication rules change
@@ -136,6 +146,24 @@ room_list_publication_rules:
 ```
 
 [`room_list_publication_rules`]: usage/configuration/config_documentation.md#room_list_publication_rules
+
+## Change of signing key expiry date for the Debian/Ubuntu package repository
+
+Administrators using the Debian/Ubuntu packages from `packages.matrix.org`,
+please be aware that we have recently updated the expiry date on the repository's GPG signing key,
+but this change must be imported into your keyring.
+
+If you have the `matrix-org-archive-keyring` package installed and it updates before the current key expires, this should
+happen automatically.
+
+Otherwise, if you see an error similar to `The following signatures were invalid: EXPKEYSIG F473DD4473365DE1`, you
+will need to get a fresh copy of the keys. You can do so with:
+
+```sh
+sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
+```
+
+The old version of the key will expire on `2025-03-15`.
 
 # Upgrading to v1.122.0
 

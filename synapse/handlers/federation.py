@@ -78,6 +78,7 @@ from synapse.replication.http.federation import (
     ReplicationStoreRoomOnOutlierMembershipRestServlet,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
@@ -1061,8 +1062,8 @@ class FederationHandler:
         if self.hs.config.server.block_non_admin_invites:
             raise SynapseError(403, "This server does not accept room invites")
 
-        spam_check = await self._spam_checker_module_callbacks.user_may_invite(
-            event.sender, event.state_key, event.room_id
+        spam_check = (
+            await self._spam_checker_module_callbacks.federated_user_may_invite(event)
         )
         if spam_check != NOT_SPAM:
             raise SynapseError(
@@ -1088,6 +1089,22 @@ class FederationHandler:
         # block any attempts to invite the server notices mxid
         if event.state_key == self._server_notices_mxid:
             raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
+
+        # check the invitee's configuration and apply rules
+        invite_config = await self.store.get_invite_config_for_user(event.state_key)
+        rule = invite_config.get_invite_rule(event.sender)
+        if rule == InviteRule.BLOCK:
+            logger.info(
+                "Automatically rejecting invite from %s due to the invite filtering rules of %s",
+                event.sender,
+                event.state_key,
+            )
+            raise SynapseError(
+                403,
+                "You are not permitted to invite this user.",
+                errcode=Codes.INVITE_BLOCKED,
+            )
+        # InviteRule.IGNORE is handled at the sync layer
 
         # We retrieve the room member handler here as to not cause a cyclic dependency
         member_handler = self.hs.get_room_member_handler()
@@ -1312,9 +1329,9 @@ class FederationHandler:
         if state_key is not None:
             # the event was not rejected (get_event raises a NotFoundError for rejected
             # events) so the state at the event should include the event itself.
-            assert (
-                state_map.get((event.type, state_key)) == event.event_id
-            ), "State at event did not include event itself"
+            assert state_map.get((event.type, state_key)) == event.event_id, (
+                "State at event did not include event itself"
+            )
 
             # ... but we need the state *before* that event
             if "replaces_state" in event.unsigned:

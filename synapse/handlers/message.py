@@ -143,9 +143,9 @@ class MessageHandler:
         elif membership == Membership.LEAVE:
             key = (event_type, state_key)
             # If the membership is not JOIN, then the event ID should exist.
-            assert (
-                membership_event_id is not None
-            ), "check_user_in_room_or_world_readable returned invalid data"
+            assert membership_event_id is not None, (
+                "check_user_in_room_or_world_readable returned invalid data"
+            )
             room_state = await self._state_storage_controller.get_state_for_events(
                 [membership_event_id], StateFilter.from_types([key])
             )
@@ -242,9 +242,9 @@ class MessageHandler:
                 room_state = await self.store.get_events(state_ids.values())
             elif membership == Membership.LEAVE:
                 # If the membership is not JOIN, then the event ID should exist.
-                assert (
-                    membership_event_id is not None
-                ), "check_user_in_room_or_world_readable returned invalid data"
+                assert membership_event_id is not None, (
+                    "check_user_in_room_or_world_readable returned invalid data"
+                )
                 room_state_events = (
                     await self._state_storage_controller.get_state_for_events(
                         [membership_event_id], state_filter=state_filter
@@ -460,7 +460,7 @@ class MessageHandler:
             # date from the database in the same database transaction.
             await self.store.expire_event(event_id)
         except Exception as e:
-            logger.error("Could not expire event %s: %r", event_id, e)
+            logger.exception("Could not expire event %s: %r", event_id, e)
 
         # Schedule the expiry of the next event to expire.
         await self._schedule_next_expiry()
@@ -495,6 +495,7 @@ class EventCreationHandler:
         self._instance_name = hs.get_instance_name()
         self._notifier = hs.get_notifier()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self._policy_handler = hs.get_room_policy_handler()
 
         self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
 
@@ -1108,6 +1109,18 @@ class EventCreationHandler:
                     event.sender,
                 )
 
+                policy_allowed = await self._policy_handler.is_event_allowed(event)
+                if not policy_allowed:
+                    logger.warning(
+                        "Event not allowed by policy server, rejecting %s",
+                        event.event_id,
+                    )
+                    raise SynapseError(
+                        403,
+                        "This message has been rejected as probable spam",
+                        Codes.FORBIDDEN,
+                    )
+
                 spam_check_result = (
                     await self._spam_checker_module_callbacks.check_event_for_spam(
                         event
@@ -1119,7 +1132,7 @@ class EventCreationHandler:
                             [code, dict] = spam_check_result
                             raise SynapseError(
                                 403,
-                                "This message had been rejected as probable spam",
+                                "This message has been rejected as probable spam",
                                 code,
                                 dict,
                             )
@@ -1266,12 +1279,14 @@ class EventCreationHandler:
                 # Allow an event to have empty list of prev_event_ids
                 # only if it has auth_event_ids.
                 or auth_event_ids
-            ), "Attempting to create a non-m.room.create event with no prev_events or auth_event_ids"
+            ), (
+                "Attempting to create a non-m.room.create event with no prev_events or auth_event_ids"
+            )
         else:
             # we now ought to have some prev_events (unless it's a create event).
-            assert (
-                builder.type == EventTypes.Create or prev_event_ids
-            ), "Attempting to create a non-m.room.create event with no prev_events"
+            assert builder.type == EventTypes.Create or prev_event_ids, (
+                "Attempting to create a non-m.room.create event with no prev_events"
+            )
 
         if for_batch:
             assert prev_event_ids is not None
@@ -1461,6 +1476,12 @@ class EventCreationHandler:
                         prev_event.event_id,
                     )
                     return prev_event
+
+            if not event.is_state() and event.type in [
+                EventTypes.Message,
+                EventTypes.Encrypted,
+            ]:
+                await self.store.set_room_participation(event.user_id, event.room_id)
 
             if event.internal_metadata.is_out_of_band_membership():
                 # the only sort of out-of-band-membership events we expect to see here are
@@ -2040,7 +2061,8 @@ class EventCreationHandler:
                 # dependent on _DUMMY_EVENT_ROOM_EXCLUSION_EXPIRY
                 logger.info(
                     "Failed to send dummy event into room %s. Will exclude it from "
-                    "future attempts until cache expires" % (room_id,)
+                    "future attempts until cache expires",
+                    room_id,
                 )
                 now = self.clock.time_msec()
                 self._rooms_to_exclude_from_dummy_event_insertion[room_id] = now
@@ -2099,7 +2121,9 @@ class EventCreationHandler:
             except AuthError:
                 logger.info(
                     "Failed to send dummy event into room %s for user %s due to "
-                    "lack of power. Will try another user" % (room_id, user_id)
+                    "lack of power. Will try another user",
+                    room_id,
+                    user_id,
                 )
         return False
 

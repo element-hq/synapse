@@ -128,6 +128,7 @@ BOOLEAN_COLUMNS = {
     "pushers": ["enabled"],
     "redactions": ["have_censored"],
     "remote_media_cache": ["authenticated"],
+    "room_memberships": ["participant"],
     "room_stats_state": ["is_federatable"],
     "rooms": ["is_public", "has_auth_chain_index"],
     "sliding_sync_joined_rooms": ["is_encrypted"],
@@ -194,7 +195,7 @@ IGNORED_TABLES = {
     # Porting the auto generated sequence in this table is non-trivial.
     # None of the entries in this list are mandatory for Synapse to keep working.
     # If state group disk space is an issue after the port, the
-    # `delete_unreferenced_state_groups_bg_update` background task can be run again.
+    # `mark_unreferenced_state_groups_for_deletion_bg_update` background task can be run again.
     "state_groups_pending_deletion",
     # We don't port these tables, as they're a faff and we can regenerate
     # them anyway.
@@ -226,7 +227,7 @@ IGNORED_BACKGROUND_UPDATES = {
     # Reapplying this background update to the postgres database is unnecessary after
     # already having waited for the SQLite database to complete all running background
     # updates.
-    "delete_unreferenced_state_groups_bg_update",
+    "mark_unreferenced_state_groups_for_deletion_bg_update",
 }
 
 
@@ -1064,7 +1065,7 @@ class Porter:
 
         def get_sent_table_size(txn: LoggingTransaction) -> int:
             txn.execute(
-                "SELECT count(*) FROM sent_transactions" " WHERE ts >= ?", (yesterday,)
+                "SELECT count(*) FROM sent_transactions WHERE ts >= ?", (yesterday,)
             )
             result = txn.fetchone()
             assert result is not None

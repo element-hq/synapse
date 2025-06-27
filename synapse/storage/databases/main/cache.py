@@ -307,7 +307,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     "get_rooms_for_user", (data.state_key,)
                 )
                 self._attempt_to_invalidate_cache(
-                    "get_sliding_sync_rooms_for_user", None
+                    "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
                 )
                 self._membership_stream_cache.entity_has_changed(data.state_key, token)  # type: ignore[attr-defined]
             elif data.type == EventTypes.RoomEncryption:
@@ -319,7 +319,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
             if (data.type, data.state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
                 self._attempt_to_invalidate_cache(
-                    "get_sliding_sync_rooms_for_user", None
+                    "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
                 )
         elif row.type == EventsStreamAllStateRow.TypeId:
             assert isinstance(data, EventsStreamAllStateRow)
@@ -330,7 +330,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_rooms_for_user", None)
             self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
             self._attempt_to_invalidate_cache("get_room_encryption", (data.room_id,))
-            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+            )
         else:
             raise Exception("Unknown events stream row type %s" % (row.type,))
 
@@ -394,7 +396,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 "_get_rooms_for_local_user_where_membership_is_inner", (state_key,)
             )
             self._attempt_to_invalidate_cache(
-                "get_sliding_sync_rooms_for_user", (state_key,)
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots",
+                (state_key,),
             )
 
             self._attempt_to_invalidate_cache(
@@ -413,7 +416,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
 
         if (etype, state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
-            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+            )
 
         if relates_to:
             self._attempt_to_invalidate_cache(
@@ -470,7 +475,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "_get_rooms_for_local_user_where_membership_is_inner", None
         )
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("get_references_for_event", None)
@@ -529,7 +536,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "get_current_hosts_in_room_ordered", (room_id,)
         )
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
+        self._attempt_to_invalidate_cache(
+            "get_sliding_sync_rooms_for_user_from_membership_snapshots", None
+        )
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("_get_membership_from_event_id", None)

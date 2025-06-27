@@ -141,6 +141,9 @@ OIDC_PROVIDER_CONFIG_SCHEMA = {
             "type": "string",
             "enum": ["auto", "userinfo_endpoint"],
         },
+        "redirect_uri": {
+            "type": ["string", "null"],
+        },
         "allow_existing_users": {"type": "boolean"},
         "user_mapping_provider": {"type": ["object", "null"]},
         "attribute_requirements": {
@@ -344,6 +347,7 @@ def _parse_oidc_config_dict(
         ),
         skip_verification=oidc_config.get("skip_verification", False),
         user_profile_method=oidc_config.get("user_profile_method", "auto"),
+        redirect_uri=oidc_config.get("redirect_uri"),
         allow_existing_users=oidc_config.get("allow_existing_users", False),
         user_mapping_provider_class=user_mapping_provider_class,
         user_mapping_provider_config=user_mapping_provider_config,
@@ -351,6 +355,9 @@ def _parse_oidc_config_dict(
         enable_registration=oidc_config.get("enable_registration", True),
         additional_authorization_parameters=oidc_config.get(
             "additional_authorization_parameters", {}
+        ),
+        passthrough_authorization_parameters=oidc_config.get(
+            "passthrough_authorization_parameters", []
         ),
     )
 
@@ -467,6 +474,18 @@ class OidcProviderConfig:
     # values are: "auto" or "userinfo_endpoint".
     user_profile_method: str
 
+    redirect_uri: Optional[str]
+    """
+    An optional replacement for Synapse's hardcoded `redirect_uri` URL
+    (`<public_baseurl>/_synapse/client/oidc/callback`). This can be used to send
+    the client to a different URL after it receives a response from the
+    `authorization_endpoint`.
+
+    If this is set, the client is expected to call Synapse's OIDC callback URL
+    reproduced above itself with the necessary parameters and session cookie, in
+    order to complete OIDC login.
+    """
+
     # whether to allow a user logging in via OIDC to match a pre-existing account
     # instead of failing
     allow_existing_users: bool
@@ -485,3 +504,6 @@ class OidcProviderConfig:
 
     # Additional parameters that will be passed to the authorization grant URL
     additional_authorization_parameters: Mapping[str, str]
+
+    # Allow query parameters to the redirect endpoint that will be passed to the authorization grant URL
+    passthrough_authorization_parameters: Collection[str]

@@ -38,6 +38,16 @@ class _BackgroundUpdates:
 
     EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
 
+    CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME = (
+        "current_state_events_stream_ordering_idx"
+    )
+    ROOM_MEMBERSHIPS_STREAM_ORDERING_INDEX_UPDATE_NAME = (
+        "room_memberships_stream_ordering_idx"
+    )
+    LOCAL_CURRENT_MEMBERSHIP_STREAM_ORDERING_INDEX_UPDATE_NAME = (
+        "local_current_membership_stream_ordering_idx"
+    )
+
     SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE = (
         "sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update"
     )
@@ -49,6 +59,8 @@ class _BackgroundUpdates:
         "sliding_sync_membership_snapshots_fix_forgotten_column_bg_update"
     )
 
-    DELETE_UNREFERENCED_STATE_GROUPS_BG_UPDATE = (
-        "delete_unreferenced_state_groups_bg_update"
+    MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE = (
+        "mark_unreferenced_state_groups_for_deletion_bg_update"
     )
+
+    FIXUP_MAX_DEPTH_CAP = "fixup_max_depth_cap"

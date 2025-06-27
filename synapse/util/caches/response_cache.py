@@ -101,7 +101,13 @@ class ResponseCache(Generic[KV]):
     used rather than trying to compute a new response.
     """
 
-    def __init__(self, clock: Clock, name: str, timeout_ms: float = 0):
+    def __init__(
+        self,
+        clock: Clock,
+        name: str,
+        timeout_ms: float = 0,
+        enable_logging: bool = True,
+    ):
         self._result_cache: Dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
@@ -109,6 +115,7 @@ class ResponseCache(Generic[KV]):
 
         self._name = name
         self._metrics = register_cache("response_cache", name, self, resizable=False)
+        self._enable_logging = enable_logging
 
     def size(self) -> int:
         return len(self._result_cache)
@@ -246,9 +253,12 @@ class ResponseCache(Generic[KV]):
         """
         entry = self._get(key)
         if not entry:
-            logger.debug(
-                "[%s]: no cached result for [%s], calculating new one", self._name, key
-            )
+            if self._enable_logging:
+                logger.debug(
+                    "[%s]: no cached result for [%s], calculating new one",
+                    self._name,
+                    key,
+                )
             context = ResponseCacheContext(cache_key=key)
             if cache_context:
                 kwargs["cache_context"] = context
@@ -269,12 +279,15 @@ class ResponseCache(Generic[KV]):
             return await make_deferred_yieldable(entry.result.observe())
 
         result = entry.result.observe()
-        if result.called:
-            logger.info("[%s]: using completed cached result for [%s]", self._name, key)
-        else:
-            logger.info(
-                "[%s]: using incomplete cached result for [%s]", self._name, key
-            )
+        if self._enable_logging:
+            if result.called:
+                logger.info(
+                    "[%s]: using completed cached result for [%s]", self._name, key
+                )
+            else:
+                logger.info(
+                    "[%s]: using incomplete cached result for [%s]", self._name, key
+                )
 
         span_context = entry.opentracing_span_context
         with start_active_span_follows_from(
