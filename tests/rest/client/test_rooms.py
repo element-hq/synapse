@@ -4733,7 +4733,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
 
         # unban user
         self.helper.change_membership(
-            self.room_id, self.creator, bad_user, "unban", content, self.creator_tok
+            self.room_id, self.creator, bad_user, "unban", {}, self.creator_tok
         )
 
         # user should be able to join again

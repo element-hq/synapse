@@ -379,12 +379,40 @@ class PersistEventsStore:
 
                 event_counter.labels(event.type, origin_type, origin_entity).inc()
 
-                # check for msc4293 redact_events flag and apply if found
                 if (
                     not self.hs.config.experimental.msc4293_enabled
                     or event.type != EventTypes.Member
+                    or event.state_key is None
                 ):
                     continue
+
+                # check if this is an unban/join that will undo a ban/kick redaction for
+                # user in room
+                if event.membership in [Membership.LEAVE, Membership.JOIN]:
+                    if event.membership == Membership.LEAVE:
+                        # self-leave, ignore
+                        if event.sender == event.state_key:
+                            continue
+                    # check to see if there is an existing ban/leave causing redactions for
+                    # this user/room combination
+                    res = await self.db_pool.simple_select_list(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        ["room_id", "user_id"],
+                    )
+                    if res:
+                        # if so, update the entry with the stream ordering when the redactions should
+                        # stop
+                        await self.db_pool.simple_update(
+                            "room_ban_redactions",
+                            {"room_id": event.room_id, "user_id": event.state_key},
+                            {
+                                "redact_end_ordering": event.internal_metadata.stream_ordering
+                            },
+                            desc="room_ban_redactions update redact_end_ordering",
+                        )
+
+                # check for msc4293 redact_events flag and apply if found
                 if event.membership not in [Membership.LEAVE, Membership.BAN]:
                     continue
                 redact = event.content.get("org.matrix.msc4293.redact_events", False)
@@ -420,7 +448,25 @@ class PersistEventsStore:
                         if sender_level < room_redaction_level:
                             continue
 
-                    if sender_level > redact_level:
+                    if sender_level >= redact_level:
+                        await self.db_pool.simple_upsert(
+                            "room_ban_redactions",
+                            {"room_id": event.room_id, "user_id": event.state_key},
+                            {
+                                "redacting_event_id": event.event_id,
+                                "redact_end_ordering": None,
+                            },
+                            {
+                                "room_id": event.room_id,
+                                "user_id": event.state_key,
+                                "redacting_event_id": event.event_id,
+                                "redact_end_ordering": None,
+                            },
+                        )
+
+                        # normally the cache entry for a redacted event would be invalidated
+                        # by an arriving redaction event, but since we are not creating redaction
+                        # events we invalidate manually
                         ids_to_redact = (
                             await self.store.get_events_sent_by_user_in_room(
                                 event.state_key, event.room_id, limit=MAX_EVENTS
@@ -429,28 +475,6 @@ class PersistEventsStore:
                         if not ids_to_redact:
                             continue
 
-                        key_values = [(event.event_id, x) for x in ids_to_redact]
-                        value_values = [
-                            (self._clock.time_msec(),) for x in ids_to_redact
-                        ]
-                        await self.db_pool.simple_upsert_many(
-                            table="redactions",
-                            key_names=["event_id", "redacts"],
-                            key_values=key_values,
-                            value_names=["received_ts"],
-                            value_values=value_values,
-                            desc="redact_on_ban_redaction_txn",
-                        )
-
-                        redacted_events = await self.store.get_events_as_list(
-                            ids_to_redact
-                        )
-                        for redacted_event in redacted_events:
-                            redacted_event.unsigned["redacted_because"] = event
-
-                        # normally the cache entry for a redacted event would be invalidated
-                        # by an arriving redaction event, but since we are not creating redaction
-                        # events we invalidate manually
                         for id in ids_to_redact:
                             await self.db_pool.runInteraction(
                                 "invalidate cache",
@@ -2850,8 +2874,9 @@ class PersistEventsStore:
         self.db_pool.simple_upsert_txn(
             txn,
             table="redactions",
-            keyvalues={"event_id": event.event_id, "redacts": event.redacts},
+            keyvalues={"event_id": event.event_id},
             values={
+                "redacts": event.redacts,
                 "received_ts": self._clock.time_msec(),
             },
         )
