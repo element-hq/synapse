@@ -695,10 +695,10 @@ class DeviceHandler(DeviceWorkerHandler):
             else:
                 raise
 
-        # Delete data specific to each device. Not optimised as it is not
-        # considered as part of a critical path.
-        for device_id in device_ids:
-            if self.hs.config.experimental.msc3890_enabled:
+        # Delete data specific to each device. Not optimised as its an
+        # experimental MSC.
+        if self.hs.config.experimental.msc3890_enabled:
+            for device_id in device_ids:
                 # Remove any local notification settings for this device in accordance
                 # with MSC3890.
                 await self._account_data_handler.remove_account_data_for_user(
@@ -706,6 +706,13 @@ class DeviceHandler(DeviceWorkerHandler):
                     f"org.matrix.msc3890.local_notification_settings.{device_id}",
                 )
 
+        # If we're deleting a lot of devices, a bunch of them may not have any
+        # to-device messages queued up. We filter those out to avoid scheduling
+        # unnecessary tasks.
+        devices_with_messages = await self.store.get_devices_with_messages(
+            user_id, device_ids
+        )
+        for device_id in devices_with_messages:
             # Delete device messages asynchronously and in batches using the task scheduler
             # We specify an upper stream id to avoid deleting non delivered messages
             # if an user re-uses a device ID.
