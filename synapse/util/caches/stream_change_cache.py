@@ -73,11 +73,23 @@ class StreamChangeCache:
 
     def __init__(
         self,
+        *,
         name: str,
+        server_name: str,
         current_stream_pos: int,
         max_size: int = 10000,
         prefilled_cache: Optional[Mapping[EntityType, int]] = None,
     ) -> None:
+        """
+        Args:
+            name
+            server_name: server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+            current_stream_pos
+            max_size
+            prefilled_cache
+        """
+
         self._original_max_size: int = max_size
         self._max_size = math.floor(max_size)
 
@@ -98,6 +110,7 @@ class StreamChangeCache:
         self.metrics = caches.register_cache(
             cache_type="cache",
             cache_name=self.name,
+            server_name=server_name,
             cache=self._cache,
             resize_callback=self.set_cache_factor,
         )
