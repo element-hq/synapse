@@ -2099,32 +2099,36 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         context = get_active_span_text_map()
 
         def add_device_changes_txn(
-            txn: LoggingTransaction, stream_ids: List[int]
+            txn: LoggingTransaction,
+            batch_device_ids: StrCollection,
+            stream_ids: List[int],
         ) -> None:
             self._add_device_change_to_stream_txn(
                 txn,
                 user_id,
-                device_ids,
+                batch_device_ids,
                 stream_ids,
             )
 
             self._add_device_outbound_room_poke_txn(
                 txn,
                 user_id,
-                device_ids,
+                batch_device_ids,
                 room_ids,
                 stream_ids,
                 context,
             )
 
-        async with self._device_list_id_gen.get_next_mult(
-            len(device_ids)
-        ) as stream_ids:
-            await self.db_pool.runInteraction(
-                "add_device_change_to_stream",
-                add_device_changes_txn,
-                stream_ids,
-            )
+        for batch_device_ids in batch_iter(device_ids, 1000):
+            async with self._device_list_id_gen.get_next_mult(
+                len(device_ids)
+            ) as stream_ids:
+                await self.db_pool.runInteraction(
+                    "add_device_change_to_stream",
+                    add_device_changes_txn,
+                    batch_device_ids,
+                    stream_ids,
+                )
 
         return stream_ids[-1]
 
