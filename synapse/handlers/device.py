@@ -815,10 +815,11 @@ class DeviceHandler(DeviceWorkerHandler):
             # This should only happen if there are no updates, so we bail.
             return
 
-        for device_id in device_ids:
-            logger.debug(
-                "Notifying about update %r/%r, ID: %r", user_id, device_id, position
-            )
+        if logger.isEnabledFor(logging.DEBUG):
+            for device_id in device_ids:
+                logger.debug(
+                    "Notifying about update %r/%r, ID: %r", user_id, device_id, position
+                )
 
         # specify the user ID too since the user should always get their own device list
         # updates, even if they aren't in any rooms.
