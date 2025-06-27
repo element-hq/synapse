@@ -126,11 +126,15 @@ class ApplicationServiceApi(SimpleHttpClient):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.config = hs.config.appservice
 
         self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "as_protocol_meta", timeout_ms=HOUR_IN_MS
+            clock=hs.get_clock(),
+            name="as_protocol_meta",
+            server_name=self.server_name,
+            timeout_ms=HOUR_IN_MS,
         )
 
     def _get_headers(self, service: "ApplicationService") -> Dict[bytes, List[bytes]]:

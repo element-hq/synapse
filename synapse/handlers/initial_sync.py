@@ -60,6 +60,7 @@ logger = logging.getLogger(__name__)
 
 class InitialSyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.state_handler = hs.get_state_handler()
@@ -77,7 +78,11 @@ class InitialSyncHandler:
                 bool,
                 bool,
             ]
-        ] = ResponseCache(hs.get_clock(), "initial_sync_cache")
+        ] = ResponseCache(
+            clock=hs.get_clock(),
+            name="initial_sync_cache",
+            server_name=self.server_name,
+        )
         self._event_serializer = hs.get_event_client_serializer()
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state

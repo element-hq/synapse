@@ -61,16 +61,26 @@ MAX_PUBLIC_ROOMS_IN_RESPONSE = 100
 
 class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.hs = hs
         self.enable_room_list_search = hs.config.roomdirectory.enable_room_list_search
         self.response_cache: ResponseCache[
             Tuple[Optional[int], Optional[str], Optional[ThirdPartyInstanceID]]
-        ] = ResponseCache(hs.get_clock(), "room_list")
+        ] = ResponseCache(
+            clock=hs.get_clock(),
+            name="room_list",
+            server_name=self.server_name,
+        )
         self.remote_response_cache: ResponseCache[
             Tuple[str, Optional[int], Optional[str], bool, Optional[str]]
-        ] = ResponseCache(hs.get_clock(), "remote_room_list", timeout_ms=30 * 1000)
+        ] = ResponseCache(
+            clock=hs.get_clock(),
+            name="remote_room_list",
+            server_name=self.server_name,
+            timeout_ms=30 * 1000,
+        )
 
     async def get_local_public_room_list(
         self,

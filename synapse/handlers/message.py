@@ -558,8 +558,9 @@ class EventCreationHandler:
         self._external_cache_joined_hosts_updates: Optional[ExpiringCache] = None
         if self._external_cache.is_enabled():
             self._external_cache_joined_hosts_updates = ExpiringCache(
-                "_external_cache_joined_hosts_updates",
-                self.clock,
+                cache_name="_external_cache_joined_hosts_updates",
+                server_name=self.server_name,
+                clock=self.clock,
                 expiry_ms=30 * 60 * 1000,
             )
 

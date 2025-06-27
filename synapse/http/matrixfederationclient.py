@@ -422,6 +422,7 @@ class MatrixFederationHttpClient:
                 user_agent.encode("ascii"),
                 hs.config.server.federation_ip_range_allowlist,
                 hs.config.server.federation_ip_range_blocklist,
+                server_name=self.server_name,
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret

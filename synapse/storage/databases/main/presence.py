@@ -79,6 +79,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     ) -> None:
         super().__init__(database, db_conn, hs)
 
+        self.server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
         self._presence_id_gen: MultiWriterIdGenerator
 
@@ -108,8 +109,9 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             max_value=self._presence_id_gen.get_current_token(),
         )
         self.presence_stream_cache = StreamChangeCache(
-            "PresenceStreamChangeCache",
-            min_presence_val,
+            name="PresenceStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_presence_val,
             prefilled_cache=presence_cache_prefill,
         )
 

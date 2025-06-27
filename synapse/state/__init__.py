@@ -631,6 +631,7 @@ class StateResolutionHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
 
         self.resolve_linearizer = Linearizer(name="state_resolve_lock")
@@ -639,6 +640,7 @@ class StateResolutionHandler:
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
             ExpiringCache(
                 cache_name="state_cache",
+                server_name=self.server_name,
                 clock=self.clock,
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,

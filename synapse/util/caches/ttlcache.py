@@ -40,7 +40,21 @@ VT = TypeVar("VT")
 class TTLCache(Generic[KT, VT]):
     """A key/value cache implementation where each entry has its own TTL"""
 
-    def __init__(self, cache_name: str, timer: Callable[[], float] = time.time):
+    def __init__(
+        self,
+        *,
+        cache_name: str,
+        server_name: str,
+        timer: Callable[[], float] = time.time,
+    ):
+        """
+        Args:
+            cache_name
+            server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+            timer: Function used to get the current time in seconds since the epoch.
+        """
+
         # map from key to _CacheEntry
         self._data: Dict[KT, _CacheEntry[KT, VT]] = {}
 
@@ -49,7 +63,13 @@ class TTLCache(Generic[KT, VT]):
 
         self._timer = timer
 
-        self._metrics = register_cache("ttl", cache_name, self, resizable=False)
+        self._metrics = register_cache(
+            cache_type="ttl",
+            cache_name=cache_name,
+            cache=self,
+            server_name=server_name,
+            resizable=False,
+        )
 
     def set(self, key: KT, value: VT, ttl: float) -> None:
         """Add/update an entry in the cache

@@ -160,7 +160,10 @@ class FederationServer(FederationBase):
 
         # We cache results for transaction with the same ID
         self._transaction_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "fed_txn_handler", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="fed_txn_handler",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self.transaction_actions = TransactionActions(self.store)
@@ -170,10 +173,18 @@ class FederationServer(FederationBase):
         # We cache responses to state queries, as they take a while and often
         # come in waves.
         self._state_resp_cache: ResponseCache[Tuple[str, Optional[str]]] = (
-            ResponseCache(hs.get_clock(), "state_resp", timeout_ms=30000)
+            ResponseCache(
+                clock=hs.get_clock(),
+                name="state_resp",
+                server_name=self.server_name,
+                timeout_ms=30000,
+            )
         )
         self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "state_ids_resp", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="state_ids_resp",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self._federation_metrics_domains = (

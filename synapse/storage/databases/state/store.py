@@ -92,6 +92,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
         self._state_deletion_store = state_deletion_store
+        self.server_name = hs.hostname
 
         # Originally the state store used a single DictionaryCache to cache the
         # event IDs for the state types in a given state group to avoid hammering
@@ -123,14 +124,16 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         # vast majority of state in Matrix (today) is member events.
 
         self._state_group_cache: DictionaryCache[int, StateKey, str] = DictionaryCache(
-            "*stateGroupCache*",
+            name="*stateGroupCache*",
+            server_name=self.server_name,
             # TODO: this hasn't been tuned yet
-            50000,
+            max_entries=50000,
         )
         self._state_group_members_cache: DictionaryCache[int, StateKey, str] = (
             DictionaryCache(
-                "*stateGroupMembersCache*",
-                500000,
+                name="*stateGroupMembersCache*",
+                server_name=self.server_name,
+                max_entries=500000,
             )
         )
 

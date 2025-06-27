@@ -127,7 +127,15 @@ class DictionaryCache(Generic[KT, DKT, DV]):
     for the '2' dict key.
     """
 
-    def __init__(self, name: str, max_entries: int = 1000):
+    def __init__(self, *, name: str, server_name: str, max_entries: int = 1000):
+        """
+        Args:
+            name
+            server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+            max_entries
+        """
+
         # We use a single LruCache to store two different types of entries:
         #   1. Map from (key, dict_key) -> dict value (or sentinel, indicating
         #      the key doesn't exist in the dict); and
@@ -152,6 +160,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
             Union[_PerKeyValue, Dict[DKT, DV]],
         ] = LruCache(
             max_size=max_entries,
+            server_name=server_name,
             cache_name=name,
             cache_type=TreeCache,
             size_callback=len,

@@ -79,7 +79,9 @@ class DeferredCache(Generic[KT, VT]):
 
     def __init__(
         self,
+        *,
         name: str,
+        server_name: str,
         max_entries: int = 1000,
         tree: bool = False,
         iterable: bool = False,
@@ -89,6 +91,8 @@ class DeferredCache(Generic[KT, VT]):
         """
         Args:
             name: The name of the cache
+            server_name: server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
             max_entries: Maximum amount of entries that the cache will hold
             tree: Use a TreeCache instead of a dict as the underlying cache type
             iterable: If True, count each item in the cached object as an entry,
@@ -113,6 +117,7 @@ class DeferredCache(Generic[KT, VT]):
         # a Deferred.
         self.cache: LruCache[KT, VT] = LruCache(
             max_size=max_entries,
+            server_name=server_name,
             cache_name=name,
             cache_type=cache_type,
             size_callback=(

@@ -66,6 +66,17 @@ all_gauges: Dict[str, Collector] = {}
 
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
+INSTANCE_LABEL_NAME = "instance"
+"""
+The standard Prometheus label name used to identify which server instance the metrics
+came from.
+In the case of a Synapse homeserver, this should be set to the homeserver name
+(`hs.hostname`).
+Normally, this would be set automatically by the Prometheus server scraping the data but
+since we support multiple instances of Synapse running in the same process and all
+metrics are in a single global `REGISTRY`, we need to manually label any metrics.
+"""
+
 
 class _RegistryProxy:
     @staticmethod
