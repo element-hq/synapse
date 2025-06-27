@@ -118,6 +118,7 @@ class EventContext:
 
 class RoomCreationHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.auth = hs.get_auth()
@@ -174,7 +175,10 @@ class RoomCreationHandler:
         # succession, only process the first attempt and return its result to
         # subsequent requests
         self._upgrade_response_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "room_upgrade", timeout_ms=FIVE_MINUTES_IN_MS
+            clock=hs.get_clock(),
+            name="room_upgrade",
+            server_name=self.server_name,
+            timeout_ms=FIVE_MINUTES_IN_MS,
         )
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 

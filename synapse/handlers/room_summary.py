@@ -96,6 +96,7 @@ class RoomSummaryHandler:
     _PAGINATION_SESSION_VALIDITY_PERIOD_MS = 5 * 60 * 1000
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._event_auth_handler = hs.get_event_auth_handler()
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -113,8 +114,9 @@ class RoomSummaryHandler:
         self._pagination_response_cache: ResponseCache[
             Tuple[str, str, bool, Optional[int], Optional[int], Optional[str]]
         ] = ResponseCache(
-            hs.get_clock(),
-            "get_room_hierarchy",
+            clock=hs.get_clock(),
+            name="get_room_hierarchy",
+            server_name=self.server_name,
         )
         self._msc3266_enabled = hs.config.experimental.msc3266_enabled
 

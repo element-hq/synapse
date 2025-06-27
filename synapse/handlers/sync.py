@@ -353,8 +353,9 @@ class SyncHandler:
         #    cached result any more, and we could flush the entry from the cache to save
         #    memory.
         self.response_cache: ResponseCache[SyncRequestKey] = ResponseCache(
-            hs.get_clock(),
-            "sync",
+            clock=hs.get_clock(),
+            name="sync",
+            server_name=self.server_name,
             timeout_ms=hs.config.caches.sync_response_cache_duration,
         )
 
