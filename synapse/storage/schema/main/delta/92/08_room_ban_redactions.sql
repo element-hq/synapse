@@ -15,7 +15,7 @@ CREATE TABLE room_ban_redactions(
     room_id string NOT NULL,
     user_id string NOT NULL,
     redacting_event_id string NOT NULL,
-    redact_end_ordering stream_ordering bigint DEFAULT NULL, -- stream ordering after which redactions are not applied
+    redact_end_ordering bigint DEFAULT NULL, -- stream ordering after which redactions are not applied
     CONSTRAINT room_ban_redaction_uniqueness UNIQUE (room_id, user_id)
 );
 
