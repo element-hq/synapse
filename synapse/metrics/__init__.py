@@ -66,6 +66,19 @@ all_gauges: Dict[str, Collector] = {}
 
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
+INSTANCE_LABEL_NAME = "instance"
+"""
+The standard Prometheus label name used to identify which server instance the metrics
+came from.
+
+In the case of a Synapse homeserver, this should be set to the homeserver name
+(`hs.hostname`).
+
+Normally, this would be set automatically by the Prometheus server scraping the data but
+since we support multiple instances of Synapse running in the same process and all
+metrics are in a single global `REGISTRY`, we need to manually label any metrics.
+"""
+
 
 class _RegistryProxy:
     @staticmethod
@@ -192,7 +205,16 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         same key.
 
         Note that `callback` may be called on a separate thread.
+
+        Args:
+            key: A tuple of label values, which must match the order of the
+                `labels` given to the constructor.
+            callback
         """
+        assert len(key) == len(self.labels), (
+            f"Expected {len(self.labels)} labels in `key`, got {len(key)}: {key}"
+        )
+
         with self._lock:
             self._registrations.setdefault(key, set()).add(callback)
 
@@ -201,7 +223,17 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         key: Tuple[str, ...],
         callback: Callable[[MetricsEntry], None],
     ) -> None:
-        """Registers that we've exited a block with labels `key`."""
+        """
+        Registers that we've exited a block with labels `key`.
+
+        Args:
+            key: A tuple of label values, which must match the order of the
+                `labels` given to the constructor.
+            callback
+        """
+        assert len(key) == len(self.labels), (
+            f"Expected {len(self.labels)} labels in `key`, got {len(key)}: {key}"
+        )
 
         with self._lock:
             self._registrations.setdefault(key, set()).discard(callback)
@@ -225,7 +257,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
             with self._lock:
                 callbacks = set(self._registrations[key])
 
-            in_flight.add_metric(key, len(callbacks))
+            in_flight.add_metric(labels=key, value=len(callbacks))
 
             metrics = self._metrics_class()
             metrics_by_key[key] = metrics
@@ -239,7 +271,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
                 "_".join([self.name, name]), "", labels=self.labels
             )
             for key, metrics in metrics_by_key.items():
-                gauge.add_metric(key, getattr(metrics, name))
+                gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
 
     def _register_with_collector(self) -> None:

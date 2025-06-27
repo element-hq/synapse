@@ -75,6 +75,7 @@ class ReplicationDataHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
@@ -342,7 +343,11 @@ class ReplicationDataHandler:
         waiting_list.add((position, deferred))
 
         # We measure here to get in flight counts and average waiting time.
-        with Measure(self._clock, "repl.wait_for_stream_position"):
+        with Measure(
+            self._clock,
+            name="repl.wait_for_stream_position",
+            server_name=self.server_name,
+        ):
             logger.info(
                 "Waiting for repl stream %r to reach %s (%s); currently at: %s",
                 stream_name,

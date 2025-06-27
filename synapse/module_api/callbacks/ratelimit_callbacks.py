@@ -43,6 +43,7 @@ GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK = Callable[
 
 class RatelimitModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self._get_ratelimit_override_for_user_callbacks: List[
             GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
@@ -64,7 +65,11 @@ class RatelimitModuleApiCallbacks:
         self, user_id: str, limiter_name: str
     ) -> Optional[RatelimitOverride]:
         for callback in self._get_ratelimit_override_for_user_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                name=f"{callback.__module__}.{callback.__qualname__}",
+                server_name=self.server_name,
+            ):
                 res: Optional[RatelimitOverride] = await delay_cancellation(
                     callback(user_id, limiter_name)
                 )

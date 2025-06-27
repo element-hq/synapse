@@ -76,6 +76,7 @@ class ReplicationSendEventRestServlet(ReplicationEndpoint):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.server_name = hs.hostname
         self.event_creation_handler = hs.get_event_creation_handler()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -121,7 +122,9 @@ class ReplicationSendEventRestServlet(ReplicationEndpoint):
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, event_id: str
     ) -> Tuple[int, JsonDict]:
-        with Measure(self.clock, "repl_send_event_parse"):
+        with Measure(
+            self.clock, name="repl_send_event_parse", server_name=self.server_name
+        ):
             event_dict = content["event"]
             room_ver = KNOWN_ROOM_VERSIONS[content["room_version"]]
             internal_metadata = content["internal_metadata"]
