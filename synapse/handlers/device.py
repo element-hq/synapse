@@ -701,10 +701,6 @@ class DeviceHandler(DeviceWorkerHandler):
             await self._auth_handler.delete_access_tokens_for_user(
                 user_id, device_id=device_id
             )
-            await self.store.delete_e2e_keys_by_device(
-                user_id=user_id, device_id=device_id
-            )
-
             if self.hs.config.experimental.msc3890_enabled:
                 # Remove any local notification settings for this device in accordance
                 # with MSC3890.
@@ -922,9 +918,6 @@ class DeviceHandler(DeviceWorkerHandler):
         # can't call self.delete_device because that will clobber the
         # access token so call the storage layer directly
         await self.store.delete_devices(user_id, [old_device_id])
-        await self.store.delete_e2e_keys_by_device(
-            user_id=user_id, device_id=old_device_id
-        )
 
         # tell everyone that the old device is gone and that the dehydrated
         # device has a new display name
@@ -946,7 +939,6 @@ class DeviceHandler(DeviceWorkerHandler):
             raise errors.NotFoundError()
 
         await self.delete_devices(user_id, [device_id])
-        await self.store.delete_e2e_keys_by_device(user_id=user_id, device_id=device_id)
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:

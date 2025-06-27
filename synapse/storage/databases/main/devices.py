@@ -1886,12 +1886,48 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 keyvalues={"user_id": user_id},
             )
 
+            # Also delete associated e2e keys.
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="e2e_device_keys_json",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="e2e_one_time_keys_json",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="dehydrated_devices",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="e2e_fallback_keys_json",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+
             # We're bulk deleting devices potentially many devices at once, so
             # let's not invalidate the cache for each device individually.
             # Instead, we will invalidate the cache for the user as a whole.
             self._invalidate_cache_and_stream(txn, self.get_device, (user_id,))
+            self._invalidate_cache_and_stream(
+                txn, self.count_e2e_one_time_keys, (user_id,)
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_e2e_unused_fallback_key_types, (user_id,)
+            )
 
-        for batch in batch_iter(device_ids, 5000):
+        for batch in batch_iter(device_ids, 1000):
             await self.db_pool.runInteraction(
                 "delete_devices", _delete_devices_txn, batch
             )
