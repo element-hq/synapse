@@ -54,6 +54,9 @@ class RoomPolicyHandler:
         Returns:
             bool: True if the event is allowed in the room, False otherwise.
         """
+        if event.type == "org.matrix.msc4284.policy":
+            return True  # always allow policy server change events
+
         policy_event = await self._storage_controllers.state.get_current_state_event(
             event.room_id, "org.matrix.msc4284.policy", ""
         )
