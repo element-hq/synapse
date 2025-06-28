@@ -2846,6 +2846,16 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(Codes.USER_LOCKED, channel.json_body["errcode"])
         self.assertTrue(channel.json_body["soft_logout"])
 
+        # User is not authorized to log in anymore
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            {"type": "m.login.password", "user": "user", "password": "pass"},
+        )
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.USER_LOCKED, channel.json_body["errcode"])
+        self.assertTrue(channel.json_body["soft_logout"])
+
     @override_config({"user_directory": {"enabled": True, "search_all_users": True}})
     def test_locked_user_not_in_user_dir(self) -> None:
         # User is available in the user dir
