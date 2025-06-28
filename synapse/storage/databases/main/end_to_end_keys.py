@@ -593,7 +593,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             txn, self.count_e2e_one_time_keys, (user_id, device_id)
         )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def count_e2e_one_time_keys(
         self, user_id: str, device_id: str
     ) -> Mapping[str, int]:
@@ -808,7 +808,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     },
                 )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def get_e2e_unused_fallback_key_types(
         self, user_id: str, device_id: str
     ) -> Sequence[str]:
@@ -1631,46 +1631,6 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
         )
         log_kv({"message": "Device keys stored."})
         return True
-
-    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
-        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
-            log_kv(
-                {
-                    "message": "Deleting keys for device",
-                    "device_id": device_id,
-                    "user_id": user_id,
-                }
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_device_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_one_time_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.count_e2e_one_time_keys, (user_id, device_id)
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="dehydrated_devices",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_fallback_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
-            )
-
-        await self.db_pool.runInteraction(
-            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
-        )
 
     def _set_e2e_cross_signing_key_txn(
         self,

@@ -76,7 +76,7 @@ from synapse.storage.databases.main.registration import (
     LoginTokenLookupResult,
     LoginTokenReused,
 )
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import JsonDict, Requester, StrCollection, UserID
 from synapse.util import stringutils as stringutils
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
 from synapse.util.msisdn import phone_number_to_msisdn
@@ -1546,6 +1546,31 @@ class AuthHandler:
         await self.hs.get_pusherpool().remove_pushers_by_access_tokens(
             user_id, (token_id for _, token_id, _ in tokens_and_devices)
         )
+
+    async def delete_access_tokens_for_devices(
+        self,
+        user_id: str,
+        device_ids: StrCollection,
+    ) -> None:
+        """Invalidate access tokens for the devices
+
+        Args:
+            user_id:  ID of user the tokens belong to
+            device_ids:  ID of device the tokens are associated with.
+                If None, tokens associated with any device (or no device) will
+                be deleted
+        """
+        tokens_and_devices = await self.store.user_delete_access_tokens_for_devices(
+            user_id,
+            device_ids,
+        )
+
+        # see if any modules want to know about this
+        if self.password_auth_provider.on_logged_out_callbacks:
+            for token, _, device_id in tokens_and_devices:
+                await self.password_auth_provider.on_logged_out(
+                    user_id=user_id, device_id=device_id, access_token=token
+                )
 
     async def add_threepid(
         self, user_id: str, medium: str, address: str, validated_at: int
