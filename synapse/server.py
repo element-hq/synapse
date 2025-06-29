@@ -587,10 +587,10 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_device_handler(self) -> DeviceWorkerHandler:
-        if self.config.worker.worker_app:
-            return DeviceWorkerHandler(self)
-        else:
+        if self.get_instance_name() in self.config.worker.writers.device_lists:
             return DeviceHandler(self)
+
+        return DeviceWorkerHandler(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:

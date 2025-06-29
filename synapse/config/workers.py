@@ -158,12 +158,12 @@ class WriterLocations:
             can only be a single instance.
         account_data: The instances that write to the account data streams. Currently
             can only be a single instance.
-        receipts: The instances that write to the receipts stream. Currently
-            can only be a single instance.
+        receipts: The instances that write to the receipts stream.
         presence: The instances that write to the presence stream. Currently
             can only be a single instance.
         push_rules: The instances that write to the push stream. Currently
             can only be a single instance.
+        device_lists: The instances that write to the device list stream.
     """
 
     events: List[str] = attr.ib(
@@ -191,6 +191,10 @@ class WriterLocations:
         converter=_instance_to_list_converter,
     )
     push_rules: List[str] = attr.ib(
+        default=["master"],
+        converter=_instance_to_list_converter,
+    )
+    device_lists: List[str] = attr.ib(
         default=["master"],
         converter=_instance_to_list_converter,
     )
@@ -413,6 +417,11 @@ class WorkerConfig(Config):
         if len(self.writers.push_rules) != 1:
             raise ConfigError(
                 "Must only specify one instance to handle `push` messages."
+            )
+
+        if len(self.writers.device_lists) == 0:
+            raise ConfigError(
+                "Must specify at least one instance to handle `device_lists` messages."
             )
 
         self.events_shard_config = RoutableShardedWorkerHandlingConfig(

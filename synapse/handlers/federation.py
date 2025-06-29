@@ -718,7 +718,7 @@ class FederationHandler:
                     await self.store.store_partial_state_room(
                         room_id=room_id,
                         servers=ret.servers_in_room,
-                        device_lists_stream_id=self.store.get_device_stream_token(),
+                        device_lists_stream_id=self.store.get_device_stream_token().stream,
                         joined_via=origin,
                     )
 

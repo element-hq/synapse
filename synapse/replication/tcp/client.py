@@ -115,7 +115,7 @@ class ReplicationDataHandler:
         all_room_ids: Set[str] = set()
         if stream_name == DeviceListsStream.NAME:
             if any(not row.is_signature and not row.hosts_calculated for row in rows):
-                prev_token = self.store.get_device_stream_token()
+                prev_token = self.store.get_device_stream_token().stream
                 all_room_ids = await self.store.get_all_device_list_changes(
                     prev_token, token
                 )

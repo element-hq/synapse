@@ -30,7 +30,7 @@ from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender.per_destination_queue import MAX_PRESENCE_STATES_PER_EDU
 from synapse.federation.units import Transaction
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceHandler, DeviceListUpdater
 from synapse.rest import admin
 from synapse.rest.client import login
 from synapse.server import HomeServer
@@ -553,6 +553,8 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
             "user_id": "@user2:host2",
             "devices": [{"device_id": "D1"}],
         }
+
+        assert isinstance(self.device_handler.device_list_updater, DeviceListUpdater)
 
         self.get_success(
             self.device_handler.device_list_updater.incoming_device_list_update(

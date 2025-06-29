@@ -504,6 +504,5 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     OneTimeKeyServlet(hs).register(http_server)
     if hs.config.experimental.msc3983_appservice_otk_claims:
         UnstableOneTimeKeyServlet(hs).register(http_server)
-    if hs.config.worker.worker_app is None:
-        SigningKeyUploadServlet(hs).register(http_server)
-        SignaturesUploadServlet(hs).register(http_server)
+    SigningKeyUploadServlet(hs).register(http_server)
+    SignaturesUploadServlet(hs).register(http_server)

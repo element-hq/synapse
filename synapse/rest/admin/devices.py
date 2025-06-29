@@ -23,7 +23,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import NotFoundError, SynapseError
-from synapse.handlers.device import DeviceHandler
 from synapse.http.servlet import (
     RestServlet,
     assert_params_in_dict,
@@ -51,9 +50,7 @@ class DeviceRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 
@@ -113,7 +110,7 @@ class DeviceRestServlet(RestServlet):
         return HTTPStatus.OK, {}
 
 
-class DevicesGetRestServlet(RestServlet):
+class DevicesRestServlet(RestServlet):
     """
     Retrieve the given user's devices
 
@@ -158,19 +155,6 @@ class DevicesGetRestServlet(RestServlet):
 
         return HTTPStatus.OK, {"devices": devices, "total": len(devices)}
 
-
-class DevicesRestServlet(DevicesGetRestServlet):
-    """
-    Retrieve the given user's devices
-    """
-
-    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/devices$", "v2")
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
-        assert isinstance(self.device_worker_handler, DeviceHandler)
-        self.device_handler = self.device_worker_handler
-
     async def on_POST(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
@@ -194,7 +178,7 @@ class DevicesRestServlet(DevicesGetRestServlet):
         if not isinstance(device_id, str):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "device_id must be a string")
 
-        await self.device_handler.check_device_registered(
+        await self.device_worker_handler.check_device_registered(
             user_id=user_id, device_id=device_id
         )
 
@@ -211,9 +195,7 @@ class DeleteDevicesRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 
