@@ -108,6 +108,9 @@ SLIDING_SYNC_RELEVANT_STATE_SET = (
     (EventTypes.Tombstone, ""),
 )
 
+# An arbitrarily large number
+MAX_EVENTS = 1000000
+
 
 @attr.s(slots=True, auto_attribs=True)
 class DeltaState:
@@ -375,6 +378,109 @@ class PersistEventsStore:
                     origin_entity = get_domain_from_id(event.sender)
 
                 event_counter.labels(event.type, origin_type, origin_entity).inc()
+
+                if (
+                    not self.hs.config.experimental.msc4293_enabled
+                    or event.type != EventTypes.Member
+                    or event.state_key is None
+                ):
+                    continue
+
+                # check if this is an unban/join that will undo a ban/kick redaction for
+                # user in room
+                if event.membership in [Membership.LEAVE, Membership.JOIN]:
+                    if event.membership == Membership.LEAVE:
+                        # self-leave, ignore
+                        if event.sender == event.state_key:
+                            continue
+                    # check to see if there is an existing ban/leave causing redactions for
+                    # this user/room combination
+                    res = await self.db_pool.simple_select_list(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        ["room_id", "user_id"],
+                    )
+                    if res:
+                        # if so, update the entry with the stream ordering when the redactions should
+                        # stop
+                        await self.db_pool.simple_update(
+                            "room_ban_redactions",
+                            {"room_id": event.room_id, "user_id": event.state_key},
+                            {
+                                "redact_end_ordering": event.internal_metadata.stream_ordering
+                            },
+                            desc="room_ban_redactions update redact_end_ordering",
+                        )
+
+                # check for msc4293 redact_events flag and apply if found
+                if event.membership not in [Membership.LEAVE, Membership.BAN]:
+                    continue
+                redact = event.content.get("org.matrix.msc4293.redact_events", False)
+                if not redact or not isinstance(redact, bool):
+                    continue
+                # self-bans currently are not authorized so we don't check for that
+                # case
+                if (
+                    event.membership == Membership.LEAVE
+                    and event.sender == event.state_key
+                ):
+                    continue
+                # check that sender can redact
+                state_filter = StateFilter.from_types([(EventTypes.PowerLevels, "")])
+                state = await self.store.get_partial_filtered_current_state_ids(
+                    event.room_id, state_filter
+                )
+                pl_id = state[(EventTypes.PowerLevels, "")]
+                pl_event = await self.store.get_event(pl_id)
+                if pl_event:
+                    sender_level = pl_event.content.get("users", {}).get(event.sender)
+                    if sender_level is None:
+                        sender_level = pl_event.content.get("users_default", 0)
+
+                    redact_level = pl_event.content.get("redact")
+                    if not redact_level:
+                        redact_level = pl_event.content.get("events_default", 0)
+
+                    room_redaction_level = pl_event.content.get("events", {}).get(
+                        "m.room.redaction"
+                    )
+                    if room_redaction_level:
+                        if sender_level < room_redaction_level:
+                            continue
+
+                    if sender_level >= redact_level:
+                        await self.db_pool.simple_upsert(
+                            "room_ban_redactions",
+                            {"room_id": event.room_id, "user_id": event.state_key},
+                            {
+                                "redacting_event_id": event.event_id,
+                                "redact_end_ordering": None,
+                            },
+                            {
+                                "room_id": event.room_id,
+                                "user_id": event.state_key,
+                                "redacting_event_id": event.event_id,
+                                "redact_end_ordering": None,
+                            },
+                        )
+
+                        # normally the cache entry for a redacted event would be invalidated
+                        # by an arriving redaction event, but since we are not creating redaction
+                        # events we invalidate manually
+                        ids_to_redact = (
+                            await self.store.get_events_sent_by_user_in_room(
+                                event.state_key, event.room_id, limit=MAX_EVENTS
+                            )
+                        )
+                        if not ids_to_redact:
+                            continue
+
+                        for id in ids_to_redact:
+                            await self.db_pool.runInteraction(
+                                "invalidate cache",
+                                self.store.invalidate_get_event_cache_after_txn,
+                                id,
+                            )
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
