@@ -436,7 +436,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             namespaces={
                 "users": [{"regex": "@_appservice.*:sender", "exclusive": True}]
             },
-            sender="@appservice:sender",
+            sender=UserID.from_string("@appservice:server"),
         )
         requester = Requester(
             user=UserID.from_string("@appservice:server"),
@@ -467,7 +467,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             namespaces={
                 "users": [{"regex": "@_appservice.*:sender", "exclusive": True}]
             },
-            sender="@appservice:sender",
+            sender=UserID.from_string("@appservice:server"),
         )
         requester = Requester(
             user=UserID.from_string("@appservice:server"),

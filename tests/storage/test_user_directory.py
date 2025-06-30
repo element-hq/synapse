@@ -38,6 +38,7 @@ from synapse.storage.databases.main.user_directory import (
     _parse_words_with_regex,
 )
 from synapse.storage.roommember import ProfileInfo
+from synapse.types import UserID
 from synapse.util import Clock
 
 from tests.server import ThreadedMemoryReactorClock
@@ -161,7 +162,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
             token="i_am_an_app_service",
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
         )
 
         mock_load_appservices = Mock(return_value=[self.appservice])
@@ -386,7 +387,7 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
         # Join the AS sender to rooms owned by the normal user.
         public, private = self._create_rooms_and_inject_memberships(
-            user, token, self.appservice.sender
+            user, token, self.appservice.sender.to_string()
         )
 
         # Rebuild the directory.

@@ -313,7 +313,7 @@ class LoginRestServlet(RestServlet):
             should_issue_refresh_token=should_issue_refresh_token,
             # The user represented by an appservice's configured sender_localpart
             # is not actually created in Synapse.
-            should_check_deactivated=qualified_user_id != appservice.sender,
+            should_check_deactivated=qualified_user_id != appservice.sender.to_string(),
             request_info=request_info,
         )
 
