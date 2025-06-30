@@ -243,7 +243,8 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
     ) -> Callable[..., "defer.Deferred[Any]"]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
-            "Cannot call cached method from class (❌ `MyClass.cached_method()`)"
+            "Cannot call cached method from class (❌ `MyClass.cached_method()`) "
+            "and must be called from an instance (✅ `MyClass().cached_method()`). "
         )
         assert obj.server_name is not None, (
             "The `server_name` attribute must be set on the object where `@cached` decorator is used."
