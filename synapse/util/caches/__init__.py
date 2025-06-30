@@ -175,14 +175,14 @@ class CacheMetric:
                 response_cache_hits.labels(**labels_base).set(self.hits)
                 for reason in EvictionReason:
                     response_cache_evicted.labels(
-                        {**labels_base, "reason": reason.name}
+                        **{**labels_base, "reason": reason.name}
                     ).set(self.eviction_size_by_reason[reason])
                 response_cache_total.labels(**labels_base).set(self.hits + self.misses)
             else:
                 cache_size.labels(**labels_base).set(len(self._cache))
                 cache_hits.labels(**labels_base).set(self.hits)
                 for reason in EvictionReason:
-                    cache_evicted.labels({**labels_base, "reason": reason.name}).set(
+                    cache_evicted.labels(**{**labels_base, "reason": reason.name}).set(
                         self.eviction_size_by_reason[reason]
                     )
                 cache_total.labels(**labels_base).set(self.hits + self.misses)
