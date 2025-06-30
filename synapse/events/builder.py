@@ -302,8 +302,8 @@ def create_local_event_from_event_dict(
     event_dict: JsonDict,
     internal_metadata_dict: Optional[JsonDict] = None,
 ) -> EventBase:
-    """Takes a fully formed event dict, ensuring that fields like `origin`
-    and `origin_server_ts` have correct values for a locally produced event,
+    """Takes a fully formed event dict, ensuring that fields like
+    `origin_server_ts` have correct values for a locally produced event,
     then signs and hashes it.
     """
 

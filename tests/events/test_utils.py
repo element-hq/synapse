@@ -122,6 +122,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "prev_events": "prev_events",
                 "prev_state": "prev_state",
                 "auth_events": "auth_events",
+                "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
                 # Also include a key that should be removed.
@@ -138,6 +139,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "prev_events": "prev_events",
                 "prev_state": "prev_state",
                 "auth_events": "auth_events",
+                "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
                 "content": {},
