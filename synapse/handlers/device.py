@@ -671,10 +671,10 @@ class DeviceHandler(DeviceWorkerHandler):
             except_device_id: optional device id which should not be deleted
         """
         device_map = await self.store.get_devices_by_user(user_id)
-        device_ids = set(device_map)
         if except_device_id is not None:
-            device_ids.discard(except_device_id)
-        await self.delete_devices(user_id, device_ids)
+            device_map.pop(except_device_id, None)
+        user_device_ids = device_map.keys()
+        await self.delete_devices(user_id, user_device_ids)
 
     async def delete_devices(self, user_id: str, device_ids: StrCollection) -> None:
         """Delete several devices
