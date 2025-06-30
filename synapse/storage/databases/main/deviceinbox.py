@@ -52,10 +52,11 @@ from synapse.storage.database import (
     make_in_list_sql_clause,
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict
+from synapse.types import JsonDict, StrCollection
 from synapse.util import Duration, json_encoder
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
@@ -1030,6 +1031,40 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
             self._clock.sleep(1)
+
+    async def get_devices_with_messages(
+        self, user_id: str, device_ids: StrCollection
+    ) -> StrCollection:
+        """Get the matching device IDs that have messages in the device inbox."""
+
+        def get_devices_with_messages_txn(
+            txn: LoggingTransaction,
+            batch_device_ids: StrCollection,
+        ) -> StrCollection:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "device_id", batch_device_ids
+            )
+            sql = f"""
+                SELECT DISTINCT device_id FROM device_inbox
+                WHERE {clause} AND user_id = ?
+            """
+            args.append(user_id)
+            txn.execute(sql, args)
+            return {row[0] for row in txn}
+
+        results: Set[str] = set()
+        for batch_device_ids in batch_iter(device_ids, 1000):
+            batch_results = await self.db_pool.runInteraction(
+                "get_devices_with_messages",
+                get_devices_with_messages_txn,
+                batch_device_ids,
+                # We don't need to run in a transaction as it's a single query
+                db_autocommit=True,
+            )
+
+            results.update(batch_results)
+
+        return results
 
 
 class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
