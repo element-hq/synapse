@@ -152,6 +152,9 @@ class RoomSummaryHandler:
             limit: An optional limit on the number of rooms to return per
                 page. Must be a positive integer.
             from_token: An optional pagination token.
+            remote_room_hosts: An optional list of remote homeserver server names. If defined,
+                each host will be used to try and fetch the room hierarchy. Must be a tuple so
+                that it can be hashed by the `RoomSummaryHandler._pagination_response_cache`.
 
         Returns:
             The JSON hierarchy dictionary.
