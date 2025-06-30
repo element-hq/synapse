@@ -231,7 +231,7 @@ class ApplicationServiceTestCase(unittest.TestCase):
         self.service.namespaces[ApplicationService.NS_USERS].append(_regex("@irc_.*"))
         self.event.type = "m.room.member"
         self.event.content = {"membership": "invite"}
-        self.event.state_key = self.service.sender
+        self.event.state_key = self.service.sender.to_string()
         self.assertTrue(
             (
                 yield self.service.is_interested_in_event(
