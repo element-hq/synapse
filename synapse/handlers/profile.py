@@ -55,6 +55,7 @@ class ProfileHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.hs = hs
