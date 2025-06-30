@@ -561,6 +561,9 @@ class ExperimentalConfig(Config):
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
 
+        # MSC4235: Add `via` param to hierarchy endpoint
+        self.msc4235_enabled: bool = experimental.get("msc4235_enabled", False)
+
         # MSC4263: Preventing MXID enumeration via key queries
         self.msc4263_limit_key_queries_to_users_who_share_rooms = experimental.get(
             "msc4263_limit_key_queries_to_users_who_share_rooms",
