@@ -23,10 +23,9 @@
 """Contains functions for registering clients."""
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
 
 from prometheus_client import Counter
-from typing_extensions import TypedDict
 
 from synapse import types
 from synapse.api.constants import (
@@ -116,6 +115,7 @@ class RegistrationHandler:
         self._user_consent_version = self.hs.config.consent.user_consent_version
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
         self._server_name = hs.hostname
+        self._user_types_config = hs.config.user_types
 
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
@@ -160,7 +160,10 @@ class RegistrationHandler:
         if not localpart:
             raise SynapseError(400, "User ID cannot be empty", Codes.INVALID_USERNAME)
 
-        if localpart[0] == "_":
+        if (
+            localpart[0] == "_"
+            and not self.hs.config.registration.allow_underscore_prefixed_localpart
+        ):
             raise SynapseError(
                 400, "User ID may not begin with _", Codes.INVALID_USERNAME
             )
@@ -303,6 +306,9 @@ class RegistrationHandler:
 
             elif default_display_name is None:
                 default_display_name = localpart
+
+            if user_type is None:
+                user_type = self._user_types_config.default_user_type
 
             await self.register_with_store(
                 user_id=user_id,
@@ -500,7 +506,7 @@ class RegistrationHandler:
                             ratelimit=False,
                         )
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _join_rooms(self, user_id: str) -> None:
         """
@@ -590,7 +596,7 @@ class RegistrationHandler:
                 # moving away from bare excepts is a good thing to do.
                 logger.error("Failed to join new user to %r: %r", r, e)
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e, exc_info=True)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _auto_join_rooms(self, user_id: str) -> None:
         """Automatically joins users to auto join rooms - creating the room in the first place

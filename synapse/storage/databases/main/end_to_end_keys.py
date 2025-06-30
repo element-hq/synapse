@@ -27,6 +27,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -39,7 +40,6 @@ from typing import (
 
 import attr
 from canonicaljson import encode_canonical_json
-from typing_extensions import Literal
 
 from synapse.api.constants import DeviceKeyAlgorithms
 from synapse.appservice import (
@@ -593,7 +593,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             txn, self.count_e2e_one_time_keys, (user_id, device_id)
         )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def count_e2e_one_time_keys(
         self, user_id: str, device_id: str
     ) -> Mapping[str, int]:
@@ -808,7 +808,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     },
                 )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def get_e2e_unused_fallback_key_types(
         self, user_id: str, device_id: str
     ) -> Sequence[str]:
@@ -1501,6 +1501,45 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             "delete_old_otks_for_next_user_batch", impl
         )
 
+    async def allow_master_cross_signing_key_replacement_without_uia(
+        self, user_id: str, duration_ms: int
+    ) -> Optional[int]:
+        """Mark this user's latest master key as being replaceable without UIA.
+
+        Said replacement will only be permitted for a short time after calling this
+        function. That time period is controlled by the duration argument.
+
+        Returns:
+            None, if there is no such key.
+            Otherwise, the timestamp before which replacement is allowed without UIA.
+        """
+        timestamp = self._clock.time_msec() + duration_ms
+
+        def impl(txn: LoggingTransaction) -> Optional[int]:
+            txn.execute(
+                """
+                UPDATE e2e_cross_signing_keys
+                SET updatable_without_uia_before_ms = ?
+                WHERE stream_id = (
+                    SELECT stream_id
+                    FROM e2e_cross_signing_keys
+                    WHERE user_id = ? AND keytype = 'master'
+                    ORDER BY stream_id DESC
+                    LIMIT 1
+                )
+            """,
+                (timestamp, user_id),
+            )
+            if txn.rowcount == 0:
+                return None
+
+            return timestamp
+
+        return await self.db_pool.runInteraction(
+            "allow_master_cross_signing_key_replacement_without_uia",
+            impl,
+        )
+
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     def __init__(
@@ -1592,46 +1631,6 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
         )
         log_kv({"message": "Device keys stored."})
         return True
-
-    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
-        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
-            log_kv(
-                {
-                    "message": "Deleting keys for device",
-                    "device_id": device_id,
-                    "user_id": user_id,
-                }
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_device_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_one_time_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.count_e2e_one_time_keys, (user_id, device_id)
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="dehydrated_devices",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_fallback_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
-            )
-
-        await self.db_pool.runInteraction(
-            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
-        )
 
     def _set_e2e_cross_signing_key_txn(
         self,
@@ -1754,43 +1753,4 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
                 for item in signatures
             ],
             desc="add_e2e_signing_key",
-        )
-
-    async def allow_master_cross_signing_key_replacement_without_uia(
-        self, user_id: str, duration_ms: int
-    ) -> Optional[int]:
-        """Mark this user's latest master key as being replaceable without UIA.
-
-        Said replacement will only be permitted for a short time after calling this
-        function. That time period is controlled by the duration argument.
-
-        Returns:
-            None, if there is no such key.
-            Otherwise, the timestamp before which replacement is allowed without UIA.
-        """
-        timestamp = self._clock.time_msec() + duration_ms
-
-        def impl(txn: LoggingTransaction) -> Optional[int]:
-            txn.execute(
-                """
-                UPDATE e2e_cross_signing_keys
-                SET updatable_without_uia_before_ms = ?
-                WHERE stream_id = (
-                    SELECT stream_id
-                    FROM e2e_cross_signing_keys
-                    WHERE user_id = ? AND keytype = 'master'
-                    ORDER BY stream_id DESC
-                    LIMIT 1
-                )
-            """,
-                (timestamp, user_id),
-            )
-            if txn.rowcount == 0:
-                return None
-
-            return timestamp
-
-        return await self.db_pool.runInteraction(
-            "allow_master_cross_signing_key_replacement_without_uia",
-            impl,
         )

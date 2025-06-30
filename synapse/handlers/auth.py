@@ -76,7 +76,7 @@ from synapse.storage.databases.main.registration import (
     LoginTokenLookupResult,
     LoginTokenReused,
 )
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import JsonDict, Requester, StrCollection, UserID
 from synapse.util import stringutils as stringutils
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
 from synapse.util.msisdn import phone_number_to_msisdn
@@ -1547,6 +1547,31 @@ class AuthHandler:
             user_id, (token_id for _, token_id, _ in tokens_and_devices)
         )
 
+    async def delete_access_tokens_for_devices(
+        self,
+        user_id: str,
+        device_ids: StrCollection,
+    ) -> None:
+        """Invalidate access tokens for the devices
+
+        Args:
+            user_id:  ID of user the tokens belong to
+            device_ids:  ID of device the tokens are associated with.
+                If None, tokens associated with any device (or no device) will
+                be deleted
+        """
+        tokens_and_devices = await self.store.user_delete_access_tokens_for_devices(
+            user_id,
+            device_ids,
+        )
+
+        # see if any modules want to know about this
+        if self.password_auth_provider.on_logged_out_callbacks:
+            for token, _, device_id in tokens_and_devices:
+                await self.password_auth_provider.on_logged_out(
+                    user_id=user_id, device_id=device_id, access_token=token
+                )
+
     async def add_threepid(
         self, user_id: str, medium: str, address: str, validated_at: int
     ) -> None:
@@ -1579,7 +1604,10 @@ class AuthHandler:
         # for the presence of an email address during password reset was
         # case sensitive).
         if medium == "email":
-            address = canonicalise_email(address)
+            try:
+                address = canonicalise_email(address)
+            except ValueError as e:
+                raise SynapseError(400, str(e))
 
         await self.store.user_add_threepid(
             user_id, medium, address, validated_at, self.hs.get_clock().time_msec()
@@ -1610,7 +1638,10 @@ class AuthHandler:
         """
         # 'Canonicalise' email addresses as per above
         if medium == "email":
-            address = canonicalise_email(address)
+            try:
+                address = canonicalise_email(address)
+            except ValueError as e:
+                raise SynapseError(400, str(e))
 
         await self.store.user_delete_threepid(user_id, medium, address)
 
@@ -1889,7 +1920,7 @@ def load_single_legacy_password_auth_provider(
     try:
         provider = module(config=config, account_handler=api)
     except Exception as e:
-        logger.error("Error while initializing %r: %s", module, e)
+        logger.exception("Error while initializing %r: %s", module, e)
         raise
 
     # All methods that the module provides should be async, but this wasn't enforced
@@ -2422,7 +2453,7 @@ class PasswordAuthProvider:
             except CancelledError:
                 raise
             except Exception as e:
-                logger.error("Module raised an exception in is_3pid_allowed: %s", e)
+                logger.exception("Module raised an exception in is_3pid_allowed: %s", e)
                 raise SynapseError(code=500, msg="Internal Server Error")
 
         return True

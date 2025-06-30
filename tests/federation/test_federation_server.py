@@ -20,14 +20,21 @@
 #
 import logging
 from http import HTTPStatus
+from typing import Optional, Union
+from unittest.mock import Mock
 
 from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.api.constants import EventTypes, Membership
+from synapse.api.errors import FederationError
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import EventBase, make_event_from_dict
+from synapse.federation.federation_base import event_from_pdu_json
+from synapse.http.types import QueryParams
+from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -37,6 +44,8 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.unittest import override_config
+
+logger = logging.getLogger(__name__)
 
 
 class FederationServerTests(unittest.FederatingHomeserverTestCase):
@@ -85,10 +94,167 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(500, channel.code, channel.result)
 
 
+def _create_acl_event(content: JsonDict) -> EventBase:
+    return make_event_from_dict(
+        {
+            "room_id": "!a:b",
+            "event_id": "$a:b",
+            "type": "m.room.server_acls",
+            "sender": "@a:b",
+            "content": content,
+        }
+    )
+
+
+class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
+    """
+    Tests to make sure that we don't accept flawed events from federation (incoming).
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.http_client = Mock()
+        return self.setup_test_homeserver(federation_http_client=self.http_client)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.store = self.hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
+        self.federation_event_handler = self.hs.get_federation_event_handler()
+
+        # Create a local room
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        self.room_id = self.helper.create_room_as(
+            user1_id, tok=user1_tok, is_public=True
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(self.room_id)
+        )
+
+        # Figure out what the forward extremities in the room are (the most recent
+        # events that aren't tied into the DAG)
+        forward_extremity_event_ids = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
+        )
+
+        # Join a remote user to the room that will attempt to send bad events
+        self.remote_bad_user_id = f"@baduser:{self.OTHER_SERVER_NAME}"
+        self.remote_bad_user_join_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.room_id,
+                    "sender": self.remote_bad_user_id,
+                    "state_key": self.remote_bad_user_id,
+                    "depth": 1000,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Member,
+                    "content": {"membership": Membership.JOIN},
+                    "auth_events": [
+                        state_map[(EventTypes.Create, "")].event_id,
+                        state_map[(EventTypes.JoinRules, "")].event_id,
+                    ],
+                    "prev_events": list(forward_extremity_event_ids),
+                }
+            ),
+            room_version=RoomVersions.V10,
+        )
+
+        # Send the join, it should return None (which is not an error)
+        self.assertEqual(
+            self.get_success(
+                self.federation_event_handler.on_receive_pdu(
+                    self.OTHER_SERVER_NAME, self.remote_bad_user_join_event
+                )
+            ),
+            None,
+        )
+
+        # Make sure we actually joined the room
+        self.assertEqual(
+            self.get_success(self.store.get_latest_event_ids_in_room(self.room_id)),
+            {self.remote_bad_user_join_event.event_id},
+        )
+
+    def test_cant_hide_direct_ancestors(self) -> None:
+        """
+        If you send a message, you must be able to provide the direct
+        prev_events that said event references.
+        """
+
+        async def post_json(
+            destination: str,
+            path: str,
+            data: Optional[JsonDict] = None,
+            long_retries: bool = False,
+            timeout: Optional[int] = None,
+            ignore_backoff: bool = False,
+            args: Optional[QueryParams] = None,
+        ) -> Union[JsonDict, list]:
+            # If it asks us for new missing events, give them NOTHING
+            if path.startswith("/_matrix/federation/v1/get_missing_events/"):
+                return {"events": []}
+            return {}
+
+        self.http_client.post_json = post_json
+
+        # Figure out what the forward extremities in the room are (the most recent
+        # events that aren't tied into the DAG)
+        forward_extremity_event_ids = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
+        )
+
+        # Now lie about an event's prev_events
+        lying_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.room_id,
+                    "sender": self.remote_bad_user_id,
+                    "depth": 1000,
+                    "origin_server_ts": 1,
+                    "type": "m.room.message",
+                    "content": {"body": "hewwo?"},
+                    "auth_events": [],
+                    "prev_events": ["$missing_prev_event"]
+                    + list(forward_extremity_event_ids),
+                }
+            ),
+            room_version=RoomVersions.V10,
+        )
+
+        with LoggingContext("test-context"):
+            failure = self.get_failure(
+                self.federation_event_handler.on_receive_pdu(
+                    self.OTHER_SERVER_NAME, lying_event
+                ),
+                FederationError,
+            )
+
+        # on_receive_pdu should throw an error
+        self.assertEqual(
+            failure.value.args[0],
+            (
+                "ERROR 403: Your server isn't divulging details about prev_events "
+                "referenced in this event."
+            ),
+        )
+
+        # Make sure the invalid event isn't there
+        extrem = self.get_success(self.store.get_latest_event_ids_in_room(self.room_id))
+        self.assertEqual(extrem, {self.remote_bad_user_join_event.event_id})
+
+
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:
         e = _create_acl_event({"allow": ["*"], "deny": ["evil.com"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -102,7 +268,7 @@ class ServerACLsTestCase(unittest.TestCase):
 
     def test_block_ip_literals(self) -> None:
         e = _create_acl_event({"allow_ip_literals": False, "allow": ["*"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -355,13 +521,76 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     #   is probably sufficient to reassure that the bucket is updated.
 
 
-def _create_acl_event(content: JsonDict) -> EventBase:
-    return make_event_from_dict(
-        {
-            "room_id": "!a:b",
-            "event_id": "$a:b",
-            "type": "m.room.server_acls",
-            "sender": "@a:b",
-            "content": content,
+class StripUnsignedFromEventsTestCase(unittest.TestCase):
+    """
+    Test to make sure that we handle the raw JSON events from federation carefully and
+    strip anything that shouldn't be there.
+    """
+
+    def test_strip_unauthorized_unsigned_values(self) -> None:
+        event1 = {
+            "sender": "@baduser:test.serv",
+            "state_key": "@baduser:test.serv",
+            "event_id": "$event1:test.serv",
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": "m.room.member",
+            "origin": "test.servx",
+            "content": {"membership": "join"},
+            "auth_events": [],
+            "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
         }
-    )
+        filtered_event = event_from_pdu_json(event1, RoomVersions.V1)
+        # Make sure unauthorized fields are stripped from unsigned
+        self.assertNotIn("more warez", filtered_event.unsigned)
+
+    def test_strip_event_maintains_allowed_fields(self) -> None:
+        event2 = {
+            "sender": "@baduser:test.serv",
+            "state_key": "@baduser:test.serv",
+            "event_id": "$event2:test.serv",
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": "m.room.member",
+            "origin": "test.servx",
+            "auth_events": [],
+            "content": {"membership": "join"},
+            "unsigned": {
+                "malicious garbage": "hackz",
+                "more warez": "more hackz",
+                "age": 14,
+                "invite_room_state": [],
+            },
+        }
+
+        filtered_event2 = event_from_pdu_json(event2, RoomVersions.V1)
+        self.assertIn("age", filtered_event2.unsigned)
+        self.assertEqual(14, filtered_event2.unsigned["age"])
+        self.assertNotIn("more warez", filtered_event2.unsigned)
+        # Invite_room_state is allowed in events of type m.room.member
+        self.assertIn("invite_room_state", filtered_event2.unsigned)
+        self.assertEqual([], filtered_event2.unsigned["invite_room_state"])
+
+    def test_strip_event_removes_fields_based_on_event_type(self) -> None:
+        event3 = {
+            "sender": "@baduser:test.serv",
+            "state_key": "@baduser:test.serv",
+            "event_id": "$event3:test.serv",
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": "m.room.power_levels",
+            "origin": "test.servx",
+            "content": {},
+            "auth_events": [],
+            "unsigned": {
+                "malicious garbage": "hackz",
+                "more warez": "more hackz",
+                "age": 14,
+                "invite_room_state": [],
+            },
+        }
+        filtered_event3 = event_from_pdu_json(event3, RoomVersions.V1)
+        self.assertIn("age", filtered_event3.unsigned)
+        # Invite_room_state field is only permitted in event type m.room.member
+        self.assertNotIn("invite_room_state", filtered_event3.unsigned)
+        self.assertNotIn("more warez", filtered_event3.unsigned)

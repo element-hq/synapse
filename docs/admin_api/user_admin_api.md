@@ -163,7 +163,8 @@ Body parameters:
 - `locked` - **bool**, optional. If unspecified, locked state will be left unchanged.
 - `user_type` - **string** or null, optional. If not provided, the user type will be
   not be changed. If `null` is given, the user type will be cleared.
-  Other allowed options are: `bot` and `support`.
+  Other allowed options are: `bot` and `support` and any extra values defined in the homserver
+  [configuration](../usage/configuration/config_documentation.md#user_types).
 
 ## List Accounts
 ### List Accounts (V2)
@@ -413,6 +414,32 @@ The following actions are **NOT** performed. The list may be incomplete.
 - [Remove rate limit overrides](#override-ratelimiting-for-users)
 - Remove from monthly active users
 - Remove user's consent information (consent version and timestamp)
+
+## Suspend/Unsuspend Account
+
+This API allows an admin to suspend/unsuspend an account. While an account is suspended, the user is 
+prohibited from sending invites, joining or knocking on rooms, sending messages, changing profile data, and redacting messages other than their own. 
+
+The api is:
+
+```
+PUT /_synapse/admin/v1/suspend/<user_id>
+```
+
+with a body of:
+
+```json
+{
+    "suspend": true
+}
+```
+
+To unsuspend a user, use the same endpoint with a body of:
+```json
+{
+  "suspend": false
+}
+```
 
 ## Reset password
 
@@ -928,7 +955,8 @@ A response body like the following is returned:
       "last_seen_ip": "1.2.3.4",
       "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
       "last_seen_ts": 1474491775024,
-      "user_id": "<user_id>"
+      "user_id": "<user_id>",
+      "dehydrated": false
     },
     {
       "device_id": "AUIECTSRND",
@@ -936,7 +964,8 @@ A response body like the following is returned:
       "last_seen_ip": "1.2.3.5",
       "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
       "last_seen_ts": 1474491775025,
-      "user_id": "<user_id>"
+      "user_id": "<user_id>",
+      "dehydrated": false
     }
   ],
   "total": 2
@@ -966,6 +995,7 @@ The following fields are returned in the JSON response body:
   - `last_seen_ts` - The timestamp (in milliseconds since the unix epoch) when this
     devices was last seen. (May be a few minutes out of date, for efficiency reasons).
   - `user_id` - Owner of  device.
+  - `dehydrated` - Whether the device is a dehydrated device.
 
 - `total` - Total number of user's devices.
 
@@ -1468,12 +1498,12 @@ The following JSON body parameter must be provided:
 -  `rooms` - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
   the user is a member of will be redacted
 
-_Added in Synapse 1.116.0._
-
 The following JSON body parameters are optional:
 
 - `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in each redaction event, and be visible to users.
 - `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
+
+_Added in Synapse 1.116.0._
 
 
 ## Check the status of a redaction process

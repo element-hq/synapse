@@ -47,7 +47,7 @@ fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(AccessControlAllowOrigin::ANY);
     headers.typed_insert(AccessControlExposeHeaders::from_iter([ETAG]));
     headers.typed_insert(Pragma::no_cache());
-    headers.typed_insert(CacheControl::new().with_no_store());
+    headers.typed_insert(CacheControl::new().with_no_store().with_no_transform());
     headers.typed_insert(session.etag());
     headers.typed_insert(session.expires());
     headers.typed_insert(session.last_modified());
@@ -192,10 +192,12 @@ impl RendezvousHandler {
             "url": uri,
         })
         .to_string();
+        let length = response.len() as _;
 
         let mut response = Response::new(response.as_bytes());
         *response.status_mut() = StatusCode::CREATED;
         response.headers_mut().typed_insert(ContentType::json());
+        response.headers_mut().typed_insert(ContentLength(length));
         prepare_headers(response.headers_mut(), &session);
         http_response_to_twisted(twisted_request, response)?;
 
@@ -299,6 +301,7 @@ impl RendezvousHandler {
         // proxy/cache setup which strips the ETag header if there is no Content-Type set.
         // Specifically, we noticed this behaviour when placing Synapse behind Cloudflare.
         response.headers_mut().typed_insert(ContentType::text());
+        response.headers_mut().typed_insert(ContentLength(0));
 
         http_response_to_twisted(twisted_request, response)?;
 
@@ -316,6 +319,7 @@ impl RendezvousHandler {
         response
             .headers_mut()
             .typed_insert(AccessControlAllowOrigin::ANY);
+        response.headers_mut().typed_insert(ContentLength(0));
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())

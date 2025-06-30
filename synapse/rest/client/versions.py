@@ -172,6 +172,10 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
+                    # Arbitrary key-value profile fields.
+                    "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
+                    # MSC4155: Invite filtering
+                    "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
                 },
             },
         )

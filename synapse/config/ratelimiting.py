@@ -228,3 +228,21 @@ class RatelimitConfig(Config):
                 config.get("remote_media_download_burst_count", "500M")
             ),
         )
+
+        self.rc_presence_per_user = RatelimitSettings.parse(
+            config,
+            "rc_presence.per_user",
+            defaults={"per_second": 0.1, "burst_count": 1},
+        )
+
+        self.rc_delayed_event_mgmt = RatelimitSettings.parse(
+            config,
+            "rc_delayed_event_mgmt",
+            defaults={"per_second": 1, "burst_count": 5},
+        )
+
+        self.rc_reports = RatelimitSettings.parse(
+            config,
+            "rc_reports",
+            defaults={"per_second": 1, "burst_count": 5},
+        )

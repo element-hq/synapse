@@ -33,12 +33,12 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Protocol,
     Set,
 )
 from urllib.parse import urlencode
 
 import attr
-from typing_extensions import Protocol
 
 from twisted.web.iweb import IRequest
 from twisted.web.server import Request
@@ -1192,9 +1192,9 @@ class SsoHandler:
         """
 
         # It is expected that this is the main process.
-        assert isinstance(
-            self._device_handler, DeviceHandler
-        ), "revoking SSO sessions can only be called on the main process"
+        assert isinstance(self._device_handler, DeviceHandler), (
+            "revoking SSO sessions can only be called on the main process"
+        )
 
         # Invalidate any running user-mapping sessions
         to_delete = []
@@ -1230,12 +1230,16 @@ class SsoHandler:
             if expected_user_id is not None and user_id != expected_user_id:
                 logger.error(
                     "Received a logout notification from SSO provider "
-                    f"{auth_provider_id!r} for the user {expected_user_id!r}, but with "
-                    f"a session ID ({auth_provider_session_id!r}) which belongs to "
-                    f"{user_id!r}. This may happen when the SSO provider user mapper "
+                    "%r for the user %r, but with "
+                    "a session ID (%r) which belongs to "
+                    "%r. This may happen when the SSO provider user mapper "
                     "uses something else than the standard attribute as mapping ID. "
                     "For OIDC providers, set `backchannel_logout_ignore_sub` to `true` "
-                    "in the provider config if that is the case."
+                    "in the provider config if that is the case.",
+                    auth_provider_id,
+                    expected_user_id,
+                    auth_provider_session_id,
+                    user_id,
                 )
                 continue
 
@@ -1277,12 +1281,16 @@ def _check_attribute_requirement(
         return False
 
     # If the requirement is None, the attribute existing is enough.
-    if req.value is None:
+    if req.value is None and req.one_of is None:
         return True
 
     values = attributes[req.attribute]
     if req.value in values:
         return True
+    if req.one_of:
+        for value in req.one_of:
+            if value in values:
+                return True
 
     logger.info(
         "SSO attribute %s did not match required value '%s' (was '%s')",

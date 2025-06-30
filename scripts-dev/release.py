@@ -254,6 +254,12 @@ def _prepare() -> None:
     # Update the version specified in pyproject.toml.
     subprocess.check_output(["poetry", "version", new_version])
 
+    # Update config schema $id.
+    schema_file = "schema/synapse-config.schema.yaml"
+    major_minor_version = ".".join(new_version.split(".")[:2])
+    url = f"https://element-hq.github.io/synapse/schema/synapse/v{major_minor_version}/synapse-config.schema.json"
+    subprocess.check_output(["sed", "-i", f"0,/^\\$id: .*/s||$id: {url}|", schema_file])
+
     # Generate changelogs.
     generate_and_write_changelog(synapse_repo, current_version, new_version)
 
@@ -592,7 +598,7 @@ def _wait_for_actions(gh_token: Optional[str]) -> None:
         if all(
             workflow["status"] != "in_progress" for workflow in resp["workflow_runs"]
         ):
-            success = (
+            success = all(
                 workflow["status"] == "completed" for workflow in resp["workflow_runs"]
             )
             if success:

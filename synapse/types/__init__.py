@@ -40,6 +40,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
     overload,
@@ -49,7 +50,7 @@ import attr
 from immutabledict import immutabledict
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
-from typing_extensions import Self, TypedDict
+from typing_extensions import Self
 from unpaddedbase64 import decode_base64
 from zope.interface import Interface
 
@@ -664,6 +665,11 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
     @classmethod
     async def parse(cls, store: "PurgeEventsStore", string: str) -> "RoomStreamToken":
+        # Check that it looks like a Synapse token first. We do this so that
+        # we don't log at the exception-level for obviously incorrect tokens.
+        if not string or string[0] not in ("s", "t", "m"):
+            raise SynapseError(400, f"Invalid room stream token {string:!r}")
+
         try:
             if string[0] == "s":
                 return cls(topological=None, stream=int(string[1:]))
@@ -883,8 +889,7 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
     def __str__(self) -> str:
         instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
         return (
-            f"MultiWriterStreamToken(stream: {self.stream}, "
-            f"instances: {{{instances}}})"
+            f"MultiWriterStreamToken(stream: {self.stream}, instances: {{{instances}}})"
         )
 
 
