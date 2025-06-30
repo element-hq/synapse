@@ -86,7 +86,6 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self.server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         # Map of (user_id, device_id) to the last stream_id that has been

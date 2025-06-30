@@ -125,7 +125,6 @@ class ReceiptsWorkerStore(SQLBaseStore):
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
     ):
-        self.server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         # In the worker store this is an ID tracker which we overwrite in the non-worker

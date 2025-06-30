@@ -93,7 +93,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
-        self.server_name = hs.hostname
 
         # In the worker store this is an ID tracker which we overwrite in the non-worker
         # class below that is used on the main process.

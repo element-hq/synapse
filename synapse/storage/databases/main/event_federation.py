@@ -137,7 +137,6 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         super().__init__(database, db_conn, hs)
 
         self.hs = hs
-        self.server_name = hs.hostname
 
         if hs.config.worker.run_background_tasks:
             hs.get_clock().looping_call(

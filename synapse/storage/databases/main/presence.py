@@ -79,7 +79,6 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
     ) -> None:
         super().__init__(database, db_conn, hs)
 
-        self.server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
         self._presence_id_gen: MultiWriterIdGenerator
 

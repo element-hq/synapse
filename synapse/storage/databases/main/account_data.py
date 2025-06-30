@@ -66,8 +66,6 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
     ):
         super().__init__(database, db_conn, hs)
 
-        self.server_name = hs.hostname
-
         self._can_write_to_account_data = (
             self._instance_name in hs.config.worker.writers.account_data
         )
