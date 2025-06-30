@@ -1054,7 +1054,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 "get_devices_with_messages",
                 get_devices_with_messages_txn,
                 batch_device_ids,
-                # We don't need to run in a transaction as its a single query
+                # We don't need to run in a transaction as it's a single query
                 db_autocommit=True,
             )
 

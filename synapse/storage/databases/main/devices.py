@@ -1916,7 +1916,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 values=device_ids,
             )
 
-            # We're bulk deleting devices potentially many devices at once, so
+            # We're bulk deleting potentially many devices at once, so
             # let's not invalidate the cache for each device individually.
             # Instead, we will invalidate the cache for the user as a whole.
             self._invalidate_cache_and_stream(txn, self.get_device, (user_id,))
