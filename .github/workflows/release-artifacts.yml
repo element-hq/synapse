@@ -149,7 +149,8 @@ jobs:
 
       - name: Build aarch64 wheels
         if: matrix.arch == 'aarch64'
-        run: echo 'CIBW_ARCHS_LINUX=aarch64' >> $GITHUB_ENV
+        run: |
+          echo 'CIBW_ARCHS_LINUX=aarch64' >> $GITHUB_ENV
       
       # The default manylinux version is 2_28 as of May 2025, see:
       # https://cibuildwheel.pypa.io/en/stable/options/#linux-image.
@@ -158,6 +159,7 @@ jobs:
       # versions. We pin the manylinux version to avoid build failures.
       - name: Pin manylinux version
         run: |
+          echo 'CIBW_MANYLINUX_X86_64_IMAGE=manylinux_2_28' >> $GITHUB_ENV
           echo 'CIBW_MANYLINUX_AARCH64_IMAGE=manylinux_2_28' >> $GITHUB_ENV
 
       - name: Only build a single wheel on PR
