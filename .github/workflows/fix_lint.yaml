@@ -24,6 +24,9 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2.7.8
 
+      - name: Install PyYAML
+        run: pip install PyYAML==6.0.2
+
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
@@ -42,6 +45,13 @@ jobs:
         continue-on-error: true
 
       - run: cargo fmt
+        continue-on-error: true
+
+      - name: Regenerate config
+        run: |
+          scripts-dev/gen_config_documentation.py \
+            schema/synapse-config.schema.yaml \
+          > docs/usage/configuration/config_documentation.md
         continue-on-error: true
 
       - uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403 # v5.2.0
