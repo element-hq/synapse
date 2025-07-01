@@ -1,3 +1,12 @@
+# Synapse 1.133.0 (2025-07-01)
+
+### Bugfixes
+
+- Bump `cibuildwheel` to 3.0.0 to fix the `manylinux` wheel builds. ([\#18615](https://github.com/element-hq/synapse/issues/18615))
+
+
+
+
 # Synapse 1.133.0rc1 (2025-06-24)
 
 ### Features

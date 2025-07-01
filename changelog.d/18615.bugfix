@@ -1,1 +1,0 @@
-Bump `cibuildwheel` to 3.0.0 to fix the `manylinux` wheel builds.
