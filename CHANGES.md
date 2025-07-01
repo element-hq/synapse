@@ -1,5 +1,14 @@
 # Synapse 1.133.0 (2025-07-01)
 
+Pre-built wheels are now built using the [manylinux_2_28](https://github.com/pypa/manylinux#manylinux_2_28-almalinux-8-based) base, which is expected to be compatible with distros using glibc 2.28 or later, including:
+
+ - Debian 10+
+ - Ubuntu 18.10+
+ - Fedora 29+
+ - CentOS/RHEL 8+
+
+Previously, wheels were built using the [manylinux2014](https://github.com/pypa/manylinux#manylinux2014-centos-7-based-glibc-217) base, which was expected to be compatible with distros using glibc 2.17 or later.
+
 ### Bugfixes
 
 - Bump `cibuildwheel` to 3.0.0 to fix the `manylinux` wheel builds. ([\#18615](https://github.com/element-hq/synapse/issues/18615))
