@@ -224,7 +224,7 @@ pydantic = ">=1.7.4, <3"
 # https://github.com/python-poetry/poetry/issues/6154). Both `pip install` and
 # `poetry build` do the right thing without this explicit dependency.
 #
-# This isn't really a dev-dependency, as `poetry install --no-dev` will fail,
+# This isn't really a dev-dependency, as `poetry install --without dev` will fail,
 # but the alternative is to add it to the main list of deps where it isn't
 # needed.
 setuptools_rust = ">=1.3"
