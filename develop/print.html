@@ -1873,7 +1873,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.132.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.133.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -14198,7 +14198,7 @@ for the given <code>room_id</code>.</p>
         }, {
             &quot;delete_id&quot;: &quot;delete_id2&quot;,
             &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
-            &quot;status&quot;: &quot;purging&quot;,
+            &quot;status&quot;: &quot;active&quot;,
             &quot;shutdown_room&quot;: {
                 &quot;kicked_users&quot;: [
                     &quot;@foobar:example.com&quot;
@@ -14226,7 +14226,7 @@ for the given <code>room_id</code>.</p>
 </code></pre>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
-    &quot;status&quot;: &quot;purging&quot;,
+    &quot;status&quot;: &quot;active&quot;,
     &quot;delete_id&quot;: &quot;bHkCNQpHqOaFhPtK&quot;,
     &quot;room_id&quot;: &quot;!roomid:example.com&quot;,
     &quot;shutdown_room&quot;: {
@@ -14258,8 +14258,8 @@ Task objects contain the following fields:
 <li><code>room_id</code> - The ID of the room being deleted</li>
 <li><code>status</code> - The status will be one of:
 <ul>
-<li><code>shutting_down</code> - The process is removing users from the room.</li>
-<li><code>purging</code> - The process is purging the room and event data from database.</li>
+<li><code>scheduled</code> - The deletion is waiting to be started</li>
+<li><code>active</code> - The process is purging the room and event data from database.</li>
 <li><code>complete</code> - The process has completed successfully.</li>
 <li><code>failed</code> - The process is aborted, an error has occurred.</li>
 </ul>
