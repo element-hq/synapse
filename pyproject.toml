@@ -159,7 +159,7 @@ synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
 [tool.poetry.dependencies]
-python = "^3.9.0"
+python = "^3.9.12"
 
 # Mandatory Dependencies
 # ----------------------
