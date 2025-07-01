@@ -139,7 +139,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.23.0
+        run: python -m pip install cibuildwheel==2.24.0
 
       - name: Set up QEMU to emulate aarch64
         if: matrix.arch == 'aarch64'
@@ -151,16 +151,6 @@ jobs:
         if: matrix.arch == 'aarch64'
         run: |
           echo 'CIBW_ARCHS_LINUX=aarch64' >> $GITHUB_ENV
-      
-      # The default manylinux version is 2_28 as of May 2025, see:
-      # https://cibuildwheel.pypa.io/en/stable/options/#linux-image.
-      #
-      # Thus, upstream libraries have begun to drop support for older
-      # versions. We pin the manylinux version to avoid build failures.
-      - name: Pin manylinux version
-        run: |
-          echo 'CIBW_MANYLINUX_X86_64_IMAGE=manylinux_2_28' >> $GITHUB_ENV
-          echo 'CIBW_MANYLINUX_AARCH64_IMAGE=manylinux_2_28' >> $GITHUB_ENV
 
       - name: Only build a single wheel on PR
         if: startsWith(github.ref, 'refs/pull/')
