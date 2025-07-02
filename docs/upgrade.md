@@ -117,7 +117,7 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
-# Upgrading to v1.131.0
+# Upgrading to v1.134.0
 
 ## ICU bundled with Synapse
 
