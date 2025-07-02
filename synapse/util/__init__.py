@@ -55,6 +55,15 @@ if typing.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class Duration:
+    """Helper class that holds constants for common time durations in
+    milliseconds."""
+
+    MINUTE_MS = 60 * 1000
+    HOUR_MS = 60 * MINUTE_MS
+    DAY_MS = 24 * HOUR_MS
+
+
 def _reject_invalid_json(val: Any) -> None:
     """Do not allow Infinity, -Infinity, or NaN values in JSON."""
     raise ValueError("Invalid JSON value: '%s'" % val)
