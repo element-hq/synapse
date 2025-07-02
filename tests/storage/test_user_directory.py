@@ -32,7 +32,6 @@ from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.storage.background_updates import _BackgroundUpdateHandler
-from synapse.storage.databases.main import user_directory
 from synapse.storage.databases.main.user_directory import (
     _parse_words_with_icu,
 )
@@ -441,11 +440,6 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BOBBY, "bobby", None))
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
-
-        self._restore_parse_words = user_directory._parse_words
-
-    def tearDown(self) -> None:
-        user_directory._parse_words = self._restore_parse_words
 
     def test_search_user_dir(self) -> None:
         # normally when alice searches the directory she should just find
