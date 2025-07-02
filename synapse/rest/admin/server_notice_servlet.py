@@ -88,9 +88,6 @@ class SendServerNoticeServlet(RestServlet):
         event_type = body.get("type", EventTypes.Message)
         state_key = body.get("state_key")
 
-        # We grab the server notices manager here as its initialisation has a check for worker processes,
-        # but worker processes still need to initialise SendServerNoticeServlet (as it is part of the
-        # admin api).
         if not self.server_notices_manager.is_enabled():
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Server notices are not enabled on this server"
@@ -113,7 +110,7 @@ class SendServerNoticeServlet(RestServlet):
             txn_id=txn_id,
         )
 
-        return HTTPStatus.OK, {"event_id": event.event_id}
+        return HTTPStatus.OK, {"event_id": event["event_id"]}
 
     async def on_POST(
         self,
