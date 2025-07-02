@@ -43,7 +43,7 @@ class SsoRegisterResource(DirectServeHtmlResource):
     """
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__()
+        super().__init__(clock=hs.get_clock())
         self._sso_handler = hs.get_sso_handler()
 
     async def _async_render_GET(self, request: Request) -> None:

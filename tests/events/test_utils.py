@@ -122,7 +122,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "prev_events": "prev_events",
                 "prev_state": "prev_state",
                 "auth_events": "auth_events",
-                "origin": "domain",
+                "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
                 # Also include a key that should be removed.
@@ -139,7 +139,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "prev_events": "prev_events",
                 "prev_state": "prev_state",
                 "auth_events": "auth_events",
-                "origin": "domain",
+                "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
                 "content": {},
@@ -148,13 +148,12 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             },
         )
 
-        # As of room versions we now redact the membership, prev_states, and origin keys.
+        # As of room versions we now redact the membership and prev_states keys.
         self.run_test(
             {
                 "type": "A",
                 "prev_state": "prev_state",
                 "membership": "join",
-                "origin": "example.com",
             },
             {"type": "A", "content": {}, "signatures": {}, "unsigned": {}},
             room_version=RoomVersions.V11,
@@ -238,7 +237,6 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             {
                 "type": "m.room.create",
                 "content": {"not_a_real_key": True},
-                "origin": "some_homeserver",
                 "nonsense_field": "some_random_garbage",
             },
             {
