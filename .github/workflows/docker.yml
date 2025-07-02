@@ -30,9 +30,6 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@fb28c2b6339dcd94da6e4cbcbc5e888961f6f8c3 # v3.9.0
-
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -70,14 +67,6 @@ jobs:
           file: "docker/Dockerfile"
           platforms: ${{ matrix.platform }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-
-      - name: Sign the images with GitHub OIDC Token
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-        run: |
-          cosign sign --yes \
-            docker.io/matrixdotorg/synapse@${DIGEST} \
-            ghcr.io/element-hq/synapse@${DIGEST}
 
       - name: Export digest
         run: |
@@ -130,6 +119,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@fb28c2b6339dcd94da6e4cbcbc5e888961f6f8c3 # v3.9.0
+
       - name: Calculate docker image tag
         uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
         with:
@@ -150,3 +142,14 @@ jobs:
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf "$REPOSITORY@sha256:%s " *)
+
+      - name: Sign each manifest
+        env:
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          DIGESTS=""
+          for TAG in $(echo "$DOCKER_METADATA_OUTPUT_JSON" | jq -r '.tags[]'); do
+            DIGEST="$(docker buildx imagetools inspect $TAG --format '{{json .Manifest}}' | jq -r '.digest')"
+            DIGESTS="$DIGESTS $REPOSITORY@$DIGEST"
+          done
+          cosign sign --yes $DIGESTS
