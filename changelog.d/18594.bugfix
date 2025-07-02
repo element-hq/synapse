@@ -1,0 +1,1 @@
+Respond with 401 & `M_USER_LOCKED` when a locked user calls `POST /login`, as per the spec.
