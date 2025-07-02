@@ -46,7 +46,7 @@ CREATE FUNCTION check_state_groups_state_deletion() RETURNS trigger
             END;
             $$;
 
-CREATE CONSTRAINT TRIGGER check_partial_state_events AFTER DELETE ON state_groups_state
+CREATE CONSTRAINT TRIGGER check_state_groups_state_deletion_trigger AFTER DELETE ON state_groups_state
     DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW
     EXECUTE PROCEDURE check_state_groups_state_deletion()
