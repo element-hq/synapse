@@ -1437,6 +1437,22 @@ files = [
 ]
 
 [[package]]
+name = "multipart"
+version = "1.2.1"
+description = "Parser for multipart/form-data"
+optional = false
+python-versions = ">=3.8"
+groups = ["main"]
+files = [
+    {file = "multipart-1.2.1-py3-none-any.whl", hash = "sha256:c03dc203bc2e67f6b46a599467ae0d87cf71d7530504b2c1ff4a9ea21d8b8c8c"},
+    {file = "multipart-1.2.1.tar.gz", hash = "sha256:829b909b67bc1ad1c6d4488fcdc6391c2847842b08323addf5200db88dbe9480"},
+]
+
+[package.extras]
+dev = ["build", "pytest", "pytest-cov", "twine"]
+docs = ["sphinx (>=8,<9)", "sphinx-autobuild"]
+
+[[package]]
 name = "mypy"
 version = "1.13.0"
 description = "Optional static typing for Python"
@@ -2810,27 +2826,28 @@ dev = ["furo (>=2024.05.06)", "nox", "packaging", "sphinx (>=5)", "twisted"]
 
 [[package]]
 name = "treq"
-version = "24.9.1"
+version = "25.5.0"
 description = "High-level Twisted HTTP Client API"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8.0"
 groups = ["main"]
 files = [
-    {file = "treq-24.9.1-py3-none-any.whl", hash = "sha256:eee4756fd9a857c77f180fd5202b52c518f2d3e2826dce28b89066c03bfc45d0"},
-    {file = "treq-24.9.1.tar.gz", hash = "sha256:15da7fc404f3e4ed59d0abe5f8eef4966fabbe618039a2a23bc7c15305cefea8"},
+    {file = "treq-25.5.0-py3-none-any.whl", hash = "sha256:e99d4e66cacaa1f0da82bb60b317d104c29dbd8ac0a75d7f657b348178d830f4"},
+    {file = "treq-25.5.0.tar.gz", hash = "sha256:25dde3a55ae85ec2f2c56332c99aef255ab14f997d0d00552ebff13538a9804a"},
 ]
 
 [package.dependencies]
 attrs = "*"
 hyperlink = ">=21.0.0"
-incremental = "*"
+incremental = ">=24.7.2"
+multipart = "*"
 requests = ">=2.1.0"
-Twisted = {version = ">=22.10.0", extras = ["tls"]}
+twisted = {version = ">=22.10.0", extras = ["tls"]}
 typing-extensions = ">=3.10.0"
 
 [package.extras]
 dev = ["httpbin (==0.7.0)", "pep8", "pyflakes", "werkzeug (==2.0.3)"]
-docs = ["sphinx (<7.0.0)"]
+docs = ["sphinx", "sphinx-rtd-theme"]
 
 [[package]]
 name = "twine"
