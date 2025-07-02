@@ -2965,14 +2965,14 @@ types-setuptools = "*"
 
 [[package]]
 name = "types-commonmark"
-version = "0.9.2.20240106"
+version = "0.9.2.20250330"
 description = "Typing stubs for commonmark"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types-commonmark-0.9.2.20240106.tar.gz", hash = "sha256:52a062b71766d6ab258fca2d8e19fb0853796e25ca9afa9d0f67a1e42c93479f"},
-    {file = "types_commonmark-0.9.2.20240106-py3-none-any.whl", hash = "sha256:606d9de1e3a96cab0b1c0b6cccf4df099116148d1d864d115fde2e27ad6877c3"},
+    {file = "types_commonmark-0.9.2.20250330-py3-none-any.whl", hash = "sha256:d1ea71e8a0810339797237ccfb6ea1a48d4ceb7139948252badaeb1a0bb642a8"},
+    {file = "types_commonmark-0.9.2.20250330.tar.gz", hash = "sha256:6c5d27e978cb36d7ad058c178a957ad8187ec9bb30700d671e9a099ae2873750"},
 ]
 
 [[package]]
