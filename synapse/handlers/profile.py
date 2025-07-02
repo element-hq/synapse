@@ -92,9 +92,7 @@ class ProfileHandler:
 
         if self.hs.is_mine(target_user):
             profileinfo = await self.store.get_profileinfo(target_user)
-            extra_fields = {}
-            if self.hs.config.experimental.msc4133_enabled:
-                extra_fields = await self.store.get_profile_fields(target_user)
+            extra_fields = await self.store.get_profile_fields(target_user)
 
             if (
                 profileinfo.display_name is None
@@ -544,16 +542,15 @@ class ProfileHandler:
             if just_field is None or just_field == ProfileFields.AVATAR_URL:
                 response["avatar_url"] = await self.store.get_profile_avatar_url(user)
 
-            if self.hs.config.experimental.msc4133_enabled:
-                if just_field is None:
-                    response.update(await self.store.get_profile_fields(user))
-                elif just_field not in (
-                    ProfileFields.DISPLAYNAME,
-                    ProfileFields.AVATAR_URL,
-                ):
-                    response[just_field] = await self.store.get_profile_field(
-                        user, just_field
-                    )
+            if just_field is None:
+                response.update(await self.store.get_profile_fields(user))
+            elif just_field not in (
+                ProfileFields.DISPLAYNAME,
+                ProfileFields.AVATAR_URL,
+            ):
+                response[just_field] = await self.store.get_profile_field(
+                    user, just_field
+                )
         except StoreError as e:
             if e.code == 404:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)

@@ -484,38 +484,34 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # The client requested ?propagate=true, so it should have happened.
             self.assertEqual(channel.json_body.get(prop), "http://my.server/pic.gif")
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_get_missing_custom_field(self) -> None:
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_get_missing_custom_field_invalid_field_name(self) -> None:
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/[custom_field]",
+            f"/_matrix/client/v3/profile/{self.owner}/[custom_field]",
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_get_custom_field_rejects_bad_username(self) -> None:
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{urllib.parse.quote('@alice:')}/custom_field",
+            f"/_matrix/client/v3/profile/{urllib.parse.quote('@alice:')}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field(self) -> None:
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"custom_field": "test"},
             access_token=self.owner_tok,
         )
@@ -523,7 +519,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         self.assertEqual(channel.json_body, {"custom_field": "test"})
@@ -531,7 +527,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # Overwriting the field should work.
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"custom_field": "new_Value"},
             access_token=self.owner_tok,
         )
@@ -539,7 +535,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         self.assertEqual(channel.json_body, {"custom_field": "new_Value"})
@@ -547,7 +543,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # Deleting the field should work.
         channel = self.make_request(
             "DELETE",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={},
             access_token=self.owner_tok,
         )
@@ -555,12 +551,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_non_string(self) -> None:
         """Non-string fields are supported for custom fields."""
         fields = {
@@ -574,7 +569,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         for key, value in fields.items():
             channel = self.make_request(
                 "PUT",
-                f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+                f"/_matrix/client/v3/profile/{self.owner}/{key}",
                 content={key: value},
                 access_token=self.owner_tok,
             )
@@ -591,22 +586,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         for key, value in fields.items():
             channel = self.make_request(
                 "GET",
-                f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+                f"/_matrix/client/v3/profile/{self.owner}/{key}",
             )
             self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
             self.assertEqual(channel.json_body, {key: value})
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_noauth(self) -> None:
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"custom_field": "test"},
         )
         self.assertEqual(channel.code, 401, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.MISSING_TOKEN)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_size(self) -> None:
         """
         Attempts to set a custom field name that is too long should get a 400 error.
@@ -614,7 +607,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # Key is missing.
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/",
+            f"/_matrix/client/v3/profile/{self.owner}/",
             content={"": "test"},
             access_token=self.owner_tok,
         )
@@ -625,7 +618,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         key = "c" * 500
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "test"},
             access_token=self.owner_tok,
         )
@@ -634,7 +627,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "DELETE",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "test"},
             access_token=self.owner_tok,
         )
@@ -644,14 +637,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         # Key doesn't match body.
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            f"/_matrix/client/v3/profile/{self.owner}/custom_field",
             content={"diff_key": "test"},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.MISSING_PARAM)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_profile_too_long(self) -> None:
         """
         Attempts to set a custom field that would push the overall profile too large.
@@ -664,7 +656,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         key = "a"
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "a" * 65498},
             access_token=self.owner_tok,
         )
@@ -692,7 +684,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         key = "b"
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "1" + "a" * ADDITIONAL_CHARS},
             access_token=self.owner_tok,
         )
@@ -722,7 +714,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         key = "b"
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: "" + "a" * ADDITIONAL_CHARS},
             access_token=self.owner_tok,
         )
@@ -732,17 +724,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         key = "a"
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
             content={key: ""},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_displayname(self) -> None:
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/displayname",
+            f"/_matrix/client/v3/profile/{self.owner}/displayname",
             content={"displayname": "test"},
             access_token=self.owner_tok,
         )
@@ -751,11 +742,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         displayname = self._get_displayname()
         self.assertEqual(displayname, "test")
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_avatar_url(self) -> None:
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/avatar_url",
+            f"/_matrix/client/v3/profile/{self.owner}/avatar_url",
             content={"avatar_url": "mxc://test/good"},
             access_token=self.owner_tok,
         )
@@ -764,12 +754,11 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         avatar_url = self._get_avatar_url()
         self.assertEqual(avatar_url, "mxc://test/good")
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_other(self) -> None:
         """Setting someone else's profile field should fail"""
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.other}/custom_field",
+            f"/_matrix/client/v3/profile/{self.other}/custom_field",
             content={"custom_field": "test"},
             access_token=self.owner_tok,
         )

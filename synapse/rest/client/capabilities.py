@@ -92,22 +92,25 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": self.config.experimental.msc3664_enabled,
             }
 
-        if self.config.experimental.msc4133_enabled:
-            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = {
-                "enabled": True,
+        disallowed_profile_fields = []
+        response["capabilities"]["m.profile_fields"] = {"enabled": True}
+        if not self.config.registration.enable_set_displayname:
+            disallowed_profile_fields.append("displayname")
+        if not self.config.registration.enable_set_avatar_url:
+            disallowed_profile_fields.append("avatar_url")
+        # If disallowed profile fields is unset, then no need to set m.profile_fields
+        # as clients should assume it is supported (once the Matrix spec version supports
+        # it).
+        if disallowed_profile_fields:
+            response["capabilities"]["m.profile_fields"] = {
+                "disallowed": disallowed_profile_fields,
             }
 
-            # Ensure this is consistent with the legacy m.set_displayname and
-            # m.set_avatar_url.
-            disallowed = []
-            if not self.config.registration.enable_set_displayname:
-                disallowed.append("displayname")
-            if not self.config.registration.enable_set_avatar_url:
-                disallowed.append("avatar_url")
-            if disallowed:
-                response["capabilities"]["uk.tcpip.msc4133.profile_fields"][
-                    "disallowed"
-                ] = disallowed
+        # For transition from unstable to stable identifiers.
+        if self.config.experimental.msc4133_enabled:
+            response["capabilities"]["uk.tcpip.msc4133.profile_fields"] = response[
+                "capabilities"
+            ]["m.profile_fields"]
 
         if self.config.experimental.msc4267_enabled:
             response["capabilities"]["org.matrix.msc4267.forget_forced_upon_leave"] = {
