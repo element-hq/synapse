@@ -1,1 +1,1 @@
-Fix avatar_url and displayname being sent on profile queries when they are null.
+Fix `avatar_url` and `displayname` being sent on federation profile queries when they are not set.
