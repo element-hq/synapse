@@ -31,7 +31,7 @@ from prometheus_client import REGISTRY
 from prometheus_client.core import Gauge
 
 from synapse.config.cache import add_resizable_cache
-from synapse.metrics import INSTANCE_LABEL_NAME
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.metrics import DynamicCollectorRegistry
 
 logger = logging.getLogger(__name__)
@@ -49,62 +49,62 @@ caches_by_name: Dict[str, Sized] = {}
 cache_size = Gauge(
     "synapse_util_caches_cache_size",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 cache_hits = Gauge(
     "synapse_util_caches_cache_hits",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 cache_evicted = Gauge(
     "synapse_util_caches_cache_evicted_size",
     "",
-    labelnames=["name", "reason", INSTANCE_LABEL_NAME],
+    labelnames=["name", "reason", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 cache_total = Gauge(
     "synapse_util_caches_cache",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 cache_max_size = Gauge(
     "synapse_util_caches_cache_max_size",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 cache_memory_usage = Gauge(
     "synapse_util_caches_cache_size_bytes",
     "Estimated memory usage of the caches",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 
 response_cache_size = Gauge(
     "synapse_util_caches_response_cache_size",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 response_cache_hits = Gauge(
     "synapse_util_caches_response_cache_hits",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 response_cache_evicted = Gauge(
     "synapse_util_caches_response_cache_evicted_size",
     "",
-    labelnames=["name", "reason", INSTANCE_LABEL_NAME],
+    labelnames=["name", "reason", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 response_cache_total = Gauge(
     "synapse_util_caches_response_cache",
     "",
-    labelnames=["name", INSTANCE_LABEL_NAME],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=CACHE_METRIC_REGISTRY,
 )
 
@@ -168,7 +168,7 @@ class CacheMetric:
         try:
             labels_base = {
                 "name": self._cache_name,
-                INSTANCE_LABEL_NAME: self._server_name,
+                SERVER_NAME_LABEL: self._server_name,
             }
             if self._cache_type == "response_cache":
                 response_cache_size.labels(**labels_base).set(len(self._cache))
