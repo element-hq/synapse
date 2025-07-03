@@ -35,7 +35,7 @@ SERVER_NOTICE_ROOM_TAG = "m.server_notice"
 
 class ServerNoticesManager:
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
+        self.server_name = hs.hostname  # nb must be called this for @cached
         self._store = hs.get_datastores().main
         self._config = hs.config
         self._account_data_handler = hs.get_account_data_handler()

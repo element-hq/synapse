@@ -97,7 +97,7 @@ class ApplicationService:
         # The full Matrix ID for this application service's sender.
         self.sender = sender
         # The application service user should be part of the server's domain.
-        self.server_name = sender.domain
+        self.server_name = sender.domain  # nb must be called this for @cached
         self.namespaces = self._check_namespaces(namespaces)
         self.id = id
         self.ip_range_whitelist = ip_range_whitelist

@@ -61,7 +61,7 @@ MAX_PUBLIC_ROOMS_IN_RESPONSE = 100
 
 class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
+        self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.hs = hs
