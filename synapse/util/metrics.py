@@ -50,35 +50,35 @@ logger = logging.getLogger(__name__)
 #
 block_counter = Counter(
     "synapse_util_metrics_block_count",
-    "",
+    documentation="The number of times this block has been called.",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """The number of times this block has been called."""
 
 block_timer = Counter(
     "synapse_util_metrics_block_time_seconds",
-    "",
+    documentation="The cumulative time spent executing this block across all calls, in seconds.",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """The cumulative time spent executing this block across all calls, in seconds."""
 
 block_ru_utime = Counter(
     "synapse_util_metrics_block_ru_utime_seconds",
-    "",
+    documentation="Resource usage: user CPU time in seconds used in this block",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """Resource usage: user CPU time in seconds used in this block"""
 
 block_ru_stime = Counter(
     "synapse_util_metrics_block_ru_stime_seconds",
-    "",
+    documentation="Resource usage: system CPU time in seconds used in this block",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """Resource usage: system CPU time in seconds used in this block"""
 
 block_db_txn_count = Counter(
     "synapse_util_metrics_block_db_txn_count",
-    "",
+    documentation="Number of database transactions completed in this block",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """Number of database transactions completed in this block"""
@@ -86,7 +86,7 @@ block_db_txn_count = Counter(
 # seconds spent waiting for db txns, excluding scheduling time, in this block
 block_db_txn_duration = Counter(
     "synapse_util_metrics_block_db_txn_duration_seconds",
-    "",
+    documentation="Seconds spent waiting for database txns, excluding scheduling time, in this block",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """Seconds spent waiting for database txns, excluding scheduling time, in this block"""
@@ -94,7 +94,7 @@ block_db_txn_duration = Counter(
 # seconds spent waiting for a db connection, in this block
 block_db_sched_duration = Counter(
     "synapse_util_metrics_block_db_sched_duration_seconds",
-    "",
+    documentation="Seconds spent waiting for a db connection, in this block",
     labelnames=["block_name", INSTANCE_LABEL_NAME],
 )
 """Seconds spent waiting for a db connection, in this block"""
@@ -112,15 +112,14 @@ class _BlockInFlightMetric(Protocol):
     """The cumulative time spent executing this block across all calls, in seconds."""
 
 
-# Tracks the number of blocks currently active
 in_flight: InFlightGauge[_BlockInFlightMetric] = InFlightGauge(
     "synapse_util_metrics_block_in_flight",
-    "",
+    desc="Tracks the number of blocks currently active",
     labels=["block_name", INSTANCE_LABEL_NAME],
     # Matches the fields in the `_BlockInFlightMetric`
     sub_metrics=["real_time_max", "real_time_sum"],
 )
-
+"""Tracks the number of blocks currently active"""
 
 P = ParamSpec("P")
 R = TypeVar("R")
