@@ -256,7 +256,7 @@ KNOWN_KEYS = {
         "depth",
         "event_id",
         "hashes",
-        "origin",
+        "origin",  # old events were created with an origin field.
         "origin_server_ts",
         "prev_events",
         "room_id",
