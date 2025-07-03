@@ -41,7 +41,7 @@ from synapse.logging.context import (
     LoggingContext,
     current_context,
 )
-from synapse.metrics import INSTANCE_LABEL_NAME, InFlightGauge
+from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
 from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
@@ -51,35 +51,35 @@ logger = logging.getLogger(__name__)
 block_counter = Counter(
     "synapse_util_metrics_block_count",
     documentation="The number of times this block has been called.",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """The number of times this block has been called."""
 
 block_timer = Counter(
     "synapse_util_metrics_block_time_seconds",
     documentation="The cumulative time spent executing this block across all calls, in seconds.",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """The cumulative time spent executing this block across all calls, in seconds."""
 
 block_ru_utime = Counter(
     "synapse_util_metrics_block_ru_utime_seconds",
     documentation="Resource usage: user CPU time in seconds used in this block",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """Resource usage: user CPU time in seconds used in this block"""
 
 block_ru_stime = Counter(
     "synapse_util_metrics_block_ru_stime_seconds",
     documentation="Resource usage: system CPU time in seconds used in this block",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """Resource usage: system CPU time in seconds used in this block"""
 
 block_db_txn_count = Counter(
     "synapse_util_metrics_block_db_txn_count",
     documentation="Number of database transactions completed in this block",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """Number of database transactions completed in this block"""
 
@@ -87,7 +87,7 @@ block_db_txn_count = Counter(
 block_db_txn_duration = Counter(
     "synapse_util_metrics_block_db_txn_duration_seconds",
     documentation="Seconds spent waiting for database txns, excluding scheduling time, in this block",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """Seconds spent waiting for database txns, excluding scheduling time, in this block"""
 
@@ -95,7 +95,7 @@ block_db_txn_duration = Counter(
 block_db_sched_duration = Counter(
     "synapse_util_metrics_block_db_sched_duration_seconds",
     documentation="Seconds spent waiting for a db connection, in this block",
-    labelnames=["block_name", INSTANCE_LABEL_NAME],
+    labelnames=["block_name", SERVER_NAME_LABEL],
 )
 """Seconds spent waiting for a db connection, in this block"""
 
@@ -115,7 +115,7 @@ class _BlockInFlightMetric(Protocol):
 in_flight: InFlightGauge[_BlockInFlightMetric] = InFlightGauge(
     "synapse_util_metrics_block_in_flight",
     desc="Tracks the number of blocks currently active",
-    labels=["block_name", INSTANCE_LABEL_NAME],
+    labels=["block_name", SERVER_NAME_LABEL],
     # Matches the fields in the `_BlockInFlightMetric`
     sub_metrics=["real_time_max", "real_time_sum"],
 )
@@ -250,7 +250,7 @@ class Measure:
         self._logging_context.__exit__(exc_type, exc_val, exc_tb)
 
         try:
-            labels = {"block_name": self.name, INSTANCE_LABEL_NAME: self.server_name}
+            labels = {"block_name": self.name, SERVER_NAME_LABEL: self.server_name}
             block_counter.labels(**labels).inc()
             block_timer.labels(**labels).inc(duration)
             block_ru_utime.labels(**labels).inc(usage.ru_utime)
