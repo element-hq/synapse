@@ -1012,7 +1012,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
             sender="@as:example.com",
             rate_limited=False,
             namespaces=namespaces,
-            supports_ephemeral=True,
+            receive_ephemeral=True,
         )
 
         # Register the application service
@@ -1097,7 +1097,7 @@ class ApplicationServicesHandlerDeviceListsTestCase(unittest.HomeserverTestCase)
                     }
                 ],
             },
-            supports_ephemeral=True,
+            receive_ephemeral=True,
             msc3202_transaction_extensions=as_supports_txn_extensions,
             # Must be set for Synapse to try pushing data to the AS
             hs_token="abcde",
