@@ -29,7 +29,20 @@ CREATE FUNCTION check_state_groups_state_deletion() RETURNS trigger
                             WHERE state_group = OLD.state_group
                         )
                 ) THEN
-                    RAISE EXCEPTION 'Deleting state_groups_state row when it still exists in state_groups_edges';
+                    RAISE EXCEPTION 'Deleting state_groups_state row when it still exists in state_groups_edges: prev_state_group = %%', OLD.state_group;
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM state_group_edges
+                    WHERE
+                        OLD.state_group = state_group_edges.state_group
+                        -- Check that the state group is fully deleted, rather
+                        -- than deleted/reinserted
+                        AND NOT EXISTS (
+                            SELECT state_group FROM state_groups_state
+                            WHERE state_group = OLD.state_group
+                        )
+                ) THEN
+                    RAISE EXCEPTION 'Deleting state_groups_state row when it still exists in state_groups_edges: state_group = %%', OLD.state_group;
                 END IF;
                 IF EXISTS (
                     SELECT 1 FROM state_groups
@@ -40,7 +53,7 @@ CREATE FUNCTION check_state_groups_state_deletion() RETURNS trigger
                             WHERE state_group = OLD.state_group
                         )
                 ) THEN
-                    RAISE EXCEPTION 'Deleting state_groups_state row when it still exists in state_groups';
+                    RAISE EXCEPTION 'Deleting state_groups_state row when it still exists in state_groups: id = %%', OLD.state_group;
                 END IF;
                 RETURN NULL;
             END;
