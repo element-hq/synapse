@@ -1520,7 +1520,6 @@ class UserDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(response["device_id"], self.other_user_device_id)
         self.assertEqual(response["display_name"], self.other_user_device_display_name)
         self.assertEqual(response["last_seen_ip"], self.other_user_client_ip)
-        self.assertEqual(response["last_seen_user_agent"], self.other_user_user_agent)
         self.assertIsInstance(response["last_seen_ts"], int)
         self.assertGreater(response["last_seen_ts"], 0)
 

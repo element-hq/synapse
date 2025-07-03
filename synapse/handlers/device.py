@@ -98,7 +98,6 @@ class DeviceWorkerHandler:
         self._auth_handler = hs.get_auth_handler()
         self._event_sources = hs.get_event_sources()
         self.server_name = hs.hostname
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
@@ -1170,7 +1169,6 @@ def _update_device_from_client_ips(
     ip = client_ips.get((device["user_id"], device["device_id"]))
     device.update(
         {
-            "last_seen_user_agent": ip.user_agent if ip else None,
             "last_seen_ts": ip.last_seen if ip else None,
             "last_seen_ip": ip.ip if ip else None,
         }
