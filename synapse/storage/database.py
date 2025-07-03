@@ -1478,13 +1478,49 @@ class DatabasePool:
         """
         Upsert, many times.
 
+        This executes a query equivalent to `INSERT INTO ... ON CONFLICT DO UPDATE`,
+        with multiple value rows.
+        The query may use emulated upserts if the database engine does not support upserts,
+        or if the table is currently unsafe to upsert.
+
+        If there are no value columns, this instead generates a `ON CONFLICT DO NOTHING`.
+
         Args:
             table: The table to upsert into
-            key_names: The key column names.
-            key_values: A list of each row's key column values.
-            value_names: The value column names
-            value_values: A list of each row's value column values.
+            key_names: The unique key column names. These are the columns used in the ON CONFLICT clause.
+            key_values: A list of each row's key column values, in the same order as `key_names`.
+            value_names: The non-unique value column names
+            value_values: A list of each row's value column values, in the same order as `value_names`.
                 Ignored if value_names is empty.
+
+        Example:
+            ```python
+            simple_upsert_many(
+                "mytable",
+                key_names=("room_id", "user_id"),
+                key_values=[
+                    ("!room1:example.org", "@user1:example.org"),
+                    ("!room2:example.org", "@user2:example.org"),
+                ],
+                value_names=("wombat_count", "is_updated"),
+                value_values=[
+                    (42, True),
+                    (7, False)
+                ],
+            )
+            ```
+
+            gives something equivalent to:
+
+            ```sql
+            INSERT INTO mytable (room_id, user_id, wombat_count, is_updated)
+            VALUES
+                ('!room1:example.org', '@user1:example.org', 42, True),
+                ('!room2:example.org', '@user2:example.org', 7, False)
+            ON CONFLICT DO UPDATE SET
+                wombat_count = EXCLUDED.wombat_count,
+                is_updated = EXCLUDED.is_updated
+            ```
         """
 
         # We can autocommit if it safe to upsert
@@ -1512,6 +1548,8 @@ class DatabasePool:
     ) -> None:
         """
         Upsert, many times.
+
+        See the documentation for `simple_upsert_many` for examples.
 
         Args:
             table: The table to upsert into

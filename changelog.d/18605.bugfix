@@ -1,0 +1,1 @@
+Ensure policy servers are not asked to scan policy server change events, allowing rooms to disable the use of a policy server while the policy server is down.

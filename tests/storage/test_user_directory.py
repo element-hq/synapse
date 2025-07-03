@@ -32,10 +32,8 @@ from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.storage.background_updates import _BackgroundUpdateHandler
-from synapse.storage.databases.main import user_directory
 from synapse.storage.databases.main.user_directory import (
     _parse_words_with_icu,
-    _parse_words_with_regex,
 )
 from synapse.storage.roommember import ProfileInfo
 from synapse.util import Clock
@@ -43,12 +41,6 @@ from synapse.util import Clock
 from tests.server import ThreadedMemoryReactorClock
 from tests.test_utils.event_injection import inject_member_event
 from tests.unittest import HomeserverTestCase, override_config
-
-try:
-    import icu
-except ImportError:
-    icu = None  # type: ignore
-
 
 ALICE = "@alice:a"
 BOB = "@bob:b"
@@ -438,8 +430,6 @@ class UserDirectoryInitialPopulationTestcase(HomeserverTestCase):
 
 
 class UserDirectoryStoreTestCase(HomeserverTestCase):
-    use_icu = False
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
 
@@ -450,12 +440,6 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
         self.get_success(self.store.update_profile_in_user_dir(BOBBY, "bobby", None))
         self.get_success(self.store.update_profile_in_user_dir(BELA, "Bela", None))
         self.get_success(self.store.add_users_in_public_rooms("!room:id", (ALICE, BOB)))
-
-        self._restore_use_icu = user_directory.USE_ICU
-        user_directory.USE_ICU = self.use_icu
-
-    def tearDown(self) -> None:
-        user_directory.USE_ICU = self._restore_use_icu
 
     def test_search_user_dir(self) -> None:
         # normally when alice searches the directory she should just find
@@ -648,24 +632,14 @@ class UserDirectoryStoreTestCase(HomeserverTestCase):
     test_search_user_dir_accent_insensitivity.skip = "not supported yet"  # type: ignore
 
 
-class UserDirectoryStoreTestCaseWithIcu(UserDirectoryStoreTestCase):
-    use_icu = True
-
-    if not icu:
-        skip = "Requires PyICU"
-
-
 class UserDirectoryICUTestCase(HomeserverTestCase):
-    if not icu:
-        skip = "Requires PyICU"
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.user_dir_helper = GetUserDirectoryTables(self.store)
 
     def test_icu_word_boundary(self) -> None:
-        """Tests that we correctly detect word boundaries when ICU (International
-        Components for Unicode) support is available.
+        """Tests that we correctly detect word boundaries with ICU
+        (International Components for Unicode).
         """
 
         display_name = "Gáo"
@@ -714,12 +688,3 @@ class UserDirectoryICUTestCase(HomeserverTestCase):
         self.assertEqual(_parse_words_with_icu("user-1"), ["user-1"])
         self.assertEqual(_parse_words_with_icu("user-ab"), ["user-ab"])
         self.assertEqual(_parse_words_with_icu("user.--1"), ["user", "-1"])
-
-    def test_regex_word_boundary_punctuation(self) -> None:
-        """
-        Tests the behaviour of punctuation with the non-ICU tokeniser
-        """
-        self.assertEqual(
-            _parse_words_with_regex("lazy'fox jumped:over the.dog"),
-            ["lazy", "fox", "jumped", "over", "the", "dog"],
-        )
