@@ -77,7 +77,7 @@ The user provided search term is lowercased and normalized using [NFKC](https://
 this treats the string as case-insensitive, canonicalizes different forms of the
 same text, and maps some "roughly equivalent" characters together.
 
-The search term is then split into segments using the system's [icu_segmenter
+The search term is then split into segments using the [`icu_segmenter`
 Rust crate](https://crates.io/crates/icu_segmenter). This crate ships with its
 own dictionary and Long Short Term-Memory (LSTM) machine learning models
 per-language to segment words. Read more [in the crate's
