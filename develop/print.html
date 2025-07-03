@@ -427,19 +427,18 @@ header files for Python C extensions.</p>
 <p>Installing prerequisites on Ubuntu or Debian:</p>
 <pre><code class="language-sh">sudo apt install build-essential python3-dev libffi-dev \
                      python3-pip python3-setuptools sqlite3 \
-                     libssl-dev virtualenv libjpeg-dev libxslt1-dev libicu-dev
+                     libssl-dev virtualenv libjpeg-dev libxslt1-dev
 </code></pre>
 <h5 id="archlinux-1"><a class="header" href="#archlinux-1">ArchLinux</a></h5>
 <p>Installing prerequisites on ArchLinux:</p>
 <pre><code class="language-sh">sudo pacman -S base-devel python python-pip \
-               python-setuptools python-virtualenv sqlite3 icu
+               python-setuptools python-virtualenv sqlite3
 </code></pre>
 <h5 id="centosfedora"><a class="header" href="#centosfedora">CentOS/Fedora</a></h5>
 <p>Installing prerequisites on CentOS or Fedora Linux:</p>
 <pre><code class="language-sh">sudo dnf install libtiff-devel libjpeg-devel libzip-devel freetype-devel \
                  libwebp-devel libxml2-devel libxslt-devel libpq-devel \
-                 python3-virtualenv libffi-devel openssl-devel python3-devel \
-                 libicu-devel
+                 python3-virtualenv libffi-devel openssl-devel python3-devel
 sudo dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h5 id="red-hat-enterprise-linux--rocky-linux--oracle-linux"><a class="header" href="#red-hat-enterprise-linux--rocky-linux--oracle-linux">Red Hat Enterprise Linux / Rocky Linux / Oracle Linux</a></h5>
@@ -456,7 +455,7 @@ dnf install python3.11 python3.11-devel
 dnf install python3.12 python3.12-devel
 </code></pre>
 <p>Finally, install common prerequisites</p>
-<pre><code class="language-bash">dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf
+<pre><code class="language-bash">dnf install libpq5 libpq5-devel lz4 pkgconf
 dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h6 id="using-venv-module-instead-of-virtualenv-command"><a class="header" href="#using-venv-module-instead-of-virtualenv-command">Using venv module instead of virtualenv command</a></h6>
@@ -480,17 +479,6 @@ pip install matrix-synapse
 <pre><code class="language-sh">xcode-select --install
 </code></pre>
 <p>Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) for them.</p>
-<p>You may need to install icu, and make the icu binaries and libraries accessible.
-Please follow <a href="https://pypi.org/project/PyICU/">the official instructions of PyICU</a> to do so.</p>
-<p>If you're struggling to get icu discovered, and see:</p>
-<pre><code>  RuntimeError:
-  Please install pkg-config on your system or set the ICU_VERSION environment
-  variable to the version of ICU you have installed.
-</code></pre>
-<p>despite it being installed and having your <code>PATH</code> updated, you can omit this dependency by
-not specifying <code>--extras all</code> to <code>poetry</code>. If using postgres, you can install Synapse via
-<code>poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry</code>.
-ICU is not a hard dependency on getting a working installation.</p>
 <p>On ARM-based Macs you may also need to install libjpeg and libpq:</p>
 <pre><code class="language-sh"> brew install jpeg libpq
 </code></pre>
@@ -504,8 +492,7 @@ export CPPFLAGS=&quot;-I/usr/local/opt/openssl/include&quot;
 <p>Installing prerequisites on openSUSE:</p>
 <pre><code class="language-sh">sudo zypper in -t pattern devel_basis
 sudo zypper in python-pip python-setuptools sqlite3 python-virtualenv \
-               python-devel libffi-devel libopenssl-devel libjpeg62-devel \
-               libicu-devel
+               python-devel libffi-devel libopenssl-devel libjpeg62-devel
 </code></pre>
 <h5 id="openbsd-1"><a class="header" href="#openbsd-1">OpenBSD</a></h5>
 <p>A port of Synapse is available under <code>net/synapse</code>. The filesystem
@@ -1891,6 +1878,10 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11340"><a class="header" href="#upgrading-to-v11340">Upgrading to v1.134.0</a></h1>
+<h2 id="icu-bundled-with-synapse"><a class="header" href="#icu-bundled-with-synapse">ICU bundled with Synapse</a></h2>
+<p>Synapse now uses the Rust <code>icu</code> library for improved user search. Installing the
+native ICU library on your system is no longer required.</p>
 <h1 id="upgrading-to-v11300"><a class="header" href="#upgrading-to-v11300">Upgrading to v1.130.0</a></h1>
 <h2 id="documented-endpoint-which-can-be-delegated-to-a-federation-worker"><a class="header" href="#documented-endpoint-which-can-be-delegated-to-a-federation-worker">Documented endpoint which can be delegated to a federation worker</a></h2>
 <p>The endpoint <code>^/_matrix/federation/v1/version$</code> can be delegated to a federation
@@ -9909,15 +9900,11 @@ no filtering on the locked status of a user is done.</p>
 <p>The user provided search term is lowercased and normalized using <a href="https://en.wikipedia.org/wiki/Unicode_equivalence#Normalization">NFKC</a>,
 this treats the string as case-insensitive, canonicalizes different forms of the
 same text, and maps some &quot;roughly equivalent&quot; characters together.</p>
-<p>The search term is then split into words:</p>
-<ul>
-<li>If <a href="https://en.wikipedia.org/wiki/International_Components_for_Unicode">ICU</a> is
-available, then the system's <a href="https://unicode-org.github.io/icu/userguide/locale/#default-locales">default locale</a>
-will be used to break the search term into words. (See the
-<a href="setup/installation.html">installation instructions</a> for how to install ICU.)</li>
-<li>If unavailable, then runs of ASCII characters, numbers, underscores, and hyphens
-are considered words.</li>
-</ul>
+<p>The search term is then split into segments using the <a href="https://crates.io/crates/icu_segmenter"><code>icu_segmenter</code>
+Rust crate</a>. This crate ships with its
+own dictionary and Long Short Term-Memory (LSTM) machine learning models
+per-language to segment words. Read more <a href="https://docs.rs/icu/latest/icu/segmenter/struct.WordSegmenter.html#method.new_auto">in the crate's
+documentation</a>.</p>
 <p>The queries for PostgreSQL and SQLite are detailed below, but their overall goal
 is to find matching users, preferring users who are &quot;real&quot; (e.g. not bots,
 not deactivated). It is assumed that real users will have a display name and
@@ -17164,7 +17151,6 @@ on Windows is not officially supported.</p>
 <p>A recent version of the Rust compiler is needed to build the native modules. The
 easiest way of installing the latest version is to use <a href="https://rustup.rs/">rustup</a>.</p>
 <p>Synapse can connect to PostgreSQL via the <a href="https://pypi.org/project/psycopg2/">psycopg2</a> Python library. Building this library from source requires access to PostgreSQL's C header files. On Debian or Ubuntu Linux, these can be installed with <code>sudo apt install libpq-dev</code>.</p>
-<p>Synapse has an optional, improved user search with better Unicode support. For that you need the development package of <code>libicu</code>. On Debian or Ubuntu Linux, this can be installed with <code>sudo apt install libicu-dev</code>.</p>
 <p>The source code of Synapse is hosted on GitHub. You will also need <a href="https://github.com/git-guides/install-git">a recent version of git</a>.</p>
 <p>For some tests, you will need <a href="https://docs.docker.com/get-docker/">a recent version of Docker</a>.</p>
 <h1 id="3-get-the-source"><a class="header" href="#3-get-the-source">3. Get the source.</a></h1>
@@ -18446,10 +18432,7 @@ $ poetry cache clear --all .
 # including the wheel artifacts which is not covered by the above command
 # (see https://github.com/python-poetry/poetry/issues/10304)
 #
-# This is necessary in order to rebuild or fetch new wheels. For example, if you update
-# the `icu` library in on your system, you will need to rebuild the PyICU Python package
-# in order to incorporate the correct dynamically linked library locations otherwise you
-# will run into errors like: `ImportError: libicui18n.so.75: cannot open shared object file: No such file or directory`
+# This is necessary in order to rebuild or fetch new wheels.
 $ rm -rf $(poetry config cache-dir)
 </code></pre>
 <h2 id="run-a-command-in-the-poetry-virtualenv"><a class="header" href="#run-a-command-in-the-poetry-virtualenv">...run a command in the <code>poetry</code> virtualenv?</a></h2>

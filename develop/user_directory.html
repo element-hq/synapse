@@ -235,15 +235,11 @@ no filtering on the locked status of a user is done.</p>
 <p>The user provided search term is lowercased and normalized using <a href="https://en.wikipedia.org/wiki/Unicode_equivalence#Normalization">NFKC</a>,
 this treats the string as case-insensitive, canonicalizes different forms of the
 same text, and maps some &quot;roughly equivalent&quot; characters together.</p>
-<p>The search term is then split into words:</p>
-<ul>
-<li>If <a href="https://en.wikipedia.org/wiki/International_Components_for_Unicode">ICU</a> is
-available, then the system's <a href="https://unicode-org.github.io/icu/userguide/locale/#default-locales">default locale</a>
-will be used to break the search term into words. (See the
-<a href="setup/installation.html">installation instructions</a> for how to install ICU.)</li>
-<li>If unavailable, then runs of ASCII characters, numbers, underscores, and hyphens
-are considered words.</li>
-</ul>
+<p>The search term is then split into segments using the <a href="https://crates.io/crates/icu_segmenter"><code>icu_segmenter</code>
+Rust crate</a>. This crate ships with its
+own dictionary and Long Short Term-Memory (LSTM) machine learning models
+per-language to segment words. Read more <a href="https://docs.rs/icu/latest/icu/segmenter/struct.WordSegmenter.html#method.new_auto">in the crate's
+documentation</a>.</p>
 <p>The queries for PostgreSQL and SQLite are detailed below, but their overall goal
 is to find matching users, preferring users who are &quot;real&quot; (e.g. not bots,
 not deactivated). It is assumed that real users will have a display name and
