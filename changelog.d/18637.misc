@@ -1,0 +1,1 @@
+Use `markdown-it-py` instead of `commonmark` in the release script.
