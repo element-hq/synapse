@@ -26,7 +26,7 @@ from synapse.api.constants import EduTypes
 from synapse.api.errors import HttpResponseException
 from synapse.events import EventBase
 from synapse.federation.persistence import TransactionActions
-from synapse.federation.units import Edu, Transaction
+from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
 from synapse.logging.opentracing import (
     extract_text_map,
     set_tag,
@@ -118,7 +118,7 @@ class TransactionManager:
                 transaction_id=txn_id,
                 origin=self._server_name,
                 destination=destination,
-                pdus=[p.get_pdu_json() for p in pdus],
+                pdus=serialize_and_filter_pdus(pdus),
                 edus=[edu.get_dict() for edu in edus],
             )
 
