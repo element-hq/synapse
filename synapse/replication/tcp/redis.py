@@ -37,6 +37,7 @@ from twisted.internet.interfaces import IAddress, IConnector
 from twisted.python.failure import Failure
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
     run_as_background_process,
@@ -97,6 +98,9 @@ class RedisSubscriber(SubscriberProtocol):
     immediately after initialisation.
 
     Attributes:
+        server_name: The homeserver name of the Synapse instance that this connection
+            is associated with. This is used to label metrics and should be set to
+            `hs.hostname`.
         synapse_handler: The command handler to handle incoming commands.
         synapse_stream_prefix: The *redis* stream name to subscribe to and publish
             from (not anything to do with Synapse replication streams).
@@ -104,6 +108,7 @@ class RedisSubscriber(SubscriberProtocol):
             commands.
     """
 
+    server_name: str
     synapse_handler: "ReplicationCommandHandler"
     synapse_stream_prefix: str
     synapse_channel_names: List[str]
@@ -173,7 +178,11 @@ class RedisSubscriber(SubscriberProtocol):
 
         # We use "redis" as the name here as we don't have 1:1 connections to
         # remote instances.
-        tcp_inbound_commands_counter.labels(cmd.NAME, "redis").inc()
+        tcp_inbound_commands_counter.labels(
+            command=cmd.NAME,
+            name="redis",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         self.handle_command(cmd)
 
@@ -238,7 +247,11 @@ class RedisSubscriber(SubscriberProtocol):
 
         # We use "redis" as the name here as we don't have 1:1 connections to
         # remote instances.
-        tcp_outbound_commands_counter.labels(cmd.NAME, "redis").inc()
+        tcp_outbound_commands_counter.labels(
+            command=cmd.NAME,
+            name="redis",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         channel_name = cmd.redis_channel_name(self.synapse_stream_prefix)
 
@@ -356,6 +369,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
             password=hs.config.redis.redis_password,
         )
 
+        self.server_name = hs.hostname
         self.synapse_handler = hs.get_replication_command_handler()
         self.synapse_stream_prefix = hs.hostname
         self.synapse_channel_names = channel_names
@@ -370,6 +384,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         # as to do so would involve overriding `buildProtocol` entirely, however
         # the base method does some other things than just instantiating the
         # protocol.
+        p.server_name = self.server_name
         p.synapse_handler = self.synapse_handler
         p.synapse_outbound_redis_connection = self.synapse_outbound_redis_connection
         p.synapse_stream_prefix = self.synapse_stream_prefix
