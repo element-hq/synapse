@@ -1,3 +1,60 @@
+# Synapse 1.133.0 (2025-07-01)
+
+Pre-built wheels are now built using the [manylinux_2_28](https://github.com/pypa/manylinux#manylinux_2_28-almalinux-8-based) base, which is expected to be compatible with distros using glibc 2.28 or later, including:
+
+ - Debian 10+
+ - Ubuntu 18.10+
+ - Fedora 29+
+ - CentOS/RHEL 8+
+
+Previously, wheels were built using the [manylinux2014](https://github.com/pypa/manylinux#manylinux2014-centos-7-based-glibc-217) base, which was expected to be compatible with distros using glibc 2.17 or later.
+
+### Bugfixes
+
+- Bump `cibuildwheel` to 3.0.0 to fix the `manylinux` wheel builds. ([\#18615](https://github.com/element-hq/synapse/issues/18615))
+
+
+
+
+# Synapse 1.133.0rc1 (2025-06-24)
+
+### Features
+
+- Add support for the [MSC4260 user report API](https://github.com/matrix-org/matrix-spec-proposals/pull/4260). ([\#18120](https://github.com/element-hq/synapse/issues/18120))
+
+### Bugfixes
+
+- Fix an issue where, during state resolution for v11 rooms, Synapse would incorrectly calculate the power level of the creator when there was no power levels event in the room. ([\#18534](https://github.com/element-hq/synapse/issues/18534), [\#18547](https://github.com/element-hq/synapse/issues/18547))
+- Fix long-standing bug where sliding sync did not honour the `room_id_to_include` config option. ([\#18535](https://github.com/element-hq/synapse/issues/18535))
+- Fix an issue where "Lock timeout is getting excessive" warnings would be logged even when the lock timeout was <10 minutes. ([\#18543](https://github.com/element-hq/synapse/issues/18543))
+- Fix an issue where Synapse could calculate the wrong power level for the creator of the room if there was no power levels event. ([\#18545](https://github.com/element-hq/synapse/issues/18545))
+
+### Improved Documentation
+
+- Generate config documentation from JSON Schema file. ([\#18528](https://github.com/element-hq/synapse/issues/18528))
+- Fix typo in user type documentation. ([\#18568](https://github.com/element-hq/synapse/issues/18568))
+
+### Internal Changes
+
+- Increase performance of introspecting access tokens when using delegated auth. ([\#18357](https://github.com/element-hq/synapse/issues/18357), [\#18561](https://github.com/element-hq/synapse/issues/18561))
+- Log user deactivations. ([\#18541](https://github.com/element-hq/synapse/issues/18541))
+- Enable [`flake8-logging`](https://docs.astral.sh/ruff/rules/#flake8-logging-log) and [`flake8-logging-format`](https://docs.astral.sh/ruff/rules/#flake8-logging-format-g) rules in Ruff and fix related issues throughout the codebase. ([\#18542](https://github.com/element-hq/synapse/issues/18542))
+- Clean up old, unused rows from the `device_federation_inbox` table. ([\#18546](https://github.com/element-hq/synapse/issues/18546))
+- Run config schema CI on develop and release branches. ([\#18551](https://github.com/element-hq/synapse/issues/18551))
+- Add support for Twisted `25.5.0`+ releases. ([\#18577](https://github.com/element-hq/synapse/issues/18577))
+- Update PyO3 to version 0.25. ([\#18578](https://github.com/element-hq/synapse/issues/18578))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/setup-python from 5.5.0 to 5.6.0. ([\#18555](https://github.com/element-hq/synapse/issues/18555))
+* Bump base64 from 0.21.7 to 0.22.1. ([\#18559](https://github.com/element-hq/synapse/issues/18559))
+* Bump dawidd6/action-download-artifact from 9 to 11. ([\#18556](https://github.com/element-hq/synapse/issues/18556))
+* Bump headers from 0.4.0 to 0.4.1. ([\#18529](https://github.com/element-hq/synapse/issues/18529))
+* Bump requests from 2.32.2 to 2.32.4. ([\#18533](https://github.com/element-hq/synapse/issues/18533))
+* Bump types-requests from 2.32.0.20250328 to 2.32.4.20250611. ([\#18558](https://github.com/element-hq/synapse/issues/18558))
+
 # Synapse 1.132.0 (2025-06-17)
 
 ### Improved Documentation

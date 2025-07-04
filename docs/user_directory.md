@@ -77,14 +77,11 @@ The user provided search term is lowercased and normalized using [NFKC](https://
 this treats the string as case-insensitive, canonicalizes different forms of the
 same text, and maps some "roughly equivalent" characters together.
 
-The search term is then split into words:
-
-* If [ICU](https://en.wikipedia.org/wiki/International_Components_for_Unicode) is
-  available, then the system's [default locale](https://unicode-org.github.io/icu/userguide/locale/#default-locales)
-  will be used to break the search term into words. (See the
-  [installation instructions](setup/installation.md) for how to install ICU.)
-* If unavailable, then runs of ASCII characters, numbers, underscores, and hyphens
-  are considered words.
+The search term is then split into segments using the [`icu_segmenter`
+Rust crate](https://crates.io/crates/icu_segmenter). This crate ships with its
+own dictionary and Long Short Term-Memory (LSTM) machine learning models
+per-language to segment words. Read more [in the crate's
+documentation](https://docs.rs/icu/latest/icu/segmenter/struct.WordSegmenter.html#method.new_auto).
 
 The queries for PostgreSQL and SQLite are detailed below, but their overall goal
 is to find matching users, preferring users who are "real" (e.g. not bots,

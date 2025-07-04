@@ -1538,6 +1538,7 @@ class RoomHierarchyRestServlet(RestServlet):
         super().__init__()
         self._auth = hs.get_auth()
         self._room_summary_handler = hs.get_room_summary_handler()
+        self.msc4235_enabled = hs.config.experimental.msc4235_enabled
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
@@ -1547,6 +1548,15 @@ class RoomHierarchyRestServlet(RestServlet):
         max_depth = parse_integer(request, "max_depth")
         limit = parse_integer(request, "limit")
 
+        # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
+        remote_room_hosts = None
+        if self.msc4235_enabled:
+            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+            via_param = parse_strings_from_args(
+                args, "org.matrix.msc4235.via", required=False
+            )
+            remote_room_hosts = tuple(via_param or [])
+
         return 200, await self._room_summary_handler.get_room_hierarchy(
             requester,
             room_id,
@@ -1554,6 +1564,7 @@ class RoomHierarchyRestServlet(RestServlet):
             max_depth=max_depth,
             limit=limit,
             from_token=parse_string(request, "from"),
+            remote_room_hosts=remote_room_hosts,
         )
 
 
