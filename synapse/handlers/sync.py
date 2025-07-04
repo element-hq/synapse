@@ -2539,9 +2539,36 @@ class SyncHandler:
 
         assert since_token
 
-        mem_change_events_by_room_id: Dict[str, List[EventBase]] = {}
+        # Filter out older membership events for the same user in the same room, keeping only
+        # the most recent one based on stream_ordering.
+        #
+        # This prevents situations where a user leaves a room and is re-invited within
+        # the same incremental sync period, which would otherwise result in both the leave
+        # and invite appearing in the sync result and confusing clients about the user's
+        # actual state in the room.
+        most_recent_events_by_room_and_user: Dict[Tuple[str, str], EventBase] = {}
         for event in membership_change_events:
-            mem_change_events_by_room_id.setdefault(event.room_id, []).append(event)
+            room_and_user_key = (event.room_id, event.state_key)
+            if room_and_user_key in most_recent_events_by_room_and_user:
+                existing_event = most_recent_events_by_room_and_user[room_and_user_key]
+
+                assert event.internal_metadata.stream_ordering
+                assert existing_event.internal_metadata.stream_ordering
+
+                # Replace it if the new event has a higher stream ordering
+                if (
+                    event.internal_metadata.stream_ordering
+                    > existing_event.internal_metadata.stream_ordering
+                ):
+                    most_recent_events_by_room_and_user[room_and_user_key] = event
+            else:
+                most_recent_events_by_room_and_user[room_and_user_key] = event
+
+        # Now rebuild mem_change_events_by_room_id using only the most recent membership event
+        # for each user in each room, ensuring the sync result reflects the latest state
+        mem_change_events_by_room_id: Dict[str, List[EventBase]] = {}
+        for (room_id, _), event in most_recent_events_by_room_and_user.items():
+            mem_change_events_by_room_id.setdefault(room_id, []).append(event)
 
         newly_joined_rooms: List[str] = list(
             sync_result_builder.forced_newly_joined_room_ids
