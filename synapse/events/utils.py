@@ -561,6 +561,7 @@ class EventClientSerializer:
 
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
+        self._auth = hs.get_auth()
         self._add_extra_fields_to_unsigned_client_event_callbacks: List[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
@@ -593,8 +594,8 @@ class EventClientSerializer:
         # relevant metadata will be when the admin requested it via their admin
         # client config account data. Also, it's "just" some `unsigned` fields, so
         # shouldn't cause much in terms of problems to downstream consumers.
-        if config.requester is not None and await self._store.is_server_admin(
-            config.requester.user
+        if config.requester is not None and await self._auth.is_server_admin(
+            config.requester
         ):
             config = make_config_for_admin(config)
 
