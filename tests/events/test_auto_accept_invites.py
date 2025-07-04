@@ -35,7 +35,7 @@ from synapse.config._base import RootConfig
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.federation.federation_base import event_from_pdu_json
-from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey, SyncVersion
+from synapse.handlers.sync import JoinedSyncResult, SyncRequestKey
 from synapse.module_api import ModuleApi
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -548,7 +548,6 @@ def sync_join(
         testcase.hs.get_sync_handler().wait_for_sync_for_user(
             requester,
             sync_config,
-            SyncVersion.SYNC_V2,
             generate_request_key(),
             since_token,
         )

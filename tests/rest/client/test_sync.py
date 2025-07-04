@@ -706,11 +706,6 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
     ("sync_endpoint", "experimental_features"),
     [
         ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
     ],
 )
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
@@ -917,11 +912,6 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     ("sync_endpoint", "experimental_features"),
     [
         ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
     ],
 )
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
@@ -1028,11 +1018,6 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
     ("sync_endpoint", "experimental_features"),
     [
         ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
     ],
 )
 class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
