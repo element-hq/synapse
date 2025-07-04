@@ -84,14 +84,14 @@ class SynapseRequest(Request):
         self,
         channel: HTTPChannel,
         site: "SynapseSite",
-        hs: "HomeServer",
+        our_server_name: str,
         *args: Any,
         max_request_body_size: int = 1024,
         request_id_header: Optional[str] = None,
         **kw: Any,
     ):
         super().__init__(channel, *args, **kw)
-        self.our_server_name = hs.hostname
+        self.our_server_name = our_server_name
         self._max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.synapse_site = site
@@ -701,6 +701,7 @@ class SynapseSite(ProxySite):
 
         self.site_tag = site_tag
         self.reactor: ISynapseReactor = reactor
+        self.server_name = hs.hostname
 
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded
@@ -712,7 +713,7 @@ class SynapseSite(ProxySite):
             return request_class(
                 channel,
                 self,
-                hs,
+                our_server_name=self.server_name,
                 max_request_body_size=max_request_body_size,
                 queued=queued,
                 request_id_header=request_id_header,
