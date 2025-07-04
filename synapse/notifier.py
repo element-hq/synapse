@@ -50,7 +50,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -74,10 +74,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-notified_events_counter = Counter("synapse_notifier_notified_events", "")
-
 users_woken_by_stream_counter = Counter(
-    "synapse_notifier_users_woken_by_stream", "", ["stream"]
+    "synapse_notifier_users_woken_by_stream",
+    "",
+    labelnames=["stream", SERVER_NAME_LABEL],
 )
 
 T = TypeVar("T")
@@ -224,6 +224,7 @@ class Notifier:
         self.room_to_user_streams: Dict[str, Set[_NotifierUserStream]] = {}
 
         self.hs = hs
+        self.server_name = hs.hostname
         self._storage_controllers = hs.get_storage_controllers()
         self.event_sources = hs.get_event_sources()
         self.store = hs.get_datastores().main
@@ -350,9 +351,10 @@ class Notifier:
             for listener in listeners:
                 listener.callback(current_token)
 
-        users_woken_by_stream_counter.labels(StreamKeyType.UN_PARTIAL_STATED_ROOMS).inc(
-            len(user_streams)
-        )
+        users_woken_by_stream_counter.labels(
+            stream=StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc(len(user_streams))
 
         # Poke the replication so that other workers also see the write to
         # the un-partial-stated rooms stream.
@@ -575,7 +577,10 @@ class Notifier:
                         listener.callback(current_token)
 
             if user_streams:
-                users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
+                users_woken_by_stream_counter.labels(
+                    stream=stream_key,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc(len(user_streams))
 
         self.notify_replication()
 
