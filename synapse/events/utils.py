@@ -426,24 +426,14 @@ class SerializeEventConfig:
     # whether an event was soft failed by the server.
     include_admin_metadata: bool = False
 
-    # Developer note: when adding properties, update make_config_for_admin() below.
-
 
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
 
 
 def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfig:
-    # Developer note: when adding properties, update test_make_serialize_config_for_admin_retains_other_fields
-    return SerializeEventConfig(
-        # Set the options which are only available to server admins
-        include_admin_metadata=True,
-        # And copy the rest
-        as_client_event=existing.as_client_event,
-        event_format=existing.event_format,
-        requester=existing.requester,
-        only_event_fields=existing.only_event_fields,
-        include_stripped_room_state=existing.include_stripped_room_state,
-    )
+    # Set the options which are only available to server admins,
+    # and copy the rest.
+    return attr.evolve(existing, include_admin_metadata=True)
 
 
 def serialize_event(
