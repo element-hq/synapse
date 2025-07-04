@@ -113,15 +113,16 @@ async def filter_events_for_client(
     """
     # Filter out events that have been soft failed so that we don't relay them
     # to clients, unless they're a server admin and want that to happen.
-    events_before_filtering = events
+    #
+    # We copy the events list to guarantee any modifications we make will only
+    # happen within the function.
+    events_before_filtering = events.copy()
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
-    if (
+    if not (
         filter_send_to_client
         and client_config.return_soft_failed_events
         and await storage.main.is_server_admin(UserID.from_string(user_id))
     ):
-        events = events_before_filtering
-    else:
         events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     if len(events_before_filtering) != len(events):
         if filtered_event_logger.isEnabledFor(logging.DEBUG):
