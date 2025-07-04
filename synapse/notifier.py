@@ -74,6 +74,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# FIXME: Unused metric, remove if not needed.
+notified_events_counter = Counter(
+    "synapse_notifier_notified_events", "", labelnames=[SERVER_NAME_LABEL]
+)
+
 users_woken_by_stream_counter = Counter(
     "synapse_notifier_users_woken_by_stream",
     "",

@@ -69,12 +69,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# FIXME: These are unused
+# FIXME: Unused metric, remove if not needed.
 push_rules_invalidation_counter = Counter(
     "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter",
     "",
     labelnames=[SERVER_NAME_LABEL],
 )
+# FIXME: Unused metric, remove if not needed.
 push_rules_state_size_counter = Counter(
     "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter",
     "",
