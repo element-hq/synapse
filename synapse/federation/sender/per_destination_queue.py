@@ -93,7 +93,7 @@ class PerDestinationQueue:
         transaction_manager: "synapse.federation.sender.TransactionManager",
         destination: str,
     ):
-        self._server_name = hs.hostname
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
         self._store = hs.get_datastores().main
@@ -561,7 +561,7 @@ class PerDestinationQueue:
                     new_pdus = await filter_events_for_server(
                         self._storage_controllers,
                         self._destination,
-                        self._server_name,
+                        self.server_name,
                         new_pdus,
                         redact=False,
                         filter_out_erased_senders=True,
@@ -608,7 +608,7 @@ class PerDestinationQueue:
         # Send at most limit EDUs for receipts.
         for content in self._pending_receipt_edus[:limit]:
             yield Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=EduTypes.RECEIPT,
                 content=content,
@@ -634,7 +634,7 @@ class PerDestinationQueue:
         )
         edus = [
             Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=edu_type,
                 content=content,
@@ -661,7 +661,7 @@ class PerDestinationQueue:
 
         edus = [
             Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=EduTypes.DIRECT_TO_DEVICE,
                 content=content,
@@ -734,7 +734,7 @@ class _TransactionQueueManager:
 
             pending_edus.append(
                 Edu(
-                    origin=self.queue._server_name,
+                    origin=self.queue.server_name,
                     destination=self.queue._destination,
                     edu_type=EduTypes.PRESENCE,
                     content={"push": presence_to_add},
