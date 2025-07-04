@@ -99,7 +99,7 @@ class RemoteKeyResourceTestCase(BaseRemoteKeyResourceTestCase):
         """
         channel = FakeChannel(self.site, self.reactor)
         # channel is a `FakeChannel` but `HTTPChannel` is expected
-        req = SynapseRequest(channel, self.site)  # type: ignore[arg-type]
+        req = SynapseRequest(channel, self.site, self.hs)  # type: ignore[arg-type]
         req.content = BytesIO(b"")
         req.requestReceived(
             b"GET",
@@ -201,7 +201,7 @@ class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
 
             channel = FakeChannel(self.site, self.reactor)
             # channel is a `FakeChannel` but `HTTPChannel` is expected
-            req = SynapseRequest(channel, self.site)  # type: ignore[arg-type]
+            req = SynapseRequest(channel, self.site, self.hs)  # type: ignore[arg-type]
             req.content = BytesIO(encode_canonical_json(data))
 
             req.requestReceived(
