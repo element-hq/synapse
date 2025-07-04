@@ -85,7 +85,6 @@ from synapse.logging.opentracing import (
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
-    ReplicationGetQueryRestServlet,
 )
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
@@ -1380,7 +1379,6 @@ class FederationHandlerRegistry:
         # and use them. However we have guards before we use them to ensure that
         # we don't route to ourselves, and in monolith mode that will always be
         # the case.
-        self._get_query_client = ReplicationGetQueryRestServlet.make_client(hs)
         self._send_edu = ReplicationFederationSendEduRestServlet.make_client(hs)
 
         self.edu_handlers: Dict[str, Callable[[str, dict], Awaitable[None]]] = {}
@@ -1450,11 +1448,8 @@ class FederationHandlerRegistry:
         # Check if we can route it somewhere else that isn't us
         instances = self._edu_type_to_instance.get(edu_type, ["master"])
         if self._instance_name not in instances:
-            # Pick an instance randomly so that we don't overload one.
-            route_to = random.choice(instances)
-
             await self._send_edu(
-                instance_name=route_to,
+                instances=instances,
                 edu_type=edu_type,
                 origin=origin,
                 content=content,
@@ -1468,10 +1463,6 @@ class FederationHandlerRegistry:
         handler = self.query_handlers.get(query_type)
         if handler:
             return await handler(args)
-
-        # Check if we can route it somewhere else that isn't us
-        if self._instance_name == "master":
-            return await self._get_query_client(query_type=query_type, args=args)
 
         # Uh oh, no handler! Let's raise an exception so the request returns an
         # error.

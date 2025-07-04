@@ -73,10 +73,6 @@ from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.module_api import NOT_SPAM
-from synapse.replication.http.federation import (
-    ReplicationCleanRoomRestServlet,
-    ReplicationStoreRoomOnOutlierMembershipRestServlet,
-)
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
@@ -162,19 +158,6 @@ class FederationHandler:
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
         self._notifier = hs.get_notifier()
         self._worker_locks = hs.get_worker_locks_handler()
-
-        self._clean_room_for_join_client = ReplicationCleanRoomRestServlet.make_client(
-            hs
-        )
-
-        if hs.config.worker.worker_app:
-            self._maybe_store_room_on_outlier_membership = (
-                ReplicationStoreRoomOnOutlierMembershipRestServlet.make_client(hs)
-            )
-        else:
-            self._maybe_store_room_on_outlier_membership = (
-                self.store.maybe_store_room_on_outlier_membership
-            )
 
         self._room_backfill = Linearizer("room_backfill")
 
@@ -857,7 +840,7 @@ class FederationHandler:
         event.internal_metadata.out_of_band_membership = True
 
         # Record the room ID and its version so that we have a record of the room
-        await self._maybe_store_room_on_outlier_membership(
+        await self.store.maybe_store_room_on_outlier_membership(
             room_id=event.room_id, room_version=event_format_version
         )
 
@@ -1115,7 +1098,7 @@ class FederationHandler:
         # keep a record of the room version, if we don't yet know it.
         # (this may get overwritten if we later get a different room version in a
         # join dance).
-        await self._maybe_store_room_on_outlier_membership(
+        await self.store.maybe_store_room_on_outlier_membership(
             room_id=event.room_id, room_version=room_version
         )
 
@@ -1768,10 +1751,7 @@ class FederationHandler:
         Args:
             room_id
         """
-        if self.config.worker.worker_app:
-            await self._clean_room_for_join_client(room_id)
-        else:
-            await self.store.clean_room_for_join(room_id)
+        await self.store.clean_room_for_join(room_id)
 
     async def get_room_complexity(
         self, remote_room_hosts: List[str], room_id: str

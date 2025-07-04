@@ -1578,7 +1578,7 @@ class EventCreationHandler:
 
                 try:
                     result = await self.send_events(
-                        instance_name=writer_instance,
+                        instances=[writer_instance],
                         events_and_context=events_and_context,
                         store=self.store,
                         requester=requester,
