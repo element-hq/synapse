@@ -15,6 +15,7 @@
 """Tests REST events for /tags paths."""
 
 from http import HTTPStatus
+from urllib import parse as urlparse
 
 import synapse.rest.admin
 from synapse.rest.client import login, room, tags
@@ -93,3 +94,68 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
         )
         # Check that the request failed with the correct error
         self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.result)
+
+    def test_put_tag_fails_if_tag_is_too_long(self) -> None:
+        """
+        Test that a user cannot add a tag to a room that is longer than the 255 bytes
+        allowed by the matrix specification.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # create a string which is larger than 255 bytes
+        tag = "X" * 300
+
+        # Make the request
+        channel = self.make_request(
+            "PUT",
+            f"/user/{user1_id}/rooms/{room_id}/tags/{tag}",
+            content={"order": 0.5},
+            access_token=user1_tok,
+        )
+        # Check that the request failed
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+
+    def test_put_tag_fails_if_tag_is_too_long_with_graphemes(self) -> None:
+        """
+        Test that a user cannot add a tag to a room that contains graphemes which are in total
+        longer than the 255 bytes allowed by the matrix specification.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # create a string which is larger than 255 bytes
+        tag = "👩‍🚒" * 25
+
+        # Make the request
+        channel = self.make_request(
+            "PUT",
+            f"/user/{user1_id}/rooms/{room_id}/tags/"
+            + urlparse.quote(tag.encode("utf-8")),
+            content={"order": 0.5},
+            access_token=user1_tok,
+        )
+        # Check that the request failed
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+
+    def test_put_tag_succeeds_with_graphemes(self) -> None:
+        """
+        Test that a user can add a tag to a room that contains graphemes which are in total
+        less than the 255 bytes allowed by the matrix specification.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # create a string of acceptable length
+        tag = "👩‍🚒" * 20
+
+        # Make the request
+        channel = self.make_request(
+            "PUT",
+            f"/user/{user1_id}/rooms/{room_id}/tags/"
+            + urlparse.quote(tag.encode("utf-8")),
+            content={"order": 0.5},
+            access_token=user1_tok,
+        )
+        # Check that the request succeeded
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
