@@ -1,0 +1,1 @@
+Fix CPU and database spinning when retrying sending events to servers whilst at the same time purging those events.
