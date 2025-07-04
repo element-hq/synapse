@@ -375,13 +375,10 @@ build-backend = "poetry.core.masonry.api"
 # Skip unsupported platforms (by us or by Rust).
 # See https://cibuildwheel.readthedocs.io/en/stable/options/#build-skip for the list of build targets.
 # We skip:
-#  - CPython 3.6, 3.7 and 3.8: EOLed
-#  - PyPy 3.7 and 3.8: we only support Python 3.9+
+#  - CPython and PyPy 3.8: EOLed
 #  - musllinux i686: excluded to reduce number of wheels we build.
 #    c.f. https://github.com/matrix-org/synapse/pull/12595#discussion_r963107677
-#  - PyPy on Aarch64 and musllinux on aarch64: too slow to build.
-#    c.f. https://github.com/matrix-org/synapse/pull/14259
-skip = "cp36* cp37* cp38* pp37* pp38* *-musllinux_i686 pp*aarch64 *-musllinux_aarch64"
+skip = "cp38* pp38* *-musllinux_i686"
 # Enable non-default builds.
 # "pypy" used to be included by default up until cibuildwheel 3.
 enable = "pypy"
