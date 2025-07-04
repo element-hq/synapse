@@ -28,14 +28,12 @@ from typing import Callable, Optional, Tuple, Type, Union
 import mypy.types
 from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
-from mypy.nodes import ARG_NAMED_OPT, TempNode, Var
+from mypy.nodes import ARG_NAMED_OPT, ListExpr, StrExpr, TempNode, Var
 from mypy.plugin import (
+    FunctionLike,
     FunctionSigContext,
     MethodSigContext,
     Plugin,
-    FunctionContext,
-    ClassDefContext,
-    FunctionLike,
 )
 from mypy.typeops import bind_self
 from mypy.types import (
@@ -49,7 +47,6 @@ from mypy.types import (
     UninhabitedType,
     UnionType,
 )
-from mypy.nodes import StrExpr, TupleExpr, ListExpr
 
 PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
     "missing-server-name-label",
@@ -170,10 +167,10 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
             )
     else:
         ctx.api.fail(
-            f"Expected the `labelnames` argument of {signature.name} to be a list of label names, but got "
-            f"{labelnames_arg_expression}",
+            f"Expected the `labelnames` argument of {signature.name} to be a list of label names "
+            f"(including 'server_name'), but got {labelnames_arg_expression}",
             ctx.context,
-            code=PROMETHEUS_METRIC_MANGLED_LABELS,
+            code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
         )
         return signature
 
