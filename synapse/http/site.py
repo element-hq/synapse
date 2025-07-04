@@ -44,6 +44,7 @@ from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, Requester
 
 if TYPE_CHECKING:
@@ -83,12 +84,14 @@ class SynapseRequest(Request):
         self,
         channel: HTTPChannel,
         site: "SynapseSite",
+        our_server_name: str,
         *args: Any,
         max_request_body_size: int = 1024,
         request_id_header: Optional[str] = None,
         **kw: Any,
     ):
         super().__init__(channel, *args, **kw)
+        self.our_server_name = our_server_name
         self._max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.synapse_site = site
@@ -334,7 +337,11 @@ class SynapseRequest(Request):
             # dispatching to the handler, so that the handler
             # can update the servlet name in the request
             # metrics
-            requests_counter.labels(self.get_method(), self.request_metrics.name).inc()
+            requests_counter.labels(
+                method=self.get_method(),
+                servlet=self.request_metrics.name,
+                **{SERVER_NAME_LABEL: self.our_server_name},
+            ).inc()
 
     @contextlib.contextmanager
     def processing(self) -> Generator[None, None, None]:
@@ -455,7 +462,7 @@ class SynapseRequest(Request):
                 self.request_metrics.name.
         """
         self.start_time = time.time()
-        self.request_metrics = RequestMetrics()
+        self.request_metrics = RequestMetrics(our_server_name=self.our_server_name)
         self.request_metrics.start(
             self.start_time, name=servlet_name, method=self.get_method()
         )
@@ -694,6 +701,7 @@ class SynapseSite(ProxySite):
 
         self.site_tag = site_tag
         self.reactor: ISynapseReactor = reactor
+        self.server_name = hs.hostname
 
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded
@@ -705,6 +713,7 @@ class SynapseSite(ProxySite):
             return request_class(
                 channel,
                 self,
+                our_server_name=self.server_name,
                 max_request_body_size=max_request_body_size,
                 queued=queued,
                 request_id_header=request_id_header,

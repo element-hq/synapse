@@ -66,6 +66,21 @@ all_gauges: Dict[str, Collector] = {}
 
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
+SERVER_NAME_LABEL = "server_name"
+"""
+The `server_name` label is used to identify the homeserver that the metrics correspond
+to. Because we support multiple instances of Synapse running in the same process and all
+metrics are in a single global `REGISTRY`, we need to manually label any metrics.
+
+In the case of a Synapse homeserver, this should be set to the homeserver name
+(`hs.hostname`).
+
+We're purposely not using the `instance` label for this purpose as that should be "The
+<host>:<port> part of the target's URL that was scraped.". Also: "In Prometheus
+terms, an endpoint you can scrape is called an *instance*, usually corresponding to a
+single process." (source: https://prometheus.io/docs/concepts/jobs_instances/)
+"""
+
 
 class _RegistryProxy:
     @staticmethod
@@ -380,18 +395,24 @@ REGISTRY.register(CPUMetrics())
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter("synapse_federation_client_sent_transactions", "")
+sent_transactions_counter = Counter(
+    "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-events_processed_counter = Counter("synapse_federation_client_events_processed", "")
+events_processed_counter = Counter(
+    "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 event_processing_loop_counter = Counter(
-    "synapse_event_processing_loop_count", "Event processing loop iterations", ["name"]
+    "synapse_event_processing_loop_count",
+    "Event processing loop iterations",
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 event_processing_loop_room_count = Counter(
     "synapse_event_processing_loop_room_count",
     "Rooms seen per event processing loop iteration",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 

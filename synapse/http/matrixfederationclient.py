@@ -87,6 +87,7 @@ from synapse.http.types import QueryParams
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util import json_decoder
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
@@ -99,10 +100,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 outgoing_requests_counter = Counter(
-    "synapse_http_matrixfederationclient_requests", "", ["method"]
+    "synapse_http_matrixfederationclient_requests",
+    "",
+    labelnames=["method", SERVER_NAME_LABEL],
 )
 incoming_responses_counter = Counter(
-    "synapse_http_matrixfederationclient_responses", "", ["method", "code"]
+    "synapse_http_matrixfederationclient_responses",
+    "",
+    labelnames=["method", "code", SERVER_NAME_LABEL],
 )
 
 
@@ -694,7 +699,9 @@ class MatrixFederationHttpClient:
                         _sec_timeout,
                     )
 
-                    outgoing_requests_counter.labels(request.method).inc()
+                    outgoing_requests_counter.labels(
+                        method=request.method, **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc()
 
                     try:
                         with Measure(self.clock, "outbound_request"):
@@ -729,7 +736,9 @@ class MatrixFederationHttpClient:
                         raise RequestSendFailed(e, can_retry=True) from e
 
                     incoming_responses_counter.labels(
-                        request.method, response.code
+                        method=request.method,
+                        code=response.code,
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
 
                     set_tag(tags.HTTP_STATUS_CODE, response.code)

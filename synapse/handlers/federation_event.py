@@ -76,6 +76,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.devices import (
     ReplicationMultiUserDevicesResyncRestServlet,
@@ -108,6 +109,7 @@ logger = logging.getLogger(__name__)
 soft_failed_event_counter = Counter(
     "synapse_federation_soft_failed_events_total",
     "Events received over federation that we marked as soft_failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # Added to debug performance and track progress on optimizations
@@ -149,6 +151,7 @@ class FederationEventHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
@@ -173,7 +176,6 @@ class FederationEventHandler:
 
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
-        self._server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         self._config = hs.config
@@ -257,7 +259,7 @@ class FederationEventHandler:
         # Note that if we were never in the room then we would have already
         # dropped the event, since we wouldn't know the room version.
         is_in_room = await self._event_auth_handler.is_host_in_room(
-            room_id, self._server_name
+            room_id, self.server_name
         )
         if not is_in_room:
             logger.info(
@@ -2062,7 +2064,9 @@ class FederationEventHandler:
                     "hs": origin,
                 },
             )
-            soft_failed_event_counter.inc()
+            soft_failed_event_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
