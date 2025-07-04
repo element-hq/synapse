@@ -208,11 +208,15 @@ class ApplicationServicesHandler:
                         **{SERVER_NAME_LABEL: self.server_name}
                     ).inc(len(events))
 
-                    event_processing_loop_room_count.labels("appservice_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                    event_processing_loop_counter.labels("appservice_sender").inc()
+                    event_processing_loop_counter.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     if events:
                         now = self.clock.time_msec()

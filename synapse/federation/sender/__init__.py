@@ -699,13 +699,19 @@ class FederationSender(AbstractFederationSender):
                         "federation_sender"
                     ).set(ts)
 
-                    events_processed_counter.inc(len(event_entries))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(event_entries))
 
-                    event_processing_loop_room_count.labels("federation_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                event_processing_loop_counter.labels("federation_sender").inc()
+                event_processing_loop_counter.labels(
+                    name="federation_sender",
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
 
                 synapse.metrics.event_processing_positions.labels(
                     "federation_sender"

@@ -362,7 +362,9 @@ class PerDestinationQueue:
                         self._destination, pending_pdus, pending_edus
                     )
 
-                    sent_transactions_counter.inc()
+                    sent_transactions_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc()
                     sent_edus_counter.labels(
                         **{SERVER_NAME_LABEL: self.server_name}
                     ).inc(len(pending_edus))
@@ -585,7 +587,9 @@ class PerDestinationQueue:
                     self._destination, room_catchup_pdus, []
                 )
 
-                sent_transactions_counter.inc()
+                sent_transactions_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
 
                 # We pulled this from the DB, so it'll be non-null
                 assert pdu.internal_metadata.stream_ordering
