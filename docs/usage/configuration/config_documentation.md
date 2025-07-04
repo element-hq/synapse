@@ -2340,6 +2340,22 @@ Example configuration:
 recaptcha_public_key: YOUR_PUBLIC_KEY
 ```
 ---
+### `recaptcha_public_key_path`
+
+An alternative to [`recaptcha_public_key`](#recaptcha_public_key):
+allows the public key to be specified in an external file.
+
+The file should be a plain text file, containing only the public key.
+Synapse reads the public key from the given file once at startup.
+
+Example configuration:
+```yaml
+recaptcha_public_key_path: /path/to/key/file
+```
+
+_Added in Synapse 1.130.0._
+
+---
 ### `recaptcha_private_key`
 
 *(string|null)* This homeserver's ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
@@ -2348,6 +2364,22 @@ Example configuration:
 ```yaml
 recaptcha_private_key: YOUR_PRIVATE_KEY
 ```
+---
+### `recaptcha_private_key_path`
+
+An alternative to [`recaptcha_private_key`](#recaptcha_private_key):
+allows the private key to be specified in an external file.
+
+The file should be a plain text file, containing only the private key.
+Synapse reads the private key from the given file once at startup.
+
+Example configuration:
+```yaml
+recaptcha_private_key_path: /path/to/key/file
+```
+
+_Added in Synapse 1.130.0._
+
 ---
 ### `enable_registration_captcha`
 
