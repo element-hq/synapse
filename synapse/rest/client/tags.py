@@ -20,9 +20,10 @@
 #
 
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
-from synapse.api.errors import AuthError
+from synapse.api.errors import AuthError, Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
 from synapse.http.site import SynapseRequest
@@ -86,6 +87,16 @@ class TagServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add tags for other users.")
+
+        # check if the tag exceeds the length allowed by the matrix-specification
+        # as defined in: https://spec.matrix.org/v1.15/client-server-api/#events-14
+        if len(tag) > 255:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "tag parameter's length is over 255 bytes",
+                errcode=Codes.INVALID_PARAM,
+            )
+
         # Check if the user has any membership in the room and raise error if not.
         # Although it's not harmful for users to tag random rooms, it's just superfluous
         # data we don't need to track or allow.

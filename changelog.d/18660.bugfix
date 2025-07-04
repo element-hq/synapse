@@ -1,0 +1,1 @@
+Don't allow creation of tags with names longer than 255 bytes, as per the spec.
