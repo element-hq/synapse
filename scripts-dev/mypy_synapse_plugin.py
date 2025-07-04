@@ -161,14 +161,18 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
         # TODO: Use `SERVER_NAME_LABEL` here
         if "server_name" not in labels:
             ctx.api.fail(
-                f"Expected {signature.name} to include 'server_name' in the list of labels",
+                f"Expected {signature.name} to include 'server_name' in the list of labels."
+                " If this is a process-level metric (vs homeserver-level), use a type ignore "
+                "comment to disable this check.",
                 ctx.context,
                 code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
             )
     else:
         ctx.api.fail(
             f"Expected the `labelnames` argument of {signature.name} to be a list of label names "
-            f"(including 'server_name'), but got {labelnames_arg_expression}",
+            f"(including 'server_name'), but got {labelnames_arg_expression}.",
+            " If this is a process-level metric (vs homeserver-level), use a type ignore "
+            "comment to disable this check.",
             ctx.context,
             code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
         )
