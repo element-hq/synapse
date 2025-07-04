@@ -58,7 +58,7 @@ class TransactionManager:
     """
 
     def __init__(self, hs: "synapse.server.HomeServer"):
-        self._server_name = hs.hostname
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self._store = hs.get_datastores().main
         self._transaction_actions = TransactionActions(self._store)
@@ -116,7 +116,7 @@ class TransactionManager:
             transaction = Transaction(
                 origin_server_ts=int(self.clock.time_msec()),
                 transaction_id=txn_id,
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=destination,
                 pdus=[p.get_pdu_json() for p in pdus],
                 edus=[edu.get_dict() for edu in edus],

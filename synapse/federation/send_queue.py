@@ -156,7 +156,9 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     def _clear_queue_before_pos(self, position_to_delete: int) -> None:
         """Clear all the queues from before a given position"""
-        with Measure(self.clock, "send_queue._clear"):
+        with Measure(
+            self.clock, name="send_queue._clear", server_name=self.server_name
+        ):
             # Delete things out of presence maps
             keys = self.presence_destinations.keys()
             i = self.presence_destinations.bisect_left(position_to_delete)
