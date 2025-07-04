@@ -51,6 +51,17 @@ from mypy.types import (
 )
 from mypy.nodes import StrExpr, TupleExpr, ListExpr
 
+PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
+    "missing-server-name-label",
+    "'server_name' label required in metric",
+    category="per-homeserver-tenant-metrics",
+)
+PROMETHEUS_METRIC_MANGLED_LABELS = ErrorCode(
+    "mangled-labels",
+    "`labelnames` argument should be a list of strings",
+    category="per-homeserver-tenant-metrics",
+)
+
 
 class SynapsePlugin(Plugin):
     def get_function_signature_hook(
@@ -94,7 +105,7 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     There are also some metrics that apply at the process level, such as
     CPU usage, Python garbage collection, Twisted reactor tick time which shouldn't
     have a `server_name` label. In those cases, use use a type ignore comment to
-    disable the check, e.g. `# type: ignore[misc]`.
+    disable the check, e.g. `# type: ignore[missing-server-name-label]`.
     """
     # The true signature, this isn't being modified so this is what will be returned.
     signature: CallableType = ctx.default_signature
@@ -141,7 +152,7 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
                     f"Expected all items in the `labelnames` argument of {signature.name} to be strings, but got "
                     f"{labelname_expression.__class__.__name__}",
                     ctx.context,
-                    code=CUSTOM_ERROR,
+                    code=PROMETHEUS_METRIC_MANGLED_LABELS,
                 )
 
         # Check if the `labelnames` argument includes the `server_name` label.
@@ -151,12 +162,14 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
             ctx.api.fail(
                 f"Expected {signature.name} to include 'server_name' in the list of labels",
                 ctx.context,
+                code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
             )
     else:
         ctx.api.fail(
             f"Expected the `labelnames` argument of {signature.name} to be a list of label names, but got "
             f"{labelnames_arg_expression}",
             ctx.context,
+            code=PROMETHEUS_METRIC_MANGLED_LABELS,
         )
         return signature
 
