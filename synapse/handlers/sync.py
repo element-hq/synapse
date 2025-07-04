@@ -63,6 +63,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -104,7 +105,7 @@ non_empty_sync_counter = Counter(
     "Count of non empty sync responses. type is initial_sync/full_state_sync"
     "/incremental_sync. lazy_loaded indicates if lazy loaded members were "
     "enabled for that request.",
-    ["type", "lazy_loaded"],
+    labelnames=["type", "lazy_loaded", SERVER_NAME_LABEL],
 )
 
 # Store the cache that tracks which lazy-loaded members have been sent to a given
@@ -329,6 +330,7 @@ class E2eeSyncResult:
 
 class SyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.hs_config = hs.config
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
@@ -611,7 +613,11 @@ class SyncHandler:
                 lazy_loaded = "true"
             else:
                 lazy_loaded = "false"
-            non_empty_sync_counter.labels(sync_label, lazy_loaded).inc()
+            non_empty_sync_counter.labels(
+                type=sync_label,
+                lazy_loaded=lazy_loaded,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
 
         return result
 
