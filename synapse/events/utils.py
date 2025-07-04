@@ -421,7 +421,7 @@ class SerializeEventConfig:
     # False, that state will be removed from the event before it is returned.
     # Otherwise, it will be kept.
     include_stripped_room_state: bool = False
-    # When True, sets unsigned flags to help clients identify events which
+    # When True, sets unsigned fields to help clients identify events which
     # only server admins can see through other configuration. For example,
     # whether an event was soft failed by the server.
     include_admin_metadata: bool = False
@@ -591,7 +591,7 @@ class EventClientSerializer:
 
         # Force-enable server admin metadata because the only time an event with
         # relevant metadata will be when the admin requested it via their admin
-        # client config account data. Also, it's "just" some `unsigned` flags, so
+        # client config account data. Also, it's "just" some `unsigned` fields, so
         # shouldn't cause much in terms of problems to downstream consumers.
         if config.requester is not None and await self._store.is_server_admin(
             config.requester.user
