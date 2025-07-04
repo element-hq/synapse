@@ -575,3 +575,6 @@ class ExperimentalConfig(Config):
 
         # MSC4155: Invite filtering
         self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)
+
+        # MSC4293: Redact on Kick/Ban
+        self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)
