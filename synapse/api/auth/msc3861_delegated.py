@@ -176,6 +176,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         assert self._config.client_id, "No client_id provided"
         assert auth_method is not None, "Invalid client_auth_method provided"
 
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
@@ -206,8 +207,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         #   In this case, the device still exists and it's not the end of the world for
         #   the old access token to continue working for a short time.
         self._introspection_cache: ResponseCache[str] = ResponseCache(
-            self._clock,
-            "token_introspection",
+            clock=self._clock,
+            name="token_introspection",
+            server_name=self.server_name,
             timeout_ms=120_000,
             # don't log because the keys are access tokens
             enable_logging=False,

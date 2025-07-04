@@ -406,7 +406,7 @@ class DirectoryHandler:
         ]
 
         for service in interested_services:
-            if user_id == service.sender:
+            if user_id == service.sender.to_string():
                 # this user IS the app service so they can do whatever they like
                 return True
             elif service.is_exclusive_alias(alias.to_string()):

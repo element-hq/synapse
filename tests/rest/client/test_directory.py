@@ -25,7 +25,7 @@ from synapse.appservice import ApplicationService
 from synapse.rest import admin
 from synapse.rest.client import directory, login, room
 from synapse.server import HomeServer
-from synapse.types import RoomAlias
+from synapse.types import RoomAlias, UserID
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
 
@@ -140,7 +140,7 @@ class DirectoryTestCase(unittest.HomeserverTestCase):
             as_token,
             id="1234",
             namespaces={"aliases": [{"regex": "#asns-*", "exclusive": True}]},
-            sender=user_id,
+            sender=UserID.from_string(user_id),
         )
         self.hs.get_datastores().main.services_cache.append(appservice)
 

@@ -137,13 +137,14 @@ class FederationClient(FederationBase):
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
 
-        self.hostname = hs.hostname
+        self.server_name = hs.hostname
         self.signing_key = hs.signing_key
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=1000,
             expiry_ms=120 * 1000,
@@ -162,6 +163,7 @@ class FederationClient(FederationBase):
             Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=1000,
             expiry_ms=5 * 60 * 1000,
@@ -1068,7 +1070,7 @@ class FederationClient(FederationBase):
             # there's some we never care about
             ev = builder.create_local_event_from_event_dict(
                 self._clock,
-                self.hostname,
+                self.server_name,
                 self.signing_key,
                 room_version=room_version,
                 event_dict=pdu_dict,

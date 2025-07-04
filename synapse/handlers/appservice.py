@@ -839,7 +839,7 @@ class ApplicationServicesHandler:
 
         # user not found; could be the AS though, so check.
         services = self.store.get_app_services()
-        service_list = [s for s in services if s.sender == user_id]
+        service_list = [s for s in services if s.sender.to_string() == user_id]
         return len(service_list) == 0
 
     async def _check_user_exists(self, user_id: str) -> bool:

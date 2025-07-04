@@ -121,9 +121,14 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
     WAIT_FOR_STREAMS: ClassVar[bool] = True
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
+
         if self.CACHE:
             self.response_cache: ResponseCache[str] = ResponseCache(
-                hs.get_clock(), "repl." + self.NAME, timeout_ms=30 * 60 * 1000
+                clock=hs.get_clock(),
+                name="repl." + self.NAME,
+                server_name=self.server_name,
+                timeout_ms=30 * 60 * 1000,
             )
 
         # We reserve `instance_name` as a parameter to sending requests, so we

@@ -33,6 +33,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     Type,
@@ -153,6 +154,14 @@ class _CacheDescriptorBase:
         )
 
 
+class HasServerName(Protocol):
+    server_name: str
+    """
+    The homeserver name that this cache is associated with (used to label the metric)
+    (`hs.hostname`).
+    """
+
+
 class DeferredCacheDescriptor(_CacheDescriptorBase):
     """A method decorator that applies a memoizing cache around the function.
 
@@ -200,6 +209,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
 
     def __init__(
         self,
+        *,
         orig: Callable[..., Any],
         max_entries: int = 1000,
         num_args: Optional[int] = None,
@@ -229,10 +239,20 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[Any], owner: Optional[Type]
+        self, obj: Optional[HasServerName], owner: Optional[Type]
     ) -> Callable[..., "defer.Deferred[Any]"]:
+        # We need access to instance-level `obj.server_name` attribute
+        assert obj is not None, (
+            "Cannot call cached method from class (❌ `MyClass.cached_method()`) "
+            "and must be called from an instance (✅ `MyClass().cached_method()`). "
+        )
+        assert obj.server_name is not None, (
+            "The `server_name` attribute must be set on the object where `@cached` decorator is used."
+        )
+
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
+            server_name=obj.server_name,
             max_entries=self.max_entries,
             tree=self.tree,
             iterable=self.iterable,
@@ -490,7 +510,7 @@ class _CachedFunctionDescriptor:
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
-            orig,
+            orig=orig,
             max_entries=self.max_entries,
             num_args=self.num_args,
             uncached_args=self.uncached_args,

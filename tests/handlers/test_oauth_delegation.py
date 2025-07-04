@@ -726,7 +726,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             token="i_am_an_app_service",
             id="1234",
             namespaces={"users": [{"regex": r"@alice:.+", "exclusive": True}]},
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
 
         self.hs.get_datastores().main.services_cache = [appservice]

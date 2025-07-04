@@ -128,6 +128,7 @@ class BulkPushRuleEvaluator:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self._event_auth_handler = hs.get_event_auth_handler()
@@ -136,10 +137,11 @@ class BulkPushRuleEvaluator:
         self._related_event_match_enabled = self.hs.config.experimental.msc3664_enabled
 
         self.room_push_rule_cache_metrics = register_cache(
-            "cache",
-            "room_push_rule_cache",
+            cache_type="cache",
+            cache_name="room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,
             resizable=False,
+            server_name=self.server_name,
         )
 
     async def _get_rules_for_event(

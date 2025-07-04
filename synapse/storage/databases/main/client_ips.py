@@ -421,6 +421,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+        self.server_name = hs.hostname
 
         if hs.config.redis.redis_enabled:
             # If we're using Redis, we can shift this update process off to
@@ -434,7 +435,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
 
         # (user_id, access_token, ip,) -> last_seen
         self.client_ip_last_seen = LruCache[Tuple[str, str, str], int](
-            cache_name="client_ip_last_seen", max_size=50000
+            cache_name="client_ip_last_seen",
+            server_name=self.server_name,
+            max_size=50000,
         )
 
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:

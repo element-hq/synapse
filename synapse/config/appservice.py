@@ -122,8 +122,7 @@ def _load_appservice(
     localpart = as_info["sender_localpart"]
     if urlparse.quote(localpart) != localpart:
         raise ValueError("sender_localpart needs characters which are not URL encoded.")
-    user = UserID(localpart, hostname)
-    user_id = user.to_string()
+    user_id = UserID(localpart, hostname)
 
     # Rate limiting for users of this AS is on by default (excludes sender)
     rate_limited = as_info.get("rate_limited")

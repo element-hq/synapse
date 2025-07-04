@@ -103,18 +103,35 @@ class ResponseCache(Generic[KV]):
 
     def __init__(
         self,
+        *,
         clock: Clock,
         name: str,
+        server_name: str,
         timeout_ms: float = 0,
         enable_logging: bool = True,
     ):
+        """
+        Args:
+            clock
+            name
+            server_name: The homeserver name that this cache is associated
+                with (used to label the metric) (`hs.hostname`).
+            timeout_ms
+            enable_logging
+        """
         self._result_cache: Dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
         self.timeout_sec = timeout_ms / 1000.0
 
         self._name = name
-        self._metrics = register_cache("response_cache", name, self, resizable=False)
+        self._metrics = register_cache(
+            cache_type="response_cache",
+            cache_name=name,
+            cache=self,
+            server_name=server_name,
+            resizable=False,
+        )
         self._enable_logging = enable_logging
 
     def size(self) -> int:
