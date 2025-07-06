@@ -1,1 +1,1 @@
-Spelling Correction logger.info("Admin toked used") to  logger.info("Admin token used")
+Spelling Correction logger.info("Admin toked used") to  logger.info("Admin token used").
