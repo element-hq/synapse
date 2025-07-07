@@ -53,6 +53,7 @@ class StatsHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.state = hs.get_state_handler()
@@ -88,7 +89,7 @@ class StatsHandler:
             finally:
                 self._is_processing = False
 
-        run_as_background_process("stats.notify_new_event", process)
+        run_as_background_process("stats.notify_new_event", self.server_name, process)
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB

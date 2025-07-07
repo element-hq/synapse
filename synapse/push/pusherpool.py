@@ -65,6 +65,7 @@ class PusherPool:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.pusher_factory = PusherFactory(hs)
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
@@ -99,7 +100,9 @@ class PusherPool:
         if not self._should_start_pushers:
             logger.info("Not starting pushers because they are disabled in the config")
             return
-        run_as_background_process("start_pushers", self._start_pushers)
+        run_as_background_process(
+            "start_pushers", self.server_name, self._start_pushers
+        )
 
     async def add_or_update_pusher(
         self,

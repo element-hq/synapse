@@ -246,6 +246,7 @@ class AuthHandler:
                 run_as_background_process,
                 5 * 60 * 1000,
                 "expire_old_sessions",
+                self.server_name,
                 self._expire_old_sessions,
             )
 

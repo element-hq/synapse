@@ -564,6 +564,7 @@ class DeviceHandler(DeviceWorkerHandler):
                 run_as_background_process,
                 DELETE_STALE_DEVICES_INTERVAL_MS,
                 "delete_stale_devices",
+                self.server_name,
                 self._delete_stale_devices,
             )
 
@@ -1213,6 +1214,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     "Handles incoming device list updates from federation and updates the DB"
 
     def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.federation = hs.get_federation_client()
         self.clock = hs.get_clock()
@@ -1243,6 +1245,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.clock.looping_call(
             run_as_background_process,
             30 * 1000,
+            server_name=self.server_name,
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
         )
@@ -1364,6 +1367,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 await self.store.mark_remote_users_device_caches_as_stale([user_id])
                 run_as_background_process(
                     "_maybe_retry_device_resync",
+                    self.server_name,
                     self.multi_user_device_resync,
                     [user_id],
                     False,

@@ -404,6 +404,7 @@ class FederationSenderHandler:
     def __init__(self, hs: "HomeServer"):
         assert hs.should_send_federation()
 
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._is_mine_id = hs.is_mine_id
         self._hs = hs
@@ -494,7 +495,9 @@ class FederationSenderHandler:
             # no need to queue up another task.
             return
 
-        run_as_background_process("_save_and_send_ack", self._save_and_send_ack)
+        run_as_background_process(
+            "_save_and_send_ack", self.server_name, self._save_and_send_ack
+        )
 
     async def _save_and_send_ack(self) -> None:
         """Save the current federation position in the database and send an ACK

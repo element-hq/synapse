@@ -309,6 +309,7 @@ class PerDestinationQueue:
 
         run_as_background_process(
             "federation_transaction_transmission_loop",
+            self.server_name,
             self._transaction_transmission_loop,
         )
 

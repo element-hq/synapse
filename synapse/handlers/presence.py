@@ -517,6 +517,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             "shutdown",
             run_as_background_process,
             "generic_presence.on_shutdown",
+            self.server_name,
             self._on_shutdown,
         )
 
@@ -814,6 +815,7 @@ class PresenceHandler(BasePresenceHandler):
             "shutdown",
             run_as_background_process,
             "presence.on_shutdown",
+            self.server_name,
             self._on_shutdown,
         )
 
@@ -1492,7 +1494,9 @@ class PresenceHandler(BasePresenceHandler):
             finally:
                 self._event_processing = False
 
-        run_as_background_process("presence.notify_new_event", _process_presence)
+        run_as_background_process(
+            "presence.notify_new_event", self.server_name, _process_presence
+        )
 
     async def _unsafe_process(self) -> None:
         # Loop round handling deltas until we're up to date

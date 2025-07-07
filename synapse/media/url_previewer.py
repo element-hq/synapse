@@ -739,7 +739,7 @@ class UrlPreviewer:
 
     def _start_expire_url_cache_data(self) -> Deferred:
         return run_as_background_process(
-            "expire_url_cache_data", self._expire_url_cache_data
+            "expire_url_cache_data", self.server_name, self._expire_url_cache_data
         )
 
     async def _expire_url_cache_data(self) -> None:

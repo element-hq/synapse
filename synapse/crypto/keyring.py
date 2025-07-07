@@ -473,8 +473,12 @@ class Keyring:
 
 class KeyFetcher(metaclass=abc.ABCMeta):
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._queue = BatchingQueue(
-            self.__class__.__name__, hs.get_clock(), self._fetch_keys
+            name=self.__class__.__name__,
+            server_name=self.server_name,
+            clock=hs.get_clock(),
+            process_batch_callback=self._fetch_keys,
         )
 
     async def get_keys(

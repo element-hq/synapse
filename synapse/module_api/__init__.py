@@ -1333,6 +1333,7 @@ class ModuleApi:
                 run_as_background_process,
                 msec,
                 desc,
+                self.server_name,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
             )
         else:
@@ -1390,6 +1391,7 @@ class ModuleApi:
             msec * 0.001,
             run_as_background_process,
             desc,
+            self.server_name,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
 

@@ -938,6 +938,7 @@ class FederationEventHandler:
         if len(events_with_failed_pull_attempts) > 0:
             run_as_background_process(
                 "_process_new_pulled_events_with_failed_pull_attempts",
+                self.server_name,
                 _process_new_pulled_events,
                 events_with_failed_pull_attempts,
             )
@@ -1531,6 +1532,7 @@ class FederationEventHandler:
             if resync:
                 run_as_background_process(
                     "resync_device_due_to_pdu",
+                    self.server_name,
                     self._resync_device,
                     event.sender,
                 )
