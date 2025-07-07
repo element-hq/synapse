@@ -27,7 +27,6 @@ from typing import (
     Any,
     Dict,
     FrozenSet,
-    Iterable,
     List,
     Literal,
     Mapping,
@@ -52,8 +51,8 @@ from synapse.api.constants import (
 )
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
-from synapse.events import EventBase, FrozenEventV3
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.events import EventBase, make_event_from_dict
 from synapse.handlers.relations import BundledAggregations
 from synapse.logging import issue9533_logger
 from synapse.logging.context import current_context
@@ -236,7 +235,7 @@ class _RoomChanges:
     invited: List[InvitedSyncResult]
     knocked: List[KnockedSyncResult]
     newly_joined_rooms: List[str]
-    newly_left_rooms: set[str]
+    newly_left_rooms: List[str]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -2387,7 +2386,9 @@ class SyncHandler:
 
         since_token = sync_result_builder.since_token
         user_id = sync_result_builder.sync_config.user.to_string()
-        logger.info("Generating _generate_sync_entry_for_rooms for %s %s", user_id, since_token)
+        logger.info(
+            "Generating _generate_sync_entry_for_rooms for %s %s", user_id, since_token
+        )
 
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
@@ -2429,7 +2430,9 @@ class SyncHandler:
         # no point in going further.
         if not sync_result_builder.full_state:
             if since_token and not ephemeral_by_room and not account_data_by_room:
-                have_changed = await self._have_rooms_changed(sync_result_builder, user_id)
+                have_changed = await self._have_rooms_changed(
+                    sync_result_builder, user_id
+                )
                 log_kv({"rooms_have_changed": have_changed})
                 if not have_changed:
                     tags_by_room = await self.store.get_updated_tags(
@@ -2484,7 +2487,7 @@ class SyncHandler:
         sync_result_builder.invited.extend(invited)
         sync_result_builder.knocked.extend(knocked)
 
-        return set(newly_joined_rooms), newly_left_rooms
+        return set(newly_joined_rooms), set(newly_left_rooms)
 
     async def _have_rooms_changed(
         self, sync_result_builder: "SyncResultBuilder", user_id: str
@@ -2502,8 +2505,11 @@ class SyncHandler:
         if membership_change_events or sync_result_builder.forced_newly_joined_room_ids:
             return True
 
-        # TODO: Hack to check if we have any deleted rooms
-        if len(await self.store.get_deleted_rooms_for_user(user_id, since_token.room_key.stream)):
+        # If we have any deleted rooms to send down sync (which do not appear down the event paths)
+        # then also emit a room change.
+        if await self.store.has_deleted_rooms_for_user(
+            user_id, since_token.room_key.stream
+        ):
             return True
 
         stream_id = since_token.room_key.stream
@@ -2543,7 +2549,6 @@ class SyncHandler:
         now_token = sync_result_builder.now_token
         sync_config = sync_result_builder.sync_config
         membership_change_events = sync_result_builder.membership_change_events
-        logger.info("Generating _get_room_changes_for_incremental_sync for %s", user_id)
 
         assert since_token
 
@@ -2765,30 +2770,41 @@ class SyncHandler:
 
             room_entries.append(entry)
 
-        deleted_left_rooms = await self.store.get_deleted_rooms_for_user(user_id, since_token.room_key.stream)
+        deleted_left_rooms = await self.store.get_deleted_rooms_for_user(
+            user_id, since_token.room_key.stream
+        )
 
-        for room_id, deleted_stream_id in deleted_left_rooms:
+        for room_id, room_version, deleted_stream_id in deleted_left_rooms:
             if room_id in newly_left_rooms:
+                # It's possible that if the user is syncing at the same time the room is deleted then they will
+                # see a genuine leave event from the room, so we don't need a synthetic leave.
                 continue
-            logger.info("Generating synthetic leave for %s in %s as room was deleted.", user_id, room_id)
+            # Otherwise, generate a synthetic leave to tell clients that the room has been deleted.
+            logger.info(
+                "Generating synthetic leave for %s in %s as room was deleted.",
+                user_id,
+                room_id,
+            )
             # Synthetic leaves for deleted rooms
-            leave_evt = FrozenEventV3({
+            leave_evt = make_event_from_dict(
+                {
                     "state_key": user_id,
-                    "sender": "@server:patroclus",
+                    "sender": user_id,
                     "room_id": room_id,
                     "type": "m.room.member",
-                    "depth": 1,
                     "content": {
                         "membership": "leave",
-                        "reason": "Room has been deleted"
-                    }
+                        "reason": "The room has been deleted",
+                    },
                 },
-                RoomVersions.V10, # TODO: Fetch this!
+                # We have no idea what the room version is since the room is gone
+                KNOWN_ROOM_VERSIONS[room_version],
             )
+            # Ensure the event is treated as an outlier since we are not persisting this!
             leave_evt.internal_metadata.outlier = True
             leave_evt.internal_metadata.out_of_band_membership = True
-            leave_evt.internal_metadata.stream_ordering = deleted_stream_id
-            
+            leave_evt.internal_metadata.stream_ordering = deleted_stream_id.stream
+
             room_entries.append(
                 RoomSyncResultBuilder(
                     room_id=room_id,
@@ -2796,11 +2812,10 @@ class SyncHandler:
                     events=[leave_evt],
                     newly_joined=False,
                     full_state=False,
-                    # TODO: THESE ARE ALL LIES, DAMNED LIES
                     since_token=since_token,
                     upto_token=since_token,
                     end_token=since_token,
-                    out_of_band=True
+                    out_of_band=True,
                 )
             )
             newly_left_rooms.append(room_id)
