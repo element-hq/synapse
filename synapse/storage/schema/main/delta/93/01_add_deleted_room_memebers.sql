@@ -13,6 +13,7 @@
 
 CREATE TABLE deleted_room_members (
     room_id TEXT NOT NULL,
+    room_version TEXT NOT NULL,
     user_id TEXT NOT NULL,
     deleted_at_stream_id bigint NOT NULL
 );
