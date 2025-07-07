@@ -345,7 +345,7 @@ def check_state_dependent_auth_rules(
         logger.debug("Allowing! %s", event)
         return
 
-    # 5. If type is m.room.membership
+    # 5. If type is m.room.member
     if event.type == EventTypes.Member:
         _is_membership_change_allowed(event.room_version, event, auth_dict)
         logger.debug("Allowing! %s", event)
