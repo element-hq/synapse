@@ -358,7 +358,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
             instance_id = id(self)
         super().__init__("%s-%s" % (name, instance_id))
         self._proc: Optional[_BackgroundProcess] = _BackgroundProcess(
-            name=name, server_name=server_name, ctx=self
+            desc=name, server_name=server_name, ctx=self
         )
 
     def start(self, rusage: "Optional[resource.struct_rusage]") -> None:

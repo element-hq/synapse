@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 class DelayedEventsHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
@@ -109,12 +110,13 @@ class DelayedEventsHandler:
                 # Can send the events in background after having awaited on marking them as processed
                 run_as_background_process(
                     "_send_events",
+                    self.server_name,
                     self._send_events,
                     events,
                 )
 
             self._initialized_from_db = run_as_background_process(
-                "_schedule_db_events", _schedule_db_events
+                "_schedule_db_events", self.server_name, _schedule_db_events
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
@@ -139,7 +141,9 @@ class DelayedEventsHandler:
             finally:
                 self._event_processing = False
 
-        run_as_background_process("delayed_events.notify_new_event", process)
+        run_as_background_process(
+            "delayed_events.notify_new_event", self.server_name, process
+        )
 
     async def _unsafe_process_new_event(self) -> None:
         # If self._event_pos is None then means we haven't fetched it from the DB yet
@@ -447,6 +451,7 @@ class DelayedEventsHandler:
                 delay_sec,
                 run_as_background_process,
                 "_send_on_timeout",
+                self.server_name,
                 self._send_on_timeout,
             )
         else:

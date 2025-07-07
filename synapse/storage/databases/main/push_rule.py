@@ -146,6 +146,7 @@ class PushRulesWorkerStore(
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="push_rules_stream",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("push_rules_stream", "instance_name", "stream_id"),

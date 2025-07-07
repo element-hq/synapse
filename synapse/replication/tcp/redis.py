@@ -130,7 +130,9 @@ class RedisSubscriber(SubscriberProtocol):
     def connectionMade(self) -> None:
         logger.info("Connected to redis")
         super().connectionMade()
-        run_as_background_process("subscribe-replication", self._send_subscribe)
+        run_as_background_process(
+            "subscribe-replication", self.server_name, self._send_subscribe
+        )
 
     async def _send_subscribe(self) -> None:
         # it's important to make sure that we only send the REPLICATE command once we
@@ -206,7 +208,7 @@ class RedisSubscriber(SubscriberProtocol):
 
         if isawaitable(res):
             run_as_background_process(
-                "replication-" + cmd.get_logcontext_id(), lambda: res
+                "replication-" + cmd.get_logcontext_id(), self.server_name, lambda: res
             )
 
     def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
@@ -228,7 +230,11 @@ class RedisSubscriber(SubscriberProtocol):
             cmd: The command to send
         """
         run_as_background_process(
-            "send-cmd", self._async_send_command, cmd, bg_start_span=False
+            "send-cmd",
+            self.server_name,
+            self._async_send_command,
+            cmd,
+            bg_start_span=False,
         )
 
     async def _async_send_command(self, cmd: Command) -> None:

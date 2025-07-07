@@ -105,10 +105,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             # caches to invalidate. (This reduces the amount of writes to the DB
             # that happen).
             self._cache_id_gen = MultiWriterIdGenerator(
-                db_conn,
-                database,
+                db_conn=db_conn,
+                db=database,
                 notifier=hs.get_replication_notifier(),
                 stream_name="caches",
+                server_name=self.server_name,
                 instance_name=hs.get_instance_name(),
                 tables=[
                     (

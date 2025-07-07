@@ -77,6 +77,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="account_data",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("room_account_data", "instance_name", "stream_id"),

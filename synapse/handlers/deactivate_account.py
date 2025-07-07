@@ -40,6 +40,7 @@ class DeactivateAccountHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.hs = hs
+        self.server_name = hs.hostname
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
         self._room_member_handler = hs.get_room_member_handler()
@@ -245,7 +246,9 @@ class DeactivateAccountHandler:
         pending deactivation, if it isn't already running.
         """
         if not self._user_parter_running:
-            run_as_background_process("user_parter_loop", self._user_parter_loop)
+            run_as_background_process(
+                "user_parter_loop", self.server_name, self._user_parter_loop
+            )
 
     async def _user_parter_loop(self) -> None:
         """Loop that parts deactivated users from rooms"""

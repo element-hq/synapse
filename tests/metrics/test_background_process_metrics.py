@@ -15,7 +15,7 @@ class TestBackgroundProcessMetrics(StdlibTestCase):
         mock_logging_context.get_resource_usage.return_value = usage
 
         process = _BackgroundProcess(
-            name="test process", server_name="test_server", ctx=mock_logging_context
+            desc="test process", server_name="test_server", ctx=mock_logging_context
         )
         # Should not raise
         process.update_metrics()

@@ -1555,6 +1555,7 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="e2e_cross_signing_keys",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("e2e_cross_signing_keys", "instance_name", "stream_id"),

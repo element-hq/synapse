@@ -611,6 +611,7 @@ class DatabasePool:
             0.0,
             run_as_background_process,
             "upsert_safety_check",
+            self.server_name,
             self._check_safe_to_upsert,
         )
 
@@ -653,6 +654,7 @@ class DatabasePool:
                 15.0,
                 run_as_background_process,
                 "upsert_safety_check",
+                self.server_name,
                 self._check_safe_to_upsert,
             )
 

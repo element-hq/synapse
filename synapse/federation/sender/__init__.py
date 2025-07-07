@@ -438,6 +438,7 @@ class FederationSender(AbstractFederationSender):
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
+            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
@@ -480,7 +481,9 @@ class FederationSender(AbstractFederationSender):
 
         # fire off a processing loop in the background
         run_as_background_process(
-            "process_event_queue_for_federation", self._process_event_queue_loop
+            "process_event_queue_for_federation",
+            self.server_name,
+            self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:
