@@ -124,7 +124,7 @@ class RedisSubscriber(SubscriberProtocol):
             # capture the sentinel context as its containing context and won't prevent
             # GC of / unintentionally reactivate what would be the current context.
             self._logging_context = BackgroundProcessLoggingContext(
-                "replication_command_handler"
+                name="replication_command_handler", server_name=self.server_name
             )
 
     def connectionMade(self) -> None:

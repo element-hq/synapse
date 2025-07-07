@@ -171,7 +171,9 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
             # capture the sentinel context as its containing context and won't prevent
             # GC of / unintentionally reactivate what would be the current context.
             self._logging_context = BackgroundProcessLoggingContext(
-                "replication-conn", self.conn_id
+                name="replication-conn",
+                server_name=self.server_name,
+                instance_id=self.conn_id,
             )
 
     def connectionMade(self) -> None:
