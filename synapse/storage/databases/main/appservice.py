@@ -30,7 +30,7 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.config.appservice import load_appservices
-from synapse.events import EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -319,6 +319,75 @@ class ApplicationServiceTransactionWorkerStore(
             "create_appservice_txn", _create_appservice_txn
         )
 
+    async def get_deleted_room_members_for_appservice(
+        self, room_stream_id: int
+    ) -> List[EventBase]:
+        # If we have a room_stream_id, let's see if there are any deleted events.
+        events: List[EventBase] = []
+        logger.info("Processing deleted rooms stream ID %s", room_stream_id)
+        rooms = await self.get_deleted_room_members_at(room_stream_id)
+        for room_id, room_data in rooms.items():
+            room_version, members = room_data
+            for user_id in members:
+                leave_evt = make_event_from_dict(
+                    {
+                        "state_key": user_id,
+                        "sender": user_id,
+                        "room_id": room_id,
+                        "type": "m.room.member",
+                        "content": {
+                            "membership": "leave",
+                            "reason": "The room has been deleted",
+                        },
+                    },
+                    room_version,
+                )
+                events.append(leave_evt)
+        return events
+
+    async def create_appservice_stream_id_txn(
+        self,
+        service: ApplicationService,
+        stream_id: int,
+    ) -> AppServiceTransaction:
+        """Atomically creates a new transaction for this application service
+        with the given room stream token.
+
+        Args:
+            service: The service who the transaction is for.
+            token: A list of persistent events to put in the transaction.
+
+        Returns:
+            A new transaction.
+        """
+
+        events = await self.get_deleted_room_members_for_appservice(stream_id)
+
+        def _create_appservice_txn(txn: LoggingTransaction) -> AppServiceTransaction:
+            new_txn_id = self._as_txn_seq_gen.get_next_id_txn(txn)
+
+            # Insert new txn into txn table
+            txn.execute(
+                "INSERT INTO application_services_txns(as_id, txn_id, event_ids, stream_id) "
+                "VALUES(?,?,?,?)",
+                (service.id, new_txn_id, [], stream_id),
+            )
+
+            return AppServiceTransaction(
+                service=service,
+                id=new_txn_id,
+                events=events,
+                ephemeral=[],
+                to_device_messages=[],
+                one_time_keys_count={},
+                unused_fallback_keys={},
+                device_list_summary=DeviceListUpdates(),
+            )
+
+        return await self.db_pool.runInteraction(
+            "create_appservice_txn", _create_appservice_txn
+        )
+
     async def complete_appservice_txn(
         self, txn_id: int, service: ApplicationService
     ) -> None:
@@ -354,15 +423,15 @@ class ApplicationServiceTransactionWorkerStore(
 
         def _get_oldest_unsent_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[int, str]]:
+        ) -> Optional[Tuple[int, str, Optional[int]]]:
             # Monotonically increasing txn ids, so just select the smallest
             # one in the txns table (we delete them when they are sent)
             txn.execute(
-                "SELECT txn_id, event_ids FROM application_services_txns WHERE as_id=?"
+                "SELECT txn_id, event_ids, stream_id FROM application_services_txns WHERE as_id=?"
                 " ORDER BY txn_id ASC LIMIT 1",
                 (service.id,),
             )
-            return cast(Optional[Tuple[int, str]], txn.fetchone())
+            return cast(Optional[Tuple[int, str, Optional[int]]], txn.fetchone())
 
         entry = await self.db_pool.runInteraction(
             "get_oldest_unsent_appservice_txn", _get_oldest_unsent_txn
@@ -371,10 +440,13 @@ class ApplicationServiceTransactionWorkerStore(
         if not entry:
             return None
 
-        txn_id, event_ids_str = entry
+        txn_id, event_ids_str, room_stream_id = entry
 
         event_ids = db_to_json(event_ids_str)
         events = await self.get_events_as_list(event_ids)
+
+        if room_stream_id:
+            events += await self.get_deleted_room_members_for_appservice(room_stream_id)
 
         # TODO: to-device messages, one-time key counts, device list summaries and unused
         #       fallback keys are not yet populated for catch-up transactions.

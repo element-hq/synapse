@@ -1849,80 +1849,143 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     async def store_deleted_room_members(
         self,
         room_id: str,
-    ) -> None:
-        """TODO: WRITE
+    ) -> int:
+        """Get all local members of a given room and copy them to
+        the deleted room members table.
+
+        This should be run just before a room is deleted (before any
+        kicks are made).
 
         Args:
             room_id: the ID of the room
-            stream_id: stream ID at the point the room was deleted
-            user_ids: all users who were ever present in the room
         """
 
-        # Welcome to the pain zone. We need to first extract all the local members
-        sql = """
-            SELECT state_key, membership, event_stream_ordering FROM current_state_events
-            WHERE type = 'm.room.member'
-                AND room_id = ?
-                AND state_key LIKE ?
-        """
+        max = self.get_room_max_stream_ordering()
 
-        # TODO: Should we check for any joins, everyone should be banned or left at this point...
+        room_version = await self.get_room_version_id()
 
-        # We do need to be careful to ensure that host doesn't have any wild cards
-        # in it, but we checked above for known ones and we'll check below that
-        # the returned user actually has the correct domain.
-        user_rows = await self.db_pool.execute(
-            "store_deleted_room_members_get_members", sql, room_id, ("%:" + self._our_server_name)
-        )
+        def _store_deleted_room_members_txn(
+            txn: LoggingTransaction,
+        ) -> None:
+            # This copies the current membership from the room into the deleted members table,
+            # taking care to preseve the old stream ordering for users who were banned or left,
+            # otherwise using the latest stream ordering.
+            sql = """
+                INSERT INTO deleted_room_members (room_id, user_id, deleted_at_stream_id, room_version)
+                SELECT room_id, state_key, (CASE
+                        WHEN (membership = 'ban' OR membership = 'leave') THEN event_stream_ordering
+                        ELSE ?
+                    END), ? FROM current_state_events
+                WHERE type = 'm.room.member'
+                    AND room_id = ?
+                    AND state_key LIKE ?
+            """
 
-        logger.info("store_deleted_room_members %s %s %s %s %s", room_id, user_rows, sql, room_id, ("%:" + self._our_server_name))
+            return txn.execute(
+                sql,
+                (max, room_version, room_id, "%" + self._our_server_name),
+            )
 
         await self.db_pool.runInteraction(
             "store_deleted_room_members",
-            self._store_deleted_room_members_txn,
-            room_id,
-            user_rows
+            _store_deleted_room_members_txn,
         )
 
-    def _store_deleted_room_members_txn(
-        self,
-        txn: LoggingTransaction,
-        room_id: str,
-        users: Iterable[Tuple[str, str, int]],
-    ) -> None:
-        # If the user is still currently joined, they are about to get kicked so
-        # use the latest stream position
-        max = self.get_room_max_stream_ordering()
-        return DatabasePool.simple_insert_many_txn(
-            txn,
-            table="deleted_room_members",
-            keys=("room_id", "user_id", "deleted_at_stream_id"),
-            values=[(room_id, user[0], user[2] if user[1] in [Membership.BAN, Membership.LEAVE] else max) for user in users],
-        )
+        return max
 
     async def get_deleted_rooms_for_user(
         self, user_id: str, stream_pos: int
-    ) -> list[(str, int)]:
-        """Checks if the given rooms have partial state.
+    ) -> list[(str, str, PersistedEventPosition)]:
+        """Get all rooms and stream positions of deleted rooms to
+        send down the user's sync.
 
-        Returns true for "partial-state" rooms, which means that the state
-        at events in the room, and `current_state_events`, may not yet be
-        complete.
+        Returns a tuple of room_id, stream position.
         """
 
-        def _get_deleted_rooms_for_user(txn: LoggingTransaction) -> list[(str, int)]:
+        def _get_deleted_rooms_for_user(
+            txn: LoggingTransaction,
+        ) -> list[(str, str, PersistedEventPosition)]:
             sql = """
-                SELECT room_id, deleted_at_stream_id FROM deleted_room_members
+                SELECT room_id, room_version, deleted_at_stream_id FROM deleted_room_members
                 WHERE user_id = ?
                 AND ? < deleted_at_stream_id
             """
             txn.execute(sql, (user_id, stream_pos))
-            return set([(r[0], r[1]) for r in txn])
+            return [(r[0], r[1], PersistedEventPosition("master", r[2])) for r in txn]
 
         return await self.db_pool.runInteraction(
-            "get_deleted_rooms_for_user",
-            _get_deleted_rooms_for_user
+            "get_deleted_rooms_for_user", _get_deleted_rooms_for_user
         )
+
+    async def has_deleted_rooms_for_user(self, user_id: str, stream_pos: int) -> bool:
+        """Checks if the user has any outstanding deleted rooms to send
+        down sync.
+
+        Returns true if there are rooms, otherwise false.
+        """
+
+        def _has_deleted_rooms_for_user(txn: LoggingTransaction) -> bool:
+            sql = """
+                SELECT 1 FROM deleted_room_members
+                WHERE user_id = ?
+                AND ? < deleted_at_stream_id
+                LIMIT 1
+            """
+            txn.execute(sql, (user_id, stream_pos))
+            return bool(txn.fetchone())
+
+        return await self.db_pool.runInteraction(
+            "has_deleted_rooms_for_user", _has_deleted_rooms_for_user
+        )
+
+    async def get_deleted_room_members_at(
+        self, stream_pos: int
+    ) -> dict[str, (str, list[str])]:
+        """Gets any rooms and users have been deleted globally at the given stream pos.
+
+        Returns true if there are rooms, otherwise false.
+        """
+
+        def _get_deleted_room_members_at(
+            txn: LoggingTransaction,
+        ) -> dict[str, (str, list[str])]:
+            sql = """
+                SELECT room_id, room_version, user_id FROM deleted_room_members
+                WHERE deleted_at_stream_id = ?
+                LIMIT 1
+            """
+            txn.execute(sql, (stream_pos,))
+            room_map: dict[str, (str, list[str])] = {}
+            for room_id, room_version, user_id in txn:
+                if not room_map.get(room_id):
+                    room_map[room_id] = (room_version,[])
+                room_map[room_id].append(user_id)
+            return room_map
+
+        return await self.db_pool.runInteraction(
+            "get_deleted_room_members_at", _get_deleted_room_members_at
+        )
+
+    @cached()
+    async def has_room_been_deleted(self, room_id: str) -> bool:
+        """Checks if a room has been deleted.
+
+        Returns True if there are any members in the deleted room, otherwise False.
+        """
+
+        def _has_room_been_deleted(txn: LoggingTransaction) -> bool:
+            sql = """
+                SELECT 1 FROM deleted_room_members
+                WHERE room_id = ?
+                LIMIT 1
+            """
+            txn.execute(sql, (room_id, ))
+            return bool(txn.fetchone())
+
+        return await self.db_pool.runInteraction(
+            "has_room_been_deleted", _has_room_been_deleted
+        )
+
 
 class RoomMemberBackgroundUpdateStore(SQLBaseStore):
     def __init__(
