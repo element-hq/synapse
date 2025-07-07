@@ -467,20 +467,9 @@ class PersistEventsStore:
                         # normally the cache entry for a redacted event would be invalidated
                         # by an arriving redaction event, but since we are not creating redaction
                         # events we invalidate manually
-                        ids_to_redact = (
-                            await self.store.get_events_sent_by_user_in_room(
-                                event.state_key, event.room_id, limit=MAX_EVENTS
-                            )
+                        self.store._invalidate_local_get_event_cache_room_id(
+                            event.room_id
                         )
-                        if not ids_to_redact:
-                            continue
-
-                        for id in ids_to_redact:
-                            await self.db_pool.runInteraction(
-                                "invalidate cache",
-                                self.store.invalidate_get_event_cache_after_txn,
-                                id,
-                            )
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
