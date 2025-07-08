@@ -98,9 +98,6 @@ class CapabilitiesRestServlet(RestServlet):
             disallowed_profile_fields.append("displayname")
         if not self.config.registration.enable_set_avatar_url:
             disallowed_profile_fields.append("avatar_url")
-        # If disallowed profile fields is unset, then no need to set m.profile_fields
-        # as clients should assume it is supported (once the Matrix spec version supports
-        # it).
         if disallowed_profile_fields:
             response["capabilities"]["m.profile_fields"]["disallowed"] = (
                 disallowed_profile_fields
