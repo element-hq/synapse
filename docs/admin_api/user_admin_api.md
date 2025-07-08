@@ -1505,8 +1505,9 @@ The following JSON body parameters are optional:
 
 - `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in each redaction event, and be visible to users.
 - `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.
-- `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful    when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in 
-     rooms where the admin does not have the sufficient power level to issue the redactions.  
+- `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful
+ when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
+ where the admin does not have the sufficient power level to issue the redactions.  
 
 _Added in Synapse 1.116.0._
 
