@@ -128,9 +128,9 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
         # We reserve `instance_name` as a parameter to sending requests, so we
         # assert here that sub classes don't try and use the name.
-        assert (
-            "instance_name" not in self.PATH_ARGS
-        ), "`instance_name` is a reserved parameter name"
+        assert "instance_name" not in self.PATH_ARGS, (
+            "`instance_name` is a reserved parameter name"
+        )
         assert (
             "instance_name"
             not in signature(self.__class__._serialize_payload).parameters

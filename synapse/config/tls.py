@@ -108,8 +108,7 @@ class TlsConfig(Config):
                 # Raise an error if this option has been specified without any
                 # corresponding certificates.
                 raise ConfigError(
-                    "federation_custom_ca_list specified without "
-                    "any certificate files"
+                    "federation_custom_ca_list specified without any certificate files"
                 )
 
             certs = []

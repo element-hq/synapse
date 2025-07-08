@@ -22,7 +22,6 @@
 
 import abc
 import collections.abc
-import os
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -48,21 +47,21 @@ from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches import intern_dict
 from synapse.util.frozenutils import freeze
-from synapse.util.stringutils import strtobool
 
 if TYPE_CHECKING:
     from synapse.events.builder import EventBuilder
 
-# Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
-# bugs where we accidentally share e.g. signature dicts. However, converting a
-# dict to frozen_dicts is expensive.
-#
-# NOTE: This is overridden by the configuration by the Synapse worker apps, but
-# for the sake of tests, it is set here while it cannot be configured on the
-# homeserver object itself.
 
-USE_FROZEN_DICTS = strtobool(os.environ.get("SYNAPSE_USE_FROZEN_DICTS", "0"))
+USE_FROZEN_DICTS = False
+"""
+Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
+bugs where we accidentally share e.g. signature dicts. However, converting a
+dict to frozen_dicts is expensive.
 
+NOTE: This is overridden by the configuration by the Synapse worker apps, but
+for the sake of tests, it is set here because it cannot be configured on the
+homeserver object itself.
+"""
 
 T = TypeVar("T")
 
@@ -209,7 +208,6 @@ class EventBase(metaclass=abc.ABCMeta):
     depth: DictProperty[int] = DictProperty("depth")
     content: DictProperty[JsonDict] = DictProperty("content")
     hashes: DictProperty[Dict[str, str]] = DictProperty("hashes")
-    origin: DictProperty[str] = DictProperty("origin")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     room_id: DictProperty[str] = DictProperty("room_id")
     sender: DictProperty[str] = DictProperty("sender")

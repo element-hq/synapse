@@ -34,6 +34,7 @@ from synapse.logging.opentracing import trace
 from synapse.media._base import (
     FileInfo,
     ThumbnailInfo,
+    check_for_cached_entry_and_respond,
     respond_404,
     respond_with_file,
     respond_with_multipart_responder,
@@ -294,6 +295,11 @@ class ThumbnailProvider:
             if media_info.authenticated:
                 raise NotFoundError()
 
+        # Once we've checked auth we can return early if the media is cached on
+        # the client
+        if check_for_cached_entry_and_respond(request):
+            return
+
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         await self._select_and_respond_with_thumbnail(
             request,
@@ -333,6 +339,11 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # Once we've checked auth we can return early if the media is cached on
+        # the client
+        if check_for_cached_entry_and_respond(request):
+            return
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         for info in thumbnail_infos:
@@ -431,6 +442,10 @@ class ThumbnailProvider:
                 respond_404(request)
                 return
 
+        # Check if the media is cached on the client, if so return 304.
+        if check_for_cached_entry_and_respond(request):
+            return
+
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
         )
@@ -509,6 +524,10 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        # Check if the media is cached on the client, if so return 304.
+        if check_for_cached_entry_and_respond(request):
+            return
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id

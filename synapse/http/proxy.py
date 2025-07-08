@@ -106,7 +106,7 @@ class ProxyResource(_AsyncResource):
     isLeaf = True
 
     def __init__(self, reactor: ISynapseReactor, hs: "HomeServer"):
-        super().__init__(True)
+        super().__init__(hs.get_clock(), True)
 
         self.reactor = reactor
         self.agent = hs.get_federation_http_client().agent

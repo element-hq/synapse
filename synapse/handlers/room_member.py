@@ -53,6 +53,7 @@ from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
+from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
     JsonDict,
     Requester,
@@ -158,6 +159,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_room,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         # Ratelimiter for invites, keyed by recipient (across all rooms, all
@@ -166,6 +168,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_user,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         # Ratelimiter for invites, keyed by issuer (across all rooms, all
@@ -174,6 +177,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_issuer,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         self._third_party_invite_limiter = Ratelimiter(
@@ -912,6 +916,23 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     additional_fields=block_invite_result[1],
                 )
 
+            # check the invitee's configuration and apply rules. Admins on the server can bypass.
+            if not is_requester_admin:
+                invite_config = await self.store.get_invite_config_for_user(target_id)
+                rule = invite_config.get_invite_rule(requester.user.to_string())
+                if rule == InviteRule.BLOCK:
+                    logger.info(
+                        "Automatically rejecting invite from %s due to the the invite filtering rules of %s",
+                        target_id,
+                        requester.user,
+                    )
+                    raise SynapseError(
+                        403,
+                        "You are not permitted to invite this user.",
+                        errcode=Codes.INVITE_BLOCKED,
+                    )
+                # InviteRule.IGNORE is handled at the sync layer.
+
         # An empty prev_events list is allowed as long as the auth_event_ids are present
         if prev_event_ids is not None:
             return await self._local_membership_update(
@@ -1551,7 +1572,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     require_consent=False,
                 )
             except Exception as e:
-                logger.exception("Error kicking guest user: %s" % (e,))
+                logger.exception("Error kicking guest user: %s", e)
 
     async def lookup_room_alias(
         self, room_alias: RoomAlias
