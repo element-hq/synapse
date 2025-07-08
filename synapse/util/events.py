@@ -13,7 +13,7 @@
 #
 #
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from synapse._pydantic_compat import Field, StrictStr, ValidationError, validator
 from synapse.types import JsonDict
@@ -44,7 +44,7 @@ class MTopic(RequestBodyModel):
 
     @validator("m_text", pre=True)
     def ignore_invalid_representations(
-        cls, m_text: any
+        cls, m_text: Any
     ) -> Optional[List[MTextRepresentation]]:
         if not isinstance(m_text, list):
             raise ValueError("m.text must be a list")
@@ -62,7 +62,7 @@ class TopicContent(RequestBodyModel):
     m_topic: Optional[MTopic] = Field(alias="m.topic", default=None)
 
     @validator("m_topic", pre=True)
-    def ignore_invalid_m_topic(cls, m_topic: any) -> Optional[MTopic]:
+    def ignore_invalid_m_topic(cls, m_topic: Any) -> Optional[MTopic]:
         try:
             return MTopic.parse_obj(m_topic)
         except ValidationError:
