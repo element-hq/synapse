@@ -39,6 +39,9 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     representation. Prefers pulling plain-text from the newer `m.topic` field if
     available with a fallback to `topic`.
 
+    Args:
+        content: The `content` field of an `m.room.topic` event.
+
     Returns:
         A string representing the plain text topic.
     """
