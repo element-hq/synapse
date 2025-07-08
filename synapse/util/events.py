@@ -128,7 +128,7 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
         (
             r
             for r in topic_content.m_topic.m_text
-            # "Defaults to text/plain if omitted."
+            # The mimetype property defaults to `text/plain` if omitted.
             if not r.mimetype or r.mimetype == "text/plain"
         ),
         None,

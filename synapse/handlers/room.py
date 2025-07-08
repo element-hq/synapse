@@ -1307,7 +1307,7 @@ class RoomCreationHandler:
                 {
                     EventContentFields.TOPIC: topic,
                     EventContentFields.M_TOPIC: {
-                        # The mimetype property defaults to text/plain if omitted.
+                        # The mimetype property defaults to `text/plain` if omitted.
                         EventContentFields.M_TEXT: [{MTextFields.BODY: topic}]
                     },
                 },
