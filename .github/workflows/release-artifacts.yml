@@ -119,7 +119,7 @@ jobs:
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
         is_pr:
-          - false
+          - ${{ startsWith(github.ref, 'refs/pull/') }}
 
         exclude:
           # Don't build macos wheels on PR CI.
@@ -144,7 +144,7 @@ jobs:
         run: python -m pip install cibuildwheel==3.0.0
 
       - name: Only build a single wheel on PR
-        if: false
+        if: startsWith(github.ref, 'refs/pull/')
         run: echo "CIBW_BUILD="cp39-manylinux_*"" >> $GITHUB_ENV
 
       - name: Build wheels
