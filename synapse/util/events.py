@@ -52,7 +52,8 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     if not m_text:
         return topic
 
-    # Find the first `text/plain` topic ("Receivers SHOULD use the first representation in the array that they understand.")
+    # Find the first `text/plain` topic ("Receivers SHOULD use the first
+    # representationin the array that they understand.")
     representation = next(
         (
             r
