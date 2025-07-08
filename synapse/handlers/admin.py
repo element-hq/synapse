@@ -358,6 +358,7 @@ class AdminHandler:
         user_id: str,
         rooms: list,
         requester: JsonMapping,
+        use_admin: bool,
         reason: Optional[str],
         limit: Optional[int],
     ) -> str:
@@ -368,6 +369,7 @@ class AdminHandler:
             user_id: the user ID of the user whose events should be redacted
             rooms: the rooms in which to redact the user's events
             requester: the user requesting the events
+            use_admin: whether to use the admin account to issue the redactions
             reason: reason for requesting the redaction, ie spam, etc
             limit: limit on the number of events in each room to redact
 
@@ -395,6 +397,7 @@ class AdminHandler:
                 "rooms": rooms,
                 "requester": requester,
                 "user_id": user_id,
+                "use_admin": use_admin,
                 "reason": reason,
                 "limit": limit,
             },
@@ -426,9 +429,18 @@ class AdminHandler:
         user_id = task.params.get("user_id")
         assert user_id is not None
 
-        # puppet the user if they're ours, otherwise use admin to redact
+        use_admin = task.params.get("use_admin")
+        assert use_admin is not None
+
+        # default to puppeting the user unless they are not local or it's been requested to
+        # use the admin user to issue the redactions
+        requester_id = (
+            admin.user.to_string()
+            if use_admin or not self.hs.is_mine_id(user_id)
+            else user_id
+        )
         requester = create_requester(
-            user_id if self.hs.is_mine_id(user_id) else admin.user.to_string(),
+            requester_id,
             authenticated_entity=admin.user.to_string(),
         )
 

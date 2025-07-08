@@ -1465,7 +1465,10 @@ _Added in Synapse 1.72.0._
 ## Redact all the events of a user
 
 This endpoint allows an admin to redact the events of a given user. There are no restrictions on redactions for a 
-local user. By default, we puppet the user who sent the message to redact it themselves. Redactions for non-local users are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified power level to issue redactions. 
+local user. By default, we puppet the user who sent the message to redact it themselves. Redactions for non-local users 
+are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified
+power level to issue redactions. An option is provided to override the default and allow the admin to issue the
+redactions in all cases.  
 
 The API is 
 ```
@@ -1501,7 +1504,9 @@ The following JSON body parameter must be provided:
 The following JSON body parameters are optional:
 
 - `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in each redaction event, and be visible to users.
-- `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
+- `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.
+- `use_admin` - If set to `true`, the admin user is used to issue the redactions, rather than puppeting the user. Useful    when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in 
+     rooms where the admin does not have the sufficient power level to issue the redactions.  
 
 _Added in Synapse 1.116.0._
 
