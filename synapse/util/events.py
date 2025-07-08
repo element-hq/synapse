@@ -13,10 +13,11 @@
 #
 #
 
-from typing import Optional
+from typing import List, Optional
 
-from synapse.api.constants import EventContentFields, MTextFields
+from synapse._pydantic_compat import Field, StrictStr, ValidationError, validator
 from synapse.types import JsonDict
+from synapse.types.rest import RequestBodyModel
 from synapse.util.stringutils import random_string
 
 
@@ -33,6 +34,41 @@ def generate_fake_event_id() -> str:
     return "$" + random_string(43)
 
 
+class MTextRepresentation(RequestBodyModel):
+    body: StrictStr
+    mimetype: Optional[StrictStr]
+
+
+class MTopic(RequestBodyModel):
+    m_text: Optional[List[MTextRepresentation]] = Field(alias="m.text")
+
+    @validator("m_text", pre=True)
+    def ignore_invalid_representations(
+        cls, m_text
+    ) -> Optional[List[MTextRepresentation]]:
+        if not isinstance(m_text, list):
+            raise ValueError("m.text must be a list")
+        representations = []
+        for element in m_text:
+            try:
+                representations.append(MTextRepresentation.parse_obj(element))
+            except ValidationError:
+                continue
+        return representations
+
+
+class TopicContent(RequestBodyModel):
+    topic: StrictStr
+    m_topic: Optional[MTopic] = Field(alias="m.topic", default=None)
+
+    @validator("m_topic", pre=True)
+    def ignore_invalid_m_topic(cls, m_topic) -> Optional[List[MTextRepresentation]]:
+        try:
+            return MTopic.parse_obj(m_topic)
+        except ValidationError:
+            return None
+
+
 def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     """
     Given the `content` of an `m.room.topic` event, returns the plain-text topic
@@ -45,32 +81,27 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     Returns:
         A string representing the plain text topic.
     """
-    topic = content.get(EventContentFields.TOPIC)
 
-    m_topic = content.get(EventContentFields.M_TOPIC)
-    if not m_topic:
-        return topic
+    try:
+        topic_content: TopicContent = TopicContent.parse_obj(content)
+    except ValidationError:
+        return None
 
-    m_text = m_topic.get(EventContentFields.M_TEXT)
-    if not m_text:
-        return topic
+    if not topic_content.m_topic or not topic_content.m_topic.m_text:
+        return topic_content.topic
 
     # Find the first `text/plain` topic ("Receivers SHOULD use the first
     # representationin the array that they understand.")
     representation = next(
         (
             r
-            for r in m_text
-            if (
-                MTextFields.MIMETYPE not in r or r[MTextFields.MIMETYPE] == "text/plain"
-            )
-            and MTextFields.BODY in r
-            # Scrutinize user input
-            and isinstance(r[MTextFields.BODY], str)
+            for r in topic_content.m_topic.m_text
+            if not r.mimetype or r.mimetype == "text/plain"
         ),
         None,
     )
-    if not representation:
-        return topic
 
-    return representation[MTextFields.BODY]
+    if not representation:
+        return topic_content.topic
+
+    return representation.body
