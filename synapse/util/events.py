@@ -118,25 +118,14 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     except ValidationError:
         return None
 
-    # Fallback to the plain-old `topic` field if `m.topic` is not present or empty.
-    if not topic_content.m_topic or not topic_content.m_topic.m_text:
-        return topic_content.topic
-
     # Find the first `text/plain` topic ("Receivers SHOULD use the first
     # representationin the array that they understand.")
-    representation = next(
-        (
-            r
-            for r in topic_content.m_topic.m_text
+    if topic_content.m_topic and topic_content.m_topic.m_text:
+        for representation in topic_content.m_topic.m_text:
             # The mimetype property defaults to `text/plain` if omitted.
-            if not r.mimetype or r.mimetype == "text/plain"
-        ),
-        None,
-    )
+            if not representation.mimetype or representation.mimetype == "text/plain":
+                return representation.body
 
     # Fallback to the plain-old `topic` field if there isn't any `text/plain` topic
     # representation available.
-    if not representation:
-        return topic_content.topic
-
-    return representation.body
+    return topic_content.topic
