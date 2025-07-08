@@ -44,7 +44,7 @@ class MTopic(RequestBodyModel):
 
     @validator("m_text", pre=True)
     def ignore_invalid_representations(
-        cls, m_text
+        cls, m_text: any
     ) -> Optional[List[MTextRepresentation]]:
         if not isinstance(m_text, list):
             raise ValueError("m.text must be a list")
@@ -62,7 +62,7 @@ class TopicContent(RequestBodyModel):
     m_topic: Optional[MTopic] = Field(alias="m.topic", default=None)
 
     @validator("m_topic", pre=True)
-    def ignore_invalid_m_topic(cls, m_topic) -> Optional[List[MTextRepresentation]]:
+    def ignore_invalid_m_topic(cls, m_topic: any) -> Optional[MTopic]:
         try:
             return MTopic.parse_obj(m_topic)
         except ValidationError:
