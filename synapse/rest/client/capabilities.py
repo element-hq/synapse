@@ -102,9 +102,9 @@ class CapabilitiesRestServlet(RestServlet):
         # as clients should assume it is supported (once the Matrix spec version supports
         # it).
         if disallowed_profile_fields:
-            response["capabilities"]["m.profile_fields"] = {
-                "disallowed": disallowed_profile_fields,
-            }
+            response["capabilities"]["m.profile_fields"]["disallowed"] = (
+                disallowed_profile_fields
+            )
 
         # For transition from unstable to stable identifiers.
         if self.config.experimental.msc4133_enabled:
