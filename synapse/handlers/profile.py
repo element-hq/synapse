@@ -537,10 +537,17 @@ class ProfileHandler:
         response: JsonDict = {}
         try:
             if just_field is None or just_field == ProfileFields.DISPLAYNAME:
-                response["displayname"] = await self.store.get_profile_displayname(user)
-
+                displayname = await self.store.get_profile_displayname(user)
+                # do not set the displayname field if it is None,
+                # since then we send a null in the JSON response
+                if displayname is not None:
+                    response["displayname"] = displayname
             if just_field is None or just_field == ProfileFields.AVATAR_URL:
-                response["avatar_url"] = await self.store.get_profile_avatar_url(user)
+                avatar_url = await self.store.get_profile_avatar_url(user)
+                # do not set the avatar_url field if it is None,
+                # since then we send a null in the JSON response
+                if avatar_url is not None:
+                    response["avatar_url"] = avatar_url
 
             if just_field is None:
                 response.update(await self.store.get_profile_fields(user))
