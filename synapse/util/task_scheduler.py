@@ -440,7 +440,8 @@ class TaskScheduler:
                 except Exception:
                     f = Failure()
                     logger.error(
-                        f"scheduled task {task.id} failed",
+                        "scheduled task %s failed",
+                        task.id,
                         exc_info=(f.type, f.value, f.getTracebackObject()),
                     )
                     status = TaskStatus.FAILED
@@ -473,8 +474,10 @@ class TaskScheduler:
             self._clock.time_msec()
             > task.timestamp + TaskScheduler.LAST_UPDATE_BEFORE_WARNING_MS
         ):
-            logger.warn(
-                f"Task {task.id} (action {task.action}) has seen no update for more than 24h and may be stuck"
+            logger.warning(
+                "Task %s (action %s) has seen no update for more than 24h and may be stuck",
+                task.id,
+                task.action,
             )
 
         if task.id in self._running_tasks:

@@ -21,7 +21,7 @@
 import logging
 import random
 import re
-from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union, cast
 from urllib.parse import urlparse
 from urllib.request import (  # type: ignore[attr-defined]
     getproxies_environment,
@@ -40,6 +40,7 @@ from twisted.internet.interfaces import (
     IProtocol,
     IProtocolFactory,
     IReactorCore,
+    IReactorTime,
     IStreamClientEndpoint,
 )
 from twisted.python.failure import Failure
@@ -129,7 +130,9 @@ class ProxyAgent(_AgentBase):
     ):
         contextFactory = contextFactory or BrowserLikePolicyForHTTPS()
 
-        _AgentBase.__init__(self, reactor, pool)
+        # `_AgentBase` expects an `IReactorTime` provider. `IReactorCore`
+        # extends `IReactorTime`, so this cast is safe.
+        _AgentBase.__init__(self, cast(IReactorTime, reactor), pool)
 
         if proxy_reactor is None:
             self.proxy_reactor = reactor
@@ -168,14 +171,14 @@ class ProxyAgent(_AgentBase):
         self.no_proxy = no_proxy
 
         self._policy_for_https = contextFactory
-        self._reactor = reactor
+        self._reactor = cast(IReactorTime, reactor)
 
         self._federation_proxy_endpoint: Optional[IStreamClientEndpoint] = None
         self._federation_proxy_credentials: Optional[ProxyCredentials] = None
         if federation_proxy_locations:
-            assert (
-                federation_proxy_credentials is not None
-            ), "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            assert federation_proxy_credentials is not None, (
+                "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            )
 
             endpoints: List[IStreamClientEndpoint] = []
             for federation_proxy_location in federation_proxy_locations:
@@ -257,7 +260,11 @@ class ProxyAgent(_AgentBase):
             raise ValueError(f"Invalid URI {uri!r}")
 
         parsed_uri = URI.fromBytes(uri)
-        pool_key = f"{parsed_uri.scheme!r}{parsed_uri.host!r}{parsed_uri.port}"
+        pool_key: tuple[bytes, bytes, int] = (
+            parsed_uri.scheme,
+            parsed_uri.host,
+            parsed_uri.port,
+        )
         request_path = parsed_uri.originForm
 
         should_skip_proxy = False
@@ -283,7 +290,7 @@ class ProxyAgent(_AgentBase):
                 )
             # Cache *all* connections under the same key, since we are only
             # connecting to a single destination, the proxy:
-            pool_key = "http-proxy"
+            pool_key = (b"http-proxy", b"", 0)
             endpoint = self.http_proxy_endpoint
             request_path = uri
         elif (
@@ -302,9 +309,9 @@ class ProxyAgent(_AgentBase):
             parsed_uri.scheme == b"matrix-federation"
             and self._federation_proxy_endpoint
         ):
-            assert (
-                self._federation_proxy_credentials is not None
-            ), "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            assert self._federation_proxy_credentials is not None, (
+                "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            )
 
             # Set a Proxy-Authorization header
             if headers is None:

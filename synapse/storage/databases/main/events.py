@@ -246,9 +246,9 @@ class PersistEventsStore:
         self.is_mine_id = hs.is_mine_id
 
         # This should only exist on instances that are configured to write
-        assert (
-            hs.get_instance_name() in hs.config.worker.writers.events
-        ), "Can only instantiate EventsStore on master"
+        assert hs.get_instance_name() in hs.config.worker.writers.events, (
+            "Can only instantiate EventsStore on master"
+        )
 
         # Since we have been configured to write, we ought to have id generators,
         # rather than id trackers.
@@ -465,9 +465,9 @@ class PersistEventsStore:
                     missing_membership_event_ids
                 )
                 # There shouldn't be any missing events
-                assert (
-                    remaining_events.keys() == missing_membership_event_ids
-                ), missing_membership_event_ids.difference(remaining_events.keys())
+                assert remaining_events.keys() == missing_membership_event_ids, (
+                    missing_membership_event_ids.difference(remaining_events.keys())
+                )
                 membership_event_map.update(remaining_events)
 
             for (
@@ -534,9 +534,9 @@ class PersistEventsStore:
                         missing_state_event_ids
                     )
                     # There shouldn't be any missing events
-                    assert (
-                        remaining_events.keys() == missing_state_event_ids
-                    ), missing_state_event_ids.difference(remaining_events.keys())
+                    assert remaining_events.keys() == missing_state_event_ids, (
+                        missing_state_event_ids.difference(remaining_events.keys())
+                    )
                     for event in remaining_events.values():
                         current_state_map[(event.type, event.state_key)] = event
 
@@ -644,9 +644,9 @@ class PersistEventsStore:
             if missing_event_ids:
                 remaining_events = await self.store.get_events(missing_event_ids)
                 # There shouldn't be any missing events
-                assert (
-                    remaining_events.keys() == missing_event_ids
-                ), missing_event_ids.difference(remaining_events.keys())
+                assert remaining_events.keys() == missing_event_ids, (
+                    missing_event_ids.difference(remaining_events.keys())
+                )
                 for event in remaining_events.values():
                     current_state_map[(event.type, event.state_key)] = event
 
@@ -3448,8 +3448,7 @@ class PersistEventsStore:
         # Delete all these events that we've already fetched and now know that their
         # prev events are the new backwards extremeties.
         query = (
-            "DELETE FROM event_backward_extremities"
-            " WHERE event_id = ? AND room_id = ?"
+            "DELETE FROM event_backward_extremities WHERE event_id = ? AND room_id = ?"
         )
         backward_extremity_tuples_to_remove = [
             (ev.event_id, ev.room_id)

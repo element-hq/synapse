@@ -870,8 +870,7 @@ class EventsPersistenceStorageController:
                 # This should only happen for outlier events.
                 if not ev.internal_metadata.is_outlier():
                     raise Exception(
-                        "Context for new event %s has no state "
-                        "group" % (ev.event_id,)
+                        "Context for new event %s has no state group" % (ev.event_id,)
                     )
                 continue
             if ctx.state_group_deltas:

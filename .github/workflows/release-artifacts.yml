@@ -28,9 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.x'
+          python-version: "3.x"
       - id: set-distros
         run: |
           # if we're running from a tag, get the full list of distros; otherwise just use debian:sid
@@ -61,12 +61,12 @@ jobs:
 
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
         with:
           install: true
 
       - name: Set up docker layer caching
-        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-buildx-${{ github.sha }}
@@ -74,9 +74,9 @@ jobs:
             ${{ runner.os }}-buildx-
 
       - name: Set up python
-        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.x'
+          python-version: "3.x"
 
       - name: Build the packages
         # see https://github.com/docker/build-push-action/issues/252
@@ -101,18 +101,21 @@ jobs:
           echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
 
       - name: Upload debs as artifacts
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
           path: debs/*
 
   build-wheels:
-    name: Build wheels on ${{ matrix.os }} for ${{ matrix.arch }}
+    name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-13]
-        arch: [x86_64, aarch64]
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-13 # This uses x86-64
+          - macos-14 # This uses arm64
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
         is_pr:
@@ -122,38 +125,27 @@ jobs:
           # Don't build macos wheels on PR CI.
           - is_pr: true
             os: "macos-13"
-          # Don't build aarch64 wheels on mac.
-          - os: "macos-13"
-            arch: aarch64
+          - is_pr: true
+            os: "macos-14"
           # Don't build aarch64 wheels on PR CI.
           - is_pr: true
-            arch: aarch64
+            os: "ubuntu-24.04-arm"
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           # setup-python@v4 doesn't impose a default python version. Need to use 3.x
           # here, because `python` on osx points to Python 2.7.
           python-version: "3.x"
 
       - name: Install cibuildwheel
-        run: python -m pip install cibuildwheel==2.23.0
-
-      - name: Set up QEMU to emulate aarch64
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
-        with:
-          platforms: arm64
-
-      - name: Build aarch64 wheels
-        if: matrix.arch == 'aarch64'
-        run: echo 'CIBW_ARCHS_LINUX=aarch64' >> $GITHUB_ENV
+        run: python -m pip install cibuildwheel==3.0.0
 
       - name: Only build a single wheel on PR
         if: startsWith(github.ref, 'refs/pull/')
-        run: echo "CIBW_BUILD="cp39-manylinux_${{ matrix.arch }}"" >> $GITHUB_ENV
+        run: echo "CIBW_BUILD="cp39-manylinux_*"" >> $GITHUB_ENV
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
@@ -161,13 +153,10 @@ jobs:
           # Skip testing for platforms which various libraries don't have wheels
           # for, and so need extra build deps.
           CIBW_TEST_SKIP: pp3*-* *i686* *musl*
-          # Fix Rust OOM errors on emulated aarch64: https://github.com/rust-lang/cargo/issues/10583
-          CARGO_NET_GIT_FETCH_WITH_CLI: true
-          CIBW_ENVIRONMENT_PASS_LINUX: CARGO_NET_GIT_FETCH_WITH_CLI
 
-      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: Wheel-${{ matrix.os }}-${{ matrix.arch }}
+          name: Wheel-${{ matrix.os }}
           path: ./wheelhouse/*.whl
 
   build-sdist:
@@ -177,20 +166,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - run: pip install build
 
       - name: Build sdist
         run: python -m build --sdist
 
-      - uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: Sdist
           path: dist/*.tar.gz
-
 
   # if it's a tag, create a release and attach the artifacts to it
   attach-assets:
@@ -203,7 +191,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@b14cf4c92620c250e1c074ab0a5800e37df86765 # v4.2.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       - name: Build a tarball for the debs
         # We need to merge all the debs uploads into one folder, then compress
         # that.
@@ -213,7 +201,7 @@ jobs:
           tar -cvJf debs.tar.xz debs
       - name: Attach to release
         # Pinned to work around https://github.com/softprops/action-gh-release/issues/445
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v0.1.15
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v0.1.15
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

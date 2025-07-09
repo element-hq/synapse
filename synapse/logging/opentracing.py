@@ -796,6 +796,13 @@ def inject_response_headers(response_headers: Headers) -> None:
         response_headers.addRawHeader("Synapse-Trace-Id", f"{trace_id:x}")
 
 
+@ensure_active_span("inject the span into a header dict")
+def inject_request_headers(headers: Dict[str, str]) -> None:
+    span = opentracing.tracer.active_span
+    assert span is not None
+    opentracing.tracer.inject(span.context, opentracing.Format.HTTP_HEADERS, headers)
+
+
 @ensure_active_span(
     "get the active span context as a dict", ret=cast(Dict[str, str], {})
 )

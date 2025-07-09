@@ -5,7 +5,7 @@ name: Build docker images
 on:
   push:
     tags: ["v*"]
-    branches: [ master, main, develop ]
+    branches: [master, main, develop]
   workflow_dispatch:
 
 permissions:
@@ -14,23 +14,21 @@ permissions:
   id-token: write # needed for signing the images with GitHub OIDC Token
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    name: Build and push image for ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs_on: ubuntu-24.04
+            suffix: linux-amd64
+          - platform: linux/arm64
+            runs_on: ubuntu-24.04-arm
+            suffix: linux-arm64
     steps:
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
-        with:
-          platforms: arm64
-
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
-
-      - name: Inspect builder
-        run: docker buildx inspect
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -55,13 +53,79 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Calculate docker image tag
-        id: set-tag
-        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
-          images: |
+          push: true
+          labels: |
+            gitsha1=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.SYNAPSE_VERSION }}
+          tags: |
             docker.io/matrixdotorg/synapse
             ghcr.io/element-hq/synapse
+          file: "docker/Dockerfile"
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.suffix }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Push merged images to ${{ matrix.repository }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        repository:
+          - docker.io/matrixdotorg/synapse
+          - ghcr.io/element-hq/synapse
+
+    needs:
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Log in to DockerHub
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        if: ${{ startsWith(matrix.repository, 'docker.io') }}
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        if: ${{ startsWith(matrix.repository, 'ghcr.io') }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+
+      - name: Calculate docker image tag
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ${{ matrix.repository }}
           flavor: |
             latest=false
           tags: |
@@ -69,31 +133,23 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
             type=pep440,pattern={{raw}}
+            type=sha
 
-      - name: Build and push all platforms
-        id: build-and-push
-        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4 # v6.15.0
-        with:
-          push: true
-          labels: |
-            gitsha1=${{ github.sha }}
-            org.opencontainers.image.version=${{ env.SYNAPSE_VERSION }}
-          tags: "${{ steps.set-tag.outputs.tags }}"
-          file: "docker/Dockerfile"
-          platforms: linux/amd64,linux/arm64
-
-          # arm64 builds OOM without the git fetch setting. c.f.
-          # https://github.com/rust-lang/cargo/issues/10583
-          build-args: |
-            CARGO_NET_GIT_FETCH_WITH_CLI=true
-
-      - name: Sign the images with GitHub OIDC Token
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
         env:
-          DIGEST: ${{ steps.build-and-push.outputs.digest }}
-          TAGS: ${{ steps.set-tag.outputs.tags }}
+          REPOSITORY: ${{ matrix.repository }}
         run: |
-          images=""
-          for tag in ${TAGS}; do
-            images+="${tag}@${DIGEST} "
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$REPOSITORY@sha256:%s " *)
+
+      - name: Sign each manifest
+        env:
+          REPOSITORY: ${{ matrix.repository }}
+        run: |
+          DIGESTS=""
+          for TAG in $(echo "$DOCKER_METADATA_OUTPUT_JSON" | jq -r '.tags[]'); do
+            DIGEST="$(docker buildx imagetools inspect $TAG --format '{{json .Manifest}}' | jq -r '.digest')"
+            DIGESTS="$DIGESTS $REPOSITORY@$DIGEST"
           done
-          cosign sign --yes ${images}
+          cosign sign --yes $DIGESTS

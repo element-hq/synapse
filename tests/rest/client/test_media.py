@@ -137,6 +137,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
         self.register_user("user", "password")
@@ -1005,7 +1006,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         data = base64.b64encode(SMALL_PNG)
 
         end_content = (
-            b"<html><head>" b'<img src="data:image/png;base64,%s" />' b"</head></html>"
+            b'<html><head><img src="data:image/png;base64,%s" /></head></html>'
         ) % (data,)
 
         channel = self.make_request(
@@ -1615,6 +1616,63 @@ class MediaConfigTest(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["m.upload.size"], self.hs.config.media.max_upload_size
         )
+
+
+class MediaConfigModuleCallbackTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        media.register_servlets,
+        admin.register_servlets,
+        login.register_servlets,
+    ]
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user = self.register_user("user", "password")
+        self.tok = self.login("user", "password")
+
+        hs.get_module_api().register_media_repository_callbacks(
+            get_media_config_for_user=self.get_media_config_for_user,
+        )
+
+    async def get_media_config_for_user(
+        self,
+        user_id: str,
+    ) -> Optional[JsonDict]:
+        # We echo back the user_id and set a custom upload size.
+        return {"m.upload.size": 1024, "user_id": user_id}
+
+    def test_media_config(self) -> None:
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/v1/media/config",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["m.upload.size"], 1024)
+        self.assertEqual(channel.json_body["user_id"], self.user)
 
 
 class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
@@ -2593,6 +2651,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="remote_test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
 
@@ -2725,6 +2784,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name="remote_test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
 

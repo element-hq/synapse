@@ -218,7 +218,7 @@ class IdentityHandler:
 
             return data
         except HttpResponseException as e:
-            logger.error("3PID bind failed with Matrix error: %r", e)
+            logger.exception("3PID bind failed with Matrix error: %r", e)
             raise e.to_synapse_error()
         except RequestTimedOutError:
             raise SynapseError(500, "Timed out contacting identity server")
@@ -323,7 +323,7 @@ class IdentityHandler:
                 # The remote server probably doesn't support unbinding (yet)
                 logger.warning("Received %d response while unbinding threepid", e.code)
             else:
-                logger.error("Failed to unbind threepid on identity server: %s", e)
+                logger.exception("Failed to unbind threepid on identity server: %s", e)
                 raise SynapseError(500, "Failed to contact identity server")
         except RequestTimedOutError:
             raise SynapseError(500, "Timed out contacting identity server")

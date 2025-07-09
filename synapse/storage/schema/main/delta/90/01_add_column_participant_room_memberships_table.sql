@@ -14,7 +14,3 @@
 -- Add a column `participant` to `room_memberships` table to track whether a room member has sent
 -- a `m.room.message` or `m.room.encrypted` event into a room they are a member of
 ALTER TABLE room_memberships ADD COLUMN participant BOOLEAN DEFAULT FALSE;
-
--- Add a background update to populate `participant` column
-INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (9001, 'populate_participant_bg_update', '{}');

@@ -134,7 +134,6 @@ RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
-  apt-get install -y --no-install-recommends rsync && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
       curl \
       gosu \
@@ -152,10 +151,6 @@ RUN \
   done
 
 # Extract the debs for each architecture
-# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
-# libraries to the right place, else the `COPY` won't work.
-# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
-# already present in the runtime image.
 RUN \
   for arch in arm64 amd64; do \
     mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
@@ -165,8 +160,6 @@ RUN \
       dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
       dpkg --extract $deb /install-${arch}; \
     done; \
-    rsync -avr /install-${arch}/lib/ /install-${arch}/usr/lib; \
-    rm -rf /install-${arch}/lib /install-${arch}/lib64; \
   done
 
 
@@ -183,7 +176,14 @@ LABEL org.opencontainers.image.documentation='https://github.com/element-hq/syna
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
-COPY --from=runtime-deps /install-${TARGETARCH} /
+# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
+# libraries to the right place, else the `COPY` won't work.
+# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
+# already present in the runtime image.
+COPY --from=runtime-deps /install-${TARGETARCH}/lib /usr/lib
+COPY --from=runtime-deps /install-${TARGETARCH}/etc /etc
+COPY --from=runtime-deps /install-${TARGETARCH}/usr /usr
+COPY --from=runtime-deps /install-${TARGETARCH}/var /var
 COPY --from=builder /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf

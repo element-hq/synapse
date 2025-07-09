@@ -205,6 +205,12 @@ class HttpPusher(Pusher):
         if self._is_processing:
             return
 
+        # Check if we are trying, but failing, to contact the pusher. If so, we
+        # don't try and start processing immediately and instead wait for the
+        # retry loop to try again later (which is controlled by the timer).
+        if self.failing_since and self.timed_call and self.timed_call.active():
+            return
+
         run_as_background_process("httppush.process", self._process)
 
     async def _process(self) -> None:
