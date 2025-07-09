@@ -89,7 +89,9 @@ class ReportEventRestServlet(RestServlet):
 
         if event is None:
             if self.hs.config.experimental.msc4277_enabled:
-                return 200, {}  # Hide existence
+                # Respond with 200 and no content regardless of whether the event
+                # exists to prevent enumeration attacks.
+                return 200, {}
             else:
                 raise NotFoundError(
                     "Unable to report event: "
@@ -145,7 +147,9 @@ class ReportRoomRestServlet(RestServlet):
         room = await self.store.get_room(room_id)
         if room is None:
             if self.hs.config.experimental.msc4277_enabled:
-                return 200, {}  # Hide existence
+                # Respond with 200 and no content regardless of whether the room
+                # exists to prevent enumeration attacks.
+                return 200, {}
             else:
                 raise NotFoundError("Room does not exist")
 
