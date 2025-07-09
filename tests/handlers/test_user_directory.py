@@ -1178,10 +1178,10 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
             for use_numeric in [False, True]:
                 if use_numeric:
                     prefix1 = f"{i}"
-                    prefix2 = f"{i+1}"
+                    prefix2 = f"{i + 1}"
                 else:
                     prefix1 = f"a{i}"
-                    prefix2 = f"a{i+1}"
+                    prefix2 = f"a{i + 1}"
 
                 local_user_1 = self.register_user(f"user{char}{prefix1}", "password")
                 local_user_2 = self.register_user(f"user{char}{prefix2}", "password")

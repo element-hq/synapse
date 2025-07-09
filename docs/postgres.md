@@ -100,6 +100,14 @@ database:
     keepalives_count: 3
 ```
 
+## Postgresql major version upgrades
+
+Postgres uses separate directories for database locations between major versions (typically `/var/lib/postgresql/<version>/main`).
+
+Therefore, it is recommended to stop Synapse and other services (MAS, etc) before upgrading Postgres major versions.
+
+It is also strongly recommended to [back up](./usage/administration/backups.md#database) your database beforehand to ensure no data loss arising from a failed upgrade.
+
 ## Backups
 
 Don't forget to [back up](./usage/administration/backups.md#database) your database!

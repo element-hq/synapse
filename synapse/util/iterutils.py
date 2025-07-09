@@ -114,7 +114,7 @@ def sorted_topologically(
 
     # This is implemented by Kahn's algorithm.
 
-    degree_map = {node: 0 for node in nodes}
+    degree_map = dict.fromkeys(nodes, 0)
     reverse_graph: Dict[T, Set[T]] = {}
 
     for node, edges in graph.items():
@@ -164,7 +164,7 @@ def sorted_topologically_batched(
     persisted.
     """
 
-    degree_map = {node: 0 for node in nodes}
+    degree_map = dict.fromkeys(nodes, 0)
     reverse_graph: Dict[T, Set[T]] = {}
 
     for node, edges in graph.items():

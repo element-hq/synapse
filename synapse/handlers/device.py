@@ -20,6 +20,7 @@
 #
 #
 import logging
+from threading import Lock
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -670,12 +671,12 @@ class DeviceHandler(DeviceWorkerHandler):
             except_device_id: optional device id which should not be deleted
         """
         device_map = await self.store.get_devices_by_user(user_id)
-        device_ids = list(device_map)
         if except_device_id is not None:
-            device_ids = [d for d in device_ids if d != except_device_id]
-        await self.delete_devices(user_id, device_ids)
+            device_map.pop(except_device_id, None)
+        user_device_ids = device_map.keys()
+        await self.delete_devices(user_id, user_device_ids)
 
-    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
+    async def delete_devices(self, user_id: str, device_ids: StrCollection) -> None:
         """Delete several devices
 
         Args:
@@ -694,17 +695,10 @@ class DeviceHandler(DeviceWorkerHandler):
             else:
                 raise
 
-        # Delete data specific to each device. Not optimised as it is not
-        # considered as part of a critical path.
-        for device_id in device_ids:
-            await self._auth_handler.delete_access_tokens_for_user(
-                user_id, device_id=device_id
-            )
-            await self.store.delete_e2e_keys_by_device(
-                user_id=user_id, device_id=device_id
-            )
-
-            if self.hs.config.experimental.msc3890_enabled:
+        # Delete data specific to each device. Not optimised as its an
+        # experimental MSC.
+        if self.hs.config.experimental.msc3890_enabled:
+            for device_id in device_ids:
                 # Remove any local notification settings for this device in accordance
                 # with MSC3890.
                 await self._account_data_handler.remove_account_data_for_user(
@@ -712,6 +706,13 @@ class DeviceHandler(DeviceWorkerHandler):
                     f"org.matrix.msc3890.local_notification_settings.{device_id}",
                 )
 
+        # If we're deleting a lot of devices, a bunch of them may not have any
+        # to-device messages queued up. We filter those out to avoid scheduling
+        # unnecessary tasks.
+        devices_with_messages = await self.store.get_devices_with_messages(
+            user_id, device_ids
+        )
+        for device_id in devices_with_messages:
             # Delete device messages asynchronously and in batches using the task scheduler
             # We specify an upper stream id to avoid deleting non delivered messages
             # if an user re-uses a device ID.
@@ -724,6 +725,10 @@ class DeviceHandler(DeviceWorkerHandler):
                     "up_to_stream_id": to_device_stream_id,
                 },
             )
+
+        await self._auth_handler.delete_access_tokens_for_devices(
+            user_id, device_ids=device_ids
+        )
 
         # Pushers are deleted after `delete_access_tokens_for_user` is called so that
         # modules using `on_logged_out` hook can use them if needed.
@@ -818,10 +823,11 @@ class DeviceHandler(DeviceWorkerHandler):
             # This should only happen if there are no updates, so we bail.
             return
 
-        for device_id in device_ids:
-            logger.debug(
-                "Notifying about update %r/%r, ID: %r", user_id, device_id, position
-            )
+        if logger.isEnabledFor(logging.DEBUG):
+            for device_id in device_ids:
+                logger.debug(
+                    "Notifying about update %r/%r, ID: %r", user_id, device_id, position
+                )
 
         # specify the user ID too since the user should always get their own device list
         # updates, even if they aren't in any rooms.
@@ -921,9 +927,6 @@ class DeviceHandler(DeviceWorkerHandler):
         # can't call self.delete_device because that will clobber the
         # access token so call the storage layer directly
         await self.store.delete_devices(user_id, [old_device_id])
-        await self.store.delete_e2e_keys_by_device(
-            user_id=user_id, device_id=old_device_id
-        )
 
         # tell everyone that the old device is gone and that the dehydrated
         # device has a new display name
@@ -945,7 +948,6 @@ class DeviceHandler(DeviceWorkerHandler):
             raise errors.NotFoundError()
 
         await self.delete_devices(user_id, [device_id])
-        await self.store.delete_e2e_keys_by_device(user_id=user_id, device_id=device_id)
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
@@ -1237,7 +1239,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         )
 
         # Attempt to resync out of sync device lists every 30s.
-        self._resync_retry_in_progress = False
+        self._resync_retry_lock = Lock()
         self.clock.looping_call(
             run_as_background_process,
             30 * 1000,
@@ -1419,13 +1421,10 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         """Retry to resync device lists that are out of sync, except if another retry is
         in progress.
         """
-        if self._resync_retry_in_progress:
+        # If the lock can not be acquired we want to always return immediately instead of blocking here
+        if not self._resync_retry_lock.acquire(blocking=False):
             return
-
         try:
-            # Prevent another call of this function to retry resyncing device lists so
-            # we don't send too many requests.
-            self._resync_retry_in_progress = True
             # Get all of the users that need resyncing.
             need_resync = await self.store.get_user_ids_requiring_device_list_resync()
 
@@ -1466,8 +1465,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                         e,
                     )
         finally:
-            # Allow future calls to retry resyncinc out of sync device lists.
-            self._resync_retry_in_progress = False
+            self._resync_retry_lock.release()
 
     async def multi_user_device_resync(
         self, user_ids: List[str], mark_failed_as_stale: bool = True
@@ -1603,7 +1601,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             if prev_stream_id is not None and cached_devices == {
                 d["device_id"]: d for d in devices
             }:
-                logging.info(
+                logger.info(
                     "Skipping device list resync for %s, as our cache matches already",
                     user_id,
                 )

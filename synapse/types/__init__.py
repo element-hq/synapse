@@ -889,8 +889,7 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
     def __str__(self) -> str:
         instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
         return (
-            f"MultiWriterStreamToken(stream: {self.stream}, "
-            f"instances: {{{instances}}})"
+            f"MultiWriterStreamToken(stream: {self.stream}, instances: {{{instances}}})"
         )
 
 

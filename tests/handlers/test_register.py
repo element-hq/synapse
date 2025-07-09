@@ -588,6 +588,29 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         d = self.store.is_support_user(user_id)
         self.assertFalse(self.get_success(d))
 
+    def test_underscore_localpart_rejected_by_default(self) -> None:
+        for invalid_user_id in ("_", "_prefixed"):
+            with self.subTest(invalid_user_id=invalid_user_id):
+                self.get_failure(
+                    self.handler.register_user(localpart=invalid_user_id),
+                    SynapseError,
+                )
+
+    @override_config(
+        {
+            "allow_underscore_prefixed_localpart": True,
+        }
+    )
+    def test_underscore_localpart_allowed_if_configured(self) -> None:
+        for valid_user_id in ("_", "_prefixed"):
+            with self.subTest(valid_user_id=valid_user_id):
+                user_id = self.get_success(
+                    self.handler.register_user(
+                        localpart=valid_user_id,
+                    ),
+                )
+                self.assertEqual(user_id, f"@{valid_user_id}:test")
+
     def test_invalid_user_id(self) -> None:
         invalid_user_id = "^abcd"
         self.get_failure(
@@ -714,6 +737,41 @@ class RegistrationTestCase(unittest.HomeserverTestCase):
         self.get_success(
             self.handler.register_user(localpart="bobflimflob", auth_provider_id="saml")
         )
+
+    def test_register_default_user_type(self) -> None:
+        """Test that the default user type is none when registering a user."""
+        user_id = self.get_success(self.handler.register_user(localpart="user"))
+        user_info = self.get_success(self.store.get_user_by_id(user_id))
+        assert user_info is not None
+        self.assertEqual(user_info.user_type, None)
+
+    def test_register_extra_user_types_valid(self) -> None:
+        """
+        Test that the specified user type is set correctly when registering a user.
+        n.b. No validation is done on the user type, so this test
+        is only to ensure that the user type can be set to any value.
+        """
+        user_id = self.get_success(
+            self.handler.register_user(localpart="user", user_type="anyvalue")
+        )
+        user_info = self.get_success(self.store.get_user_by_id(user_id))
+        assert user_info is not None
+        self.assertEqual(user_info.user_type, "anyvalue")
+
+    @override_config(
+        {
+            "user_types": {
+                "extra_user_types": ["extra1", "extra2"],
+                "default_user_type": "extra1",
+            }
+        }
+    )
+    def test_register_extra_user_types_with_default(self) -> None:
+        """Test that the default_user_type in config is set correctly when registering a user."""
+        user_id = self.get_success(self.handler.register_user(localpart="user"))
+        user_info = self.get_success(self.store.get_user_by_id(user_id))
+        assert user_info is not None
+        self.assertEqual(user_info.user_type, "extra1")
 
     async def get_or_create_user(
         self,

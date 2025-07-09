@@ -94,6 +94,7 @@ from synapse.handlers.read_marker import ReadMarkerHandler
 from synapse.handlers.receipts import ReceiptsHandler
 from synapse.handlers.register import RegistrationHandler
 from synapse.handlers.relations import RelationsHandler
+from synapse.handlers.reports import ReportsHandler
 from synapse.handlers.room import (
     RoomContextHandler,
     RoomCreationHandler,
@@ -107,6 +108,7 @@ from synapse.handlers.room_member import (
     RoomMemberMasterHandler,
 )
 from synapse.handlers.room_member_worker import RoomMemberWorkerHandler
+from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
@@ -718,6 +720,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReceiptsHandler(self)
 
     @cache_in_self
+    def get_reports_handler(self) -> ReportsHandler:
+        return ReportsHandler(self)
+
+    @cache_in_self
     def get_read_marker_handler(self) -> ReadMarkerHandler:
         return ReadMarkerHandler(self)
 
@@ -806,6 +812,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         from synapse.handlers.oidc import OidcHandler
 
         return OidcHandler(self)
+
+    @cache_in_self
+    def get_room_policy_handler(self) -> RoomPolicyHandler:
+        return RoomPolicyHandler(self)
 
     @cache_in_self
     def get_event_client_serializer(self) -> EventClientSerializer:

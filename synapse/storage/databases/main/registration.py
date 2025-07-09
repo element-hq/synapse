@@ -40,14 +40,16 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import IdGenerator
 from synapse.storage.util.sequence import build_sequence_generator
-from synapse.types import JsonDict, UserID, UserInfo
+from synapse.types import JsonDict, StrCollection, UserID, UserInfo
 from synapse.util.caches.descriptors import cached
+from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -583,7 +585,9 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
 
         await self.db_pool.runInteraction("set_shadow_banned", set_shadow_banned_txn)
 
-    async def set_user_type(self, user: UserID, user_type: Optional[UserTypes]) -> None:
+    async def set_user_type(
+        self, user: UserID, user_type: Optional[Union[UserTypes, str]]
+    ) -> None:
         """Sets the user type.
 
         Args:
@@ -683,7 +687,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             retcol="user_type",
             allow_none=True,
         )
-        return res is None
+        return res is None or res not in [UserTypes.BOT, UserTypes.SUPPORT]
 
     def is_support_user_txn(self, txn: LoggingTransaction, user_id: str) -> bool:
         res = self.db_pool.simple_select_one_onecol_txn(
@@ -959,10 +963,12 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction("count_users", _count_users)
 
     async def count_real_users(self) -> int:
-        """Counts all users without a special user_type registered on the homeserver."""
+        """Counts all users without the bot or support user_types registered on the homeserver."""
 
         def _count_users(txn: LoggingTransaction) -> int:
-            txn.execute("SELECT COUNT(*) FROM users where user_type is null")
+            txn.execute(
+                f"SELECT COUNT(*) FROM users WHERE user_type IS NULL OR user_type NOT IN ('{UserTypes.BOT}', '{UserTypes.SUPPORT}')"
+            )
             row = txn.fetchone()
             assert row is not None
             return row[0]
@@ -2545,7 +2551,8 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
                 the user, setting their displayname to the given value
             admin: is an admin user?
             user_type: type of user. One of the values from api.constants.UserTypes,
-                or None for a normal user.
+                a custom value set in the configuration file, or None for a normal
+                user.
             shadow_banned: Whether the user is shadow-banned, i.e. they may be
                 told their requests succeeded but we ignore them.
             approved: Whether to consider the user has already been approved by an
@@ -2795,6 +2802,81 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
             return tokens_and_devices
 
         return await self.db_pool.runInteraction("user_delete_access_tokens", f)
+
+    async def user_delete_access_tokens_for_devices(
+        self,
+        user_id: str,
+        device_ids: StrCollection,
+    ) -> List[Tuple[str, int, Optional[str]]]:
+        """
+        Invalidate access and refresh tokens belonging to a user
+
+        Args:
+            user_id: ID of user the tokens belong to
+            device_ids: The devices to delete tokens for.
+        Returns:
+            A tuple of (token, token id, device id) for each of the deleted tokens
+        """
+
+        def user_delete_access_tokens_for_devices_txn(
+            txn: LoggingTransaction, batch_device_ids: StrCollection
+        ) -> List[Tuple[str, int, Optional[str]]]:
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="refresh_tokens",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=batch_device_ids,
+            )
+
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "device_id", batch_device_ids
+            )
+            args.append(user_id)
+
+            if self.database_engine.supports_returning:
+                sql = f"""
+                    DELETE FROM access_tokens
+                    WHERE {clause} AND user_id = ?
+                    RETURNING token, id, device_id
+                """
+                txn.execute(sql, args)
+                tokens_and_devices = txn.fetchall()
+            else:
+                tokens_and_devices = self.db_pool.simple_select_many_txn(
+                    txn,
+                    table="access_tokens",
+                    column="device_id",
+                    iterable=batch_device_ids,
+                    keyvalues={"user_id": user_id},
+                    retcols=("token", "id", "device_id"),
+                )
+
+                self.db_pool.simple_delete_many_txn(
+                    txn,
+                    table="access_tokens",
+                    keyvalues={"user_id": user_id},
+                    column="device_id",
+                    values=batch_device_ids,
+                )
+
+            self._invalidate_cache_and_stream_bulk(
+                txn,
+                self.get_user_by_access_token,
+                [(t[0],) for t in tokens_and_devices],
+            )
+            return tokens_and_devices
+
+        results = []
+        for batch_device_ids in batch_iter(device_ids, 1000):
+            tokens_and_devices = await self.db_pool.runInteraction(
+                "user_delete_access_tokens_for_devices",
+                user_delete_access_tokens_for_devices_txn,
+                batch_device_ids,
+            )
+            results.extend(tokens_and_devices)
+
+        return results
 
     async def delete_access_token(self, access_token: str) -> None:
         def f(txn: LoggingTransaction) -> None:

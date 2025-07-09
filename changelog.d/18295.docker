@@ -1,1 +1,0 @@
-When generating container scripts from templates, don't add a leading newline so that their shebangs may be handled correctly.

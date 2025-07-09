@@ -739,9 +739,9 @@ class BackgroundUpdater:
             c.execute(sql)
 
         async def updater(progress: JsonDict, batch_size: int) -> int:
-            assert isinstance(
-                self.db_pool.engine, engines.PostgresEngine
-            ), "validate constraint background update registered for non-Postres database"
+            assert isinstance(self.db_pool.engine, engines.PostgresEngine), (
+                "validate constraint background update registered for non-Postres database"
+            )
 
             logger.info("Validating constraint %s to %s", constraint_name, table)
             await self.db_pool.runWithConnection(runner)
@@ -900,9 +900,9 @@ class BackgroundUpdater:
               on the table. Used to iterate over the table.
         """
 
-        assert isinstance(
-            self.db_pool.engine, engines.PostgresEngine
-        ), "validate constraint background update registered for non-Postres database"
+        assert isinstance(self.db_pool.engine, engines.PostgresEngine), (
+            "validate constraint background update registered for non-Postres database"
+        )
 
         async def updater(progress: JsonDict, batch_size: int) -> int:
             return await self.validate_constraint_and_delete_in_background(

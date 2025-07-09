@@ -878,7 +878,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         data = base64.b64encode(SMALL_PNG)
 
         end_content = (
-            b"<html><head>" b'<img src="data:image/png;base64,%s" />' b"</head></html>"
+            b'<html><head><img src="data:image/png;base64,%s" /></head></html>'
         ) % (data,)
 
         channel = self.make_request(

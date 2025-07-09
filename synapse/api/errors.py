@@ -137,6 +137,9 @@ class Codes(str, Enum):
     PROFILE_TOO_LARGE = "M_PROFILE_TOO_LARGE"
     KEY_TOO_LARGE = "M_KEY_TOO_LARGE"
 
+    # Part of MSC4155
+    INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
@@ -300,6 +303,20 @@ class UserDeactivatedError(SynapseError):
         """
         super().__init__(
             code=HTTPStatus.FORBIDDEN, msg=msg, errcode=Codes.USER_DEACTIVATED
+        )
+
+
+class UserLockedError(SynapseError):
+    """The error returned to the client when the user attempted to access an
+    authenticated endpoint, but the account has been locked.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            code=HTTPStatus.UNAUTHORIZED,
+            msg="User account has been locked",
+            errcode=Codes.USER_LOCKED,
+            additional_fields={"soft_logout": True},
         )
 
 
@@ -524,7 +541,11 @@ class InvalidCaptchaError(SynapseError):
 
 
 class LimitExceededError(SynapseError):
-    """A client has sent too many requests and is being throttled."""
+    """A client has sent too many requests and is being throttled.
+
+    Args:
+        pause: Optional time in seconds to pause before responding to the client.
+    """
 
     def __init__(
         self,
@@ -532,6 +553,7 @@ class LimitExceededError(SynapseError):
         code: int = 429,
         retry_after_ms: Optional[int] = None,
         errcode: str = Codes.LIMIT_EXCEEDED,
+        pause: Optional[float] = None,
     ):
         # Use HTTP header Retry-After to enable library-assisted retry handling.
         headers = (
@@ -542,6 +564,7 @@ class LimitExceededError(SynapseError):
         super().__init__(code, "Too Many Requests", errcode, headers=headers)
         self.retry_after_ms = retry_after_ms
         self.limiter_name = limiter_name
+        self.pause = pause
 
     def error_dict(self, config: Optional["HomeServerConfig"]) -> "JsonDict":
         return cs_error(self.msg, self.errcode, retry_after_ms=self.retry_after_ms)

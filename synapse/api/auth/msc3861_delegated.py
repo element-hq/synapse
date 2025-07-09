@@ -30,9 +30,6 @@ from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
 from prometheus_client import Histogram
 
-from twisted.web.client import readBody
-from twisted.web.http_headers import Headers
-
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,
@@ -43,8 +40,14 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import make_deferred_yieldable
-from synapse.logging.opentracing import active_span, force_tracing, start_active_span
+from synapse.logging.context import PreserveLoggingContext
+from synapse.logging.opentracing import (
+    active_span,
+    force_tracing,
+    inject_request_headers,
+    start_active_span,
+)
+from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
@@ -179,6 +182,10 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
+        self._rust_http_client = HttpClient(
+            user_agent=self._http_client.user_agent.decode("utf8")
+        )
+
         # # Token Introspection Cache
         # This remembers what users/devices are represented by which access tokens,
         # in order to reduce overall system load:
@@ -301,7 +308,6 @@ class MSC3861DelegatedAuth(BaseAuth):
         introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": str(self._http_client.user_agent, "utf-8"),
             "Accept": "application/json",
             # Tell MAS that we support reading the device ID as an explicit
             # value, not encoded in the scope. This is supported by MAS 0.15+
@@ -315,38 +321,34 @@ class MSC3861DelegatedAuth(BaseAuth):
         uri, raw_headers, body = self._client_auth.prepare(
             method="POST", uri=introspection_endpoint, headers=raw_headers, body=body
         )
-        headers = Headers({k: [v] for (k, v) in raw_headers.items()})
 
         # Do the actual request
-        # We're not using the SimpleHttpClient util methods as we don't want to
-        # check the HTTP status code, and we do the body encoding ourselves.
 
+        logger.debug("Fetching token from MAS")
         start_time = self._clock.time()
         try:
-            response = await self._http_client.request(
-                method="POST",
-                uri=uri,
-                data=body.encode("utf-8"),
-                headers=headers,
-            )
-
-            resp_body = await make_deferred_yieldable(readBody(response))
+            with start_active_span("mas-introspect-token"):
+                inject_request_headers(raw_headers)
+                with PreserveLoggingContext():
+                    resp_body = await self._rust_http_client.post(
+                        url=uri,
+                        response_limit=1 * 1024 * 1024,
+                        headers=raw_headers,
+                        request_body=body,
+                    )
+        except HttpResponseException as e:
+            end_time = self._clock.time()
+            introspection_response_timer.labels(e.code).observe(end_time - start_time)
+            raise
         except Exception:
             end_time = self._clock.time()
             introspection_response_timer.labels("ERR").observe(end_time - start_time)
             raise
 
-        end_time = self._clock.time()
-        introspection_response_timer.labels(response.code).observe(
-            end_time - start_time
-        )
+        logger.debug("Fetched token from MAS")
 
-        if response.code < 200 or response.code >= 300:
-            raise HttpResponseException(
-                response.code,
-                response.phrase.decode("ascii", errors="replace"),
-                resp_body,
-            )
+        end_time = self._clock.time()
+        introspection_response_timer.labels(200).observe(end_time - start_time)
 
         resp = json_decoder.decode(resp_body.decode("utf-8"))
 
@@ -475,7 +477,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
-            logging.info("Admin toked used")
+            logger.info("Admin toked used")
             # XXX: that user doesn't exist and won't be provisioned.
             # This is mostly fine for admin calls, but we should also think about doing
             # requesters without a user_id.

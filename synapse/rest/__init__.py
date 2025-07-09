@@ -165,7 +165,7 @@ class ClientRestResource(JsonResource):
             # Fail on unknown servlet groups.
             if servlet_group not in SERVLET_GROUPS:
                 if servlet_group == "media":
-                    logger.warn(
+                    logger.warning(
                         "media.can_load_media_repo needs to be configured for the media servlet to be available"
                     )
                 raise RuntimeError(
