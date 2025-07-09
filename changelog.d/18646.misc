@@ -1,1 +1,0 @@
-Replace `PyICU` crate with equivalent `icu_segmenter` Rust crate.
