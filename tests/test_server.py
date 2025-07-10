@@ -226,8 +226,7 @@ class OptionsResourceTests(unittest.TestCase):
             isLeaf = True
 
             def render(self, request: SynapseRequest) -> bytes:
-                # Type-ignore: mypy thinks request.path is Optional[Any], not bytes.
-                return request.path  # type: ignore[return-value]
+                return request.path
 
         # Setup a resource with some children.
         self.resource = OptionsResource()
@@ -317,15 +316,16 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             await self.callback(request)
 
     def setUp(self) -> None:
-        reactor, _ = get_clock()
+        reactor, clock = get_clock()
         self.reactor = reactor
+        self.clock = clock
 
     def test_good_response(self) -> None:
         async def callback(request: SynapseRequest) -> None:
             request.write(b"response")
             request.finish()
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -345,7 +345,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
         async def callback(request: SynapseRequest, **kwargs: object) -> None:
             raise RedirectException(b"/look/an/eagle", 301)
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -367,7 +367,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             e.cookies.append(b"session=yespls")
             raise e
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -388,7 +388,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             request.write(b"response")
             request.finish()
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -401,7 +401,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
 
 class CancellableDirectServeJsonResource(DirectServeJsonResource):
     def __init__(self, clock: Clock):
-        super().__init__()
+        super().__init__(clock=clock)
         self.clock = clock
 
     @cancellable
@@ -418,7 +418,7 @@ class CancellableDirectServeHtmlResource(DirectServeHtmlResource):
     ERROR_TEMPLATE = "{code} {msg}"
 
     def __init__(self, clock: Clock):
-        super().__init__()
+        super().__init__(clock=clock)
         self.clock = clock
 
     @cancellable

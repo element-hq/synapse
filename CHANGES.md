@@ -1,3 +1,150 @@
+# Synapse 1.134.0rc1 (2025-07-09)
+
+### Features
+
+- Support for [MSC4235](https://github.com/matrix-org/matrix-spec-proposals/pull/4235): `via` query param for hierarchy endpoint. Contributed by Krishan (@kfiven). ([\#18070](https://github.com/element-hq/synapse/issues/18070))
+- Add `forget_forced_upon_leave` capability as per [MSC4267](https://github.com/matrix-org/matrix-spec-proposals/pull/4267). ([\#18196](https://github.com/element-hq/synapse/issues/18196))
+- Add `federated_user_may_invite` spam checker callback which receives the entire invite event. Contributed by @tulir @ Beeper. ([\#18241](https://github.com/element-hq/synapse/issues/18241))
+
+### Bugfixes
+
+- Fix `KeyError` on background updates when using split main/state databases. ([\#18509](https://github.com/element-hq/synapse/issues/18509))
+- Improve performance of device deletion by adding missing index. ([\#18582](https://github.com/element-hq/synapse/issues/18582))
+- Fix `avatar_url` and `displayname` being sent on federation profile queries when they are not set. ([\#18593](https://github.com/element-hq/synapse/issues/18593))
+- Respond with 401 & `M_USER_LOCKED` when a locked user calls `POST /login`, as per the spec. ([\#18594](https://github.com/element-hq/synapse/issues/18594))
+- Ensure policy servers are not asked to scan policy server change events, allowing rooms to disable the use of a policy server while the policy server is down. ([\#18605](https://github.com/element-hq/synapse/issues/18605))
+
+### Improved Documentation
+
+- Fix documentation of the Delete Room Admin API's status field. ([\#18519](https://github.com/element-hq/synapse/issues/18519))
+
+### Deprecations and Removals
+
+- Stop adding the "origin" field to newly-created events (PDUs). ([\#18418](https://github.com/element-hq/synapse/issues/18418))
+
+### Internal Changes
+
+- Replace `PyICU` crate with equivalent `icu_segmenter` Rust crate. ([\#18553](https://github.com/element-hq/synapse/issues/18553), [\#18646](https://github.com/element-hq/synapse/issues/18646))
+- Improve docstring on `simple_upsert_many`. ([\#18573](https://github.com/element-hq/synapse/issues/18573))
+- Raise poetry-core version cap to 2.1.3. ([\#18575](https://github.com/element-hq/synapse/issues/18575))
+- Raise setuptools_rust version cap to 1.11.1. ([\#18576](https://github.com/element-hq/synapse/issues/18576))
+- Better handling of ratelimited requests. ([\#18595](https://github.com/element-hq/synapse/issues/18595), [\#18600](https://github.com/element-hq/synapse/issues/18600))
+- Update to Rust 1.87.0 in CI, and bump the pinned commit of the `dtolnay/rust-toolchain` GitHub Action to `b3b07ba8b418998c39fb20f53e8b695cdcc8de1b`. ([\#18596](https://github.com/element-hq/synapse/issues/18596))
+- Speed up bulk device deletion. ([\#18602](https://github.com/element-hq/synapse/issues/18602))
+- Speed up the building of arm-based wheels in CI. ([\#18618](https://github.com/element-hq/synapse/issues/18618))
+- Speed up the building of Docker images in CI. ([\#18620](https://github.com/element-hq/synapse/issues/18620))
+- Add `.zed/` directory to `.gitignore`. ([\#18623](https://github.com/element-hq/synapse/issues/18623))
+- Log the room ID we're purging state for. ([\#18625](https://github.com/element-hq/synapse/issues/18625))
+
+
+
+### Updates to locked dependencies
+
+* Bump Swatinem/rust-cache from 2.7.8 to 2.8.0. ([\#18612](https://github.com/element-hq/synapse/issues/18612))
+* Bump attrs from 24.2.0 to 25.3.0. ([\#18649](https://github.com/element-hq/synapse/issues/18649))
+* Bump authlib from 1.5.2 to 1.6.0. ([\#18642](https://github.com/element-hq/synapse/issues/18642))
+* Bump base64 from 0.21.7 to 0.22.1. ([\#18589](https://github.com/element-hq/synapse/issues/18589))
+* Bump base64 from 0.21.7 to 0.22.1. ([\#18629](https://github.com/element-hq/synapse/issues/18629))
+* Bump docker/build-push-action from 6.17.0 to 6.18.0. ([\#18497](https://github.com/element-hq/synapse/issues/18497))
+* Bump docker/setup-buildx-action from 3.10.0 to 3.11.1. ([\#18587](https://github.com/element-hq/synapse/issues/18587))
+* Bump hiredis from 3.1.0 to 3.2.1. ([\#18638](https://github.com/element-hq/synapse/issues/18638))
+* Bump ijson from 3.3.0 to 3.4.0. ([\#18650](https://github.com/element-hq/synapse/issues/18650))
+* Bump jsonschema from 4.23.0 to 4.24.0. ([\#18630](https://github.com/element-hq/synapse/issues/18630))
+* Bump msgpack from 1.1.0 to 1.1.1. ([\#18651](https://github.com/element-hq/synapse/issues/18651))
+* Bump mypy-zope from 1.0.11 to 1.0.12. ([\#18640](https://github.com/element-hq/synapse/issues/18640))
+* Bump phonenumbers from 9.0.2 to 9.0.8. ([\#18652](https://github.com/element-hq/synapse/issues/18652))
+* Bump pillow from 11.2.1 to 11.3.0. ([\#18624](https://github.com/element-hq/synapse/issues/18624))
+* Bump prometheus-client from 0.21.0 to 0.22.1. ([\#18609](https://github.com/element-hq/synapse/issues/18609))
+* Bump pyasn1-modules from 0.4.1 to 0.4.2. ([\#18495](https://github.com/element-hq/synapse/issues/18495))
+* Bump pydantic from 2.11.4 to 2.11.7. ([\#18639](https://github.com/element-hq/synapse/issues/18639))
+* Bump reqwest from 0.12.15 to 0.12.20. ([\#18590](https://github.com/element-hq/synapse/issues/18590))
+* Bump reqwest from 0.12.20 to 0.12.22. ([\#18627](https://github.com/element-hq/synapse/issues/18627))
+* Bump ruff from 0.11.11 to 0.12.1. ([\#18645](https://github.com/element-hq/synapse/issues/18645))
+* Bump ruff from 0.12.1 to 0.12.2. ([\#18657](https://github.com/element-hq/synapse/issues/18657))
+* Bump sentry-sdk from 2.22.0 to 2.32.0. ([\#18633](https://github.com/element-hq/synapse/issues/18633))
+* Bump setuptools-rust from 1.10.2 to 1.11.1. ([\#18655](https://github.com/element-hq/synapse/issues/18655))
+* Bump sigstore/cosign-installer from 3.8.2 to 3.9.0. ([\#18588](https://github.com/element-hq/synapse/issues/18588))
+* Bump sigstore/cosign-installer from 3.9.0 to 3.9.1. ([\#18608](https://github.com/element-hq/synapse/issues/18608))
+* Bump stefanzweifel/git-auto-commit-action from 5.2.0 to 6.0.1. ([\#18607](https://github.com/element-hq/synapse/issues/18607))
+* Bump tokio from 1.45.1 to 1.46.0. ([\#18628](https://github.com/element-hq/synapse/issues/18628))
+* Bump tokio from 1.46.0 to 1.46.1. ([\#18667](https://github.com/element-hq/synapse/issues/18667))
+* Bump treq from 24.9.1 to 25.5.0. ([\#18610](https://github.com/element-hq/synapse/issues/18610))
+* Bump types-bleach from 6.2.0.20241123 to 6.2.0.20250514. ([\#18634](https://github.com/element-hq/synapse/issues/18634))
+* Bump types-jsonschema from 4.23.0.20250516 to 4.24.0.20250528. ([\#18611](https://github.com/element-hq/synapse/issues/18611))
+* Bump types-opentracing from 2.4.10.6 to 2.4.10.20250622. ([\#18586](https://github.com/element-hq/synapse/issues/18586))
+* Bump types-psycopg2 from 2.9.21.20250318 to 2.9.21.20250516. ([\#18658](https://github.com/element-hq/synapse/issues/18658))
+* Bump types-pyyaml from 6.0.12.20241230 to 6.0.12.20250516. ([\#18643](https://github.com/element-hq/synapse/issues/18643))
+* Bump types-setuptools from 75.2.0.20241019 to 80.9.0.20250529. ([\#18644](https://github.com/element-hq/synapse/issues/18644))
+* Bump typing-extensions from 4.12.2 to 4.14.0. ([\#18654](https://github.com/element-hq/synapse/issues/18654))
+* Bump typing-extensions from 4.14.0 to 4.14.1. ([\#18668](https://github.com/element-hq/synapse/issues/18668))
+* Bump urllib3 from 2.2.2 to 2.5.0. ([\#18572](https://github.com/element-hq/synapse/issues/18572))
+
+# Synapse 1.133.0 (2025-07-01)
+
+Pre-built wheels are now built using the [manylinux_2_28](https://github.com/pypa/manylinux#manylinux_2_28-almalinux-8-based) base, which is expected to be compatible with distros using glibc 2.28 or later, including:
+
+ - Debian 10+
+ - Ubuntu 18.10+
+ - Fedora 29+
+ - CentOS/RHEL 8+
+
+Previously, wheels were built using the [manylinux2014](https://github.com/pypa/manylinux#manylinux2014-centos-7-based-glibc-217) base, which was expected to be compatible with distros using glibc 2.17 or later.
+
+### Bugfixes
+
+- Bump `cibuildwheel` to 3.0.0 to fix the `manylinux` wheel builds. ([\#18615](https://github.com/element-hq/synapse/issues/18615))
+
+
+
+
+# Synapse 1.133.0rc1 (2025-06-24)
+
+### Features
+
+- Add support for the [MSC4260 user report API](https://github.com/matrix-org/matrix-spec-proposals/pull/4260). ([\#18120](https://github.com/element-hq/synapse/issues/18120))
+
+### Bugfixes
+
+- Fix an issue where, during state resolution for v11 rooms, Synapse would incorrectly calculate the power level of the creator when there was no power levels event in the room. ([\#18534](https://github.com/element-hq/synapse/issues/18534), [\#18547](https://github.com/element-hq/synapse/issues/18547))
+- Fix long-standing bug where sliding sync did not honour the `room_id_to_include` config option. ([\#18535](https://github.com/element-hq/synapse/issues/18535))
+- Fix an issue where "Lock timeout is getting excessive" warnings would be logged even when the lock timeout was <10 minutes. ([\#18543](https://github.com/element-hq/synapse/issues/18543))
+- Fix an issue where Synapse could calculate the wrong power level for the creator of the room if there was no power levels event. ([\#18545](https://github.com/element-hq/synapse/issues/18545))
+
+### Improved Documentation
+
+- Generate config documentation from JSON Schema file. ([\#18528](https://github.com/element-hq/synapse/issues/18528))
+- Fix typo in user type documentation. ([\#18568](https://github.com/element-hq/synapse/issues/18568))
+
+### Internal Changes
+
+- Increase performance of introspecting access tokens when using delegated auth. ([\#18357](https://github.com/element-hq/synapse/issues/18357), [\#18561](https://github.com/element-hq/synapse/issues/18561))
+- Log user deactivations. ([\#18541](https://github.com/element-hq/synapse/issues/18541))
+- Enable [`flake8-logging`](https://docs.astral.sh/ruff/rules/#flake8-logging-log) and [`flake8-logging-format`](https://docs.astral.sh/ruff/rules/#flake8-logging-format-g) rules in Ruff and fix related issues throughout the codebase. ([\#18542](https://github.com/element-hq/synapse/issues/18542))
+- Clean up old, unused rows from the `device_federation_inbox` table. ([\#18546](https://github.com/element-hq/synapse/issues/18546))
+- Run config schema CI on develop and release branches. ([\#18551](https://github.com/element-hq/synapse/issues/18551))
+- Add support for Twisted `25.5.0`+ releases. ([\#18577](https://github.com/element-hq/synapse/issues/18577))
+- Update PyO3 to version 0.25. ([\#18578](https://github.com/element-hq/synapse/issues/18578))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/setup-python from 5.5.0 to 5.6.0. ([\#18555](https://github.com/element-hq/synapse/issues/18555))
+* Bump base64 from 0.21.7 to 0.22.1. ([\#18559](https://github.com/element-hq/synapse/issues/18559))
+* Bump dawidd6/action-download-artifact from 9 to 11. ([\#18556](https://github.com/element-hq/synapse/issues/18556))
+* Bump headers from 0.4.0 to 0.4.1. ([\#18529](https://github.com/element-hq/synapse/issues/18529))
+* Bump requests from 2.32.2 to 2.32.4. ([\#18533](https://github.com/element-hq/synapse/issues/18533))
+* Bump types-requests from 2.32.0.20250328 to 2.32.4.20250611. ([\#18558](https://github.com/element-hq/synapse/issues/18558))
+
+# Synapse 1.132.0 (2025-06-17)
+
+### Improved Documentation
+
+- Improvements to generate config documentation from JSON Schema file. ([\#18522](https://github.com/element-hq/synapse/issues/18522))
+
+
+
+
 # Synapse 1.132.0rc1 (2025-06-10)
 
 ### Features
