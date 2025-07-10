@@ -1977,6 +1977,18 @@ Setting this to a high value allows users to report content quickly, possibly in
 <pre><code class="language-yaml">max_upload_size: 60M
 </code></pre>
 <hr />
+<h3 id="media_upload_limits"><a class="header" href="#media_upload_limits"><code>media_upload_limits</code></a></h3>
+<p><em>(array)</em> A list of media upload limits defining how much data a given user can upload in a given time period.</p>
+<p>An empty list means no limits are applied.</p>
+<p>Defaults to <code>[]</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
+</code></pre>
+<hr />
 <h3 id="max_image_pixels"><a class="header" href="#max_image_pixels"><code>max_image_pixels</code></a></h3>
 <p><em>(byte size)</em> Maximum number of pixels that will be thumbnailed. Defaults to <code>&quot;32M&quot;</code>.</p>
 <p>Example configuration:</p>
