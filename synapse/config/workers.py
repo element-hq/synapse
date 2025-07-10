@@ -170,6 +170,10 @@ class WriterLocations:
         default=["master"],
         converter=_instance_to_list_converter,
     )
+    thread_subscriptions: List[str] = attr.ib(
+        default=["master"],
+        converter=_instance_to_list_converter,
+    )
 
 
 @attr.s(auto_attribs=True)

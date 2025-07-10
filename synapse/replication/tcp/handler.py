@@ -72,6 +72,7 @@ from synapse.replication.tcp.streams import (
     ToDeviceStream,
     TypingStream,
 )
+from synapse.replication.tcp.streams._base import ThreadSubscriptionsStream
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -181,6 +182,15 @@ class ReplicationCommandHandler:
 
             if isinstance(stream, PushRulesStream):
                 if hs.get_instance_name() in hs.config.worker.writers.push_rules:
+                    self._streams_to_replicate.append(stream)
+
+                continue
+
+            if isinstance(stream, ThreadSubscriptionsStream):
+                if (
+                    hs.get_instance_name()
+                    in hs.config.worker.writers.thread_subscriptions
+                ):
                     self._streams_to_replicate.append(stream)
 
                 continue
