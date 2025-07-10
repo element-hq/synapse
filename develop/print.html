@@ -1878,6 +1878,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11350"><a class="header" href="#upgrading-to-v11350">Upgrading to v1.135.0</a></h1>
+<h2 id="on_user_registration-module-api-callback-may-now-run-on-any-worker"><a class="header" href="#on_user_registration-module-api-callback-may-now-run-on-any-worker"><code>on_user_registration</code> module API callback may now run on any worker</a></h2>
+<p>Previously, the <code>on_user_registration</code> callback would only run on the main
+process. Modules relying on this callback must assume that they may now be
+called from any worker, not just the main process.</p>
 <h1 id="upgrading-to-v11340"><a class="header" href="#upgrading-to-v11340">Upgrading to v1.134.0</a></h1>
 <h2 id="icu-bundled-with-synapse"><a class="header" href="#icu-bundled-with-synapse">ICU bundled with Synapse</a></h2>
 <p>Synapse now uses the Rust <code>icu</code> library for improved user search. Installing the
