@@ -361,7 +361,8 @@ class RoomID(DomainSpecificString):
 
 @attr.s(slots=True, frozen=True, repr=False)
 class EventID(DomainSpecificString):
-    """Structure representing an event id."""
+    """Structure representing an event ID which is namespaced to a homeserver.
+    Room versions 3 and above are not supported by this grammar."""
 
     SIGIL = "$"
 
