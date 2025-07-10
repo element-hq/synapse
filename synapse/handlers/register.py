@@ -49,7 +49,6 @@ from synapse.http.servlet import assert_params_in_dict
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,
-    ReplicationRegisterServlet,
 )
 from synapse.spam_checker_api import RegistrationBehaviour
 from synapse.types import GUEST_USER_ID_PATTERN, RoomAlias, UserID, create_requester
@@ -120,7 +119,6 @@ class RegistrationHandler:
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
         if hs.config.worker.worker_app:
-            self._register_client = ReplicationRegisterServlet.make_client(hs)
             self._register_device_client = RegisterDeviceReplicationServlet.make_client(
                 hs
             )
