@@ -322,6 +322,15 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "thread_subscriptions": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/unstable/io.element.msc4306/.*",
+        ],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
 }
 
 # Templates for sections that may be inserted multiple times in config files
@@ -430,6 +439,12 @@ def add_worker_roles_to_shared_config(
 
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
+
+    if "thread_subscriptions" in worker_types_set:
+        # we can have multiple instances of thread_subscriptions workers
+        shared_config.setdefault("stream_writers", {}).setdefault(
+            "thread_subscriptions", []
+        ).append(worker_name)
 
     if "event_persister" in worker_types_set:
         # Event persisters write to the events stream, so we need to update
