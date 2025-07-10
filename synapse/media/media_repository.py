@@ -330,7 +330,7 @@ class MediaRepository:
         logger.info("Stored local media in file %r", fname)
 
         if should_quarantine:
-            logger.warn(
+            logger.warning(
                 "Media has been automatically quarantined as it matched existing quarantined media"
             )
 
@@ -1397,8 +1397,8 @@ class MediaRepository:
             )
 
             logger.info(
-                "Purging remote media last accessed before"
-                f" {remote_media_threshold_timestamp_ms}"
+                "Purging remote media last accessed before %s",
+                remote_media_threshold_timestamp_ms,
             )
 
             await self.delete_old_remote_media(
@@ -1413,8 +1413,8 @@ class MediaRepository:
             )
 
             logger.info(
-                "Purging local media last accessed before"
-                f" {local_media_threshold_timestamp_ms}"
+                "Purging local media last accessed before %s",
+                local_media_threshold_timestamp_ms,
             )
 
             await self.delete_old_local_media(

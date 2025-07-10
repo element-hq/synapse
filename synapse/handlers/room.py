@@ -51,6 +51,7 @@ from synapse.api.constants import (
     HistoryVisibility,
     JoinRules,
     Membership,
+    MTextFields,
     RoomCreationPreset,
     RoomEncryptionAlgorithms,
     RoomTypes,
@@ -698,7 +699,7 @@ class RoomCreationHandler:
         except SynapseError as e:
             # again I'm not really expecting this to fail, but if it does, I'd rather
             # we returned the new room to the client at this point.
-            logger.error("Unable to send updated alias events in old room: %s", e)
+            logger.exception("Unable to send updated alias events in old room: %s", e)
 
         try:
             await self.event_creation_handler.create_and_send_nonmember_event(
@@ -715,7 +716,7 @@ class RoomCreationHandler:
         except SynapseError as e:
             # again I'm not really expecting this to fail, but if it does, I'd rather
             # we returned the new room to the client at this point.
-            logger.error("Unable to send updated alias events in new room: %s", e)
+            logger.exception("Unable to send updated alias events in new room: %s", e)
 
     async def create_room(
         self,
@@ -1303,7 +1304,13 @@ class RoomCreationHandler:
             topic = room_config["topic"]
             topic_event, topic_context = await create_event(
                 EventTypes.Topic,
-                {"topic": topic},
+                {
+                    EventContentFields.TOPIC: topic,
+                    EventContentFields.M_TOPIC: {
+                        # The mimetype property defaults to `text/plain` if omitted.
+                        EventContentFields.M_TEXT: [{MTextFields.BODY: topic}]
+                    },
+                },
                 True,
             )
             events_to_send.append((topic_event, topic_context))

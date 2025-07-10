@@ -23,6 +23,7 @@ from typing import (
     List,
     Literal,
     Mapping,
+    MutableMapping,
     Optional,
     Set,
     Tuple,
@@ -73,6 +74,7 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncResult,
 )
 from synapse.types.state import StateFilter
+from synapse.util import MutableOverlayMapping
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -245,9 +247,11 @@ class SlidingSyncRoomLists:
         # Note: this won't include rooms the user has left themselves. We add back
         # `newly_left` rooms below. This is more efficient than fetching all rooms and
         # then filtering out the old left rooms.
-        room_membership_for_user_map = (
-            await self.store.get_sliding_sync_rooms_for_user_from_membership_snapshots(
-                user_id
+        room_membership_for_user_map: MutableMapping[str, RoomsForUserSlidingSync] = (
+            MutableOverlayMapping(
+                await self.store.get_sliding_sync_rooms_for_user_from_membership_snapshots(
+                    user_id
+                )
             )
         )
         # To play nice with the rewind logic below, we need to go fetch the rooms the
@@ -268,26 +272,12 @@ class SlidingSyncRoomLists:
             )
         )
         if self_leave_room_membership_for_user_map:
-            # FIXME: It would be nice to avoid this copy but since
-            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
-            # can't return a mutable value like a `dict`. We make the copy to get a
-            # mutable dict that we can change. We try to only make a copy when necessary
-            # (if we actually need to change something) as in most cases, the logic
-            # doesn't need to run.
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             room_membership_for_user_map.update(self_leave_room_membership_for_user_map)
 
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
         invite_config = await self.store.get_invite_config_for_user(user_id)
         if ignored_users:
-            # FIXME: It would be nice to avoid this copy but since
-            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
-            # can't return a mutable value like a `dict`. We make the copy to get a
-            # mutable dict that we can change. We try to only make a copy when necessary
-            # (if we actually need to change something) as in most cases, the logic
-            # doesn't need to run.
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             # Make a copy so we don't run into an error: `dictionary changed size during
             # iteration`, when we remove items
             for room_id in list(room_membership_for_user_map.keys()):
@@ -316,13 +306,6 @@ class SlidingSyncRoomLists:
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
         if changes:
-            # FIXME: It would be nice to avoid this copy but since
-            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
-            # can't return a mutable value like a `dict`. We make the copy to get a
-            # mutable dict that we can change. We try to only make a copy when necessary
-            # (if we actually need to change something) as in most cases, the logic
-            # doesn't need to run.
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
                     # Remove rooms that the user joined after the `to_token`
@@ -364,13 +347,6 @@ class SlidingSyncRoomLists:
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
         if missing_newly_left_rooms:
-            # FIXME: It would be nice to avoid this copy but since
-            # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
-            # can't return a mutable value like a `dict`. We make the copy to get a
-            # mutable dict that we can change. We try to only make a copy when necessary
-            # (if we actually need to change something) as in most cases, the logic
-            # doesn't need to run.
-            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 newly_left_room_for_user = newly_left_room_map[room_id]
                 # This should be a given
@@ -460,6 +436,10 @@ class SlidingSyncRoomLists:
                         room_membership_for_user_map[room_id] = room_for_user
                     else:
                         room_membership_for_user_map.pop(room_id, None)
+
+        # Remove any rooms that we globally exclude from sync.
+        for room_id in self.rooms_to_exclude_globally:
+            room_membership_for_user_map.pop(room_id, None)
 
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
@@ -577,14 +557,6 @@ class SlidingSyncRoomLists:
 
         if sync_config.room_subscriptions:
             with start_active_span("assemble_room_subscriptions"):
-                # FIXME: It would be nice to avoid this copy but since
-                # `get_sliding_sync_rooms_for_user_from_membership_snapshots` is cached, it
-                # can't return a mutable value like a `dict`. We make the copy to get a
-                # mutable dict that we can change. We try to only make a copy when necessary
-                # (if we actually need to change something) as in most cases, the logic
-                # doesn't need to run.
-                room_membership_for_user_map = dict(room_membership_for_user_map)
-
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
                 partial_state_rooms = await self.store.get_partial_rooms()

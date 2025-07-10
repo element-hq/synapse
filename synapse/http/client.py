@@ -213,7 +213,7 @@ class _IPBlockingResolver:
 
                 if _is_ip_blocked(ip_address, self._ip_allowlist, self._ip_blocklist):
                     logger.info(
-                        "Blocked %s from DNS resolution to %s" % (ip_address, hostname)
+                        "Blocked %s from DNS resolution to %s", ip_address, hostname
                     )
                     has_bad_ip = True
 
@@ -318,7 +318,7 @@ class BlocklistingAgentWrapper(Agent):
             pass
         else:
             if _is_ip_blocked(ip_address, self._ip_allowlist, self._ip_blocklist):
-                logger.info("Blocking access to %s" % (ip_address,))
+                logger.info("Blocking access to %s", ip_address)
                 e = SynapseError(HTTPStatus.FORBIDDEN, "IP address blocked")
                 return defer.fail(Failure(e))
 
@@ -723,7 +723,7 @@ class BaseHttpClient:
         resp_headers = dict(response.headers.getAllRawHeaders())
 
         if response.code > 299:
-            logger.warning("Got %d when downloading %s" % (response.code, url))
+            logger.warning("Got %d when downloading %s", response.code, url)
             raise SynapseError(
                 HTTPStatus.BAD_GATEWAY, "Got error %d" % (response.code,), Codes.UNKNOWN
             )
@@ -1106,7 +1106,7 @@ class _MultipartParserProtocol(protocol.Protocol):
                         self.stream.write(data[start:end])
                     except Exception as e:
                         logger.warning(
-                            f"Exception encountered writing file data to stream: {e}"
+                            "Exception encountered writing file data to stream: %s", e
                         )
                         self.deferred.errback()
                     self.file_length += end - start
@@ -1129,7 +1129,7 @@ class _MultipartParserProtocol(protocol.Protocol):
         try:
             self.parser.write(incoming_data)
         except Exception as e:
-            logger.warning(f"Exception writing to multipart parser: {e}")
+            logger.warning("Exception writing to multipart parser: %s", e)
             self.deferred.errback()
             return
 
