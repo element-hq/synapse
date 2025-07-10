@@ -20,6 +20,7 @@ from twisted.internet.interfaces import IDelayedCall
 from synapse.api.constants import EventTypes
 from synapse.api.errors import ShadowBanError
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -289,7 +290,10 @@ class DelayedEventsHandler:
         if self._repl_client is not None:
             # NOTE: If this throws, the delayed event will remain in the DB and
             # will be picked up once the main worker gets another delayed event.
-            await self._repl_client(next_send_ts=next_send_ts)
+            await self._repl_client(
+                instance_name=MAIN_PROCESS_INSTANCE_NAME,
+                next_send_ts=next_send_ts,
+            )
         elif self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at(next_send_ts)
 

@@ -2259,7 +2259,7 @@ class FederationEventHandler:
             try:
                 for batch in batch_iter(event_and_contexts, 200):
                     result = await self._send_events(
-                        instances=[instance],
+                        instance_name=instance,
                         store=self._store,
                         room_id=room_id,
                         event_and_contexts=batch,

@@ -20,6 +20,7 @@
 #
 #
 import logging
+import random
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Tuple
 
 from synapse.api.constants import AccountDataTypes
@@ -132,7 +133,7 @@ class AccountDataHandler:
             return max_stream_id
         else:
             response = await self._add_room_data_client(
-                instances=self._account_data_writers,
+                instance_name=random.choice(self._account_data_writers),
                 user_id=user_id,
                 room_id=room_id,
                 account_data_type=account_data_type,
@@ -173,7 +174,7 @@ class AccountDataHandler:
             return max_stream_id
         else:
             response = await self._remove_room_data_client(
-                instances=self._account_data_writers,
+                instance_name=random.choice(self._account_data_writers),
                 user_id=user_id,
                 room_id=room_id,
                 account_data_type=account_data_type,
@@ -209,7 +210,7 @@ class AccountDataHandler:
             return max_stream_id
         else:
             response = await self._add_user_data_client(
-                instances=self._account_data_writers,
+                instance_name=random.choice(self._account_data_writers),
                 user_id=user_id,
                 account_data_type=account_data_type,
                 content=content,
@@ -245,7 +246,7 @@ class AccountDataHandler:
             return max_stream_id
         else:
             response = await self._remove_user_data_client(
-                instances=self._account_data_writers,
+                instance_name=random.choice(self._account_data_writers),
                 user_id=user_id,
                 account_data_type=account_data_type,
             )
@@ -276,7 +277,7 @@ class AccountDataHandler:
             return max_stream_id
         else:
             response = await self._add_tag_client(
-                instances=self._account_data_writers,
+                instance_name=random.choice(self._account_data_writers),
                 user_id=user_id,
                 room_id=room_id,
                 tag=tag,
@@ -301,7 +302,7 @@ class AccountDataHandler:
             return max_stream_id
         else:
             response = await self._remove_tag_client(
-                instances=self._account_data_writers,
+                instance_name=random.choice(self._account_data_writers),
                 user_id=user_id,
                 room_id=room_id,
                 tag=tag,

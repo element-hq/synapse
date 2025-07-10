@@ -578,7 +578,7 @@ class StateHandler:
         writer_instance = self._events_shard_config.get_instance(room_id)
         if writer_instance != self._instance_name:
             await self._update_current_state_client(
-                instances=[writer_instance],
+                instance_name=writer_instance,
                 room_id=room_id,
             )
             return

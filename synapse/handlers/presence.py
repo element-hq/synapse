@@ -484,7 +484,7 @@ class _NullContextManager(ContextManager[None]):
 class WorkerPresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
-        self._presence_writer_instances = hs.config.worker.writers.presence
+        self._presence_writer_instance = hs.config.worker.writers.presence[0]
 
         # Route presence EDUs to the right worker
         hs.get_federation_registry().register_instances_for_edu(
@@ -717,7 +717,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
 
         # Proxy request to instance that writes presence
         await self._set_state_client(
-            instances=self._presence_writer_instances,
+            instance_name=self._presence_writer_instance,
             user_id=user_id,
             device_id=device_id,
             state=state,
@@ -738,7 +738,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         # Proxy request to instance that writes presence
         user_id = user.to_string()
         await self._bump_active_client(
-            instances=self._presence_writer_instances,
+            instance_name=self._presence_writer_instance,
             user_id=user_id,
             device_id=device_id,
         )
@@ -2476,7 +2476,7 @@ class PresenceFederationQueue:
             # If not local we query over http replication from the presence
             # writer
             result = await self._repl_client(
-                instances=[instance_name],
+                instance_name=instance_name,
                 stream_name=PresenceFederationStream.NAME,
                 from_token=from_token,
                 upto_token=upto_token,
