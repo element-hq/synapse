@@ -939,6 +939,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         Returns:
             The new stream ID.
         """
+        # This generates new stream IDs and therefore must be called on a writer.
         if not self._is_device_list_writer:
             raise Exception("Can only be called on device list writers")
 
@@ -1975,6 +1976,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             The maximum stream ID of device list updates that were added to the database, or
             None if no updates were added.
         """
+        # This generates new stream IDs and therefore must be called on a writer.
         if not self._is_device_list_writer:
             raise Exception("Can only be called on device list writers")
 
@@ -2268,6 +2270,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         """Queue the device update to be sent to the given set of hosts,
         calculated from the room ID.
         """
+        # This generates new stream IDs and therefore must be called on a writer.
         if not self._is_device_list_writer:
             raise Exception("Can only be called on device list writers")
 
@@ -2299,6 +2302,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         """Add a device list update to the table tracking remote device list
         updates during partial joins.
         """
+        # This generates new stream IDs and therefore must be called on a writer.
         if not self._is_device_list_writer:
             raise Exception("Can only be called on device list writers")
 
