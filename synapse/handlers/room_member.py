@@ -916,7 +916,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     )
                 # InviteRule.IGNORE is handled at the sync layer.
 
-        # An empty prev_events list is allowed as long as the auth_event_ids are present
         if prev_event_ids is not None:
             return await self._local_membership_update(
                 requester=requester,

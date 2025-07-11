@@ -1222,7 +1222,6 @@ class EventCreationHandler:
         if state_event_ids is not None:
             # Do a quick check to make sure that prev_event_ids is present to
             # make the type-checking around `builder.build` happy.
-            # prev_event_ids could be an empty array though.
             assert prev_event_ids is not None
 
             temp_event = await builder.build(
