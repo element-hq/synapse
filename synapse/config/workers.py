@@ -27,8 +27,6 @@ from typing import Any, Dict, List, Optional, Union
 import attr
 
 from synapse._pydantic_compat import (
-    BaseModel,
-    Extra,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -47,6 +45,7 @@ from synapse.config.server import (
     parse_listener_def,
 )
 from synapse.types import JsonDict
+from synapse.util.pydantic_models import ParseModel
 
 _DEPRECATED_WORKER_DUTY_OPTION_USED = """
 The '%s' configuration option is deprecated and will be removed in a future
@@ -90,30 +89,7 @@ def _instance_to_list_converter(obj: Union[str, List[str]]) -> List[str]:
     return obj
 
 
-class ConfigModel(BaseModel):
-    """A custom version of Pydantic's BaseModel which
-
-     - ignores unknown fields and
-     - does not allow fields to be overwritten after construction,
-
-    but otherwise uses Pydantic's default behaviour.
-
-    For now, ignore unknown fields. In the future, we could change this so that unknown
-    config values cause a ValidationError, provided the error messages are meaningful to
-    server operators.
-
-    Subclassing in this way is recommended by
-    https://pydantic-docs.helpmanual.io/usage/model_config/#change-behaviour-globally
-    """
-
-    class Config:
-        # By default, ignore fields that we don't recognise.
-        extra = Extra.ignore
-        # By default, don't allow fields to be reassigned after parsing.
-        allow_mutation = False
-
-
-class InstanceTcpLocationConfig(ConfigModel):
+class InstanceTcpLocationConfig(ParseModel):
     """The host and port to talk to an instance via HTTP replication."""
 
     host: StrictStr
@@ -129,7 +105,7 @@ class InstanceTcpLocationConfig(ConfigModel):
         return f"{self.host}:{self.port}"
 
 
-class InstanceUnixLocationConfig(ConfigModel):
+class InstanceUnixLocationConfig(ParseModel):
     """The socket file to talk to an instance via HTTP replication."""
 
     path: StrictStr
