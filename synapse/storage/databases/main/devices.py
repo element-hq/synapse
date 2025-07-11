@@ -2216,9 +2216,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             A list of user ID, device ID, room ID, stream ID and optional opentracing
             context, in order of ascending (stream ID, room ID).
         """
-        if not self._is_device_list_writer:
-            raise Exception("Can only be called on device list writers")
-
         sql = """
             SELECT user_id, device_id, room_id, stream_id, opentracing_context
             FROM device_lists_changes_in_room
