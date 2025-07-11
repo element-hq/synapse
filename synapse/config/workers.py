@@ -167,35 +167,35 @@ class WriterLocations:
     """
 
     events: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     typing: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     to_device: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     account_data: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     receipts: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     presence: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     push_rules: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
     device_lists: List[str] = attr.ib(
-        default=["master"],
+        default=[MAIN_PROCESS_INSTANCE_NAME],
         converter=_instance_to_list_converter,
     )
 
@@ -380,7 +380,10 @@ class WorkerConfig(Config):
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
-                if instance != "master" and instance not in self.instance_map:
+                if (
+                    instance != MAIN_PROCESS_INSTANCE_NAME
+                    and instance not in self.instance_map
+                ):
                     raise ConfigError(
                         "Instance %r is configured to write %s but does not appear in `instance_map` config."
                         % (instance, stream)
@@ -446,9 +449,12 @@ class WorkerConfig(Config):
         #
         # No effort is made to ensure only a single instance of these tasks is
         # running.
-        background_tasks_instance = config.get("run_background_tasks_on") or "master"
+        background_tasks_instance = (
+            config.get("run_background_tasks_on") or MAIN_PROCESS_INSTANCE_NAME
+        )
         self.run_background_tasks = (
-            self.worker_name is None and background_tasks_instance == "master"
+            self.worker_name is None
+            and background_tasks_instance == MAIN_PROCESS_INSTANCE_NAME
         ) or self.worker_name == background_tasks_instance
 
         self.should_notify_appservices = self._should_this_worker_perform_duty(
@@ -520,9 +526,10 @@ class WorkerConfig(Config):
         # 'don't run here'.
         new_option_should_run_here = None
         if new_option_name in config:
-            designated_worker = config[new_option_name] or "master"
+            designated_worker = config[new_option_name] or MAIN_PROCESS_INSTANCE_NAME
             new_option_should_run_here = (
-                designated_worker == "master" and self.worker_name is None
+                designated_worker == MAIN_PROCESS_INSTANCE_NAME
+                and self.worker_name is None
             ) or designated_worker == self.worker_name
 
         legacy_option_should_run_here = None
@@ -619,7 +626,7 @@ class WorkerConfig(Config):
             # If no worker instances are set we check if the legacy option
             # is set, which means use the main process.
             if legacy_option:
-                worker_instances = ["master"]
+                worker_instances = [MAIN_PROCESS_INSTANCE_NAME]
 
             if self.worker_app == legacy_app_name:
                 if legacy_option:
