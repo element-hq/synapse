@@ -630,7 +630,7 @@ class FederationHandler:
             #    room.
             # In short, the races either have an acceptable outcome or should be
             # impossible.
-            await self._clean_room_for_join(room_id)
+            await self.store.clean_room_for_join(room_id)
 
         try:
             # Try the host we successfully got a response to /make_join/
@@ -1743,15 +1743,6 @@ class FederationHandler:
             raise SynapseError(502, "Third party certificate could not be checked")
         if "valid" not in response or not response["valid"]:
             raise AuthError(403, "Third party certificate was invalid")
-
-    async def _clean_room_for_join(self, room_id: str) -> None:
-        """Called to clean up any data in DB for a given room, ready for the
-        server to join the room.
-
-        Args:
-            room_id
-        """
-        await self.store.clean_room_for_join(room_id)
 
     async def get_room_complexity(
         self, remote_room_hosts: List[str], room_id: str
