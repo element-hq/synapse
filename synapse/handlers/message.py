@@ -568,7 +568,6 @@ class EventCreationHandler:
         requester: Requester,
         event_dict: dict,
         txn_id: Optional[str] = None,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         auth_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
@@ -594,10 +593,6 @@ class EventCreationHandler:
             requester
             event_dict: An entire event
             txn_id
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids:
                 the forward extremities to use as the prev_events for the
                 new event.
@@ -717,7 +712,6 @@ class EventCreationHandler:
         event, unpersisted_context = await self.create_new_client_event(
             builder=builder,
             requester=requester,
-            allow_no_prev_events=allow_no_prev_events,
             prev_event_ids=prev_event_ids,
             auth_event_ids=auth_event_ids,
             state_event_ids=state_event_ids,
@@ -945,7 +939,6 @@ class EventCreationHandler:
         self,
         requester: Requester,
         event_dict: dict,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         ratelimit: bool = True,
@@ -962,10 +955,6 @@ class EventCreationHandler:
         Args:
             requester: The requester sending the event.
             event_dict: An entire event.
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids:
                 The event IDs to use as the prev events.
                 Should normally be left as None to automatically request them
@@ -1051,7 +1040,6 @@ class EventCreationHandler:
             return await self._create_and_send_nonmember_event_locked(
                 requester=requester,
                 event_dict=event_dict,
-                allow_no_prev_events=allow_no_prev_events,
                 prev_event_ids=prev_event_ids,
                 state_event_ids=state_event_ids,
                 ratelimit=ratelimit,
@@ -1065,7 +1053,6 @@ class EventCreationHandler:
         self,
         requester: Requester,
         event_dict: dict,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         ratelimit: bool = True,
@@ -1097,7 +1084,6 @@ class EventCreationHandler:
                     requester,
                     event_dict,
                     txn_id=txn_id,
-                    allow_no_prev_events=allow_no_prev_events,
                     prev_event_ids=prev_event_ids,
                     state_event_ids=state_event_ids,
                     outlier=outlier,
@@ -1180,7 +1166,6 @@ class EventCreationHandler:
         self,
         builder: EventBuilder,
         requester: Optional[Requester] = None,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         auth_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
@@ -1200,10 +1185,6 @@ class EventCreationHandler:
         Args:
             builder:
             requester:
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids:
                 the forward extremities to use as the prev_events for the
                 new event.
@@ -1269,24 +1250,14 @@ class EventCreationHandler:
         else:
             prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
 
+        # We now ought to have some `prev_events` (unless it's a create event).
+        #
         # Do a quick sanity check here, rather than waiting until we've created the
         # event and then try to auth it (which fails with a somewhat confusing "No
         # create event in auth events")
-        if allow_no_prev_events:
-            # We allow events with no `prev_events` but it better have some `auth_events`
-            assert (
-                builder.type == EventTypes.Create
-                # Allow an event to have empty list of prev_event_ids
-                # only if it has auth_event_ids.
-                or auth_event_ids
-            ), (
-                "Attempting to create a non-m.room.create event with no prev_events or auth_event_ids"
-            )
-        else:
-            # we now ought to have some prev_events (unless it's a create event).
-            assert builder.type == EventTypes.Create or prev_event_ids, (
-                "Attempting to create a non-m.room.create event with no prev_events"
-            )
+        assert builder.type == EventTypes.Create or len(prev_event_ids) > 0, (
+            "Attempting to create an event with no prev_events"
+        )
 
         if for_batch:
             assert prev_event_ids is not None
