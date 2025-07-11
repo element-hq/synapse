@@ -823,7 +823,7 @@ class SsoHandler:
                         return True
 
             # store it in media repository
-            avatar_mxc_url = await self._media_repo.create_content(
+            avatar_mxc_url = await self._media_repo.create_or_update_content(
                 media_type=headers[b"Content-Type"][0].decode("utf-8"),
                 upload_name=upload_name,
                 content=picture,

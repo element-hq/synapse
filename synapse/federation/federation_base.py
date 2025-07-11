@@ -322,8 +322,7 @@ def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventB
         SynapseError: if the pdu is missing required fields or is otherwise
             not a valid matrix event
     """
-    # we could probably enforce a bunch of other fields here (room_id, sender,
-    # origin, etc etc)
+    # we could probably enforce a bunch of other fields here (room_id, sender, etc.)
     assert_params_in_dict(pdu_json, ("type", "depth"))
 
     # Strip any unauthorized values from "unsigned" if they exist

@@ -103,6 +103,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK,
     CHECK_REGISTRATION_FOR_SPAM_CALLBACK,
     CHECK_USERNAME_FOR_SPAM_CALLBACK,
+    FEDERATED_USER_MAY_INVITE_CALLBACK,
     SHOULD_DROP_FEDERATED_EVENT_CALLBACK,
     USER_MAY_CREATE_ROOM_ALIAS_CALLBACK,
     USER_MAY_CREATE_ROOM_CALLBACK,
@@ -314,6 +315,7 @@ class ModuleApi:
         ] = None,
         user_may_join_room: Optional[USER_MAY_JOIN_ROOM_CALLBACK] = None,
         user_may_invite: Optional[USER_MAY_INVITE_CALLBACK] = None,
+        federated_user_may_invite: Optional[FEDERATED_USER_MAY_INVITE_CALLBACK] = None,
         user_may_send_3pid_invite: Optional[USER_MAY_SEND_3PID_INVITE_CALLBACK] = None,
         user_may_create_room: Optional[USER_MAY_CREATE_ROOM_CALLBACK] = None,
         user_may_create_room_alias: Optional[
@@ -337,6 +339,7 @@ class ModuleApi:
             should_drop_federated_event=should_drop_federated_event,
             user_may_join_room=user_may_join_room,
             user_may_invite=user_may_invite,
+            federated_user_may_invite=federated_user_may_invite,
             user_may_send_3pid_invite=user_may_send_3pid_invite,
             user_may_create_room=user_may_create_room,
             user_may_create_room_alias=user_may_create_room_alias,

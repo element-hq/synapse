@@ -368,7 +368,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
             raise StoreError(500, "Problem storing device.")
 
-    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
+    async def delete_devices(self, user_id: str, device_ids: StrCollection) -> None:
         """Deletes several devices.
 
         Args:
@@ -392,11 +392,49 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 values=device_ids,
                 keyvalues={"user_id": user_id},
             )
-            self._invalidate_cache_and_stream_bulk(
-                txn, self.get_device, [(user_id, device_id) for device_id in device_ids]
+
+            # Also delete associated e2e keys.
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="e2e_device_keys_json",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="e2e_one_time_keys_json",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="dehydrated_devices",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
+            )
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="e2e_fallback_keys_json",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=device_ids,
             )
 
-        for batch in batch_iter(device_ids, 100):
+            # We're bulk deleting potentially many devices at once, so
+            # let's not invalidate the cache for each device individually.
+            # Instead, we will invalidate the cache for the user as a whole.
+            self._invalidate_cache_and_stream(txn, self.get_device, (user_id,))
+            self._invalidate_cache_and_stream(
+                txn, self.count_e2e_one_time_keys, (user_id,)
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_e2e_unused_fallback_key_types, (user_id,)
+            )
+
+        for batch in batch_iter(device_ids, 1000):
             await self.db_pool.runInteraction(
                 "delete_devices", _delete_devices_txn, batch
             )
@@ -427,7 +465,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
         await self.invalidate_cache_and_stream("get_device", (user_id, device_id))
 
-    @cached()
+    @cached(tree=True)
     async def get_device(
         self, user_id: str, device_id: str
     ) -> Optional[Mapping[str, Any]]:
@@ -1947,6 +1985,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         def add_device_changes_txn(
             txn: LoggingTransaction,
+            batch_device_ids: StrCollection,
         ) -> int:
             stream_ids = self._device_list_id_gen.get_next_mult_txn(
                 txn, len(device_ids)
@@ -1955,14 +1994,14 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             self._add_device_change_to_stream_txn(
                 txn,
                 user_id,
-                device_ids,
+                batch_device_ids,
                 stream_ids,
             )
 
             self._add_device_outbound_room_poke_txn(
                 txn,
                 user_id,
-                device_ids,
+                batch_device_ids,
                 room_ids,
                 stream_ids,
                 context,
@@ -1970,10 +2009,15 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
             return stream_ids[-1]
 
-        return await self.db_pool.runInteraction(
-            "add_device_change_to_stream",
-            add_device_changes_txn,
-        )
+        last_stream_id: Optional[int] = None
+        for batch_device_ids in batch_iter(device_ids, 1000):
+            last_stream_id = await self.db_pool.runInteraction(
+                "add_device_change_to_stream",
+                add_device_changes_txn,
+                batch_device_ids,
+            )
+
+        return last_stream_id
 
     def _add_device_change_to_stream_txn(
         self,

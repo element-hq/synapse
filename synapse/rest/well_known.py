@@ -86,7 +86,7 @@ class ClientWellKnownResource(DirectServeJsonResource):
     isLeaf = 1
 
     def __init__(self, hs: "HomeServer"):
-        super().__init__(hs.get_clock())
+        super().__init__(clock=hs.get_clock())
         self._well_known_builder = WellKnownBuilder(hs)
 
     async def _async_render_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:

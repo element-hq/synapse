@@ -614,7 +614,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             txn, self.count_e2e_one_time_keys, (user_id, device_id)
         )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def count_e2e_one_time_keys(
         self, user_id: str, device_id: str
     ) -> Mapping[str, int]:
@@ -829,7 +829,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     },
                 )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def get_e2e_unused_fallback_key_types(
         self, user_id: str, device_id: str
     ) -> Sequence[str]:

@@ -48,7 +48,6 @@ from synapse.http.servlet import assert_params_in_dict
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,
-    ReplicationRegisterServlet,
 )
 from synapse.spam_checker_api import RegistrationBehaviour
 from synapse.types import GUEST_USER_ID_PATTERN, RoomAlias, UserID, create_requester
@@ -119,7 +118,6 @@ class RegistrationHandler:
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
         if hs.config.worker.worker_app:
-            self._register_client = ReplicationRegisterServlet.make_client(hs)
             self._register_device_client = RegisterDeviceReplicationServlet.make_client(
                 hs
             )
@@ -737,37 +735,20 @@ class RegistrationHandler:
             shadow_banned: Whether to shadow-ban the user
             approved: Whether to mark the user as approved by an administrator
         """
-        if self.hs.config.worker.worker_app:
-            await self._register_client(
-                user_id=user_id,
-                password_hash=password_hash,
-                was_guest=was_guest,
-                make_guest=make_guest,
-                appservice_id=appservice_id,
-                create_profile_with_displayname=create_profile_with_displayname,
-                admin=admin,
-                user_type=user_type,
-                address=address,
-                shadow_banned=shadow_banned,
-                approved=approved,
-            )
-        else:
-            await self.store.register_user(
-                user_id=user_id,
-                password_hash=password_hash,
-                was_guest=was_guest,
-                make_guest=make_guest,
-                appservice_id=appservice_id,
-                create_profile_with_displayname=create_profile_with_displayname,
-                admin=admin,
-                user_type=user_type,
-                shadow_banned=shadow_banned,
-                approved=approved,
-            )
+        await self.store.register_user(
+            user_id=user_id,
+            password_hash=password_hash,
+            was_guest=was_guest,
+            make_guest=make_guest,
+            appservice_id=appservice_id,
+            create_profile_with_displayname=create_profile_with_displayname,
+            admin=admin,
+            user_type=user_type,
+            shadow_banned=shadow_banned,
+            approved=approved,
+        )
 
-            # Only call the account validity module(s) on the main process, to avoid
-            # repeating e.g. database writes on all of the workers.
-            await self._account_validity_handler.on_user_registration(user_id)
+        await self._account_validity_handler.on_user_registration(user_id)
 
     async def register_device(
         self,

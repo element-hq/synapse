@@ -105,6 +105,22 @@ USER_MAY_INVITE_CALLBACK = Callable[
         ]
     ],
 ]
+FEDERATED_USER_MAY_INVITE_CALLBACK = Callable[
+    ["synapse.events.EventBase"],
+    Awaitable[
+        Union[
+            Literal["NOT_SPAM"],
+            Codes,
+            # Highly experimental, not officially part of the spamchecker API, may
+            # disappear without warning depending on the results of ongoing
+            # experiments.
+            # Use this to return additional information as part of an error.
+            Tuple[Codes, JsonDict],
+            # Deprecated
+            bool,
+        ]
+    ],
+]
 USER_MAY_SEND_3PID_INVITE_CALLBACK = Callable[
     [str, str, str, str],
     Awaitable[
@@ -266,6 +282,7 @@ def load_legacy_spam_checkers(hs: "synapse.server.HomeServer") -> None:
     spam_checker_methods = {
         "check_event_for_spam",
         "user_may_invite",
+        "federated_user_may_invite",
         "user_may_create_room",
         "user_may_create_room_alias",
         "user_may_publish_room",
@@ -347,6 +364,9 @@ class SpamCheckerModuleApiCallbacks:
         ] = []
         self._user_may_join_room_callbacks: List[USER_MAY_JOIN_ROOM_CALLBACK] = []
         self._user_may_invite_callbacks: List[USER_MAY_INVITE_CALLBACK] = []
+        self._federated_user_may_invite_callbacks: List[
+            FEDERATED_USER_MAY_INVITE_CALLBACK
+        ] = []
         self._user_may_send_3pid_invite_callbacks: List[
             USER_MAY_SEND_3PID_INVITE_CALLBACK
         ] = []
@@ -377,6 +397,7 @@ class SpamCheckerModuleApiCallbacks:
         ] = None,
         user_may_join_room: Optional[USER_MAY_JOIN_ROOM_CALLBACK] = None,
         user_may_invite: Optional[USER_MAY_INVITE_CALLBACK] = None,
+        federated_user_may_invite: Optional[FEDERATED_USER_MAY_INVITE_CALLBACK] = None,
         user_may_send_3pid_invite: Optional[USER_MAY_SEND_3PID_INVITE_CALLBACK] = None,
         user_may_create_room: Optional[USER_MAY_CREATE_ROOM_CALLBACK] = None,
         user_may_create_room_alias: Optional[
@@ -405,6 +426,11 @@ class SpamCheckerModuleApiCallbacks:
 
         if user_may_invite is not None:
             self._user_may_invite_callbacks.append(user_may_invite)
+
+        if federated_user_may_invite is not None:
+            self._federated_user_may_invite_callbacks.append(
+                federated_user_may_invite,
+            )
 
         if user_may_send_3pid_invite is not None:
             self._user_may_send_3pid_invite_callbacks.append(
@@ -604,6 +630,43 @@ class SpamCheckerModuleApiCallbacks:
 
         # No spam-checker has rejected the request, let it pass.
         return self.NOT_SPAM
+
+    async def federated_user_may_invite(
+        self, event: "synapse.events.EventBase"
+    ) -> Union[Tuple[Codes, dict], Literal["NOT_SPAM"]]:
+        """Checks if a given user may send an invite
+
+        Args:
+            event: The event to be checked
+
+        Returns:
+            NOT_SPAM if the operation is permitted, Codes otherwise.
+        """
+        for callback in self._federated_user_may_invite_callbacks:
+            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+                res = await delay_cancellation(callback(event))
+                # Normalize return values to `Codes` or `"NOT_SPAM"`.
+                if res is True or res is self.NOT_SPAM:
+                    continue
+                elif res is False:
+                    return synapse.api.errors.Codes.FORBIDDEN, {}
+                elif isinstance(res, synapse.api.errors.Codes):
+                    return res, {}
+                elif (
+                    isinstance(res, tuple)
+                    and len(res) == 2
+                    and isinstance(res[0], synapse.api.errors.Codes)
+                    and isinstance(res[1], dict)
+                ):
+                    return res
+                else:
+                    logger.warning(
+                        "Module returned invalid value, rejecting invite as spam"
+                    )
+                    return synapse.api.errors.Codes.FORBIDDEN, {}
+
+        # Check the standard user_may_invite callback if no module has rejected the invite yet.
+        return await self.user_may_invite(event.sender, event.state_key, event.room_id)
 
     async def user_may_send_3pid_invite(
         self, inviter_userid: str, medium: str, address: str, room_id: str
