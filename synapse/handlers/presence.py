@@ -202,6 +202,7 @@ class BasePresenceHandler(abc.ABC):
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
+        self._track_offline_presence = hs.config.server.track_offline_presence
 
         self._federation = None
         if hs.should_send_federation():
@@ -1094,17 +1095,26 @@ class PresenceHandler(BasePresenceHandler):
 
         user_id = user.to_string()
 
+        devices = self._user_to_device_to_current_state.setdefault(user_id, {})
+
+        device_state = devices.setdefault(
+            device_id,
+            UserDevicePresenceState.default(user_id, device_id),
+        )
+
+        # If Presence tracking is disabled for Offline devices and device is Offline, no-op
+        if (
+            not self._track_offline_presence
+            and device_state.state == PresenceState.OFFLINE
+        ):
+            return
+
         bump_active_time_counter.inc()
 
         now = self.clock.time_msec()
 
         # Update the device information & mark the device as online if it was
         # unavailable.
-        devices = self._user_to_device_to_current_state.setdefault(user_id, {})
-        device_state = devices.setdefault(
-            device_id,
-            UserDevicePresenceState.default(user_id, device_id),
-        )
         device_state.last_active_ts = now
         if device_state.state == PresenceState.UNAVAILABLE:
             device_state.state = PresenceState.ONLINE
@@ -1397,6 +1407,15 @@ class PresenceHandler(BasePresenceHandler):
             device_id,
             UserDevicePresenceState.default(user_id, device_id),
         )
+
+        # If Presence tracking is disabled for Offline devices and device was Offline and is still Offline, no-op
+        if (
+            not self._track_offline_presence
+            and device_state.state == PresenceState.OFFLINE
+            and presence == PresenceState.OFFLINE
+        ):
+            return
+
         device_state.state = presence
         device_state.last_active_ts = now
         if is_sync:
