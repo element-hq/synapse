@@ -55,25 +55,12 @@ class DevicesRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         self.device_handler = hs.get_device_handler()
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         devices = await self.device_handler.get_devices_by_user(
             requester.user.to_string()
         )
-
-        # If MSC3852 is disabled, then the "last_seen_user_agent" field will be
-        # removed from each device. If it is enabled, then the field name will
-        # be replaced by the unstable identifier.
-        #
-        # When MSC3852 is accepted, this block of code can just be removed to
-        # expose "last_seen_user_agent" to clients.
-        for device in devices:
-            last_seen_user_agent = device["last_seen_user_agent"]
-            del device["last_seen_user_agent"]
-            if self._msc3852_enabled:
-                device["org.matrix.msc3852.last_seen_user_agent"] = last_seen_user_agent
 
         return 200, {"devices": devices}
 
@@ -145,7 +132,6 @@ class DeviceRestServlet(RestServlet):
         handler = hs.get_device_handler()
         self.device_handler = handler
         self.auth_handler = hs.get_auth_handler()
-        self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
         self._is_main_process = hs.config.worker.worker_app is None
 
@@ -158,17 +144,6 @@ class DeviceRestServlet(RestServlet):
         )
         if device is None:
             raise NotFoundError("No device found")
-
-        # If MSC3852 is disabled, then the "last_seen_user_agent" field will be
-        # removed from each device. If it is enabled, then the field name will
-        # be replaced by the unstable identifier.
-        #
-        # When MSC3852 is accepted, this block of code can just be removed to
-        # expose "last_seen_user_agent" to clients.
-        last_seen_user_agent = device["last_seen_user_agent"]
-        del device["last_seen_user_agent"]
-        if self._msc3852_enabled:
-            device["org.matrix.msc3852.last_seen_user_agent"] = last_seen_user_agent
 
         return 200, device
 

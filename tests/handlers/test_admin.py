@@ -278,7 +278,6 @@ class ExfiltrateData(unittest.HomeserverTestCase):
         self.assertEqual(args[0][0]["user_id"], self.user2)
         self.assertIn("device_id", args[0][0])
         self.assertIsNone(args[0][0]["display_name"])
-        self.assertIsNone(args[0][0]["last_seen_user_agent"])
         self.assertIsNone(args[0][0]["last_seen_ts"])
         self.assertIsNone(args[0][0]["last_seen_ip"])
 

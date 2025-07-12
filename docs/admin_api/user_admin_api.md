@@ -953,7 +953,6 @@ A response body like the following is returned:
       "device_id": "QBUAZIFURK",
       "display_name": "android",
       "last_seen_ip": "1.2.3.4",
-      "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
       "last_seen_ts": 1474491775024,
       "user_id": "<user_id>",
       "dehydrated": false
@@ -962,7 +961,6 @@ A response body like the following is returned:
       "device_id": "AUIECTSRND",
       "display_name": "ios",
       "last_seen_ip": "1.2.3.5",
-      "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
       "last_seen_ts": 1474491775025,
       "user_id": "<user_id>",
       "dehydrated": false
@@ -989,8 +987,6 @@ The following fields are returned in the JSON response body:
   - `display_name` - Display name set by the user for this device.
     Absent if no name has been set.
   - `last_seen_ip` - The IP address where this device was last seen.
-    (May be a few minutes out of date, for efficiency reasons).
-  - `last_seen_user_agent` - The user agent of the device when it was last seen.
     (May be a few minutes out of date, for efficiency reasons).
   - `last_seen_ts` - The timestamp (in milliseconds since the unix epoch) when this
     devices was last seen. (May be a few minutes out of date, for efficiency reasons).
@@ -1071,7 +1067,6 @@ A response body like the following is returned:
   "device_id": "<device_id>",
   "display_name": "android",
   "last_seen_ip": "1.2.3.4",
-  "last_seen_user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:103.0) Gecko/20100101 Firefox/103.0",
   "last_seen_ts": 1474491775024,
   "user_id": "<user_id>"
 }
@@ -1092,8 +1087,6 @@ The following fields are returned in the JSON response body:
 - `display_name` - Display name set by the user for this device.
   Absent if no name has been set.
 - `last_seen_ip` - The IP address where this device was last seen.
-  (May be a few minutes out of date, for efficiency reasons).
-  - `last_seen_user_agent` - The user agent of the device when it was last seen.
   (May be a few minutes out of date, for efficiency reasons).
 - `last_seen_ts` - The timestamp (in milliseconds since the unix epoch) when this
   devices was last seen. (May be a few minutes out of date, for efficiency reasons).
