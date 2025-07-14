@@ -4647,10 +4647,10 @@ properties:
       This setting defines options related to the user directory.
 
 
-      *Warning: The Matrix spec requires homeservers to consider at least users
-      the requesting user shares a room with and users who reside in public
-      rooms known to the homeserver in directory searches. Some of the settings
-      below aid performance but are in violation of this requirement.*
+      *Warning: While the homeserver may determine which subset of users are searched,
+      the Matrix specification requires homeservers to include (at minimum) users
+      visible in public rooms and users sharing a room with the requester. Some settings
+      below improve performance but violate this requirement.*
     properties:
       enabled:
         type: boolean
