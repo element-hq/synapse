@@ -44,7 +44,7 @@ The proxy will be **used** for:
 - phone-home stats
 - recaptcha validation
 - CAS auth validation
-- OpenID Connect
+- OpenID Connect (OIDC)
 - Outbound federation
 - Federation (checking public key revocation)
 - Fetching public keys of other servers
@@ -53,7 +53,7 @@ The proxy will be **used** for:
 It will **not be used** for:
 
 - Application Services
-- Identity servers
+- Matrix Identity servers
 - In worker configurations
   - connections between workers
   - connections from workers to Redis
