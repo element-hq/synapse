@@ -4689,9 +4689,7 @@ properties:
         default: false
       exclude_remote_users:
         type: boolean
-        description: >-
-          If set to `true`, the search will only return local users (which is not
-          spec-compliant).
+        description: If set to true, the search will only return local users.
         default: false
       show_locked_users:
         type: boolean
