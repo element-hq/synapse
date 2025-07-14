@@ -5906,10 +5906,28 @@ Setting this to a high value allows users to report content quickly, possibly in
 <pre><code class="language-yaml">recaptcha_public_key: YOUR_PUBLIC_KEY
 </code></pre>
 <hr />
+<h3 id="recaptcha_public_key_path"><a class="header" href="#recaptcha_public_key_path"><code>recaptcha_public_key_path</code></a></h3>
+<p><em>(string|null)</em> An alternative to <a href="usage/configuration/config_documentation.html#recaptcha_public_key"><code>recaptcha_public_key</code></a>: allows the public key to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.</p>
+<p><em>Added in Synapse 1.134.0.</em></p>
+<p>Defaults to <code>null</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">recaptcha_public_key_path: /path/to/key/file
+</code></pre>
+<hr />
 <h3 id="recaptcha_private_key"><a class="header" href="#recaptcha_private_key"><code>recaptcha_private_key</code></a></h3>
 <p><em>(string|null)</em> This homeserver's ReCAPTCHA private key. Must be specified if <a href="usage/configuration/config_documentation.html#enable_registration_captcha"><code>enable_registration_captcha</code></a> is enabled. Defaults to <code>null</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">recaptcha_private_key: YOUR_PRIVATE_KEY
+</code></pre>
+<hr />
+<h3 id="recaptcha_private_key_path"><a class="header" href="#recaptcha_private_key_path"><code>recaptcha_private_key_path</code></a></h3>
+<p><em>(string|null)</em> An alternative to <a href="usage/configuration/config_documentation.html#recaptcha_private_key"><code>recaptcha_private_key</code></a>: allows the private key to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.</p>
+<p><em>Added in Synapse 1.134.0.</em></p>
+<p>Defaults to <code>null</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">recaptcha_private_key_path: /path/to/key/file
 </code></pre>
 <hr />
 <h3 id="enable_registration_captcha"><a class="header" href="#enable_registration_captcha"><code>enable_registration_captcha</code></a></h3>
