@@ -263,6 +263,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
             @property
             def room_id(self) -> str:
+                assert self._base_builder.room_id is not None
                 return self._base_builder.room_id
 
             @property

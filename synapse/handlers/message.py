@@ -678,7 +678,10 @@ class EventCreationHandler:
                     Codes.USER_ACCOUNT_SUSPENDED,
                 )
 
-        if event_dict["type"] == EventTypes.Create and event_dict["state_key"] == "":
+        is_create_event = (
+            event_dict["type"] == EventTypes.Create and event_dict["state_key"] == ""
+        )
+        if is_create_event:
             room_version_id = event_dict["content"]["room_version"]
             maybe_room_version_obj = KNOWN_ROOM_VERSIONS.get(room_version_id)
             if not maybe_room_version_obj:
@@ -785,6 +788,7 @@ class EventCreationHandler:
         """
         # the only thing the user can do is join the server notices room.
         if builder.type == EventTypes.Member:
+            assert builder.room_id is not None
             membership = builder.content.get("membership", None)
             if membership == Membership.JOIN:
                 return await self.store.is_server_notice_room(builder.room_id)
@@ -1267,7 +1271,13 @@ class EventCreationHandler:
                 % (len(prev_event_ids),)
             )
         else:
-            prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
+            if builder.type == EventTypes.Create:
+                prev_event_ids = []
+            else:
+                assert builder.room_id is not None
+                prev_event_ids = await self.store.get_prev_events_for_room(
+                    builder.room_id
+                )
 
         # Do a quick sanity check here, rather than waiting until we've created the
         # event and then try to auth it (which fails with a somewhat confusing "No
@@ -2153,6 +2163,7 @@ class EventCreationHandler:
                 original_event.room_version, third_party_result
             )
             self.validator.validate_builder(builder)
+            assert builder.room_id is not None
         except SynapseError as e:
             raise Exception(
                 "Third party rules module created an invalid event: " + e.msg,
