@@ -3732,11 +3732,10 @@ encryption_enabled_by_default_for_room_type: invite
 
 *(object)* This setting defines options related to the user directory.
 
-*Warning: The Matrix spec requires homeservers to consider at least users the requesting user shares a room with and users who reside in public rooms known to the homeserver in directory searches. Some of the settings below aid performance but are in violation of this requirement.*
-
 This setting has the following sub-options:
 
-* `enabled` (boolean): Defines whether users can search the user directory. If `false`, then empty responses are returned to all queries (which is not spec-compliant). Defaults to `true`.
+* `enabled` (boolean): Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.
+  *Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.* Defaults to `true`.
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 
@@ -3748,7 +3747,7 @@ This setting has the following sub-options:
 
 * `prefer_local_users` (boolean): Defines whether to prefer local users in search query results. If set to true, local users are more likely to appear above remote users when searching the user directory. Defaults to `false`.
 
-* `exclude_remote_users` (boolean): If set to `true`, the search will only return local users (which is not spec-compliant). Defaults to `false`.
+* `exclude_remote_users` (boolean): If set to true, the search will only return local users. Defaults to `false`.
 
 * `show_locked_users` (boolean): Defines whether to show locked users in search query results. Defaults to `false`.
 
