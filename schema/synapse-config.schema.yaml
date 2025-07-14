@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.132/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.134/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -2185,6 +2185,23 @@ properties:
     examples:
       - per_second: 2.0
         burst_count: 20.0
+  rc_reports:
+    $ref: "#/$defs/rc"
+    description: >-
+      Ratelimiting settings for reporting content.
+
+      This is a ratelimiting option that ratelimits reports made by users
+      about content they see.
+
+      Setting this to a high value allows users to report content quickly, possibly in
+      duplicate. This can result in higher database usage.
+    default:
+      per_user:
+        per_second: 1.0
+        burst_count: 5.0
+    examples:
+      - per_second: 2.0
+        burst_count: 20.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -2318,6 +2335,30 @@ properties:
     default: 50M
     examples:
       - 60M
+  media_upload_limits:
+    type: array
+    description: >-
+      A list of media upload limits defining how much data a given user can
+      upload in a given time period.
+
+
+      An empty list means no limits are applied.
+    default: []
+    items:
+      time_period:
+        type: "#/$defs/duration"
+        description: >-
+          The time period over which the limit applies. Required.
+      max_size:
+        type: "#/$defs/bytes"
+        description: >-
+          Amount of data that can be uploaded in the time period by the user.
+          Required.
+    examples:
+      - - time_period: 1h
+          max_size: 100M
+        - time_period: 1w
+          max_size: 500M
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.

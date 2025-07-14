@@ -1,1 +1,0 @@
-Fix an issue where during state resolution for v11 rooms Synapse would incorrectly calculate the power level of the creator when there was no power levels event in the room.

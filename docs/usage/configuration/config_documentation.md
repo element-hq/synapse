@@ -1937,6 +1937,33 @@ rc_delayed_event_mgmt:
   burst_count: 20.0
 ```
 ---
+### `rc_reports`
+
+*(object)* Ratelimiting settings for reporting content.
+This is a ratelimiting option that ratelimits reports made by users about content they see.
+Setting this to a high value allows users to report content quickly, possibly in duplicate. This can result in higher database usage.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_reports:
+  per_user:
+    per_second: 1.0
+    burst_count: 5.0
+```
+
+Example configuration:
+```yaml
+rc_reports:
+  per_second: 2.0
+  burst_count: 20.0
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
@@ -2057,6 +2084,23 @@ Defaults to `"50M"`.
 Example configuration:
 ```yaml
 max_upload_size: 60M
+```
+---
+### `media_upload_limits`
+
+*(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+
+An empty list means no limits are applied.
+
+Defaults to `[]`.
+
+Example configuration:
+```yaml
+media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
 ```
 ---
 ### `max_image_pixels`

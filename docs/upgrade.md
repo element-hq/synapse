@@ -117,6 +117,21 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.135.0
+
+## `on_user_registration` module API callback may now run on any worker
+
+Previously, the `on_user_registration` callback would only run on the main
+process. Modules relying on this callback must assume that they may now be
+called from any worker, not just the main process.
+
+# Upgrading to v1.134.0
+
+## ICU bundled with Synapse
+
+Synapse now uses the Rust `icu` library for improved user search. Installing the
+native ICU library on your system is no longer required.
+
 # Upgrading to v1.130.0
 
 ## Documented endpoint which can be delegated to a federation worker
