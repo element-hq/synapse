@@ -961,6 +961,13 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.clear()
         self._current_event_fetches.clear()
 
+    def _invalidate_async_get_event_cache_room_id(self, room_id: str) -> None:
+        """
+        Clears the async get_event cache for a room. Currently a no-op until
+        an async get_event cache is implemented - see https://github.com/matrix-org/synapse/pull/13242
+        for preliminary work.
+        """
+
     async def _get_events_from_cache(
         self, events: Iterable[str], update_metrics: bool = True
     ) -> Dict[str, EventCacheEntry]:
@@ -1590,10 +1597,9 @@ class EventsWorkerStore(SQLBaseStore):
                         continue
                     redacting_event_id, redact_end_ordering = res
                     if redact_end_ordering:
-                        if e_row.stream_ordering < redact_end_ordering:
-                            e_row.redactions.append(redacting_event_id)
-                    else:
-                        e_row.redactions.append(redacting_event_id)
+                        if e_row.stream_ordering > redact_end_ordering:
+                            continue
+                    e_row.redactions.append(redacting_event_id)
         return event_dict
 
     def _maybe_redact_event_row(
