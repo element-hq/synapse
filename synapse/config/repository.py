@@ -61,7 +61,7 @@ THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP = {
     "image/png": "png",
 }
 
-HTTP_PROXY_SET_WARNING = """\
+URL_PREVIEW_BLACKLIST_IGNORED_BECAUSE_HTTP_PROXY_SET_WARNING = """\
 The Synapse config url_preview_ip_range_blacklist will be ignored as an HTTP(s) proxy is configured."""
 
 
@@ -235,16 +235,20 @@ class ContentRepositoryConfig(Config):
             check_requirements("url-preview")
 
             proxy_env = getproxies_environment()
-            if "url_preview_ip_range_blacklist" not in config:
+            if "url_preview_ip_range_blacklist" in config:
+                if "http" in proxy_env or "https" in proxy_env:
+                    logger.warning(
+                        "".join(
+                            URL_PREVIEW_BLACKLIST_IGNORED_BECAUSE_HTTP_PROXY_SET_WARNING
+                        )
+                    )
+            else:
                 if "http" not in proxy_env or "https" not in proxy_env:
                     raise ConfigError(
                         "For security, you must specify an explicit target IP address "
                         "blacklist in url_preview_ip_range_blacklist for url previewing "
                         "to work"
                     )
-            else:
-                if "http" in proxy_env or "https" in proxy_env:
-                    logger.warning("".join(HTTP_PROXY_SET_WARNING))
 
             # we always block '0.0.0.0' and '::', which are supposed to be
             # unroutable addresses.
