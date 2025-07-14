@@ -2703,7 +2703,7 @@ properties:
       Synapse reads the public key from the given file once at startup.
 
 
-      _Added in Synapse 1.134.0._
+      _Added in Synapse 1.135.0._
     default: null
     examples:
       - /path/to/key/file
@@ -2726,7 +2726,7 @@ properties:
       Synapse reads the private key from the given file once at startup.
 
 
-      _Added in Synapse 1.134.0._
+      _Added in Synapse 1.135.0._
     default: null
     examples:
       - /path/to/key/file
