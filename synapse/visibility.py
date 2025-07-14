@@ -120,10 +120,26 @@ async def filter_events_for_client(
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
     if not (
         filter_send_to_client
-        and client_config.return_soft_failed_events
+        and (
+            client_config.return_soft_failed_events
+            or client_config.return_policy_server_spammy_events
+        )
         and await storage.main.is_server_admin(UserID.from_string(user_id))
     ):
-        events = [e for e in events if not e.internal_metadata.is_soft_failed()]
+        # `return_soft_failed_events` implies `return_policy_server_spammy_events`, so
+        # we want to check when they've asked for *just* `return_policy_server_spammy_events`
+        if not client_config.return_soft_failed_events:
+            events = [
+                e
+                for e in events
+                # Return non-soft-failed events as well as those explicitly marked
+                # as spam by a policy server. This excludes events that were soft
+                # failed by other means.
+                if not e.internal_metadata.is_soft_failed()
+                or e.internal_metadata.policy_server_spammy
+            ]
+        else:
+            events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     if len(events_before_filtering) != len(events):
         if filtered_event_logger.isEnabledFor(logging.DEBUG):
             filtered_event_logger.debug(

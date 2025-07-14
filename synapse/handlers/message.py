@@ -1111,6 +1111,9 @@ class EventCreationHandler:
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)
                 if not policy_allowed:
+                    # We shouldn't need to set the metadata because the raise should
+                    # cause the request to be denied, but just in case:
+                    event.internal_metadata.policy_server_spammy = True
                     logger.warning(
                         "Event not allowed by policy server, rejecting %s",
                         event.event_id,

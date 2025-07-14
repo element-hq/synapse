@@ -15,8 +15,12 @@ class AdminClientConfig:
         # `unsigned` portion of the event to inform clients that the event
         # is soft-failed.
         self.return_soft_failed_events: bool = False
+        self.return_policy_server_spammy_events: bool = False
 
         if account_data:
             self.return_soft_failed_events = account_data.get(
                 "return_soft_failed_events", False
+            )
+            self.return_policy_server_spammy_events = account_data.get(
+                "return_policy_server_spammy_events", False
             )
