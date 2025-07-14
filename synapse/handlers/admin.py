@@ -429,8 +429,7 @@ class AdminHandler:
         user_id = task.params.get("user_id")
         assert user_id is not None
 
-        use_admin = task.params.get("use_admin")
-        assert use_admin is not None
+        use_admin = task.params.get("use_admin", False)
 
         # default to puppeting the user unless they are not local or it's been requested to
         # use the admin user to issue the redactions
