@@ -69,7 +69,10 @@ class ReportEventRestServlet(RestServlet):
                 "Param 'reason' must be a string",
                 Codes.BAD_JSON,
             )
-        if type(body.get("score", 0)) is not int:  # noqa: E721
+        if (
+            not self.hs.config.experimental.msc4277_enabled
+            and type(body.get("score", 0)) is not int
+        ):  # noqa: E721
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Param 'score' must be an integer",
@@ -85,10 +88,15 @@ class ReportEventRestServlet(RestServlet):
             event = None
 
         if event is None:
-            raise NotFoundError(
-                "Unable to report event: "
-                "it does not exist or you aren't able to see it."
-            )
+            if self.hs.config.experimental.msc4277_enabled:
+                # Respond with 200 and no content regardless of whether the event
+                # exists to prevent enumeration attacks.
+                return 200, {}
+            else:
+                raise NotFoundError(
+                    "Unable to report event: "
+                    "it does not exist or you aren't able to see it."
+                )
 
         await self.store.add_event_report(
             room_id=room_id,
@@ -138,7 +146,12 @@ class ReportRoomRestServlet(RestServlet):
 
         room = await self.store.get_room(room_id)
         if room is None:
-            raise NotFoundError("Room does not exist")
+            if self.hs.config.experimental.msc4277_enabled:
+                # Respond with 200 and no content regardless of whether the room
+                # exists to prevent enumeration attacks.
+                return 200, {}
+            else:
+                raise NotFoundError("Room does not exist")
 
         await self.store.add_room_report(
             room_id=room_id,

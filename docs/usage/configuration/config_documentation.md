@@ -2086,6 +2086,23 @@ Example configuration:
 max_upload_size: 60M
 ```
 ---
+### `media_upload_limits`
+
+*(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+
+An empty list means no limits are applied.
+
+Defaults to `[]`.
+
+Example configuration:
+```yaml
+media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
+```
+---
 ### `max_image_pixels`
 
 *(byte size)* Maximum number of pixels that will be thumbnailed. Defaults to `"32M"`.
