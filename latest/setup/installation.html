@@ -353,19 +353,18 @@ header files for Python C extensions.</p>
 <p>Installing prerequisites on Ubuntu or Debian:</p>
 <pre><code class="language-sh">sudo apt install build-essential python3-dev libffi-dev \
                      python3-pip python3-setuptools sqlite3 \
-                     libssl-dev virtualenv libjpeg-dev libxslt1-dev libicu-dev
+                     libssl-dev virtualenv libjpeg-dev libxslt1-dev
 </code></pre>
 <h5 id="archlinux-1"><a class="header" href="#archlinux-1">ArchLinux</a></h5>
 <p>Installing prerequisites on ArchLinux:</p>
 <pre><code class="language-sh">sudo pacman -S base-devel python python-pip \
-               python-setuptools python-virtualenv sqlite3 icu
+               python-setuptools python-virtualenv sqlite3
 </code></pre>
 <h5 id="centosfedora"><a class="header" href="#centosfedora">CentOS/Fedora</a></h5>
 <p>Installing prerequisites on CentOS or Fedora Linux:</p>
 <pre><code class="language-sh">sudo dnf install libtiff-devel libjpeg-devel libzip-devel freetype-devel \
                  libwebp-devel libxml2-devel libxslt-devel libpq-devel \
-                 python3-virtualenv libffi-devel openssl-devel python3-devel \
-                 libicu-devel
+                 python3-virtualenv libffi-devel openssl-devel python3-devel
 sudo dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h5 id="red-hat-enterprise-linux--rocky-linux--oracle-linux"><a class="header" href="#red-hat-enterprise-linux--rocky-linux--oracle-linux">Red Hat Enterprise Linux / Rocky Linux / Oracle Linux</a></h5>
@@ -382,7 +381,7 @@ dnf install python3.11 python3.11-devel
 dnf install python3.12 python3.12-devel
 </code></pre>
 <p>Finally, install common prerequisites</p>
-<pre><code class="language-bash">dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf
+<pre><code class="language-bash">dnf install libpq5 libpq5-devel lz4 pkgconf
 dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h6 id="using-venv-module-instead-of-virtualenv-command"><a class="header" href="#using-venv-module-instead-of-virtualenv-command">Using venv module instead of virtualenv command</a></h6>
@@ -406,17 +405,6 @@ pip install matrix-synapse
 <pre><code class="language-sh">xcode-select --install
 </code></pre>
 <p>Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) for them.</p>
-<p>You may need to install icu, and make the icu binaries and libraries accessible.
-Please follow <a href="https://pypi.org/project/PyICU/">the official instructions of PyICU</a> to do so.</p>
-<p>If you're struggling to get icu discovered, and see:</p>
-<pre><code>  RuntimeError:
-  Please install pkg-config on your system or set the ICU_VERSION environment
-  variable to the version of ICU you have installed.
-</code></pre>
-<p>despite it being installed and having your <code>PATH</code> updated, you can omit this dependency by
-not specifying <code>--extras all</code> to <code>poetry</code>. If using postgres, you can install Synapse via
-<code>poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry</code>.
-ICU is not a hard dependency on getting a working installation.</p>
 <p>On ARM-based Macs you may also need to install libjpeg and libpq:</p>
 <pre><code class="language-sh"> brew install jpeg libpq
 </code></pre>
@@ -430,8 +418,7 @@ export CPPFLAGS=&quot;-I/usr/local/opt/openssl/include&quot;
 <p>Installing prerequisites on openSUSE:</p>
 <pre><code class="language-sh">sudo zypper in -t pattern devel_basis
 sudo zypper in python-pip python-setuptools sqlite3 python-virtualenv \
-               python-devel libffi-devel libopenssl-devel libjpeg62-devel \
-               libicu-devel
+               python-devel libffi-devel libopenssl-devel libjpeg62-devel
 </code></pre>
 <h5 id="openbsd-1"><a class="header" href="#openbsd-1">OpenBSD</a></h5>
 <p>A port of Synapse is available under <code>net/synapse</code>. The filesystem
