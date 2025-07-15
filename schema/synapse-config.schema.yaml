@@ -4692,6 +4692,7 @@ properties:
           Defines whether users can search the user directory. If `false` then
           empty responses are returned to all queries.
 
+
           *Warning: While the homeserver may determine which subset of users are
           searched, the Matrix specification requires homeservers to include (at
           minimum) users visible in public rooms and users sharing a room with
