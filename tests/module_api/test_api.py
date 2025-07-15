@@ -28,7 +28,7 @@ from synapse.api.constants import EduTypes, EventTypes
 from synapse.api.errors import NotFoundError
 from synapse.events import EventBase
 from synapse.federation.units import Transaction
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceWriterHandler
 from synapse.handlers.presence import UserPresenceState
 from synapse.handlers.push_rules import InvalidRuleException
 from synapse.module_api import ModuleApi
@@ -819,7 +819,7 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
 
         # Delete the device.
         device_handler = self.hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         self.get_success(device_handler.delete_devices(user_id, [device_id]))
 
         # Check that the callback was called and the pushers still existed.

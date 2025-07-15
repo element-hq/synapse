@@ -85,7 +85,6 @@ from synapse.util.retryutils import (
 
 if TYPE_CHECKING:
     from synapse.app.generic_worker import GenericWorkerStore
-    from synapse.app.homeserver import DataStore
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -113,7 +112,7 @@ def _check_device_name_length(name: Optional[str]) -> None:
         )
 
 
-class DeviceWorkerHandler:
+class DeviceHandler:
     device_list_updater: "DeviceListWorkerUpdater"
     store: "GenericWorkerStore"
 
@@ -901,17 +900,22 @@ class DeviceWorkerHandler:
                 device_id=device_id,
                 from_stream_id=from_stream_id,
                 to_stream_id=up_to_stream_id,
-                limit=DeviceHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT,
+                limit=DeviceWriterHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT,
             )
 
             if from_stream_id is None:
                 return TaskStatus.COMPLETE, None, None
 
-            await self.clock.sleep(DeviceHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0)
+            await self.clock.sleep(
+                DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0
+            )
 
 
-class DeviceHandler(DeviceWorkerHandler):
-    store: "DataStore"  # type: ignore[assignment]
+class DeviceWriterHandler(DeviceHandler):
+    """
+    Superclass of the DeviceHandler which gets instanciated on workers that can
+    write to the device list stream.
+    """
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
@@ -1275,7 +1279,7 @@ def _update_device_from_client_ips(
 
 
 class DeviceListWorkerUpdater:
-    "Handles incoming device list updates from federation and contacts the main process over replication"
+    "Handles incoming device list updates from federation and contacts the main device list writer over replication"
 
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
@@ -1379,9 +1383,12 @@ class DeviceListWorkerUpdater:
 
 
 class DeviceListUpdater(DeviceListWorkerUpdater):
-    "Handles incoming device list updates from federation and updates the DB"
+    """Handles incoming device list updates from federation and updates the DB.
 
-    def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
+    This is only instanciated on the first device list writer, as it uses
+    in-process linearizers for some operations."""
+
+    def __init__(self, hs: "HomeServer", device_handler: DeviceWriterHandler):
         super().__init__(hs)
 
         self.federation = hs.get_federation_client()

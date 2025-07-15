@@ -29,7 +29,7 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import RoomEncryptionAlgorithms
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.appservice import ApplicationService
-from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceHandler
+from synapse.handlers.device import MAX_DEVICE_DISPLAY_NAME_LEN, DeviceWriterHandler
 from synapse.rest import admin
 from synapse.rest.client import devices, login, register
 from synapse.server import HomeServer
@@ -53,7 +53,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
             application_service_api=self.appservice_api,
         )
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
+        assert isinstance(handler, DeviceWriterHandler)
         self.handler = handler
         self.store = hs.get_datastores().main
         self.device_message_handler = hs.get_device_message_handler()
@@ -229,7 +229,7 @@ class DeviceTestCase(unittest.HomeserverTestCase):
 
         # queue a bunch of messages in the inbox
         requester = create_requester(sender, device_id=DEVICE_ID)
-        for i in range(DeviceHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT + 10):
+        for i in range(DeviceWriterHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT + 10):
             self.get_success(
                 self.device_message_handler.send_device_message(
                     requester, "message_type", {receiver: {"*": {"val": i}}}
@@ -462,7 +462,7 @@ class DehydrationTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver("server")
         handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
+        assert isinstance(handler, DeviceWriterHandler)
         self.handler = handler
         self.message_handler = hs.get_device_message_handler()
         self.registration = hs.get_registration_handler()
