@@ -2086,6 +2086,23 @@ Example configuration:
 max_upload_size: 60M
 ```
 ---
+### `media_upload_limits`
+
+*(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+
+An empty list means no limits are applied.
+
+Defaults to `[]`.
+
+Example configuration:
+```yaml
+media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
+```
+---
 ### `max_image_pixels`
 
 *(byte size)* Maximum number of pixels that will be thumbnailed. Defaults to `"32M"`.
@@ -2340,6 +2357,21 @@ Example configuration:
 recaptcha_public_key: YOUR_PUBLIC_KEY
 ```
 ---
+### `recaptcha_public_key_path`
+
+*(string|null)* An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows the public key to be specified in an external file.
+
+The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
+
+_Added in Synapse 1.134.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_public_key_path: /path/to/key/file
+```
+---
 ### `recaptcha_private_key`
 
 *(string|null)* This homeserver's ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
@@ -2347,6 +2379,21 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 Example configuration:
 ```yaml
 recaptcha_private_key: YOUR_PRIVATE_KEY
+```
+---
+### `recaptcha_private_key_path`
+
+*(string|null)* An alternative to [`recaptcha_private_key`](#recaptcha_private_key): allows the private key to be specified in an external file.
+
+The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
+
+_Added in Synapse 1.134.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_private_key_path: /path/to/key/file
 ```
 ---
 ### `enable_registration_captcha`
