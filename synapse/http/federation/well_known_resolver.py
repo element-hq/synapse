@@ -96,10 +96,10 @@ class WellKnownResolver:
     ):
         """
         Args:
+            server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             reactor
             agent
             user_agent
-            server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             well_known_cache
             had_well_known_cache
         """
