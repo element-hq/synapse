@@ -672,7 +672,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
             self.assertEqual(edu["edu_type"], EduTypes.DEVICE_LIST_UPDATE)
             c = edu["content"]
             if stream_id is not None:
-                self.assertEqual(c["prev_id"], [stream_id])  # type: ignore[unreachable]
+                self.assertEqual(c["prev_id"], [stream_id])
                 self.assertGreaterEqual(c["stream_id"], stream_id)
             stream_id = c["stream_id"]
         devices = {edu["content"]["device_id"] for edu in self.edus}

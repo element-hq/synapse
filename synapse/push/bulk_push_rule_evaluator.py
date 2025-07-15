@@ -130,7 +130,8 @@ class BulkPushRuleEvaluator:
         self.hs = hs
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self._event_auth_handler = hs.get_event_auth_handler()
         self.should_calculate_push_rules = self.hs.config.push.enable_push
 

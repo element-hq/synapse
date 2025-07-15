@@ -813,7 +813,9 @@ class StateStorageController:
             state_group = object()
 
         assert state_group is not None
-        with Measure(self._clock, "get_joined_hosts"):
+        with Measure(
+            self._clock, name="get_joined_hosts", server_name=self.server_name
+        ):
             return await self._get_joined_hosts(
                 room_id, state_group, state_entry=state_entry
             )

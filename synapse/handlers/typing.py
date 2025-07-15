@@ -506,6 +506,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
 class TypingNotificationEventSource(EventSource[int, JsonMapping]):
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._main_store = hs.get_datastores().main
         self.clock = hs.get_clock()
         # We can't call get_typing_handler here because there's a cycle:
@@ -538,7 +539,9 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
                   appservice may be interested in.
                 * The latest known room serial.
         """
-        with Measure(self.clock, "typing.get_new_events_as"):
+        with Measure(
+            self.clock, name="typing.get_new_events_as", server_name=self.server_name
+        ):
             handler = self.get_typing_handler()
 
             events = []
@@ -574,7 +577,9 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         Find typing notifications for given rooms (> `from_token` and <= `to_token`)
         """
 
-        with Measure(self.clock, "typing.get_new_events"):
+        with Measure(
+            self.clock, name="typing.get_new_events", server_name=self.server_name
+        ):
             from_key = int(from_key)
             handler = self.get_typing_handler()
 

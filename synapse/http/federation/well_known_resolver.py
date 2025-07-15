@@ -87,10 +87,10 @@ class WellKnownResolver:
 
     def __init__(
         self,
+        server_name: str,
         reactor: IReactorTime,
         agent: IAgent,
         user_agent: bytes,
-        server_name: str,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
         had_well_known_cache: Optional[TTLCache[bytes, bool]] = None,
     ):
@@ -99,12 +99,12 @@ class WellKnownResolver:
             reactor
             agent
             user_agent
-            server_name: The homeserver name running this resolver
-                (used to label metrics) (`hs.hostname`).
+            server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             well_known_cache
             had_well_known_cache
         """
 
+        self.server_name = server_name
         self._reactor = reactor
         self._clock = Clock(reactor)
 
@@ -146,7 +146,13 @@ class WellKnownResolver:
         # TODO: should we linearise so that we don't end up doing two .well-known
         # requests for the same server in parallel?
         try:
-            with Measure(self._clock, "get_well_known"):
+            with Measure(
+                self._clock,
+                name="get_well_known",
+                # This should be our homeserver where the the code is running (used to
+                # label metrics)
+                server_name=self.server_name,
+            ):
                 result: Optional[bytes]
                 cache_period: float
 

@@ -60,7 +60,7 @@ jobs:
       - run: poetry run pip list > before.txt
       # Upgrade all runtime dependencies only. This is intended to mimic a fresh
       # `pip install matrix-synapse[all]` as closely as possible.
-      - run: poetry update --no-dev
+      - run: poetry update --without dev
       - run: poetry run pip list > after.txt && (diff -u before.txt after.txt || true)
       - name: Remove unhelpful options from mypy config
         run: sed -e '/warn_unused_ignores = True/d' -e '/warn_redundant_casts = True/d' -i mypy.ini

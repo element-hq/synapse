@@ -189,7 +189,8 @@ class StateHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self.hs = hs
@@ -749,7 +750,9 @@ class StateResolutionHandler:
             # which will be used as a cache key for future resolutions, but
             # not get persisted.
 
-            with Measure(self.clock, "state.create_group_ids"):
+            with Measure(
+                self.clock, name="state.create_group_ids", server_name=self.server_name
+            ):
                 cache = _make_state_cache_entry(new_state, state_groups_ids)
 
             self._state_cache[group_names] = cache
@@ -787,7 +790,9 @@ class StateResolutionHandler:
             a map from (type, state_key) to event_id.
         """
         try:
-            with Measure(self.clock, "state._resolve_events") as m:
+            with Measure(
+                self.clock, name="state._resolve_events", server_name=self.server_name
+            ) as m:
                 room_version_obj = KNOWN_ROOM_VERSIONS[room_version]
                 if room_version_obj.state_res == StateResolutionVersions.V1:
                     return await v1.resolve_events_with_store(

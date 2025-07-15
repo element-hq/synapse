@@ -95,10 +95,10 @@ class MatrixFederationAgentTests(unittest.TestCase):
             timer=self.reactor.seconds,
         )
         self.well_known_resolver = WellKnownResolver(
-            self.reactor,
-            Agent(self.reactor, contextFactory=self.tls_factory),
-            b"test-agent",
-            server_name="test_server",
+            server_name="OUR_STUB_HOMESERVER_NAME",
+            reactor=self.reactor,
+            agent=Agent(self.reactor, contextFactory=self.tls_factory),
+            user_agent=b"test-agent",
             well_known_cache=self.well_known_cache,
             had_well_known_cache=self.had_well_known_cache,
         )
@@ -274,12 +274,12 @@ class MatrixFederationAgentTests(unittest.TestCase):
         because it is created too early during setUp
         """
         return MatrixFederationAgent(
+            server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=cast(ISynapseReactor, self.reactor),
             tls_client_options_factory=self.tls_factory,
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
-            server_name="test_server",
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=self.well_known_resolver,
         )
@@ -1017,18 +1017,18 @@ class MatrixFederationAgentTests(unittest.TestCase):
         # Build a new agent and WellKnownResolver with a different tls factory
         tls_factory = FederationPolicyForHTTPS(config)
         agent = MatrixFederationAgent(
+            server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=self.reactor,
             tls_client_options_factory=tls_factory,
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
-            server_name="test_server",
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
-                cast(ISynapseReactor, self.reactor),
-                Agent(self.reactor, contextFactory=tls_factory),
-                b"test-agent",
-                server_name="test_server",
+                server_name="OUR_STUB_HOMESERVER_NAME",
+                reactor=cast(ISynapseReactor, self.reactor),
+                agent=Agent(self.reactor, contextFactory=tls_factory),
+                user_agent=b"test-agent",
                 well_known_cache=self.well_known_cache,
                 had_well_known_cache=self.had_well_known_cache,
             ),
