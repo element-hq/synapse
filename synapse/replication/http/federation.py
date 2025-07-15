@@ -205,6 +205,8 @@ class ReplicationFederationSendEduRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationGetQueryRestServlet(ReplicationEndpoint):
     """Handle responding to queries from federation.
 
@@ -252,6 +254,8 @@ class ReplicationGetQueryRestServlet(ReplicationEndpoint):
         return 200, result
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationCleanRoomRestServlet(ReplicationEndpoint):
     """Called to clean up any data in DB for a given room, ready for the
     server to join the room.
@@ -287,6 +291,8 @@ class ReplicationCleanRoomRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationStoreRoomOnOutlierMembershipRestServlet(ReplicationEndpoint):
     """Called to clean up any data in DB for a given room, ready for the
     server to join the room.
