@@ -145,7 +145,6 @@ class DeviceRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
-        self._is_main_process = hs.config.worker.worker_app is None
 
     async def on_GET(
         self, request: SynapseRequest, device_id: str
