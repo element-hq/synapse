@@ -29,11 +29,11 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 from urllib.request import (  # type: ignore[attr-defined]
     getproxies_environment,
 )
-from typing_extensions import ParamSpec, TypeGuard
 
 import attr
 import yaml
 from netaddr import AddrFormatError, IPNetwork, IPSet
+from typing_extensions import TypeGuard
 
 from twisted.conch.ssh.keys import Key
 
@@ -737,7 +737,9 @@ class ServerConfig(Config):
                 )
             )
 
-        # Prefer config over the environment variables
+        # Figure out forward proxy config for outgoing HTTP requests.
+        #
+        # Prefer values from the file config over the environment variables
         proxies_from_env = getproxies_environment()
         self.http_proxy = config.get("http_proxy", proxies_from_env.get("http"))
         if not isinstance(self.http_proxy, str):
@@ -758,14 +760,6 @@ class ServerConfig(Config):
             raise ConfigError(
                 "'no_proxy_hosts' must be a list of strings", ("no_proxy_hosts",)
             )
-        for no_proxy_host in self.no_proxy_hosts:
-            if not isinstance(no_proxy_host, str):
-                raise ConfigError(
-                    "'no_proxy_hosts' must be a list of strings",
-                    ("no_proxy_hosts",),
-                )
-
-        reveal_type(self.no_proxy_hosts)
 
         logger.debug(
             "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
