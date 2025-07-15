@@ -185,6 +185,8 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
         return 200, multi_user_devices
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
     """Unused endpoint, kept for backwards compatibility during rollout."""
 
