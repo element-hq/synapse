@@ -2320,7 +2320,7 @@
         "string",
         "null"
       ],
-      "description": "An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows the public key to be specified in an external file.\n\nThe file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.\n\n_Added in Synapse 1.134.0._",
+      "description": "An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows the public key to be specified in an external file.\n\nThe file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.\n\n_Added in Synapse 1.135.0._",
       "default": null,
       "examples": [
         "/path/to/key/file"
@@ -2342,7 +2342,7 @@
         "string",
         "null"
       ],
-      "description": "An alternative to [`recaptcha_private_key`](#recaptcha_private_key): allows the private key to be specified in an external file.\n\nThe file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.\n\n_Added in Synapse 1.134.0._",
+      "description": "An alternative to [`recaptcha_private_key`](#recaptcha_private_key): allows the private key to be specified in an external file.\n\nThe file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.\n\n_Added in Synapse 1.135.0._",
       "default": null,
       "examples": [
         "/path/to/key/file"
