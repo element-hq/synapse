@@ -3394,7 +3394,9 @@ Setting this to a high value allows users to report content quickly, possibly in
 <p>This setting has the following sub-options:</p>
 <ul>
 <li>
-<p><code>enabled</code> (boolean): Defines whether users can search the user directory. If false then empty responses are returned to all queries. Defaults to <code>true</code>.</p>
+<p><code>enabled</code> (boolean): Defines whether users can search the user directory. If <code>false</code> then empty responses are returned to all queries.</p>
+<p><em>Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using <code>false</code> improves performance but violates this requirement.</em></p>
+<p>Defaults to <code>true</code>.</p>
 </li>
 <li>
 <p><code>search_all_users</code> (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.</p>

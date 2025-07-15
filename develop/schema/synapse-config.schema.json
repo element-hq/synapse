@@ -3883,7 +3883,7 @@
       "properties": {
         "enabled": {
           "type": "boolean",
-          "description": "Defines whether users can search the user directory. If false then empty responses are returned to all queries.",
+          "description": "Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.\n\n*Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.*",
           "default": true
         },
         "search_all_users": {
