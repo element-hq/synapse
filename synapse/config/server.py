@@ -26,6 +26,10 @@ import os.path
 import urllib.parse
 from textwrap import indent
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from urllib.request import (  # type: ignore[attr-defined]
+    getproxies_environment,
+)
+from typing_extensions import ParamSpec, TypeGuard
 
 import attr
 import yaml
@@ -42,6 +46,21 @@ from ._base import Config, ConfigError
 from ._util import validate_config
 
 logger = logging.getLogger(__name__)
+
+
+# Directly from the mypy docs:
+# https://typing.python.org/en/latest/spec/narrowing.html#typeguard
+def is_str_list(val: Any, allow_empty: bool) -> TypeGuard[list[str]]:
+    """
+    Type-narrow a value to a list of strings (compatible with mypy).
+    """
+    if not isinstance(val, list):
+        return False
+
+    if len(val) == 0:
+        return allow_empty
+    return all(isinstance(x, str) for x in val)
+
 
 DIRECT_TCP_ERROR = """
 Using direct TCP replication for workers is no longer supported.
@@ -717,6 +736,43 @@ class ServerConfig(Config):
                     ),
                 )
             )
+
+        # Prefer config over the environment variables
+        proxies_from_env = getproxies_environment()
+        self.http_proxy = config.get("http_proxy", proxies_from_env.get("http"))
+        if not isinstance(self.http_proxy, str):
+            raise ConfigError("'http_proxy' must be a string", ("http_proxy",))
+        self.https_proxy = config.get("https_proxy", proxies_from_env.get("https"))
+        if not isinstance(self.https_proxy, str):
+            raise ConfigError("'https_proxy' must be a string", ("https_proxy",))
+        # List of hosts which should not use the proxy. Synapse will directly connect to
+        # these hosts.
+        self.no_proxy_hosts = config.get("no_proxy_hosts")
+        # The `no_proxy` environment variable should be a comma-separated list of hosts,
+        # IP addresses, or IP ranges in CIDR format
+        no_proxy_from_env = proxies_from_env.get("no")
+        if self.no_proxy_hosts is None and no_proxy_from_env is not None:
+            self.no_proxy_hosts = no_proxy_from_env.split(",")
+
+        if not is_str_list(self.no_proxy_hosts, allow_empty=True):
+            raise ConfigError(
+                "'no_proxy_hosts' must be a list of strings", ("no_proxy_hosts",)
+            )
+        for no_proxy_host in self.no_proxy_hosts:
+            if not isinstance(no_proxy_host, str):
+                raise ConfigError(
+                    "'no_proxy_hosts' must be a list of strings",
+                    ("no_proxy_hosts",),
+                )
+
+        reveal_type(self.no_proxy_hosts)
+
+        logger.debug(
+            "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
+            self.http_proxy,
+            self.https_proxy,
+            self.no_proxy,
+        )
 
         self.cleanup_extremities_with_dummy_events = config.get(
             "cleanup_extremities_with_dummy_events", True
