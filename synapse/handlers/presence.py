@@ -747,6 +747,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
 class PresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self.wheel_timer: WheelTimer[str] = WheelTimer()
         self.notifier = hs.get_notifier()
 
@@ -941,7 +942,9 @@ class PresenceHandler(BasePresenceHandler):
 
         now = self.clock.time_msec()
 
-        with Measure(self.clock, "presence_update_states"):
+        with Measure(
+            self.clock, name="presence_update_states", server_name=self.server_name
+        ):
             # NOTE: We purposefully don't await between now and when we've
             # calculated what we want to do with the new states, to avoid races.
 
@@ -1497,7 +1500,9 @@ class PresenceHandler(BasePresenceHandler):
     async def _unsafe_process(self) -> None:
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "presence_delta"):
+            with Measure(
+                self.clock, name="presence_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
                 if self._event_pos == room_max_stream_ordering:
                     return
@@ -1759,6 +1764,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         # Same with get_presence_router:
         #
         #   AuthHandler -> Notifier -> PresenceEventSource -> ModuleApi -> AuthHandler
+        self.server_name = hs.hostname
         self.get_presence_handler = hs.get_presence_handler
         self.get_presence_router = hs.get_presence_router
         self.clock = hs.get_clock()
@@ -1792,7 +1798,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         user_id = user.to_string()
         stream_change_cache = self.store.presence_stream_cache
 
-        with Measure(self.clock, "presence.get_new_events"):
+        with Measure(
+            self.clock, name="presence.get_new_events", server_name=self.server_name
+        ):
             if from_key is not None:
                 from_key = int(from_key)
 

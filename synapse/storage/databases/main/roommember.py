@@ -983,7 +983,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         `_get_user_ids_from_membership_event_ids` for any uncached events.
         """
 
-        with Measure(self._clock, "get_joined_user_ids_from_state"):
+        with Measure(
+            self._clock,
+            name="get_joined_user_ids_from_state",
+            server_name=self.server_name,
+        ):
             users_in_room = set()
             member_event_ids = [
                 e_id for key, e_id in state.items() if key[0] == EventTypes.Member
