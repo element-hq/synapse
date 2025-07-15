@@ -559,7 +559,7 @@ class RegistrationHandler:
                         if join_rules_event:
                             join_rule = join_rules_event.content.get("join_rule", None)
                             requires_invite = (
-                                bool(join_rule) and join_rule != JoinRules.PUBLIC
+                                join_rule is not None and join_rule != JoinRules.PUBLIC
                             )
 
                 # Send the invite, if necessary.
