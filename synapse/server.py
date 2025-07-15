@@ -142,6 +142,9 @@ from synapse.replication.tcp.streams import STREAMS_MAP, Stream
 from synapse.rest.media.media_repository_resource import MediaRepositoryResource
 from synapse.server_notices.server_notices_manager import ServerNoticesManager
 from synapse.server_notices.server_notices_sender import ServerNoticesSender
+from synapse.server_notices.worker_server_notices_manager import (
+    WorkerServerNoticesManager,
+)
 from synapse.server_notices.worker_server_notices_sender import (
     WorkerServerNoticesSender,
 )
@@ -758,9 +761,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         return FederationHandlerRegistry(self)
 
     @cache_in_self
-    def get_server_notices_manager(self) -> ServerNoticesManager:
+    def get_server_notices_manager(self) -> WorkerServerNoticesManager:
         if self.config.worker.worker_app:
-            raise Exception("Workers cannot send server notices")
+            return WorkerServerNoticesManager(self)
         return ServerNoticesManager(self)
 
     @cache_in_self
