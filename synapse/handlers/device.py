@@ -146,8 +146,14 @@ class DeviceHandler:
 
         self._device_list_writers = hs.config.worker.writers.device_lists
 
-        # There are a few things we only handle on a single writer because of
-        # linearizers in the DeviceListUpdater
+        # Ensure a few operations are only running on the first device list writer
+        #
+        # This is needed because of a few linearizers in the DeviceListUpdater,
+        # and avoid using cross-worker locks.
+        #
+        # The main logic update is that the DeviceListUpdater is now only
+        # instantiated on the first device list writer, and a few methods that
+        # were safe to move to any worker were moved to the DeviceListWorkerUpdater
         self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
 
         self._notify_device_update_client = (
@@ -163,6 +169,9 @@ class DeviceHandler:
             ReplicationDeviceHandleRoomUnPartialStated.make_client(hs)
         )
 
+        # The EDUs are handled on a single writer, as it needs to acquire a
+        # per-user lock, for which it is cheaper to use in-memory linearizers
+        # than cross-worker locks.
         hs.get_federation_registry().register_instances_for_edu(
             EduTypes.DEVICE_LIST_UPDATE,
             [self._main_device_list_writer],
@@ -933,6 +942,9 @@ class DeviceWriterHandler(DeviceHandler):
 
         # There are a few things that are only handled on the main device list
         # writer to avoid cross-worker locks
+        #
+        # This mainly concerns the `DeviceListUpdater` class, which is only
+        # instantiated on the first device list writer.
         self._is_main_device_list_writer = (
             hs.get_instance_name() == self._main_device_list_writer
         )
