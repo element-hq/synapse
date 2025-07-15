@@ -826,7 +826,7 @@ class SimpleHttpClient(BaseHttpClient):
             connectTimeout=15,
             contextFactory=self.hs.get_http_client_context_factory(),
             pool=pool,
-            use_proxy=use_proxy,
+            proxy_config=hs.config.server.proxy_config,
         )
 
         if self._ip_blocklist:

@@ -24,7 +24,6 @@ import re
 from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union, cast
 from urllib.parse import urlparse
 from urllib.request import (  # type: ignore[attr-defined]
-    getproxies_environment,
     proxy_bypass_environment,
 )
 
@@ -54,6 +53,7 @@ from twisted.web.error import SchemeNotSupported
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IAgent, IBodyProducer, IPolicyForHTTPS, IResponse
 
+from synapse.config.server import ProxyConfig
 from synapse.config.workers import (
     InstanceLocationConfig,
     InstanceTcpLocationConfig,
@@ -99,8 +99,7 @@ class ProxyAgent(_AgentBase):
         pool: connection pool to be used. If None, a
             non-persistent pool instance will be created.
 
-        use_proxy: Whether proxy settings should be discovered and used
-            from conventional environment variables.
+        proxy_config: TODO
 
         federation_proxy_locations: An optional list of locations to proxy outbound federation
             traffic through (only requests that use the `matrix-federation://` scheme
@@ -118,13 +117,14 @@ class ProxyAgent(_AgentBase):
 
     def __init__(
         self,
+        *,
         reactor: IReactorCore,
         proxy_reactor: Optional[IReactorCore] = None,
         contextFactory: Optional[IPolicyForHTTPS] = None,
         connectTimeout: Optional[float] = None,
         bindAddress: Optional[bytes] = None,
         pool: Optional[HTTPConnectionPool] = None,
-        use_proxy: bool = False,
+        proxy_config: Optional[ProxyConfig] = None,
         federation_proxy_locations: Collection[InstanceLocationConfig] = (),
         federation_proxy_credentials: Optional[ProxyCredentials] = None,
     ):
@@ -145,30 +145,28 @@ class ProxyAgent(_AgentBase):
         if bindAddress is not None:
             self._endpoint_kwargs["bindAddress"] = bindAddress
 
-        http_proxy = None
-        https_proxy = None
-        no_proxy = None
-        if use_proxy:
-            proxies = getproxies_environment()
-            http_proxy = proxies["http"].encode() if "http" in proxies else None
-            https_proxy = proxies["https"].encode() if "https" in proxies else None
-            no_proxy = proxies["no"] if "no" in proxies else None
+        self.proxy_config = proxy_config
+        if proxy_config is not None:
             logger.debug(
                 "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
-                http_proxy,
-                https_proxy,
-                no_proxy,
+                self.proxy_config.http_proxy,
+                self.proxy_config.https_proxy,
+                self.proxy_config.no_proxy_hosts,
             )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
-            http_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
+            self.proxy_config.http_proxy,
+            self.proxy_reactor,
+            contextFactory,
+            **self._endpoint_kwargs,
         )
 
         self.https_proxy_endpoint, self.https_proxy_creds = http_proxy_endpoint(
-            https_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
+            self.proxy_config.https_proxy,
+            self.proxy_reactor,
+            contextFactory,
+            **self._endpoint_kwargs,
         )
-
-        self.no_proxy = no_proxy
 
         self._policy_for_https = contextFactory
         self._reactor = cast(IReactorTime, reactor)
@@ -267,12 +265,10 @@ class ProxyAgent(_AgentBase):
         )
         request_path = parsed_uri.originForm
 
-        should_skip_proxy = False
-        if self.no_proxy is not None:
-            should_skip_proxy = proxy_bypass_environment(
-                parsed_uri.host.decode(),
-                proxies={"no": self.no_proxy},
-            )
+        should_skip_proxy = proxy_bypass_environment(
+            parsed_uri.host.decode(),
+            proxies=self.proxy_config.get_proxies_dictionary(),
+        )
 
         if (
             parsed_uri.scheme == b"http"

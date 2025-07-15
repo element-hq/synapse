@@ -25,7 +25,7 @@ import logging
 import os.path
 import urllib.parse
 from textwrap import indent
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, TypedDict, Union
 from urllib.request import getproxies_environment
 
 import attr
@@ -308,8 +308,32 @@ class LimitRemoteRoomsConfig:
     )
 
 
+class ProxyConfigDictionary(TypedDict):
+    """
+    Dictionary of proxy settings suitable for interacting with `urllib.request` API's
+    """
+
+    http: Optional[str]
+    """
+    Proxy server to use for HTTP requests.
+    """
+    https: Optional[str]
+    """
+    Proxy server to use for HTTPS requests.
+    """
+    no: Optional[str]
+    """
+    Comma-separated list of hosts, IP addresses, or IP ranges in CIDR format which
+    should not use the proxy.
+    """
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class ProxyConfig:
+    """
+    Synapse configuration for HTTP proxy settings.
+    """
+
     http_proxy: Optional[str]
     """
     Proxy server to use for HTTP requests.
@@ -323,6 +347,19 @@ class ProxyConfig:
     List of hosts, IP addresses, or IP ranges in CIDR format which should not use the
     proxy. Synapse will directly connect to these hosts.
     """
+
+    def get_proxies_dictionary(self) -> ProxyConfigDictionary:
+        """
+        Returns a dictionary of proxy settings suitable for interacting with
+        `urllib.request` API's (e.g. `urllib.request.proxy_bypass_environment`)
+
+        The keys are `"http"`, `"https"`, and `"no"`.
+        """
+        return ProxyConfigDictionary(
+            http=self.http_proxy,
+            https=self.https_proxy,
+            no=",".join(self.no_proxy_hosts) if self.no_proxy_hosts else None,
+        )
 
 
 def parse_proxy_config(config: JsonDict) -> ProxyConfig:
