@@ -26,9 +26,7 @@ import os.path
 import urllib.parse
 from textwrap import indent
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
-from urllib.request import (  # type: ignore[attr-defined]
-    getproxies_environment,
-)
+from urllib.request import getproxies_environment
 
 import attr
 import yaml
@@ -307,6 +305,63 @@ class LimitRemoteRoomsConfig:
     )
     admins_can_join: bool = attr.ib(
         validator=attr.validators.instance_of(bool), default=False
+    )
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ProxyConfig:
+    http_proxy: Optional[str]
+    """
+    Proxy server to use for HTTP requests.
+    """
+    https_proxy: Optional[str]
+    """
+    Proxy server to use for HTTPS requests.
+    """
+    no_proxy_hosts: Optional[List[str]]
+    """
+    List of hosts, IP addresses, or IP ranges in CIDR format which should not use the
+    proxy. Synapse will directly connect to these hosts.
+    """
+
+
+def parse_proxy_config(config: JsonDict) -> ProxyConfig:
+    """
+    Figure out forward proxy config for outgoing HTTP requests.
+
+    Prefer values from the file config over the environment variables (`http_proxy`,
+    `https_proxy`, `no_proxy`, not case-sensitive).
+
+    Args:
+        config: The top-level homeserver configuration dictionary.
+    """
+    proxies_from_env = getproxies_environment()
+    http_proxy = config.get("http_proxy", proxies_from_env.get("http"))
+    if http_proxy is not None and not isinstance(http_proxy, str):
+        raise ConfigError("'http_proxy' must be a string", ("http_proxy",))
+
+    https_proxy = config.get("https_proxy", proxies_from_env.get("https"))
+    if https_proxy is not None and not isinstance(https_proxy, str):
+        raise ConfigError("'https_proxy' must be a string", ("https_proxy",))
+
+    # List of hosts which should not use the proxy. Synapse will directly connect to
+    # these hosts.
+    no_proxy_hosts = config.get("no_proxy_hosts")
+    # The `no_proxy` environment variable should be a comma-separated list of hosts,
+    # IP addresses, or IP ranges in CIDR format
+    no_proxy_from_env = proxies_from_env.get("no")
+    if no_proxy_hosts is None and no_proxy_from_env is not None:
+        no_proxy_hosts = no_proxy_from_env.split(",")
+
+    if no_proxy_hosts is not None and not is_str_list(no_proxy_hosts, allow_empty=True):
+        raise ConfigError(
+            "'no_proxy_hosts' must be a list of strings", ("no_proxy_hosts",)
+        )
+
+    return ProxyConfig(
+        http_proxy=http_proxy,
+        https_proxy=https_proxy,
+        no_proxy_hosts=no_proxy_hosts,
     )
 
 
@@ -740,32 +795,12 @@ class ServerConfig(Config):
         # Figure out forward proxy config for outgoing HTTP requests.
         #
         # Prefer values from the file config over the environment variables
-        proxies_from_env = getproxies_environment()
-        self.http_proxy = config.get("http_proxy", proxies_from_env.get("http"))
-        if not isinstance(self.http_proxy, str):
-            raise ConfigError("'http_proxy' must be a string", ("http_proxy",))
-        self.https_proxy = config.get("https_proxy", proxies_from_env.get("https"))
-        if not isinstance(self.https_proxy, str):
-            raise ConfigError("'https_proxy' must be a string", ("https_proxy",))
-        # List of hosts which should not use the proxy. Synapse will directly connect to
-        # these hosts.
-        self.no_proxy_hosts = config.get("no_proxy_hosts")
-        # The `no_proxy` environment variable should be a comma-separated list of hosts,
-        # IP addresses, or IP ranges in CIDR format
-        no_proxy_from_env = proxies_from_env.get("no")
-        if self.no_proxy_hosts is None and no_proxy_from_env is not None:
-            self.no_proxy_hosts = no_proxy_from_env.split(",")
-
-        if not is_str_list(self.no_proxy_hosts, allow_empty=True):
-            raise ConfigError(
-                "'no_proxy_hosts' must be a list of strings", ("no_proxy_hosts",)
-            )
-
+        self.proxy_config = parse_proxy_config(config)
         logger.debug(
             "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
-            self.http_proxy,
-            self.https_proxy,
-            self.no_proxy,
+            self.proxy_config.http_proxy,
+            self.proxy_config.https_proxy,
+            self.proxy_config.no_proxy_hosts,
         )
 
         self.cleanup_extremities_with_dummy_events = config.get(

@@ -22,11 +22,10 @@
 import logging
 import os
 from typing import Any, Dict, List, Tuple
-from urllib.request import getproxies_environment
 
 import attr
 
-from synapse.config.server import generate_ip_set
+from synapse.config.server import generate_ip_set, parse_proxy_config
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
 from synapse.util.module_loader import load_module
@@ -234,16 +233,20 @@ class ContentRepositoryConfig(Config):
         if self.url_preview_enabled:
             check_requirements("url-preview")
 
-            proxy_env = getproxies_environment()
+            proxy_config = parse_proxy_config(config)
+            is_proxy_configured = (
+                proxy_config.http_proxy is not None
+                or proxy_config.https_proxy is not None
+            )
             if "url_preview_ip_range_blacklist" in config:
-                if "http" in proxy_env or "https" in proxy_env:
+                if is_proxy_configured:
                     logger.warning(
                         "".join(
                             URL_PREVIEW_BLACKLIST_IGNORED_BECAUSE_HTTP_PROXY_SET_WARNING
                         )
                     )
             else:
-                if "http" not in proxy_env or "https" not in proxy_env:
+                if not is_proxy_configured:
                     raise ConfigError(
                         "For security, you must specify an explicit target IP address "
                         "blacklist in url_preview_ip_range_blacklist for url previewing "
