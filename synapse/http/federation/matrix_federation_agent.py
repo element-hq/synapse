@@ -40,6 +40,7 @@ from twisted.web.client import URI, Agent, HTTPConnectionPool
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IAgent, IAgentEndpointFactory, IBodyProducer, IResponse
 
+from synapse.config.server import ProxyConfig
 from synapse.crypto.context_factory import FederationPolicyForHTTPS
 from synapse.http import proxyagent
 from synapse.http.client import BlocklistingAgentWrapper, BlocklistingReactorWrapper
@@ -77,6 +78,8 @@ class MatrixFederationAgent:
 
         ip_blocklist: Disallowed IP addresses.
 
+        proxy_config: Proxy configuration to use for this agent.
+
         proxy_reactor: twisted reactor to use for connections to the proxy server
            reactor might have some blocking applied (i.e. for DNS queries),
            but we need unblocked access to the proxy.
@@ -92,11 +95,13 @@ class MatrixFederationAgent:
 
     def __init__(
         self,
+        *,
         reactor: ISynapseReactor,
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
         ip_blocklist: IPSet,
+        proxy_config: Optional[ProxyConfig] = None,
         _srv_resolver: Optional[SrvResolver] = None,
         _well_known_resolver: Optional[WellKnownResolver] = None,
     ):
@@ -130,11 +135,11 @@ class MatrixFederationAgent:
                 reactor,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(
-                        reactor,
-                        proxy_reactor,
+                        reactor=reactor,
+                        proxy_reactor=proxy_reactor,
                         pool=self._pool,
                         contextFactory=tls_client_options_factory,
-                        use_proxy=True,
+                        proxy_config=proxy_config,
                     ),
                     ip_blocklist=ip_blocklist,
                 ),

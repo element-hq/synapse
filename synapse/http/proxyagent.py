@@ -99,7 +99,7 @@ class ProxyAgent(_AgentBase):
         pool: connection pool to be used. If None, a
             non-persistent pool instance will be created.
 
-        proxy_config: TODO
+        proxy_config: Proxy configuration to use for this agent.
 
         federation_proxy_locations: An optional list of locations to proxy outbound federation
             traffic through (only requests that use the `matrix-federation://` scheme
@@ -146,7 +146,7 @@ class ProxyAgent(_AgentBase):
             self._endpoint_kwargs["bindAddress"] = bindAddress
 
         self.proxy_config = proxy_config
-        if proxy_config is not None:
+        if self.proxy_config is not None:
             logger.debug(
                 "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
                 self.proxy_config.http_proxy,
@@ -155,14 +155,18 @@ class ProxyAgent(_AgentBase):
             )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
-            self.proxy_config.http_proxy,
+            self.proxy_config.http_proxy.encode()
+            if self.proxy_config and self.proxy_config.http_proxy
+            else None,
             self.proxy_reactor,
             contextFactory,
             **self._endpoint_kwargs,
         )
 
         self.https_proxy_endpoint, self.https_proxy_creds = http_proxy_endpoint(
-            self.proxy_config.https_proxy,
+            self.proxy_config.https_proxy.encode()
+            if self.proxy_config and self.proxy_config.https_proxy
+            else None,
             self.proxy_reactor,
             contextFactory,
             **self._endpoint_kwargs,
@@ -265,10 +269,12 @@ class ProxyAgent(_AgentBase):
         )
         request_path = parsed_uri.originForm
 
-        should_skip_proxy = proxy_bypass_environment(
-            parsed_uri.host.decode(),
-            proxies=self.proxy_config.get_proxies_dictionary(),
-        )
+        should_skip_proxy = False
+        if self.proxy_config is not None:
+            should_skip_proxy = proxy_bypass_environment(
+                parsed_uri.host.decode(),
+                proxies=self.proxy_config.get_proxies_dictionary(),
+            )
 
         if (
             parsed_uri.scheme == b"http"

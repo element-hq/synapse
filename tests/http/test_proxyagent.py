@@ -39,6 +39,7 @@ from twisted.internet.protocol import Factory, Protocol
 from twisted.protocols.tls import TLSMemoryBIOProtocol
 from twisted.web.http import HTTPChannel
 
+from synapse.config.server import parse_proxy_config
 from synapse.http.client import BlocklistingReactorWrapper
 from synapse.http.connectproxyclient import BasicProxyCredentials
 from synapse.http.proxyagent import ProxyAgent, parse_proxy
@@ -379,27 +380,36 @@ class MatrixFederationAgentTests(TestCase):
         self.assertEqual(body, b"result")
 
     def test_http_request(self) -> None:
-        agent = ProxyAgent(self.reactor)
+        agent = ProxyAgent(reactor=self.reactor)
         self._test_request_direct_connection(agent, b"http", b"test.com", b"")
 
     def test_https_request(self) -> None:
-        agent = ProxyAgent(self.reactor, contextFactory=get_test_https_policy())
+        agent = ProxyAgent(reactor=self.reactor, contextFactory=get_test_https_policy())
         self._test_request_direct_connection(agent, b"https", b"test.com", b"abc")
 
-    def test_http_request_use_proxy_empty_environment(self) -> None:
-        agent = ProxyAgent(self.reactor, use_proxy=True)
+    def test_http_request_proxy_config_empty_environment(self) -> None:
+        agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         self._test_request_direct_connection(agent, b"http", b"test.com", b"")
 
     @patch.dict(os.environ, {"http_proxy": "proxy.com:8888", "NO_PROXY": "test.com"})
     def test_http_request_via_uppercase_no_proxy(self) -> None:
-        agent = ProxyAgent(self.reactor, use_proxy=True)
+        agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         self._test_request_direct_connection(agent, b"http", b"test.com", b"")
 
     @patch.dict(
         os.environ, {"http_proxy": "proxy.com:8888", "no_proxy": "test.com,unused.com"}
     )
     def test_http_request_via_no_proxy(self) -> None:
-        agent = ProxyAgent(self.reactor, use_proxy=True)
+        agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         self._test_request_direct_connection(agent, b"http", b"test.com", b"")
 
     @patch.dict(
@@ -407,23 +417,26 @@ class MatrixFederationAgentTests(TestCase):
     )
     def test_https_request_via_no_proxy(self) -> None:
         agent = ProxyAgent(
-            self.reactor,
+            reactor=self.reactor,
             contextFactory=get_test_https_policy(),
-            use_proxy=True,
+            proxy_config=parse_proxy_config({}),
         )
         self._test_request_direct_connection(agent, b"https", b"test.com", b"abc")
 
     @patch.dict(os.environ, {"http_proxy": "proxy.com:8888", "no_proxy": "*"})
     def test_http_request_via_no_proxy_star(self) -> None:
-        agent = ProxyAgent(self.reactor, use_proxy=True)
+        agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         self._test_request_direct_connection(agent, b"http", b"test.com", b"")
 
     @patch.dict(os.environ, {"https_proxy": "proxy.com", "no_proxy": "*"})
     def test_https_request_via_no_proxy_star(self) -> None:
         agent = ProxyAgent(
-            self.reactor,
+            reactor=self.reactor,
             contextFactory=get_test_https_policy(),
-            use_proxy=True,
+            proxy_config=parse_proxy_config({}),
         )
         self._test_request_direct_connection(agent, b"https", b"test.com", b"abc")
 
@@ -517,10 +530,15 @@ class MatrixFederationAgentTests(TestCase):
         """
         if expect_proxy_ssl:
             agent = ProxyAgent(
-                self.reactor, use_proxy=True, contextFactory=get_test_https_policy()
+                reactor=self.reactor,
+                proxy_config=parse_proxy_config({}),
+                contextFactory=get_test_https_policy(),
             )
         else:
-            agent = ProxyAgent(self.reactor, use_proxy=True)
+            agent = ProxyAgent(
+                reactor=self.reactor,
+                proxy_config=parse_proxy_config({}),
+            )
 
         self.reactor.lookups["proxy.com"] = "1.2.3.5"
         d = agent.request(b"GET", b"http://test.com")
@@ -590,9 +608,9 @@ class MatrixFederationAgentTests(TestCase):
             expected_auth_credentials: credentials to authenticate at proxy
         """
         agent = ProxyAgent(
-            self.reactor,
+            reactor=self.reactor,
             contextFactory=get_test_https_policy(),
-            use_proxy=True,
+            proxy_config=parse_proxy_config({}),
         )
 
         self.reactor.lookups["proxy.com"] = "1.2.3.5"
@@ -713,11 +731,11 @@ class MatrixFederationAgentTests(TestCase):
     def test_http_request_via_proxy_with_blocklist(self) -> None:
         # The blocklist includes the configured proxy IP.
         agent = ProxyAgent(
-            BlocklistingReactorWrapper(
+            reactor=BlocklistingReactorWrapper(
                 self.reactor, ip_allowlist=None, ip_blocklist=IPSet(["1.0.0.0/8"])
             ),
-            self.reactor,
-            use_proxy=True,
+            proxy_reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
         )
 
         self.reactor.lookups["proxy.com"] = "1.2.3.5"
@@ -759,12 +777,12 @@ class MatrixFederationAgentTests(TestCase):
     def test_https_request_via_uppercase_proxy_with_blocklist(self) -> None:
         # The blocklist includes the configured proxy IP.
         agent = ProxyAgent(
-            BlocklistingReactorWrapper(
+            reactor=BlocklistingReactorWrapper(
                 self.reactor, ip_allowlist=None, ip_blocklist=IPSet(["1.0.0.0/8"])
             ),
-            self.reactor,
+            proxy_reactor=self.reactor,
             contextFactory=get_test_https_policy(),
-            use_proxy=True,
+            proxy_config=parse_proxy_config({}),
         )
 
         self.reactor.lookups["proxy.com"] = "1.2.3.5"
@@ -852,7 +870,10 @@ class MatrixFederationAgentTests(TestCase):
 
     @patch.dict(os.environ, {"http_proxy": "proxy.com:8888"})
     def test_proxy_with_no_scheme(self) -> None:
-        http_proxy_agent = ProxyAgent(self.reactor, use_proxy=True)
+        http_proxy_agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         proxy_ep = checked_cast(HostnameEndpoint, http_proxy_agent.http_proxy_endpoint)
         self.assertEqual(proxy_ep._hostText, "proxy.com")
         self.assertEqual(proxy_ep._port, 8888)
@@ -860,18 +881,27 @@ class MatrixFederationAgentTests(TestCase):
     @patch.dict(os.environ, {"http_proxy": "socks://proxy.com:8888"})
     def test_proxy_with_unsupported_scheme(self) -> None:
         with self.assertRaises(ValueError):
-            ProxyAgent(self.reactor, use_proxy=True)
+            ProxyAgent(
+                reactor=self.reactor,
+                proxy_config=parse_proxy_config({}),
+            )
 
     @patch.dict(os.environ, {"http_proxy": "http://proxy.com:8888"})
     def test_proxy_with_http_scheme(self) -> None:
-        http_proxy_agent = ProxyAgent(self.reactor, use_proxy=True)
+        http_proxy_agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         proxy_ep = checked_cast(HostnameEndpoint, http_proxy_agent.http_proxy_endpoint)
         self.assertEqual(proxy_ep._hostText, "proxy.com")
         self.assertEqual(proxy_ep._port, 8888)
 
     @patch.dict(os.environ, {"http_proxy": "https://proxy.com:8888"})
     def test_proxy_with_https_scheme(self) -> None:
-        https_proxy_agent = ProxyAgent(self.reactor, use_proxy=True)
+        https_proxy_agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config({}),
+        )
         proxy_ep = checked_cast(_WrapperEndpoint, https_proxy_agent.http_proxy_endpoint)
         self.assertEqual(proxy_ep._wrappedEndpoint._hostText, "proxy.com")
         self.assertEqual(proxy_ep._wrappedEndpoint._port, 8888)

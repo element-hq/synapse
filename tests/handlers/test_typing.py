@@ -86,11 +86,12 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         self.mock_federation_client = AsyncMock(spec=["put_json"])
         self.mock_federation_client.put_json.return_value = (200, "OK")
         self.mock_federation_client.agent = MatrixFederationAgent(
-            reactor,
+            reactor=reactor,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            proxy_config=None,
         )
 
         # the tests assume that we are starting at unix time 1000

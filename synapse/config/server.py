@@ -321,10 +321,12 @@ class ProxyConfigDictionary(TypedDict):
     """
     Proxy server to use for HTTPS requests.
     """
-    no: Optional[str]
+    no: str
     """
     Comma-separated list of hosts, IP addresses, or IP ranges in CIDR format which
     should not use the proxy.
+
+    Empty string means no hosts should be excluded from the proxy.
     """
 
 
@@ -358,7 +360,7 @@ class ProxyConfig:
         return ProxyConfigDictionary(
             http=self.http_proxy,
             https=self.https_proxy,
-            no=",".join(self.no_proxy_hosts) if self.no_proxy_hosts else None,
+            no=",".join(self.no_proxy_hosts) if self.no_proxy_hosts else "",
         )
 
 

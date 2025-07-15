@@ -274,6 +274,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            proxy_config=None,
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=self.well_known_resolver,
         )
@@ -1016,6 +1017,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            proxy_config=None,
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
                 cast(ISynapseReactor, self.reactor),
