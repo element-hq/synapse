@@ -441,11 +441,6 @@ def add_worker_roles_to_shared_config(
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
 
-    if "event_persister" in worker_types_set:
-        # Event persisters write to the events stream, so we need to update
-        # the list of event stream writers
-        worker_types_set.add("events")
-
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
@@ -873,6 +868,13 @@ def generate_worker_files(
             )
         else:
             healthcheck_urls.append("http://localhost:%d/health" % (worker_port,))
+
+        # Special case for event_persister: those are just workers that write to
+        # the `events` stream. For other workers, the worker name is the same
+        # name of the stream they write to, but for some reason it is not the
+        # case for event_persister.
+        if "event_persister" in worker_types_set:
+            worker_types_set.add("events")
 
         # Update the shared config with sharding-related options if necessary
         add_worker_roles_to_shared_config(
