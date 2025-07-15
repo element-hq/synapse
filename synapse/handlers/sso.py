@@ -43,7 +43,7 @@ import attr
 from twisted.web.iweb import IRequest
 from twisted.web.server import Request
 
-from synapse.api.constants import LoginType, ProfileFields
+from synapse.api.constants import LoginType
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError
 from synapse.config.sso import SsoAttributeRequirement
 from synapse.handlers.device import DeviceHandler
@@ -812,9 +812,9 @@ class SsoHandler:
             upload_name = "sso_avatar_" + hashlib.sha256(picture.read()).hexdigest()
 
             # bail if user already has the same avatar
-            profile = await self._profile_handler.get_profile(user_id)
-            if ProfileFields.AVATAR_URL in profile:
-                avatar_url_parts = profile[ProfileFields.AVATAR_URL].split("/")
+            avatar_url = await self._profile_handler.get_avatar_url(user_id)
+            if avatar_url:
+                avatar_url_parts = avatar_url.split("/")
                 server_name = avatar_url_parts[-2]
                 media_id = avatar_url_parts[-1]
                 if self._is_mine_server_name(server_name):

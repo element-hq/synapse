@@ -132,6 +132,7 @@ class Mailer:
         self.macaroon_gen = self.hs.get_macaroon_generator()
         self.state_handler = self.hs.get_state_handler()
         self._storage_controllers = hs.get_storage_controllers()
+        self._profile_handler = hs.get_profile_handler()
         self.app_name = app_name
         self.email_subjects: EmailSubjectConfig = hs.config.email.email_subjects
 
@@ -290,7 +291,7 @@ class Mailer:
         state_by_room = {}
 
         try:
-            user_display_name = await self.store.get_profile_displayname(
+            user_display_name = await self._profile_handler.get_displayname(
                 UserID.from_string(user_id)
             )
             if user_display_name is None:

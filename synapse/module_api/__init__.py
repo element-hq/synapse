@@ -1139,7 +1139,7 @@ class ModuleApi:
             try:
                 # Try to fetch the user's profile.
                 profile = await self._hs.get_profile_handler().get_profile(
-                    target_user_id.to_string(),
+                    target_user_id.to_string(), requester.user
                 )
             except SynapseError as e:
                 # If the profile couldn't be found, use default values.

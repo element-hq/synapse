@@ -711,6 +711,26 @@ class ApplicationServicesHandler:
                 return True
         return False
 
+    async def query_profile(
+        self, user_id: str, from_user_id: Optional[UserID] = None, key: Optional[str] = None
+    ) -> Optional[JsonDict]:
+        """Check if any application service knows this user_id exists.
+
+        Args:
+            user_id: The user to query if they exist on any AS.
+        Returns:
+            True if this user exists on at least one application service.
+        """
+        user_query_services = self._get_services_for_user(user_id=user_id)
+        accumulated_profile = {}
+        for user_service in user_query_services:
+            profile = await self.appservice_api.query_profile(
+                user_service, user_id, from_user_id, key
+            )
+            if profile:
+                accumulated_profile.update(profile)
+        return accumulated_profile
+
     async def query_room_alias_exists(
         self, room_alias: RoomAlias
     ) -> Optional[RoomAliasMapping]:

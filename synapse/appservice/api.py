@@ -50,6 +50,9 @@ from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.types import (
+    UserID,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -251,6 +254,50 @@ class ApplicationServiceApi(SimpleHttpClient):
         except Exception as ex:
             logger.warning("query_3pe to %s threw exception %s", service.url, ex)
             return []
+
+    async def query_profile(
+        self,
+        service: "ApplicationService",
+        user_id: str,
+        from_user_id: Optional[UserID] = None,
+        key: Optional[str] = None,
+    ) -> Optional[JsonDict]:
+        if service.url is None:
+            return None
+
+        # This is required by the configuration.
+        assert service.hs_token is not None
+
+        try:
+            args = {}
+            if self.config.use_appservice_legacy_authorization:
+                args["access_token"] = service.hs_token
+            if from_user_id:
+                args["from_user_id"] = from_user_id.to_string()
+
+            url = f"{service.url}{APP_SERVICE_PREFIX}/profile/{urllib.parse.quote(user_id)}"
+
+            if key:
+                url += f"/{key}"
+
+            response = await self.get_json(
+                url,
+                args,
+                headers=self._get_headers(service),
+            )
+            if key:
+                if key in response:
+                    return {key: response[key]}
+                else:
+                    raise Exception(f"Missing {key} in response to profile request")
+            return response
+        except CodeMessageException as e:
+            if e.code == 404:
+                return None
+            logger.warning("query_user to %s received %s", service.url, e.code)
+        except Exception as ex:
+            logger.warning("query_user to %s threw exception %s", service.url, ex)
+        return None
 
     async def get_3pe_protocol(
         self, service: "ApplicationService", protocol: str

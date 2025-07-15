@@ -76,7 +76,14 @@ class ProfileHandler:
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
-    async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
+        self._as = hs.get_application_service_handler()
+
+    async def get_profile(
+        self,
+        user_id: str,
+        ignore_backoff: bool = True,
+        from_user_id: Optional[UserID] = None,
+    ) -> JsonDict:
         """
         Get a user's profile as a JSON dictionary.
 
@@ -89,6 +96,7 @@ class ProfileHandler:
             fields, if set. For remote queries it may contain arbitrary information.
         """
         target_user = UserID.from_string(user_id)
+        ret = {}
 
         if self.hs.is_mine(target_user):
             profileinfo = await self.store.get_profileinfo(target_user)
@@ -104,15 +112,12 @@ class ProfileHandler:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
 
             # Do not include display name or avatar if unset.
-            ret = {}
             if profileinfo.display_name is not None:
                 ret[ProfileFields.DISPLAYNAME] = profileinfo.display_name
             if profileinfo.avatar_url is not None:
                 ret[ProfileFields.AVATAR_URL] = profileinfo.avatar_url
             if extra_fields:
                 ret.update(extra_fields)
-
-            return ret
         else:
             try:
                 result = await self.federation.make_query(
@@ -121,7 +126,7 @@ class ProfileHandler:
                     args={"user_id": user_id},
                     ignore_backoff=ignore_backoff,
                 )
-                return result
+                ret = result
             except RequestSendFailed as e:
                 raise SynapseError(502, "Failed to fetch profile") from e
             except HttpResponseException as e:
@@ -134,7 +139,15 @@ class ProfileHandler:
                     raise SynapseError(502, "Failed to fetch profile")
                 raise e.to_synapse_error()
 
-    async def get_displayname(self, target_user: UserID) -> Optional[str]:
+        # Check whether the appservice has any information about the user.
+        as_profile = await self._as.query_profile(user_id, from_user_id)
+        ret.update(as_profile)
+
+        return ret
+
+    async def get_displayname(
+        self, target_user: UserID, from_user_id: Optional[UserID] = None
+    ) -> Optional[str]:
         """
         Fetch a user's display name from their profile.
 
@@ -144,6 +157,14 @@ class ProfileHandler:
         Returns:
             The user's display name or None if unset.
         """
+
+        # Check whether the appservice has any information about the user.
+        as_profile = await self._as.query_profile(
+            target_user.to_string(), from_user_id, "displayname"
+        )
+        if "displayname" in as_profile:
+            return as_profile.displayname
+
         if self.hs.is_mine(target_user):
             try:
                 displayname = await self.store.get_profile_displayname(target_user)
@@ -239,7 +260,9 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
-    async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
+    async def get_avatar_url(
+        self, target_user: UserID, from_user_id: Optional[UserID]
+    ) -> Optional[str]:
         """
         Fetch a user's avatar URL from their profile.
 
@@ -249,6 +272,14 @@ class ProfileHandler:
         Returns:
             The user's avatar URL or None if unset.
         """
+
+        # Check whether the appservice has any information about the user.
+        as_profile = await self._as.query_profile(
+            target_user.to_string(), from_user_id, "avatar_url"
+        )
+        if "avatar_url" in as_profile:
+            return as_profile.avatar_url
+
         if self.hs.is_mine(target_user):
             try:
                 avatar_url = await self.store.get_profile_avatar_url(target_user)
@@ -417,7 +448,10 @@ class ProfileHandler:
         return True
 
     async def get_profile_field(
-        self, target_user: UserID, field_name: str
+        self,
+        target_user: UserID,
+        field_name: str,
+        from_user_id: Optional[UserID] = None,
     ) -> JsonValue:
         """
         Fetch a user's profile from the database for local users and over federation
@@ -430,6 +464,14 @@ class ProfileHandler:
         Returns:
             The value for the profile field or None if the field does not exist.
         """
+
+        # Check whether the appservice has any information about the user.
+        as_profile = await self._as.query_profile(
+            target_user.to_string(), from_user_id, field_name
+        )
+        if field_name in as_profile:
+            return as_profile[field_name]
+
         if self.hs.is_mine(target_user):
             try:
                 field_value = await self.store.get_profile_field(
@@ -534,7 +576,12 @@ class ProfileHandler:
         if not self.hs.is_mine(user):
             raise SynapseError(400, "User is not hosted on this homeserver")
 
-        just_field = args.get("field", None)
+        just_field = args.get("field")
+
+        # Check whether the appservice has any information about the user.
+        as_profile = await self._as.query_profile(user.to_string(), key=just_field)
+        if just_field and just_field in as_profile:
+            return as_profile[just_field]
 
         response: JsonDict = {}
         try:
@@ -564,6 +611,8 @@ class ProfileHandler:
             if e.code == 404:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
             raise
+
+        response.update(as_profile)
 
         return response
 

@@ -84,7 +84,7 @@ class ProfileDisplaynameRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
-        displayname = await self.profile_handler.get_displayname(user)
+        displayname = await self.profile_handler.get_displayname(user, requester_user)
 
         ret = {}
         if displayname is not None:
@@ -162,7 +162,7 @@ class ProfileAvatarURLRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
-        avatar_url = await self.profile_handler.get_avatar_url(user)
+        avatar_url = await self.profile_handler.get_avatar_url(user, requester_user)
 
         ret = {}
         if avatar_url is not None:
@@ -239,7 +239,7 @@ class ProfileRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
-        ret = await self.profile_handler.get_profile(user_id)
+        ret = await self.profile_handler.get_profile(user_id, requester_user)
 
         return 200, ret
 
@@ -288,11 +288,17 @@ class UnstableProfileFieldRestServlet(RestServlet):
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
         if field_name == ProfileFields.DISPLAYNAME:
-            field_value: JsonValue = await self.profile_handler.get_displayname(user)
+            field_value: JsonValue = await self.profile_handler.get_displayname(
+                user, requester_user
+            )
         elif field_name == ProfileFields.AVATAR_URL:
-            field_value = await self.profile_handler.get_avatar_url(user)
+            field_value = await self.profile_handler.get_avatar_url(
+                user, requester_user
+            )
         else:
-            field_value = await self.profile_handler.get_profile_field(user, field_name)
+            field_value = await self.profile_handler.get_profile_field(
+                user, field_name, requester_user
+            )
 
         return 200, {field_name: field_value}
 
