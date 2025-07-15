@@ -874,7 +874,8 @@ class DeviceHandler:
     async def handle_new_device_update(self) -> None:
         """Wake up a device writer to send local device list changes as federation outbound pokes."""
         # This is only sent to the first device writer to avoid cross-worker
-        # locks in _handle_new_device_update_async.
+        # locks in _handle_new_device_update_async, as it makes assumptions
+        # about being the only instance running.
         await self._handle_new_device_update_client(
             instance_name=self._device_list_writers[0],
         )
@@ -1041,6 +1042,10 @@ class DeviceWriterHandler(DeviceHandler):
         )
 
     async def handle_new_device_update(self) -> None:
+        # _handle_new_device_update_async is only called on the first device
+        # writer, as it makes assumptions about only having one instance running
+        # at a time. If this is not the first device writer, we defer to the
+        # superclass, which will make the call go through replication.
         if not self._is_main_device_list_writer:
             return await super().handle_new_device_update()
 
