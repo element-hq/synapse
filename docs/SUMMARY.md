@@ -74,6 +74,7 @@
       - [Users](admin_api/user_admin_api.md)
       - [Server Version](admin_api/version_api.md)
       - [Federation](usage/administration/admin_api/federation.md)
+      - [Client-Server API Extensions](admin_api/client_server_api_extensions.md)
     - [Manhole](manhole.md)
     - [Monitoring](metrics-howto.md)
       - [Reporting Homeserver Usage Statistics](usage/administration/monitoring/reporting_homeserver_usage_statistics.md)
