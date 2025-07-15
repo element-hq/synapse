@@ -43,7 +43,14 @@ from typing import (
 
 import attr
 from pkg_resources import parse_version
-from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, Metric
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    Metric,
+    generate_latest,
+)
 from prometheus_client.core import (
     REGISTRY,
     GaugeHistogramMetricFamily,
@@ -51,11 +58,12 @@ from prometheus_client.core import (
 )
 
 from twisted.python.threadpool import ThreadPool
+from twisted.web.resource import Resource
+from twisted.web.server import Request
 
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
-from synapse.metrics._twisted_exposition import MetricsResource, generate_latest
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
@@ -84,6 +92,11 @@ single process." (source: https://prometheus.io/docs/concepts/jobs_instances/)
 """
 
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+"""
+Content type of the latest text format for Prometheus metrics.
+
+Pulled directly from the prometheus_client library.
+"""
 
 
 def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
@@ -550,6 +563,23 @@ def register_threadpool(name: str, threadpool: ThreadPool) -> None:
     threadpool_total_working_threads.labels(name).set_function(
         lambda: len(threadpool.working)
     )
+
+
+class MetricsResource(Resource):
+    """
+    Twisted ``Resource`` that serves prometheus metrics.
+    """
+
+    isLeaf = True
+
+    def __init__(self, registry: CollectorRegistry = REGISTRY):
+        self.registry = registry
+
+    def render_GET(self, request: Request) -> bytes:
+        request.setHeader(b"Content-Type", CONTENT_TYPE_LATEST.encode("ascii"))
+        response = generate_latest(self.registry)
+        request.setHeader(b"Content-Length", str(len(response)))
+        return response
 
 
 __all__ = [
