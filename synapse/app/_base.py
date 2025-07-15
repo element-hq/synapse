@@ -286,6 +286,16 @@ def register_start(
 def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
     """
     Start Prometheus metrics server.
+
+    This method runs the metrics server on a different port, in a different thread to
+    Synapse. This can make it more resilient to heavy load in Synapse causing metric
+    requests to be slow or timeout.
+
+    Even though `start_http_server_prometheus(...)` uses `threading.Thread` behind the
+    scenes (where all threads share the GIL and only one thread can execute Python
+    bytecode at a time), this still works because the metrics thread can preempt the
+    Twisted reactor thread between bytecode boundaries and the metrics thread gets
+    scheduled with roughly equal priority to the Twisted reactor thread.
     """
     from prometheus_client import start_http_server as start_http_server_prometheus
 
