@@ -1408,7 +1408,7 @@ class PresenceHandler(BasePresenceHandler):
         # Based on the state of each user's device calculate the new presence state.
         presence = _combine_device_states(devices.values())
 
-        new_fields = {"state": presence}
+        new_fields: JsonDict = {"state": presence}
 
         if presence == PresenceState.ONLINE or presence == PresenceState.BUSY:
             new_fields["last_active_ts"] = now
