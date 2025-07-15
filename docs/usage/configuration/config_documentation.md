@@ -2363,7 +2363,7 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 
 The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
 
-_Added in Synapse 1.134.0._
+_Added in Synapse 1.135.0._
 
 Defaults to `null`.
 
@@ -2387,7 +2387,7 @@ recaptcha_private_key: YOUR_PRIVATE_KEY
 
 The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
 
-_Added in Synapse 1.134.0._
+_Added in Synapse 1.135.0._
 
 Defaults to `null`.
 
