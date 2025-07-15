@@ -2332,6 +2332,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         # may be returning a device update that was already sent through
         # federation here in case of concurrent writes. This is absolutely fine,
         # sending a device update multiple times through federation is safe
+
+        # FIXME: record the full multi-writer stream token with individual
+        # writer positions at the time of the join to avoid this
         min_device_stream_id = await self.db_pool.simple_select_one_onecol(
             table="partial_state_rooms",
             keyvalues={
