@@ -431,4 +431,4 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
                 state_key=user,
                 tok=self.creator_token,
             )
-            self.assertEqual(content["membership"], "ban")
+            self.assertEqual(content[EventContentFields.MEMBERSHIP], Membership.BAN)
