@@ -1479,7 +1479,7 @@ class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
 
         mock_load_appservices = Mock(return_value=[self.appservice])

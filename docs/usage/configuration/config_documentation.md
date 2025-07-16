@@ -2363,7 +2363,7 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 
 The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
 
-_Added in Synapse 1.134.0._
+_Added in Synapse 1.135.0._
 
 Defaults to `null`.
 
@@ -2387,7 +2387,7 @@ recaptcha_private_key: YOUR_PRIVATE_KEY
 
 The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
 
-_Added in Synapse 1.134.0._
+_Added in Synapse 1.135.0._
 
 Defaults to `null`.
 
@@ -3808,7 +3808,11 @@ encryption_enabled_by_default_for_room_type: invite
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): Defines whether users can search the user directory. If false then empty responses are returned to all queries. Defaults to `true`.
+* `enabled` (boolean): Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.
+
+  *Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.*
+
+  Defaults to `true`.
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 

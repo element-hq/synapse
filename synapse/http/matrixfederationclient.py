@@ -417,6 +417,7 @@ class MatrixFederationHttpClient:
         if hs.get_instance_name() in outbound_federation_restricted_to:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
+                server_name=self.server_name,
                 reactor=self.reactor,
                 tls_client_options_factory=tls_client_options_factory,
                 user_agent=user_agent.encode("ascii"),
@@ -698,7 +699,11 @@ class MatrixFederationHttpClient:
                     outgoing_requests_counter.labels(request.method).inc()
 
                     try:
-                        with Measure(self.clock, "outbound_request"):
+                        with Measure(
+                            self.clock,
+                            name="outbound_request",
+                            server_name=self.server_name,
+                        ):
                             # we don't want all the fancy cookie and redirect handling
                             # that treq.request gives: just use the raw Agent.
 

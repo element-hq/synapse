@@ -2703,7 +2703,7 @@ properties:
       Synapse reads the public key from the given file once at startup.
 
 
-      _Added in Synapse 1.134.0._
+      _Added in Synapse 1.135.0._
     default: null
     examples:
       - /path/to/key/file
@@ -2726,7 +2726,7 @@ properties:
       Synapse reads the private key from the given file once at startup.
 
 
-      _Added in Synapse 1.134.0._
+      _Added in Synapse 1.135.0._
     default: null
     examples:
       - /path/to/key/file
@@ -4719,8 +4719,15 @@ properties:
       enabled:
         type: boolean
         description: >-
-          Defines whether users can search the user directory. If false then
+          Defines whether users can search the user directory. If `false` then
           empty responses are returned to all queries.
+
+
+          *Warning: While the homeserver may determine which subset of users are
+          searched, the Matrix specification requires homeservers to include (at
+          minimum) users visible in public rooms and users sharing a room with
+          the requester. Using `false` improves performance but violates this
+          requirement.*
         default: true
       search_all_users:
         type: boolean

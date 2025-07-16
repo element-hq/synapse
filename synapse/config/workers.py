@@ -238,10 +238,16 @@ class WorkerConfig(Config):
         if worker_replication_secret_path:
             if worker_replication_secret:
                 raise ConfigError(CONFLICTING_WORKER_REPLICATION_SECRET_OPTS_ERROR)
-            self.worker_replication_secret = read_file(
+            self.worker_replication_secret: Optional[str] = read_file(
                 worker_replication_secret_path, ("worker_replication_secret_path",)
             ).strip()
         else:
+            if worker_replication_secret is not None and not isinstance(
+                worker_replication_secret, str
+            ):
+                raise ConfigError(
+                    "Config option must be a string", ("worker_replication_secret",)
+                )
             self.worker_replication_secret = worker_replication_secret
 
         self.worker_name = config.get("worker_name", self.worker_app)
