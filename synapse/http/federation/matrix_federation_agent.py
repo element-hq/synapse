@@ -92,6 +92,7 @@ class MatrixFederationAgent:
 
     def __init__(
         self,
+        server_name: str,
         reactor: ISynapseReactor,
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
         user_agent: bytes,
@@ -100,6 +101,11 @@ class MatrixFederationAgent:
         _srv_resolver: Optional[SrvResolver] = None,
         _well_known_resolver: Optional[WellKnownResolver] = None,
     ):
+        """
+        Args:
+            server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
+        """
+
         # proxy_reactor is not blocklisting reactor
         proxy_reactor = reactor
 
@@ -127,6 +133,7 @@ class MatrixFederationAgent:
 
         if _well_known_resolver is None:
             _well_known_resolver = WellKnownResolver(
+                server_name,
                 reactor,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(

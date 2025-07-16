@@ -76,6 +76,7 @@ class ReplicationFederationSendEventsRestServlet(ReplicationEndpoint):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
@@ -122,7 +123,9 @@ class ReplicationFederationSendEventsRestServlet(ReplicationEndpoint):
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
     ) -> Tuple[int, JsonDict]:
-        with Measure(self.clock, "repl_fed_send_events_parse"):
+        with Measure(
+            self.clock, name="repl_fed_send_events_parse", server_name=self.server_name
+        ):
             room_id = content["room_id"]
             backfilled = content["backfilled"]
 
@@ -202,6 +205,8 @@ class ReplicationFederationSendEduRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationGetQueryRestServlet(ReplicationEndpoint):
     """Handle responding to queries from federation.
 
@@ -249,6 +254,8 @@ class ReplicationGetQueryRestServlet(ReplicationEndpoint):
         return 200, result
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationCleanRoomRestServlet(ReplicationEndpoint):
     """Called to clean up any data in DB for a given room, ready for the
     server to join the room.
@@ -284,6 +291,8 @@ class ReplicationCleanRoomRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationStoreRoomOnOutlierMembershipRestServlet(ReplicationEndpoint):
     """Called to clean up any data in DB for a given room, ready for the
     server to join the room.

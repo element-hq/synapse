@@ -31,6 +31,7 @@ IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK = Callable[[str, int], Awaitabl
 
 class MediaRepositoryModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self._get_media_config_for_user_callbacks: List[
             GET_MEDIA_CONFIG_FOR_USER_CALLBACK
@@ -57,7 +58,11 @@ class MediaRepositoryModuleApiCallbacks:
 
     async def get_media_config_for_user(self, user_id: str) -> Optional[JsonDict]:
         for callback in self._get_media_config_for_user_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                name=f"{callback.__module__}.{callback.__qualname__}",
+                server_name=self.server_name,
+            ):
                 res: Optional[JsonDict] = await delay_cancellation(callback(user_id))
             if res:
                 return res
@@ -68,7 +73,11 @@ class MediaRepositoryModuleApiCallbacks:
         self, user_id: str, size: int
     ) -> bool:
         for callback in self._is_user_allowed_to_upload_media_of_size_callbacks:
-            with Measure(self.clock, f"{callback.__module__}.{callback.__qualname__}"):
+            with Measure(
+                self.clock,
+                name=f"{callback.__module__}.{callback.__qualname__}",
+                server_name=self.server_name,
+            ):
                 res: bool = await delay_cancellation(callback(user_id, size))
             if not res:
                 return res

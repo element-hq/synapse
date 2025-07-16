@@ -526,6 +526,8 @@ class DeviceHandler(DeviceWorkerHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.federation_sender = hs.get_federation_sender()
         self._account_data_handler = hs.get_account_data_handler()
         self._storage_controllers = hs.get_storage_controllers()
@@ -671,12 +673,12 @@ class DeviceHandler(DeviceWorkerHandler):
             except_device_id: optional device id which should not be deleted
         """
         device_map = await self.store.get_devices_by_user(user_id)
-        device_ids = list(device_map)
         if except_device_id is not None:
-            device_ids = [d for d in device_ids if d != except_device_id]
-        await self.delete_devices(user_id, device_ids)
+            device_map.pop(except_device_id, None)
+        user_device_ids = device_map.keys()
+        await self.delete_devices(user_id, user_device_ids)
 
-    async def delete_devices(self, user_id: str, device_ids: List[str]) -> None:
+    async def delete_devices(self, user_id: str, device_ids: StrCollection) -> None:
         """Delete several devices
 
         Args:
@@ -695,17 +697,10 @@ class DeviceHandler(DeviceWorkerHandler):
             else:
                 raise
 
-        # Delete data specific to each device. Not optimised as it is not
-        # considered as part of a critical path.
-        for device_id in device_ids:
-            await self._auth_handler.delete_access_tokens_for_user(
-                user_id, device_id=device_id
-            )
-            await self.store.delete_e2e_keys_by_device(
-                user_id=user_id, device_id=device_id
-            )
-
-            if self.hs.config.experimental.msc3890_enabled:
+        # Delete data specific to each device. Not optimised as its an
+        # experimental MSC.
+        if self.hs.config.experimental.msc3890_enabled:
+            for device_id in device_ids:
                 # Remove any local notification settings for this device in accordance
                 # with MSC3890.
                 await self._account_data_handler.remove_account_data_for_user(
@@ -713,6 +708,13 @@ class DeviceHandler(DeviceWorkerHandler):
                     f"org.matrix.msc3890.local_notification_settings.{device_id}",
                 )
 
+        # If we're deleting a lot of devices, a bunch of them may not have any
+        # to-device messages queued up. We filter those out to avoid scheduling
+        # unnecessary tasks.
+        devices_with_messages = await self.store.get_devices_with_messages(
+            user_id, device_ids
+        )
+        for device_id in devices_with_messages:
             # Delete device messages asynchronously and in batches using the task scheduler
             # We specify an upper stream id to avoid deleting non delivered messages
             # if an user re-uses a device ID.
@@ -725,6 +727,10 @@ class DeviceHandler(DeviceWorkerHandler):
                     "up_to_stream_id": to_device_stream_id,
                 },
             )
+
+        await self._auth_handler.delete_access_tokens_for_devices(
+            user_id, device_ids=device_ids
+        )
 
         # Pushers are deleted after `delete_access_tokens_for_user` is called so that
         # modules using `on_logged_out` hook can use them if needed.
@@ -819,10 +825,11 @@ class DeviceHandler(DeviceWorkerHandler):
             # This should only happen if there are no updates, so we bail.
             return
 
-        for device_id in device_ids:
-            logger.debug(
-                "Notifying about update %r/%r, ID: %r", user_id, device_id, position
-            )
+        if logger.isEnabledFor(logging.DEBUG):
+            for device_id in device_ids:
+                logger.debug(
+                    "Notifying about update %r/%r, ID: %r", user_id, device_id, position
+                )
 
         # specify the user ID too since the user should always get their own device list
         # updates, even if they aren't in any rooms.
@@ -922,9 +929,6 @@ class DeviceHandler(DeviceWorkerHandler):
         # can't call self.delete_device because that will clobber the
         # access token so call the storage layer directly
         await self.store.delete_devices(user_id, [old_device_id])
-        await self.store.delete_e2e_keys_by_device(
-            user_id=user_id, device_id=old_device_id
-        )
 
         # tell everyone that the old device is gone and that the dehydrated
         # device has a new display name
@@ -946,7 +950,6 @@ class DeviceHandler(DeviceWorkerHandler):
             raise errors.NotFoundError()
 
         await self.delete_devices(user_id, [device_id])
-        await self.store.delete_e2e_keys_by_device(user_id=user_id, device_id=device_id)
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
@@ -1214,7 +1217,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
         self.store = hs.get_datastores().main
         self.federation = hs.get_federation_client()
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
         self._notifier = hs.get_notifier()
 

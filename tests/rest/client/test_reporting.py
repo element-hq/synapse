@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from typing import Optional
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -28,6 +29,7 @@ from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ReportEventTestCase(unittest.HomeserverTestCase):
@@ -80,6 +82,11 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
         data = {"reason": None, "score": None}
         self._assert_status(400, data)
 
+    @override_config({"experimental_features": {"msc4277_enabled": True}})
+    def test_score_str(self) -> None:
+        data = {"score": "string"}
+        self._assert_status(200, data)
+
     def test_cannot_report_nonexistent_event(self) -> None:
         """
         Tests that we don't accept event reports for events which do not exist.
@@ -96,6 +103,19 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
             channel.json_body["error"],
             msg=channel.result["body"],
         )
+
+    @override_config({"experimental_features": {"msc4277_enabled": True}})
+    def test_event_existence_hidden(self) -> None:
+        """
+        Tests that the requester cannot infer the existence of an event.
+        """
+        channel = self.make_request(
+            "POST",
+            f"rooms/{self.room_id}/report/$nonsenseeventid:test",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
 
     def test_cannot_report_event_if_not_in_room(self) -> None:
         """
@@ -192,10 +212,112 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
             msg=channel.result["body"],
         )
 
+    @override_config({"experimental_features": {"msc4277_enabled": True}})
+    def test_room_existence_hidden(self) -> None:
+        """
+        Tests that the requester cannot infer the existence of a room.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/rooms/!bloop:example.org/report",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(
             "POST",
             self.report_path,
+            data,
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+
+
+class ReportUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        reporting.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_tok = self.login("user", "pass")
+
+        self.target_user_id = self.register_user("target_user", "pass")
+
+    def test_reason_str(self) -> None:
+        data = {"reason": "this makes me sad"}
+        self._assert_status(200, data)
+
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                table="user_reports",
+                keyvalues={"target_user_id": self.target_user_id},
+                retcol="id",
+                desc="get_user_report_ids",
+            )
+        )
+        self.assertEqual(len(rows), 1)
+
+    def test_no_reason(self) -> None:
+        data = {"not_reason": "for typechecking"}
+        self._assert_status(400, data)
+
+    def test_reason_nonstring(self) -> None:
+        data = {"reason": 42}
+        self._assert_status(400, data)
+
+    def test_reason_null(self) -> None:
+        data = {"reason": None}
+        self._assert_status(400, data)
+
+    def test_reason_long(self) -> None:
+        data = {"reason": "x" * 1001}
+        self._assert_status(400, data)
+
+    def test_cannot_report_nonlocal_user(self) -> None:
+        """
+        Tests that we ignore reports for nonlocal users.
+        """
+        target_user_id = "@bloop:example.org"
+        data = {"reason": "i am very sad"}
+        self._assert_status(200, data, target_user_id)
+        self._assert_no_reports_for_user(target_user_id)
+
+    def test_can_report_nonexistent_user(self) -> None:
+        """
+        Tests that we ignore reports for nonexistent users.
+        """
+        target_user_id = f"@bloop:{self.hs.hostname}"
+        data = {"reason": "i am very sad"}
+        self._assert_status(200, data, target_user_id)
+        self._assert_no_reports_for_user(target_user_id)
+
+    def _assert_no_reports_for_user(self, target_user_id: str) -> None:
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                table="user_reports",
+                keyvalues={"target_user_id": target_user_id},
+                retcol="id",
+                desc="get_user_report_ids",
+            )
+        )
+        self.assertEqual(len(rows), 0)
+
+    def _assert_status(
+        self, response_status: int, data: JsonDict, user_id: Optional[str] = None
+    ) -> None:
+        if user_id is None:
+            user_id = self.target_user_id
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/users/{user_id}/report",
             data,
             access_token=self.other_user_tok,
             shorthand=False,

@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 class DelayedEventsHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
@@ -159,7 +160,9 @@ class DelayedEventsHandler:
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self._clock, "delayed_events_delta"):
+            with Measure(
+                self._clock, name="delayed_events_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self._store.get_room_max_stream_ordering()
                 if self._event_pos == room_max_stream_ordering:
                     return

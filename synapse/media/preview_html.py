@@ -133,7 +133,7 @@ def decode_body(
         content_type: The Content-Type header.
 
     Returns:
-        The parsed HTML body, or None if an error occurred during processed.
+        The parsed HTML body, or None if an error occurred during processing.
     """
     # If there's no body, nothing useful is going to be found.
     if not body:
@@ -158,9 +158,31 @@ def decode_body(
     # Create an HTML parser.
     parser = etree.HTMLParser(recover=True, encoding=encoding)
 
-    # Attempt to parse the body. Returns None if the body was successfully
-    # parsed, but no tree was found.
-    return etree.fromstring(body, parser)
+    # Attempt to parse the body. With `lxml` 6.0.0+, this will be an empty HTML
+    # tree if the body was successfully parsed, but no tree was found. In
+    # previous `lxml` versions, `etree.fromstring` would return `None` in that
+    # case.
+    html_tree = etree.fromstring(body, parser)
+
+    # Account for the above referenced case where `html_tree` is an HTML tree
+    # with an empty body. If so, return None.
+    if html_tree is not None and html_tree.tag == "html":
+        # If the tree has only a single <body> element and it's empty, then
+        # return None.
+        body_el = html_tree.find("body")
+        if body_el is not None and len(html_tree) == 1:
+            # Extract the content of the body tag as text.
+            body_text = "".join(cast(Iterable[str], body_el.itertext()))
+
+            # Strip any undecodable Unicode characters and whitespace.
+            body_text = body_text.strip("\ufffd").strip()
+
+            # If there's no text left, and there were no child tags,
+            # then we consider the <body> tag empty.
+            if not body_text and len(body_el) == 0:
+                return None
+
+    return html_tree
 
 
 def _get_meta_tags(

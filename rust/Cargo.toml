@@ -30,19 +30,20 @@ http = "1.1.0"
 lazy_static = "1.4.0"
 log = "0.4.17"
 mime = "0.3.17"
-pyo3 = { version = "0.24.2", features = [
+pyo3 = { version = "0.25.1", features = [
     "macros",
     "anyhow",
     "abi3",
     "abi3-py39",
 ] }
-pyo3-log = "0.12.3"
-pythonize = "0.24.0"
+pyo3-log = "0.12.4"
+pythonize = "0.25.0"
 regex = "1.6.0"
 sha2 = "0.10.8"
 serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"
 ulid = "1.1.2"
+icu_segmenter = "2.0.0"
 reqwest = { version = "0.12.15", default-features = false, features = [
     "http2",
     "stream",
