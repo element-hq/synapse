@@ -1330,6 +1330,9 @@ class DeviceListWorkerUpdater:
             # Shortcut empty requests
             return {}
 
+        # This uses a per-user-id lock; to avoid using cross-worker locks, we
+        # forward the request to the main device list writer.
+        # See DeviceListUpdater
         return await self._multi_user_device_resync_client(
             instance_name=self._main_device_list_writer,
             user_ids=user_ids,
