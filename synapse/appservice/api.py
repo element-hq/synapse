@@ -555,6 +555,9 @@ class ApplicationServiceApi(SimpleHttpClient):
                         )
                         and service.is_interested_in_user(e.state_key)
                     ),
+                    # Appservices are considered 'trusted' by the admin and should have
+                    # applicable metadata on their events.
+                    include_admin_metadata=True,
                 ),
             )
             for e in events

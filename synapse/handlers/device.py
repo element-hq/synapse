@@ -123,7 +123,8 @@ class DeviceHandler:
     store: "GenericWorkerStore"
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.hs = hs
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.notifier = hs.get_notifier()
@@ -133,7 +134,6 @@ class DeviceHandler:
         self._auth_handler = hs.get_auth_handler()
         self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
-        self.server_name = hs.hostname
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
@@ -1417,7 +1417,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         super().__init__(hs)
 
         self.federation = hs.get_federation_client()
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
 
         self._remote_edu_linearizer = Linearizer(name="remote_device_list")
