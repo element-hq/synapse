@@ -59,6 +59,7 @@ class NotRetryingDestination(Exception):
 
 
 async def get_retry_limiter(
+    *,
     destination: str,
     our_server_name: str,
     clock: Clock,
@@ -84,7 +85,12 @@ async def get_retry_limiter(
     Example usage:
 
         try:
-            limiter = await get_retry_limiter(destination, clock, store)
+            limiter = await get_retry_limiter(
+                destination=destination,
+                our_server_name=self.server_name,
+                clock=clock,
+                store=store,
+            )
             with limiter:
                 response = await do_request()
         except NotRetryingDestination:

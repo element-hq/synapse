@@ -619,9 +619,10 @@ class MatrixFederationHttpClient:
             raise FederationDeniedError(request.destination)
 
         limiter = await synapse.util.retryutils.get_retry_limiter(
-            request.destination,
-            self.clock,
-            self._store,
+            destination=request.destination,
+            our_server_name=self.server_name,
+            clock=self.clock,
+            store=self._store,
             backoff_on_404=backoff_on_404,
             ignore_backoff=ignore_backoff,
             notifier=self.hs.get_notifier(),
