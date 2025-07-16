@@ -610,7 +610,12 @@ class RoomCreationHandler:
         if ban_event_ids:
             ban_events = await self.store.get_events_as_list(ban_event_ids)
 
-            # Add any banned users to the new room
+            # Add any banned users to the new room.
+            #
+            # Note generally we should send membership events via
+            # `update_membership`, however in this case its fine to bypass as
+            # these bans don't need any special treatment, i.e. the sender is in
+            # the room and they don't need any extra signatures, etc.
             await self.event_creation_handler.create_and_send_new_client_events(
                 requester=requester,
                 room_id=new_room_id,
