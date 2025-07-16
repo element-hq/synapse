@@ -111,6 +111,7 @@ class ApplicationServiceScheduler:
 
     def __init__(self, hs: "HomeServer"):
         self.txn_ctrl = _TransactionController(hs)
+        self.store = hs.get_datastores().main
         self.queuer = _ServiceQueuer(self.txn_ctrl, hs)
 
     async def start(self) -> None:
