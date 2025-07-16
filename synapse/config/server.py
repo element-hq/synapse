@@ -368,7 +368,7 @@ def parse_proxy_config(config: JsonDict) -> ProxyConfig:
     """
     Figure out forward proxy config for outgoing HTTP requests.
 
-    Prefer values from the file config over the environment variables (`http_proxy`,
+    Prefer values from the given config over the environment variables (`http_proxy`,
     `https_proxy`, `no_proxy`, not case-sensitive).
 
     Args:
