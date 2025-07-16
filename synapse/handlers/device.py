@@ -923,7 +923,7 @@ class DeviceHandler:
 
 class DeviceWriterHandler(DeviceHandler):
     """
-    Superclass of the DeviceHandler which gets instanciated on workers that can
+    Superclass of the DeviceHandler which gets instantiated on workers that can
     write to the device list stream.
     """
 
