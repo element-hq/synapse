@@ -178,6 +178,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/login$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/3pid$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/whoami$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)",
             "^/_matrix/client/versions$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$",
             "^/_matrix/client/(r0|v3|unstable)/register$",
@@ -194,6 +195,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$",
             "^/_matrix/client/(r0|v3|unstable)/capabilities$",
             "^/_matrix/client/(r0|v3|unstable)/notifications$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
@@ -265,13 +269,6 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
-    "frontend_proxy": {
-        "app": "synapse.app.generic_worker",
-        "listener_resources": ["client", "replication"],
-        "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload"],
-        "shared_extra_conf": {},
-        "worker_extra_conf": "",
-    },
     "account_data": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -309,9 +306,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
     "device_lists": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
-        "endpoint_patterns": [
-            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$"
-        ],
+        "endpoint_patterns": [],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
