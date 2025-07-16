@@ -1523,6 +1523,13 @@ class EventCreationHandler:
     ) -> None:
         """Helper to create and send a batch of new client events.
 
+        This supports sending membership events in very limited circumstances
+        (namely that the event is valid as is and doesn't need federation
+        requests or anything). Callers should prefer to use `update_membership`,
+        which correctly handles membership events in all cases. We allow
+        sending membership events here as its useful when copying e.g. bans
+        between rooms.
+
         Args:
             requester: The requester sending the events.
             room_id: The room ID to send the events in.
