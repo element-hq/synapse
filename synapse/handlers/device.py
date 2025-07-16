@@ -183,6 +183,32 @@ class DeviceHandler:
             [self._main_device_list_writer],
         )
 
+        self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
+
+        if (
+            hs.config.worker.run_background_tasks
+            and self._delete_stale_devices_after is not None
+        ):
+            self.clock.looping_call(
+                run_as_background_process,
+                DELETE_STALE_DEVICES_INTERVAL_MS,
+                "delete_stale_devices",
+                self._delete_stale_devices,
+            )
+
+    async def _delete_stale_devices(self) -> None:
+        """Background task that deletes devices which haven't been accessed for more than
+        a configured time period.
+        """
+        # We should only be running this job if the config option is defined.
+        assert self._delete_stale_devices_after is not None
+        now_ms = self.clock.time_msec()
+        since_ms = now_ms - self._delete_stale_devices_after
+        devices = await self.store.get_local_devices_not_accessed_since(since_ms)
+
+        for user_id, user_devices in devices.items():
+            await self.delete_devices(user_id, user_devices)
+
     async def check_device_registered(
         self,
         user_id: str,
@@ -972,32 +998,6 @@ class DeviceWriterHandler(DeviceHandler):
                 EduTypes.DEVICE_LIST_UPDATE,
                 self.device_list_updater.incoming_device_list_update,
             )
-
-        self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
-
-        if (
-            hs.config.worker.run_background_tasks
-            and self._delete_stale_devices_after is not None
-        ):
-            self.clock.looping_call(
-                run_as_background_process,
-                DELETE_STALE_DEVICES_INTERVAL_MS,
-                "delete_stale_devices",
-                self._delete_stale_devices,
-            )
-
-    async def _delete_stale_devices(self) -> None:
-        """Background task that deletes devices which haven't been accessed for more than
-        a configured time period.
-        """
-        # We should only be running this job if the config option is defined.
-        assert self._delete_stale_devices_after is not None
-        now_ms = self.clock.time_msec()
-        since_ms = now_ms - self._delete_stale_devices_after
-        devices = await self.store.get_local_devices_not_accessed_since(since_ms)
-
-        for user_id, user_devices in devices.items():
-            await self.delete_devices(user_id, user_devices)
 
     @trace
     @measure_func("notify_device_update")
