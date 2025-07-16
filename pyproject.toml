@@ -159,7 +159,13 @@ synapse_review_recent_signups = "synapse._scripts.review_recent_signups:main"
 update_synapse_database = "synapse._scripts.update_synapse_database:main"
 
 [tool.poetry.dependencies]
-python = "^3.9.0"
+# We aim to support all versions of Python currently supported upstream as per
+# our dependency deprecation policy:
+# https://element-hq.github.io/synapse/latest/deprecation_policy.html#policy
+#
+# 3.9.12 is currently the minimum version due to Twisted requiring it:
+# https://github.com/twisted/twisted/commit/27674f64d8a553ad5e68913bfb1c936e6fdeb46a
+python = "^3.9.12"
 
 # Mandatory Dependencies
 # ----------------------
