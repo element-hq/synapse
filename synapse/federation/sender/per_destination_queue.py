@@ -745,7 +745,7 @@ class _TransactionQueueManager:
 
             pending_edus.append(
                 Edu(
-                    origin=self.queue._server_name,
+                    origin=self.queue.server_name,
                     destination=self.queue._destination,
                     edu_type=EduTypes.PRESENCE,
                     content={"push": presence_to_add},

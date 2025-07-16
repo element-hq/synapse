@@ -484,6 +484,7 @@ class _NullContextManager(ContextManager[None]):
 class WorkerPresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self._presence_writer_instance = hs.config.worker.writers.presence[0]
 
         # Route presence EDUs to the right worker

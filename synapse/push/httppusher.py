@@ -106,6 +106,7 @@ class HttpPusher(Pusher):
 
     def __init__(self, hs: "HomeServer", pusher_config: PusherConfig):
         super().__init__(hs, pusher_config)
+        self.server_name = hs.hostname
         self._storage_controllers = self.hs.get_storage_controllers()
         self.app_display_name = pusher_config.app_display_name
         self.device_display_name = pusher_config.device_display_name

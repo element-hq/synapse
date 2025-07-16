@@ -561,6 +561,7 @@ class DatabasePool:
         engine: BaseDatabaseEngine,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
