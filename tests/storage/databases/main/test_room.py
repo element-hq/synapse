@@ -47,7 +47,9 @@ class RoomBackgroundUpdateStoreTestCase(HomeserverTestCase):
 
     def _generate_room(self) -> str:
         """Create a room and return the room ID."""
-        return self.helper.create_room_as(self.user_id, tok=self.token, room_version="10")
+        return self.helper.create_room_as(
+            self.user_id, tok=self.token, room_version="10"
+        )
 
     def run_background_updates(self, update_name: str) -> None:
         """Insert and run the background update."""

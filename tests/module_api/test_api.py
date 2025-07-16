@@ -743,7 +743,6 @@ class ModuleApiTestCase(BaseModuleApiTestCase):
 
         # Now do the happy path.
         user_id = self.register_user("user", "password")
-        access_token = self.login(user_id, "password")
 
         room_id, room_alias = self.get_success(
             self.module_api.create_room(
