@@ -263,6 +263,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         assert hs.get_instance_name() in hs.config.worker.writers.typing
 
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.notifier = hs.get_notifier()
         self.event_auth_handler = hs.get_event_auth_handler()
@@ -280,7 +281,9 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         # caches which room_ids changed at which serials
         self._typing_stream_change_cache = StreamChangeCache(
-            "TypingStreamChangeCache", self._latest_room_serial
+            name="TypingStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=self._latest_room_serial,
         )
 
     def _handle_timeout_for_member(self, now: int, member: RoomMember) -> None:

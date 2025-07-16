@@ -90,7 +90,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         account_max = self.get_max_account_data_stream_id()
         self._account_data_stream_cache = StreamChangeCache(
-            "AccountDataAndTagsChangeCache", account_max
+            name="AccountDataAndTagsChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=account_max,
         )
 
         self.db_pool.updates.register_background_index_update(

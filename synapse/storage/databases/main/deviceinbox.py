@@ -94,6 +94,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             Tuple[str, Optional[str]], int
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
@@ -127,8 +128,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_inbox_stream_cache = StreamChangeCache(
-            "DeviceInboxStreamChangeCache",
-            min_device_inbox_id,
+            name="DeviceInboxStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_inbox_id,
             prefilled_cache=device_inbox_prefill,
         )
 
@@ -143,8 +145,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_federation_outbox_stream_cache = StreamChangeCache(
-            "DeviceFederationOutboxStreamChangeCache",
-            min_device_outbox_id,
+            name="DeviceFederationOutboxStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_outbox_id,
             prefilled_cache=device_outbox_prefill,
         )
 

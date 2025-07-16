@@ -31,18 +31,24 @@ from tests.unittest import TestCase
 
 class DeferredCacheTestCase(TestCase):
     def test_empty(self) -> None:
-        cache: DeferredCache[str, int] = DeferredCache("test")
+        cache: DeferredCache[str, int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         with self.assertRaises(KeyError):
             cache.get("foo")
 
     def test_hit(self) -> None:
-        cache: DeferredCache[str, int] = DeferredCache("test")
+        cache: DeferredCache[str, int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         cache.prefill("foo", 123)
 
         self.assertEqual(self.successResultOf(cache.get("foo")), 123)
 
     def test_hit_deferred(self) -> None:
-        cache: DeferredCache[str, int] = DeferredCache("test")
+        cache: DeferredCache[str, int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         origin_d: "defer.Deferred[int]" = defer.Deferred()
         set_d = cache.set("k1", origin_d)
 
@@ -65,7 +71,9 @@ class DeferredCacheTestCase(TestCase):
 
     def test_callbacks(self) -> None:
         """Invalidation callbacks are called at the right time"""
-        cache: DeferredCache[str, int] = DeferredCache("test")
+        cache: DeferredCache[str, int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         callbacks = set()
 
         # start with an entry, with a callback
@@ -98,7 +106,9 @@ class DeferredCacheTestCase(TestCase):
         self.assertEqual(callbacks, {"set", "get"})
 
     def test_set_fail(self) -> None:
-        cache: DeferredCache[str, int] = DeferredCache("test")
+        cache: DeferredCache[str, int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         callbacks = set()
 
         # start with an entry, with a callback
@@ -135,7 +145,9 @@ class DeferredCacheTestCase(TestCase):
         self.assertEqual(callbacks, {"prefill", "get2"})
 
     def test_get_immediate(self) -> None:
-        cache: DeferredCache[str, int] = DeferredCache("test")
+        cache: DeferredCache[str, int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         d1: "defer.Deferred[int]" = defer.Deferred()
         cache.set("key1", d1)
 
@@ -151,7 +163,9 @@ class DeferredCacheTestCase(TestCase):
         self.assertEqual(v, 2)
 
     def test_invalidate(self) -> None:
-        cache: DeferredCache[Tuple[str], int] = DeferredCache("test")
+        cache: DeferredCache[Tuple[str], int] = DeferredCache(
+            name="test", server_name="test_server"
+        )
         cache.prefill(("foo",), 123)
         cache.invalidate(("foo",))
 
@@ -159,7 +173,9 @@ class DeferredCacheTestCase(TestCase):
             cache.get(("foo",))
 
     def test_invalidate_all(self) -> None:
-        cache: DeferredCache[str, str] = DeferredCache("testcache")
+        cache: DeferredCache[str, str] = DeferredCache(
+            name="testcache", server_name="test_server"
+        )
 
         callback_record = [False, False]
 
@@ -203,7 +219,10 @@ class DeferredCacheTestCase(TestCase):
 
     def test_eviction(self) -> None:
         cache: DeferredCache[int, str] = DeferredCache(
-            "test", max_entries=2, apply_cache_factor_from_config=False
+            name="test",
+            server_name="test_server",
+            max_entries=2,
+            apply_cache_factor_from_config=False,
         )
 
         cache.prefill(1, "one")
@@ -218,7 +237,10 @@ class DeferredCacheTestCase(TestCase):
 
     def test_eviction_lru(self) -> None:
         cache: DeferredCache[int, str] = DeferredCache(
-            "test", max_entries=2, apply_cache_factor_from_config=False
+            name="test",
+            server_name="test_server",
+            max_entries=2,
+            apply_cache_factor_from_config=False,
         )
 
         cache.prefill(1, "one")
@@ -237,7 +259,8 @@ class DeferredCacheTestCase(TestCase):
 
     def test_eviction_iterable(self) -> None:
         cache: DeferredCache[int, List[str]] = DeferredCache(
-            "test",
+            name="test",
+            server_name="test_server",
             max_entries=3,
             apply_cache_factor_from_config=False,
             iterable=True,
