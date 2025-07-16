@@ -113,6 +113,12 @@ def _check_device_name_length(name: Optional[str]) -> None:
 
 
 class DeviceHandler:
+    """
+    Handles most things related to devices. This doesn't do any writing to the
+    device list stream on its own, and will call to device list writers through
+    replication when necessary (see DeviceWriterHandler).
+    """
+
     device_list_updater: "DeviceListWorkerUpdater"
     store: "GenericWorkerStore"
 
