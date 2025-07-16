@@ -962,7 +962,9 @@ class DeviceWriterHandler(DeviceHandler):
         # processing.
         self._handle_new_device_update_new_data = False
 
-        if self._main_device_list_writer:
+        # Only the main device list writer handles device list EDUs and converts
+        # device list updates to outbound federation pokes.
+        if self._is_main_device_list_writer:
             # On start up check if there are any updates pending.
             hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
             self.device_list_updater = DeviceListUpdater(hs, self)
