@@ -242,7 +242,7 @@ class TestBasicProxyCredentials(TestCase):
         )
 
 
-class MatrixFederationAgentTests(TestCase):
+class ProxyAgentTests(TestCase):
     def setUp(self) -> None:
         self.reactor = ThreadedMemoryReactorClock()
 
