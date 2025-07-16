@@ -25,7 +25,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests import unittest
@@ -41,7 +41,7 @@ class ApplicationServiceApiTestCase(unittest.HomeserverTestCase):
         self.api = hs.get_application_service_api()
         self.service = ApplicationService(
             id="unique_identifier",
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
             url=URL,
             token="unused",
             hs_token=TOKEN,

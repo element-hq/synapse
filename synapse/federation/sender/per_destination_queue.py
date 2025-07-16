@@ -129,6 +129,8 @@ class PerDestinationQueue:
 
         # The stream_ordering of the most recent PDU that was discarded due to
         # being in catch-up mode.
+        # Can be set to zero if no PDU has been discarded since the last time
+        # we queried for new PDUs during catch-up.
         self._catchup_last_skipped: int = 0
 
         # Cache of the last successfully-transmitted stream ordering for this
@@ -463,8 +465,18 @@ class PerDestinationQueue:
                 # of a race condition, so we check that no new events have been
                 # skipped due to us being in catch-up mode
 
-                if self._catchup_last_skipped > last_successful_stream_ordering:
+                if (
+                    self._catchup_last_skipped != 0
+                    and self._catchup_last_skipped > last_successful_stream_ordering
+                ):
                     # another event has been skipped because we were in catch-up mode
+                    # As an exception to this case: we can hit this branch if the
+                    # room has been purged whilst we have been looping.
+                    # In that case we avoid hot-looping by resetting the 'catch-up skipped
+                    # PDU' flag.
+                    # Then if there is still no progress to be made at the next iteration,
+                    # we can exit catch-up mode.
+                    self._catchup_last_skipped = 0
                     continue
 
                 # we are done catching up!

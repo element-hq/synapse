@@ -339,6 +339,7 @@ class EventsPersistenceStorageController:
         assert stores.persist_events
         self.persist_events_store = stores.persist_events
 
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self.is_mine_id = hs.is_mine_id
@@ -618,7 +619,11 @@ class EventsPersistenceStorageController:
             state_delta_for_room = None
 
             if not backfilled:
-                with Measure(self._clock, "_calculate_state_and_extrem"):
+                with Measure(
+                    self._clock,
+                    name="_calculate_state_and_extrem",
+                    server_name=self.server_name,
+                ):
                     # Work out the new "current state" for the room.
                     # We do this by working out what the new extremities are and then
                     # calculating the state from that.
@@ -629,7 +634,11 @@ class EventsPersistenceStorageController:
                         room_id, chunk
                     )
 
-            with Measure(self._clock, "calculate_chain_cover_index_for_events"):
+            with Measure(
+                self._clock,
+                name="calculate_chain_cover_index_for_events",
+                server_name=self.server_name,
+            ):
                 # We now calculate chain ID/sequence numbers for any state events we're
                 # persisting. We ignore out of band memberships as we're not in the room
                 # and won't have their auth chain (we'll fix it up later if we join the
@@ -721,7 +730,11 @@ class EventsPersistenceStorageController:
                     break
 
         logger.debug("Calculating state delta for room %s", room_id)
-        with Measure(self._clock, "persist_events.get_new_state_after_events"):
+        with Measure(
+            self._clock,
+            name="persist_events.get_new_state_after_events",
+            server_name=self.server_name,
+        ):
             res = await self._get_new_state_after_events(
                 room_id,
                 ev_ctx_rm,
@@ -748,7 +761,11 @@ class EventsPersistenceStorageController:
             # removed keys entirely.
             delta = DeltaState([], delta_ids)
         elif current_state is not None:
-            with Measure(self._clock, "persist_events.calculate_state_delta"):
+            with Measure(
+                self._clock,
+                name="persist_events.calculate_state_delta",
+                server_name=self.server_name,
+            ):
                 delta = await self._calculate_state_delta(room_id, current_state)
 
         if delta:

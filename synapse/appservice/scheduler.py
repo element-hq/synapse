@@ -317,7 +317,7 @@ class _ServiceQueuer:
         users: Set[str] = set()
 
         # The sender is always included
-        users.add(service.sender)
+        users.add(service.sender.to_string())
 
         # All AS users that would receive the PDUs or EDUs sent to these rooms
         # are classed as 'interesting'.

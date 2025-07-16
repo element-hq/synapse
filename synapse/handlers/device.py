@@ -526,6 +526,8 @@ class DeviceHandler(DeviceWorkerHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.federation_sender = hs.get_federation_sender()
         self._account_data_handler = hs.get_account_data_handler()
         self._storage_controllers = hs.get_storage_controllers()
@@ -1217,7 +1219,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.federation = hs.get_federation_client()
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
         self._notifier = hs.get_notifier()
 
@@ -1234,6 +1237,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         # resyncs.
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
             cache_name="device_update_edu",
+            server_name=self.server_name,
             clock=self.clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,

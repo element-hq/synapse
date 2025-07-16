@@ -823,9 +823,9 @@ class TestBulkPushRuleEvaluator(unittest.HomeserverTestCase):
         # Define an application service so that we can register appservice users
         self._service_token = "some_token"
         self._service = ApplicationService(
-            self._service_token,
-            "as1",
-            "@as.sender:test",
+            token=self._service_token,
+            id="as1",
+            sender=UserID.from_string("@as.sender:test"),
             namespaces={
                 "users": [
                     {"regex": "@_as_.*:test", "exclusive": True},

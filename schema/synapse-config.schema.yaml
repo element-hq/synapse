@@ -2335,6 +2335,30 @@ properties:
     default: 50M
     examples:
       - 60M
+  media_upload_limits:
+    type: array
+    description: >-
+      A list of media upload limits defining how much data a given user can
+      upload in a given time period.
+
+
+      An empty list means no limits are applied.
+    default: []
+    items:
+      time_period:
+        type: "#/$defs/duration"
+        description: >-
+          The time period over which the limit applies. Required.
+      max_size:
+        type: "#/$defs/bytes"
+        description: >-
+          Amount of data that can be uploaded in the time period by the user.
+          Required.
+    examples:
+      - - time_period: 1h
+          max_size: 100M
+        - time_period: 1w
+          max_size: 500M
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.
@@ -2668,6 +2692,21 @@ properties:
     default: null
     examples:
       - YOUR_PUBLIC_KEY
+  recaptcha_public_key_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows
+      the public key to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the public key.
+      Synapse reads the public key from the given file once at startup.
+
+
+      _Added in Synapse 1.135.0._
+    default: null
+    examples:
+      - /path/to/key/file
   recaptcha_private_key:
     type: ["string", "null"]
     description: >-
@@ -2676,6 +2715,21 @@ properties:
     default: null
     examples:
       - YOUR_PRIVATE_KEY
+  recaptcha_private_key_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`recaptcha_private_key`](#recaptcha_private_key):
+      allows the private key to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the private key.
+      Synapse reads the private key from the given file once at startup.
+
+
+      _Added in Synapse 1.135.0._
+    default: null
+    examples:
+      - /path/to/key/file
   enable_registration_captcha:
     type: boolean
     description: >-
@@ -4665,8 +4719,15 @@ properties:
       enabled:
         type: boolean
         description: >-
-          Defines whether users can search the user directory. If false then
+          Defines whether users can search the user directory. If `false` then
           empty responses are returned to all queries.
+
+
+          *Warning: While the homeserver may determine which subset of users are
+          searched, the Matrix specification requires homeservers to include (at
+          minimum) users visible in public rooms and users sharing a room with
+          the requester. Using `false` improves performance but violates this
+          requirement.*
         default: true
       search_all_users:
         type: boolean

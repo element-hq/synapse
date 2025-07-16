@@ -109,8 +109,9 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             max_value=self._presence_id_gen.get_current_token(),
         )
         self.presence_stream_cache = StreamChangeCache(
-            "PresenceStreamChangeCache",
-            min_presence_val,
+            name="PresenceStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_presence_val,
             prefilled_cache=presence_cache_prefill,
         )
 

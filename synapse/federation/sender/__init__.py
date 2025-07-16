@@ -660,7 +660,11 @@ class FederationSender(AbstractFederationSender):
                     logger.debug(
                         "Handling %i events in room %s", len(events), events[0].room_id
                     )
-                    with Measure(self.clock, "handle_room_events"):
+                    with Measure(
+                        self.clock,
+                        name="handle_room_events",
+                        server_name=self.server_name,
+                    ):
                         for event in events:
                             await handle_event(event)
 
