@@ -1080,6 +1080,9 @@ class DeviceWriterHandler(DeviceHandler):
         This happens in the background so as not to block the original request
         that generated the device update.
         """
+        # This should only ever be called on the main device list writer, as it
+        # expects to only have a single instance of this loop running at a time.
+        # See `handle_new_device_update`.
         assert self._is_main_device_list_writer
 
         if self._handle_new_device_update_is_processing:
