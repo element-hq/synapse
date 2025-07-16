@@ -7,12 +7,20 @@ proxy is supported, not SOCKS proxy or anything else.
 
 ## Configure
 
-The proxy settings can be configured in the homeserver configuration file via `http_proxy`,
-`https_proxy`, and `no_proxy_hosts`.
-- `http_proxy`: Proxy server to use for HTTP requests.
-- `https_proxy`: Proxy server to use for HTTPS requests.
-- `no_proxy_hosts`: List of hosts, IP addresses, or IP ranges in CIDR format which
-  should not use the proxy. Synapse will directly connect to these hosts.
+The proxy settings can be configured in the homeserver configuration file via
+[`http_proxy`](../usage/configuration/config_documentation.md#http_proxy),
+[`https_proxy`](../usage/configuration/config_documentation.md#https_proxy), and
+[`no_proxy_hosts`](../usage/configuration/config_documentation.md#no_proxy_hosts).
+
+`homeserver.yaml` example:
+```yaml
+http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+no_proxy_hosts:
+  - master.hostname.example.com
+  - 10.1.0.0/16
+  - 172.30.0.0/16
+```
 
 The proxy settings can also be configured via the `http_proxy`, `https_proxy`,
 `no_proxy` environment variables. The environment variable is not case sensitive.
