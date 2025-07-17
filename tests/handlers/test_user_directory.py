@@ -31,7 +31,7 @@ from synapse.appservice import ApplicationService
 from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
-from synapse.types import JsonDict, UserProfile, create_requester
+from synapse.types import JsonDict, UserID, UserProfile, create_requester
 from synapse.util import Clock
 
 from tests import unittest
@@ -78,7 +78,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
             # Note: this user does not match the regex above, so that tests
             # can distinguish the sender from the AS user.
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
 
         mock_load_appservices = Mock(return_value=[self.appservice])
@@ -196,7 +196,9 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         user = self.register_user("user", "pass")
         token = self.login(user, "pass")
         room = self.helper.create_room_as(user, is_public=True, tok=token)
-        self.helper.join(room, self.appservice.sender, tok=self.appservice.token)
+        self.helper.join(
+            room, self.appservice.sender.to_string(), tok=self.appservice.token
+        )
         self._check_only_one_user_in_directory(user, room)
 
     def test_search_term_with_colon_in_it_does_not_raise(self) -> None:
@@ -433,7 +435,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
     def test_handle_local_profile_change_with_appservice_sender(self) -> None:
         # profile is not in directory
         profile = self.get_success(
-            self.store._get_user_in_directory(self.appservice.sender)
+            self.store._get_user_in_directory(self.appservice.sender.to_string())
         )
         self.assertIsNone(profile)
 
@@ -441,13 +443,13 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         profile_info = ProfileInfo(avatar_url="avatar_url", display_name="4L1c3")
         self.get_success(
             self.handler.handle_local_profile_change(
-                self.appservice.sender, profile_info
+                self.appservice.sender.to_string(), profile_info
             )
         )
 
         # profile is still not in directory
         profile = self.get_success(
-            self.store._get_user_in_directory(self.appservice.sender)
+            self.store._get_user_in_directory(self.appservice.sender.to_string())
         )
         self.assertIsNone(profile)
 

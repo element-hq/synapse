@@ -85,16 +85,20 @@ class MatrixFederationAgentTests(unittest.TestCase):
         self.tls_factory = FederationPolicyForHTTPS(config)
 
         self.well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache(
-            "test_cache", timer=self.reactor.seconds
+            cache_name="test_cache",
+            server_name="test_server",
+            timer=self.reactor.seconds,
         )
         self.had_well_known_cache: TTLCache[bytes, bool] = TTLCache(
-            "test_cache", timer=self.reactor.seconds
+            cache_name="test_cache",
+            server_name="test_server",
+            timer=self.reactor.seconds,
         )
         self.well_known_resolver = WellKnownResolver(
-            "OUR_STUB_HOMESERVER_NAME",
-            self.reactor,
-            Agent(self.reactor, contextFactory=self.tls_factory),
-            b"test-agent",
+            server_name="OUR_STUB_HOMESERVER_NAME",
+            reactor=self.reactor,
+            agent=Agent(self.reactor, contextFactory=self.tls_factory),
+            user_agent=b"test-agent",
             well_known_cache=self.well_known_cache,
             had_well_known_cache=self.had_well_known_cache,
         )
@@ -270,7 +274,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         because it is created too early during setUp
         """
         return MatrixFederationAgent(
-            "OUR_STUB_HOMESERVER_NAME",
+            server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=cast(ISynapseReactor, self.reactor),
             tls_client_options_factory=self.tls_factory,
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
@@ -1013,7 +1017,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
         # Build a new agent and WellKnownResolver with a different tls factory
         tls_factory = FederationPolicyForHTTPS(config)
         agent = MatrixFederationAgent(
-            "OUR_STUB_HOMESERVER_NAME",
+            server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=self.reactor,
             tls_client_options_factory=tls_factory,
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
@@ -1021,10 +1025,10 @@ class MatrixFederationAgentTests(unittest.TestCase):
             ip_blocklist=IPSet(),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
-                "OUR_STUB_HOMESERVER_NAME",
-                cast(ISynapseReactor, self.reactor),
-                Agent(self.reactor, contextFactory=tls_factory),
-                b"test-agent",
+                server_name="OUR_STUB_HOMESERVER_NAME",
+                reactor=cast(ISynapseReactor, self.reactor),
+                agent=Agent(self.reactor, contextFactory=tls_factory),
+                user_agent=b"test-agent",
                 well_known_cache=self.well_known_cache,
                 had_well_known_cache=self.had_well_known_cache,
             ),

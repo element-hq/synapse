@@ -43,6 +43,7 @@ from synapse.types import (
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
+    UserID,
 )
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
@@ -1009,7 +1010,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         appservice = ApplicationService(
             token=random_string(10),
             id=random_string(10),
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
             rate_limited=False,
             namespaces=namespaces,
             supports_ephemeral=True,
@@ -1087,7 +1088,7 @@ class ApplicationServicesHandlerDeviceListsTestCase(unittest.HomeserverTestCase)
         appservice = ApplicationService(
             token=random_string(10),
             id=random_string(10),
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
             rate_limited=False,
             namespaces={
                 ApplicationService.NS_USERS: [
@@ -1151,9 +1152,9 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         # Define an application service for the tests
         self._service_token = "VERYSECRET"
         self._service = ApplicationService(
-            self._service_token,
-            "as1",
-            "@as.sender:test",
+            token=self._service_token,
+            id="as1",
+            sender=UserID.from_string("@as.sender:test"),
             namespaces={
                 "users": [
                     {"regex": "@_as_.*:test", "exclusive": True},

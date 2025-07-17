@@ -128,8 +128,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             limit=10000,
         )
         self._device_list_stream_cache = StreamChangeCache(
-            "DeviceListStreamChangeCache",
-            min_device_list_id,
+            name="DeviceListStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_list_id,
             prefilled_cache=device_list_prefill,
         )
 
@@ -142,8 +143,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             limit=10000,
         )
         self._device_list_room_stream_cache = StreamChangeCache(
-            "DeviceListRoomStreamChangeCache",
-            min_device_list_room_id,
+            name="DeviceListRoomStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_list_room_id,
             prefilled_cache=device_list_room_prefill,
         )
 
@@ -159,8 +161,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             limit=1000,
         )
         self._user_signature_stream_cache = StreamChangeCache(
-            "UserSignatureStreamChangeCache",
-            user_signature_stream_list_id,
+            name="UserSignatureStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=user_signature_stream_list_id,
             prefilled_cache=user_signature_stream_prefill,
         )
 
@@ -178,8 +181,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 limit=10000,
             )
             self._device_list_federation_stream_cache = StreamChangeCache(
-                "DeviceListFederationStreamChangeCache",
-                device_list_federation_list_id,
+                name="DeviceListFederationStreamChangeCache",
+                server_name=self.server_name,
+                current_stream_pos=device_list_federation_list_id,
                 prefilled_cache=device_list_federation_prefill,
             )
 
@@ -1769,11 +1773,16 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+        self.server_name = hs.hostname
 
         # Map of (user_id, device_id) -> bool. If there is an entry that implies
         # the device exists.
         self.device_id_exists_cache: LruCache[Tuple[str, str], Literal[True]] = (
-            LruCache(cache_name="device_id_exists", max_size=10000)
+            LruCache(
+                cache_name="device_id_exists",
+                server_name=self.server_name,
+                max_size=10000,
+            )
         )
 
     async def store_device(
