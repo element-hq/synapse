@@ -1,1 +1,1 @@
-Prevent dirty `Cargo.lock` changes after install.
+Fix dirty `Cargo.lock` changes appearing after install (`base64`).
