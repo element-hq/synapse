@@ -287,7 +287,16 @@ jobs:
           poetry-version: "2.1.1"
 
       - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
-        run: git diff --exit-code Cargo.lock
+        # The `::error::` syntax is using GitHub Actions' error annotations, see
+        # https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions
+        run: |
+          if git diff --quiet Cargo.lock; then
+            echo "Cargo.lock is up to date"
+          else
+            echo "::error::Cargo.lock has uncommitted changes after install. Please run 'poetry install --extras all' and commit the Cargo.lock changes."
+            git diff --exit-code Cargo.lock
+            exit 1
+          fi
 
   # This job is split from `lint-rust` because it requires a nightly Rust toolchain
   # for some of the unstable options we use in `.rustfmt.toml`.
