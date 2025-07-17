@@ -160,6 +160,7 @@ class DeviceHandler:
         # The main logic update is that the DeviceListUpdater is now only
         # instantiated on the first device list writer, and a few methods that
         # were safe to move to any worker were moved to the DeviceListWorkerUpdater
+        # This must be kept in sync with DeviceListWorkerUpdater
         self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
 
         self._notify_device_update_client = (
@@ -1312,6 +1313,8 @@ class DeviceListWorkerUpdater:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._notifier = hs.get_notifier()
+        # On which instance the DeviceListUpdater is running
+        # Must be kept in sync with DeviceHandler
         self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
         self._multi_user_device_resync_client = (
             ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
