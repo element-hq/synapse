@@ -155,7 +155,9 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         Caches produce metrics reflecting their state when scraped.
         """
         CACHE_NAME = "cache_metrics_test_fgjkbdfg"
-        cache: DeferredCache[str, str] = DeferredCache(CACHE_NAME, max_entries=777)
+        cache: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, server_name=self.hs.hostname, max_entries=777
+        )
 
         items = {
             x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")

@@ -111,6 +111,7 @@ class SyncRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.sync_handler = hs.get_sync_handler()
@@ -125,6 +126,7 @@ class SyncRestServlet(RestServlet):
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
             cache_name="sync_valid_filter",
+            server_name=self.server_name,
         )
 
         # Ratelimiter for presence updates, keyed by requester.

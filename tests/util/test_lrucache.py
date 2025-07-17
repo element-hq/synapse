@@ -34,13 +34,13 @@ from tests.unittest import override_config
 
 class LruCacheTestCase(unittest.HomeserverTestCase):
     def test_get_set(self) -> None:
-        cache: LruCache[str, str] = LruCache(1)
+        cache: LruCache[str, str] = LruCache(max_size=1)
         cache["key"] = "value"
         self.assertEqual(cache.get("key"), "value")
         self.assertEqual(cache["key"], "value")
 
     def test_eviction(self) -> None:
-        cache: LruCache[int, int] = LruCache(2)
+        cache: LruCache[int, int] = LruCache(max_size=2)
         cache[1] = 1
         cache[2] = 2
 
@@ -54,7 +54,7 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache.get(3), 3)
 
     def test_setdefault(self) -> None:
-        cache: LruCache[str, int] = LruCache(1)
+        cache: LruCache[str, int] = LruCache(max_size=1)
         self.assertEqual(cache.setdefault("key", 1), 1)
         self.assertEqual(cache.get("key"), 1)
         self.assertEqual(cache.setdefault("key", 2), 1)
@@ -63,14 +63,16 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache.get("key"), 2)
 
     def test_pop(self) -> None:
-        cache: LruCache[str, int] = LruCache(1)
+        cache: LruCache[str, int] = LruCache(max_size=1)
         cache["key"] = 1
         self.assertEqual(cache.pop("key"), 1)
         self.assertEqual(cache.pop("key"), None)
 
     def test_del_multi(self) -> None:
         # The type here isn't quite correct as they don't handle TreeCache well.
-        cache: LruCache[Tuple[str, str], str] = LruCache(4, cache_type=TreeCache)
+        cache: LruCache[Tuple[str, str], str] = LruCache(
+            max_size=4, cache_type=TreeCache
+        )
         cache[("animal", "cat")] = "mew"
         cache[("animal", "dog")] = "woof"
         cache[("vehicles", "car")] = "vroom"
@@ -89,21 +91,23 @@ class LruCacheTestCase(unittest.HomeserverTestCase):
         # Man from del_multi say "Yes".
 
     def test_clear(self) -> None:
-        cache: LruCache[str, int] = LruCache(1)
+        cache: LruCache[str, int] = LruCache(max_size=1)
         cache["key"] = 1
         cache.clear()
         self.assertEqual(len(cache), 0)
 
     @override_config({"caches": {"per_cache_factors": {"mycache": 10}}})
     def test_special_size(self) -> None:
-        cache: LruCache = LruCache(10, "mycache")
+        cache: LruCache = LruCache(
+            max_size=10, server_name="test_server", cache_name="mycache"
+        )
         self.assertEqual(cache.max_size, 100)
 
 
 class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
     def test_get(self) -> None:
         m = Mock()
-        cache: LruCache[str, str] = LruCache(1)
+        cache: LruCache[str, str] = LruCache(max_size=1)
 
         cache.set("key", "value")
         self.assertFalse(m.called)
@@ -122,7 +126,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
 
     def test_multi_get(self) -> None:
         m = Mock()
-        cache: LruCache[str, str] = LruCache(1)
+        cache: LruCache[str, str] = LruCache(max_size=1)
 
         cache.set("key", "value")
         self.assertFalse(m.called)
@@ -141,7 +145,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
 
     def test_set(self) -> None:
         m = Mock()
-        cache: LruCache[str, str] = LruCache(1)
+        cache: LruCache[str, str] = LruCache(max_size=1)
 
         cache.set("key", "value", callbacks=[m])
         self.assertFalse(m.called)
@@ -157,7 +161,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
 
     def test_pop(self) -> None:
         m = Mock()
-        cache: LruCache[str, str] = LruCache(1)
+        cache: LruCache[str, str] = LruCache(max_size=1)
 
         cache.set("key", "value", callbacks=[m])
         self.assertFalse(m.called)
@@ -177,7 +181,9 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
         m3 = Mock()
         m4 = Mock()
         # The type here isn't quite correct as they don't handle TreeCache well.
-        cache: LruCache[Tuple[str, str], str] = LruCache(4, cache_type=TreeCache)
+        cache: LruCache[Tuple[str, str], str] = LruCache(
+            max_size=4, cache_type=TreeCache
+        )
 
         cache.set(("a", "1"), "value", callbacks=[m1])
         cache.set(("a", "2"), "value", callbacks=[m2])
@@ -199,7 +205,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
     def test_clear(self) -> None:
         m1 = Mock()
         m2 = Mock()
-        cache: LruCache[str, str] = LruCache(5)
+        cache: LruCache[str, str] = LruCache(max_size=5)
 
         cache.set("key1", "value", callbacks=[m1])
         cache.set("key2", "value", callbacks=[m2])
@@ -216,7 +222,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
         m1 = Mock(name="m1")
         m2 = Mock(name="m2")
         m3 = Mock(name="m3")
-        cache: LruCache[str, str] = LruCache(2)
+        cache: LruCache[str, str] = LruCache(max_size=2)
 
         cache.set("key1", "value", callbacks=[m1])
         cache.set("key2", "value", callbacks=[m2])
@@ -252,7 +258,7 @@ class LruCacheCallbacksTestCase(unittest.HomeserverTestCase):
 
 class LruCacheSizedTestCase(unittest.HomeserverTestCase):
     def test_evict(self) -> None:
-        cache: LruCache[str, List[int]] = LruCache(5, size_callback=len)
+        cache: LruCache[str, List[int]] = LruCache(max_size=5, size_callback=len)
         cache["key1"] = [0]
         cache["key2"] = [1, 2]
         cache["key3"] = [3]
@@ -275,7 +281,9 @@ class LruCacheSizedTestCase(unittest.HomeserverTestCase):
 
     def test_zero_size_drop_from_cache(self) -> None:
         """Test that `drop_from_cache` works correctly with 0-sized entries."""
-        cache: LruCache[str, List[int]] = LruCache(5, size_callback=lambda x: 0)
+        cache: LruCache[str, List[int]] = LruCache(
+            max_size=5, size_callback=lambda x: 0
+        )
         cache["key1"] = []
 
         self.assertEqual(len(cache), 0)
@@ -299,7 +307,7 @@ class TimeEvictionTestCase(unittest.HomeserverTestCase):
     def test_evict(self) -> None:
         setup_expire_lru_cache_entries(self.hs)
 
-        cache: LruCache[str, int] = LruCache(5, clock=self.hs.get_clock())
+        cache: LruCache[str, int] = LruCache(max_size=5, clock=self.hs.get_clock())
 
         # Check that we evict entries we haven't accessed for 30 minutes.
         cache["key1"] = 1
@@ -351,7 +359,7 @@ class MemoryEvictionTestCase(unittest.HomeserverTestCase):
         mock_jemalloc_class.get_stat.return_value = 924288000
 
         setup_expire_lru_cache_entries(self.hs)
-        cache: LruCache[str, int] = LruCache(4, clock=self.hs.get_clock())
+        cache: LruCache[str, int] = LruCache(max_size=4, clock=self.hs.get_clock())
 
         cache["key1"] = 1
         cache["key2"] = 2
@@ -387,7 +395,9 @@ class MemoryEvictionTestCase(unittest.HomeserverTestCase):
 
 class ExtraIndexLruCacheTestCase(unittest.HomeserverTestCase):
     def test_invalidate_simple(self) -> None:
-        cache: LruCache[str, int] = LruCache(10, extra_index_cb=lambda k, v: str(v))
+        cache: LruCache[str, int] = LruCache(
+            max_size=10, extra_index_cb=lambda k, v: str(v)
+        )
         cache["key1"] = 1
         cache["key2"] = 2
 
@@ -400,7 +410,9 @@ class ExtraIndexLruCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache.get("key2"), 2)
 
     def test_invalidate_multi(self) -> None:
-        cache: LruCache[str, int] = LruCache(10, extra_index_cb=lambda k, v: str(v))
+        cache: LruCache[str, int] = LruCache(
+            max_size=10, extra_index_cb=lambda k, v: str(v)
+        )
         cache["key1"] = 1
         cache["key2"] = 1
         cache["key3"] = 2

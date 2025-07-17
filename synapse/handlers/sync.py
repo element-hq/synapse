@@ -353,8 +353,9 @@ class SyncHandler:
         #    cached result any more, and we could flush the entry from the cache to save
         #    memory.
         self.response_cache: ResponseCache[SyncRequestKey] = ResponseCache(
-            hs.get_clock(),
-            "sync",
+            clock=hs.get_clock(),
+            name="sync",
+            server_name=self.server_name,
             timeout_ms=hs.config.caches.sync_response_cache_duration,
         )
 
@@ -362,8 +363,9 @@ class SyncHandler:
         self.lazy_loaded_members_cache: ExpiringCache[
             Tuple[str, Optional[str]], LruCache[str, str]
         ] = ExpiringCache(
-            "lazy_loaded_members_cache",
-            self.clock,
+            cache_name="lazy_loaded_members_cache",
+            server_name=self.server_name,
+            clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
@@ -1134,7 +1136,7 @@ class SyncHandler:
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
-            cache = LruCache(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
+            cache = LruCache(max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
             self.lazy_loaded_members_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)

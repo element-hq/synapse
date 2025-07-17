@@ -1457,7 +1457,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -1525,7 +1525,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -1751,7 +1751,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
