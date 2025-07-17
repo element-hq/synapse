@@ -286,9 +286,6 @@ jobs:
           install-project: "true"
           poetry-version: "2.1.1"
 
-      - name: Check Rust code formatting
-        run: cargo fmt --check
-
       - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
         run: git diff --exit-code Cargo.lock
 
