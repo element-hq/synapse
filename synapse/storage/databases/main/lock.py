@@ -418,7 +418,7 @@ class Lock:
         )
 
     @staticmethod
-    async def _renew(
+    def _renew(
         server_name: str,
         store: LockStore,
         clock: Clock,
