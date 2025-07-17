@@ -36,9 +36,6 @@ static RUNTIME: OnceCell<Runtime> = OnceCell::new();
 /// A reference to the `twisted.internet.defer` module.
 static DEFER: OnceCell<PyObject> = OnceCell::new();
 
-/// A reference to the `twisted.internet.reactor`.
-static REACTOR: OnceCell<Py<PyModule>> = OnceCell::new();
-
 /// Access the tokio runtime.
 fn runtime() -> PyResult<&'static Runtime> {
     RUNTIME.get_or_try_init(|| {
@@ -56,13 +53,6 @@ fn runtime() -> PyResult<&'static Runtime> {
 fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
     Ok(DEFER
         .get_or_try_init(|| py.import("twisted.internet.defer").map(Into::into))?
-        .bind(py))
-}
-
-/// Access to the `twisted.internet.reactor` module.
-fn reactor(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
-    Ok(REACTOR
-        .get_or_try_init(|| py.import("twisted.internet.reactor").map(Into::into))?
         .bind(py))
 }
 
@@ -87,26 +77,21 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 }
 
 #[pyclass]
-#[derive(Clone)]
 struct HttpClient {
     client: reqwest::Client,
+    reactor: PyObject,
 }
 
 #[pymethods]
 impl HttpClient {
     #[new]
-    pub fn py_new(py: Python<'_>, user_agent: &str) -> PyResult<HttpClient> {
-        // The twisted reactor can only be imported after Synapse has been
-        // imported, to allow Synapse to change the twisted reactor. If we try
-        // and import the reactor too early twisted installs a default reactor,
-        // which can't be replaced.
-        reactor(py)?;
-
+    pub fn py_new(reactor: PyObject, user_agent: &str) -> PyResult<HttpClient> {
         Ok(HttpClient {
             client: reqwest::Client::builder()
                 .user_agent(user_agent)
                 .build()
                 .context("building reqwest client")?,
+            reactor,
         })
     }
 
@@ -144,7 +129,7 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
-        create_deferred(py, async move {
+        create_deferred(py, self.reactor.clone_ref(py), async move {
             let response = builder.send().await.context("sending request")?;
 
             let status = response.status();
@@ -174,7 +159,7 @@ impl HttpClient {
 /// tokio runtime.
 ///
 /// Does not handle deferred cancellation or contextvars.
-fn create_deferred<F, O>(py: Python, fut: F) -> PyResult<Bound<'_, PyAny>>
+fn create_deferred<F, O>(py: Python, reactor: PyObject, fut: F) -> PyResult<Bound<'_, PyAny>>
 where
     F: Future<Output = PyResult<O>> + Send + 'static,
     for<'a> O: IntoPyObject<'a> + Send + 'static,
@@ -204,17 +189,17 @@ where
                 },
             };
 
+            let reactor = reactor.bind(py);
+
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
             match res {
                 Ok(obj) => {
-                    reactor(py)
-                        .expect("failed to load reactor")
+                    reactor
                         .call_method("callFromThread", (deferred_callback, obj), None)
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
                 Err(err) => {
-                    reactor(py)
-                        .expect("failed to load reactor")
+                    reactor
                         .call_method("callFromThread", (deferred_errback, err), None)
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }

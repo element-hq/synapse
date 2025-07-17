@@ -184,7 +184,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
         self._rust_http_client = HttpClient(
-            user_agent=self._http_client.user_agent.decode("utf8")
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
         )
 
         # # Token Introspection Cache
