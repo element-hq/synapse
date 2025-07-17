@@ -101,7 +101,9 @@ class TaskScheduler:
 
     def __init__(self, hs: "HomeServer"):
         self._hs = hs
-        self.server_name = hs.hostname
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._running_tasks: Set[str] = set()

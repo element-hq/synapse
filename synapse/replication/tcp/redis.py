@@ -294,6 +294,10 @@ class SynapseRedisFactory(RedisFactory):
             convertNumbers=convertNumbers,
         )
 
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
+
         hs.get_clock().looping_call(self._send_ping, 30 * 1000)
 
     @wrap_as_background_process("redis_ping")

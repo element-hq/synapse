@@ -227,7 +227,7 @@ async def _expire_old_entries(
 
         logger.info("Dropped %d items from caches", i)
 
-    run_as_background_process(
+    await run_as_background_process(
         "LruCache._expire_old_entries",
         server_name,
         _internal_expire_old_entries,

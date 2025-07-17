@@ -75,7 +75,7 @@ from synapse.http.site import SynapseSite
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -525,6 +525,7 @@ async def start(hs: "HomeServer") -> None:
     Args:
         hs: homeserver instance
     """
+    server_name = hs.hostname
     reactor = hs.get_reactor()
 
     # We want to use a separate thread pool for the resolver so that large
@@ -543,16 +544,24 @@ async def start(hs: "HomeServer") -> None:
     # Set up the SIGHUP machinery.
     if hasattr(signal, "SIGHUP"):
 
-        @wrap_as_background_process("sighup")
         async def handle_sighup(*args: Any, **kwargs: Any) -> None:
-            # Tell systemd our state, if we're using it. This will silently fail if
-            # we're not using systemd.
-            sdnotify(b"RELOADING=1")
+            async def _handle_sighup(*args: Any, **kwargs: Any) -> None:
+                # Tell systemd our state, if we're using it. This will silently fail if
+                # we're not using systemd.
+                sdnotify(b"RELOADING=1")
 
-            for i, args, kwargs in _sighup_callbacks:
-                i(*args, **kwargs)
+                for i, args, kwargs in _sighup_callbacks:
+                    i(*args, **kwargs)
 
-            sdnotify(b"READY=1")
+                sdnotify(b"READY=1")
+
+            await run_as_background_process(
+                "sighup",
+                server_name,
+                _handle_sighup,
+                *args,
+                **kwargs,
+            )
 
         # We defer running the sighup handlers until next reactor tick. This
         # is so that we're in a sane state, e.g. flushing the logs may fail

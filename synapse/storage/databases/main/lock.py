@@ -456,7 +456,7 @@ class Lock:
                 desc="renew_lock",
             )
 
-        run_as_background_process(
+        await run_as_background_process(
             "Lock._renew",
             server_name,
             _internal_renew,
