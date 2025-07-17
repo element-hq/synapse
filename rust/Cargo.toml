@@ -23,7 +23,7 @@ name = "synapse.synapse_rust"
 
 [dependencies]
 anyhow = "1.0.63"
-base64 = "0.21.7"
+base64 = "0.22.1"
 bytes = "1.6.0"
 headers = "0.4.0"
 http = "1.1.0"
