@@ -574,6 +574,7 @@ class RoomStateTestCase(RoomBase):
             ),
         )
         self.assertEqual(channel2.code, HTTPStatus.OK, channel2.json_body)
+        # "content" is the default format.
         self.assertEqual(channel1.json_body, channel2.json_body)
 
     def test_get_state_format_event(self) -> None:
