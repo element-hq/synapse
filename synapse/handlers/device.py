@@ -1092,6 +1092,16 @@ class DeviceWriterHandler(DeviceHandler):
 
         self._handle_new_device_update_is_processing = True
 
+        # Note that this logic only deals with the current stream ID, and not
+        # the full stream token. This means that oubound pokes are only sent
+        # once every writer on the device_lists stream has caught up. This is
+        # fine, it may only introduces a bit of lag on the outbound pokes.
+        # To fix this, 'device_lists_changes_converted_stream_position' would
+        # need to include the full stream token instead of just a stream ID.
+        # We could also consider have each writer converting their own device
+        # list updates, but that can quickly become complex to handle changes in
+        # the list of device writers.
+
         # The stream ID we processed previous iteration (if any), and the set of
         # hosts we've already poked about for this update. This is so that we
         # don't poke the same remote server about the same update repeatedly.
