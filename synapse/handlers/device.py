@@ -1097,7 +1097,7 @@ class DeviceWriterHandler(DeviceHandler):
 
         self._handle_new_device_update_is_processing = True
 
-        # Note that this logic only deals with the current stream ID, and not
+        # Note that this logic only deals with the minimum stream ID, and not
         # the full stream token. This means that oubound pokes are only sent
         # once every writer on the device_lists stream has caught up. This is
         # fine, it may only introduces a bit of lag on the outbound pokes.
