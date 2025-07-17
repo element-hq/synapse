@@ -2179,9 +2179,8 @@ properties:
       with a short timeout, or restarting several different delayed events all
       at once) without the risk of being ratelimited.
     default:
-      per_user:
-        per_second: 1.0
-        burst_count: 5.0
+      per_second: 1.0
+      burst_count: 5.0
     examples:
       - per_second: 2.0
         burst_count: 20.0
