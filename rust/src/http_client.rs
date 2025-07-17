@@ -17,7 +17,7 @@ use std::{collections::HashMap, future::Future};
 use anyhow::Context;
 use futures::TryStreamExt;
 use once_cell::sync::OnceCell;
-use pyo3::{create_exception, exceptions::PyException, prelude::*, types::PyString};
+use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
 use tokio::runtime::Runtime;
 
@@ -29,6 +29,20 @@ create_exception!(
     PyException,
     "A panic which happened in a Rust future"
 );
+
+impl RustPanicError {
+    fn from_panic(panic_err: &(dyn std::any::Any + Send + 'static)) -> PyErr {
+        // Apparently this is how you extract the panic message from a panic
+        let panic_message = if let Some(str_slice) = panic_err.downcast_ref::<&str>() {
+            str_slice
+        } else if let Some(string) = panic_err.downcast_ref::<String>() {
+            string
+        } else {
+            "unknown error"
+        };
+        Self::new_err(panic_message.to_owned())
+    }
+}
 
 /// The tokio runtime that we're using to run async Rust libs.
 static RUNTIME: OnceCell<Runtime> = OnceCell::new();
@@ -68,7 +82,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
-    // synapse.synapse_rust import acl` work.
+    // synapse.synapse_rust import http_client` work.
     py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.http_client", child_module)?;
@@ -179,12 +193,7 @@ where
             let res = match res {
                 Ok(r) => r,
                 Err(join_err) => match join_err.try_into_panic() {
-                    Ok(panic_err) => {
-                        let panic_message = get_panic_message(&panic_err);
-                        Err(RustPanicError::new_err(
-                            PyString::new(py, panic_message).unbind(),
-                        ))
-                    }
+                    Ok(panic_err) => Err(RustPanicError::from_panic(&panic_err)),
                     Err(err) => Err(PyException::new_err(format!("Task cancelled: {err}"))),
                 },
             };
@@ -208,16 +217,4 @@ where
     });
 
     Ok(deferred)
-}
-
-/// Try and get the panic message out of the panic
-fn get_panic_message<'a>(panic_err: &'a (dyn std::any::Any + Send + 'static)) -> &'a str {
-    // Apparently this is how you extract the panic message from a panic
-    if let Some(str_slice) = panic_err.downcast_ref::<&str>() {
-        str_slice
-    } else if let Some(string) = panic_err.downcast_ref::<String>() {
-        string
-    } else {
-        "unknown error"
-    }
 }
