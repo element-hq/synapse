@@ -143,6 +143,9 @@ jobs:
       - name: Run ruff format
         run: poetry run ruff format --check .
 
+      - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
+        run: git diff --exit-code Cargo.lock
+
   lint-mypy:
     runs-on: ubuntu-latest
     name: Typechecking
