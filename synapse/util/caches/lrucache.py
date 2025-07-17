@@ -45,7 +45,7 @@ from typing import (
     overload,
 )
 
-from twisted.internet import reactor
+from twisted.internet import defer, reactor
 from twisted.internet.interfaces import IReactorTime
 
 from synapse.config import cache as cache_config
@@ -120,12 +120,12 @@ USE_GLOBAL_LIST = False
 GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 
-async def _expire_old_entries(
+def _expire_old_entries(
     server_name: str,
     clock: Clock,
     expiry_seconds: float,
     autotune_config: Optional[dict],
-) -> None:
+) -> defer.Deferred[None]:
     """Walks the global cache list to find cache entries that haven't been
     accessed in the given number of seconds, or if a given memory threshold has been breached.
     """
@@ -227,7 +227,7 @@ async def _expire_old_entries(
 
         logger.info("Dropped %d items from caches", i)
 
-    await run_as_background_process(
+    return run_as_background_process(
         "LruCache._expire_old_entries",
         server_name,
         _internal_expire_old_entries,

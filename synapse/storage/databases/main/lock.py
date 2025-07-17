@@ -24,6 +24,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Collection, Optional, Set, Tuple, Type
 from weakref import WeakValueDictionary
 
+from twisted.internet import defer
 from twisted.internet.task import LoopingCall
 
 from synapse.metrics.background_process_metrics import (
@@ -425,7 +426,7 @@ class Lock:
         lock_name: str,
         lock_key: str,
         token: str,
-    ) -> None:
+    ) -> defer.Deferred[None]:
         """Renew the lock.
 
         Note: this is a static method, rather than using self.*, so that we
@@ -456,7 +457,7 @@ class Lock:
                 desc="renew_lock",
             )
 
-        await run_as_background_process(
+        return run_as_background_process(
             "Lock._renew",
             server_name,
             _internal_renew,

@@ -544,7 +544,7 @@ async def start(hs: "HomeServer") -> None:
     # Set up the SIGHUP machinery.
     if hasattr(signal, "SIGHUP"):
 
-        async def handle_sighup(*args: Any, **kwargs: Any) -> None:
+        def handle_sighup(*args: Any, **kwargs: Any) -> defer.Deferred[None]:
             async def _handle_sighup(*args: Any, **kwargs: Any) -> None:
                 # Tell systemd our state, if we're using it. This will silently fail if
                 # we're not using systemd.
@@ -555,7 +555,7 @@ async def start(hs: "HomeServer") -> None:
 
                 sdnotify(b"READY=1")
 
-            await run_as_background_process(
+            return run_as_background_process(
                 "sighup",
                 server_name,
                 _handle_sighup,

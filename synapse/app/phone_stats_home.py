@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, List, Mapping, Sized, Tuple
 
 from prometheus_client import Gauge
 
+from twisted.internet import defer
+
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
 )
@@ -68,11 +70,11 @@ registered_reserved_users_mau_gauge = Gauge(
 )
 
 
-async def phone_stats_home(
+def phone_stats_home(
     hs: "HomeServer",
     stats: JsonDict,
     stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
-) -> None:
+) -> defer.Deferred[None]:
     server_name = hs.hostname
 
     async def _phone_stats_home(
@@ -188,7 +190,7 @@ async def phone_stats_home(
         except Exception as e:
             logger.warning("Error reporting stats: %s", e)
 
-    await run_as_background_process(
+    return run_as_background_process(
         "phone_stats_home", server_name, _phone_stats_home, hs, stats, stats_process
     )
 
@@ -223,7 +225,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
-    def generate_monthly_active_users() -> None:
+    def generate_monthly_active_users() -> defer.Deferred[None]:
         async def _generate_monthly_active_users() -> None:
             current_mau_count = 0
             current_mau_count_by_service: Mapping[str, int] = {}
@@ -243,7 +245,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
             registered_reserved_users_mau_gauge.set(float(len(reserved_users)))
             max_mau_gauge.set(float(hs.config.server.max_mau_value))
 
-        run_as_background_process(
+        return run_as_background_process(
             "generate_monthly_active_users",
             server_name,
             _generate_monthly_active_users,
