@@ -1871,10 +1871,8 @@
       "$ref": "#/$defs/rc",
       "description": "Ratelimiting settings for delayed event management.\n\nThis is a ratelimiting option that ratelimits attempts to restart, cancel, or view delayed events based on the sending client's account and device ID.\n\nAttempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.\n\nSetting this to a high value allows clients to make delayed event management requests often (such as repeatedly restarting a delayed event with a short timeout, or restarting several different delayed events all at once) without the risk of being ratelimited.",
       "default": {
-        "per_user": {
-          "per_second": 1.0,
-          "burst_count": 5.0
-        }
+        "per_second": 1.0,
+        "burst_count": 5.0
       },
       "examples": [
         {
