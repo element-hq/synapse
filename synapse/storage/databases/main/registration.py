@@ -2448,6 +2448,154 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
         self._invalidate_cache_and_stream(txn, self.is_user_approved, (user_id,))
 
+    async def user_delete_access_tokens(
+        self,
+        user_id: str,
+        except_token_id: Optional[int] = None,
+        device_id: Optional[str] = None,
+    ) -> List[Tuple[str, int, Optional[str]]]:
+        """
+        Invalidate access and refresh tokens belonging to a user
+
+        Args:
+            user_id: ID of user the tokens belong to
+            except_token_id: access_tokens ID which should *not* be deleted
+            device_id: ID of device the tokens are associated with.
+                If None, tokens associated with any device (or no device) will
+                be deleted
+        Returns:
+            A tuple of (token, token id, device id) for each of the deleted tokens
+        """
+
+        def f(txn: LoggingTransaction) -> List[Tuple[str, int, Optional[str]]]:
+            keyvalues = {"user_id": user_id}
+            if device_id is not None:
+                keyvalues["device_id"] = device_id
+
+            items = keyvalues.items()
+            where_clause = " AND ".join(k + " = ?" for k, _ in items)
+            values: List[Union[str, int]] = [v for _, v in items]
+            # Conveniently, refresh_tokens and access_tokens both use the user_id and device_id fields. Only caveat
+            # is the `except_token_id` param that is tricky to get right, so for now we're just using the same where
+            # clause and values before we handle that. This seems to be only used in the "set password" handler.
+            refresh_where_clause = where_clause
+            refresh_values = values.copy()
+            if except_token_id:
+                # TODO: support that for refresh tokens
+                where_clause += " AND id != ?"
+                values.append(except_token_id)
+
+            txn.execute(
+                "SELECT token, id, device_id FROM access_tokens WHERE %s"
+                % where_clause,
+                values,
+            )
+            tokens_and_devices = [(r[0], r[1], r[2]) for r in txn]
+
+            self._invalidate_cache_and_stream_bulk(
+                txn,
+                self.get_user_by_access_token,
+                [(token,) for token, _, _ in tokens_and_devices],
+            )
+
+            txn.execute("DELETE FROM access_tokens WHERE %s" % where_clause, values)
+
+            txn.execute(
+                "DELETE FROM refresh_tokens WHERE %s" % refresh_where_clause,
+                refresh_values,
+            )
+
+            return tokens_and_devices
+
+        return await self.db_pool.runInteraction("user_delete_access_tokens", f)
+
+    async def user_delete_access_tokens_for_devices(
+        self,
+        user_id: str,
+        device_ids: StrCollection,
+    ) -> List[Tuple[str, int, Optional[str]]]:
+        """
+        Invalidate access and refresh tokens belonging to a user
+
+        Args:
+            user_id: ID of user the tokens belong to
+            device_ids: The devices to delete tokens for.
+        Returns:
+            A tuple of (token, token id, device id) for each of the deleted tokens
+        """
+
+        def user_delete_access_tokens_for_devices_txn(
+            txn: LoggingTransaction, batch_device_ids: StrCollection
+        ) -> List[Tuple[str, int, Optional[str]]]:
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="refresh_tokens",
+                keyvalues={"user_id": user_id},
+                column="device_id",
+                values=batch_device_ids,
+            )
+
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "device_id", batch_device_ids
+            )
+            args.append(user_id)
+
+            if self.database_engine.supports_returning:
+                sql = f"""
+                    DELETE FROM access_tokens
+                    WHERE {clause} AND user_id = ?
+                    RETURNING token, id, device_id
+                """
+                txn.execute(sql, args)
+                tokens_and_devices = txn.fetchall()
+            else:
+                tokens_and_devices = self.db_pool.simple_select_many_txn(
+                    txn,
+                    table="access_tokens",
+                    column="device_id",
+                    iterable=batch_device_ids,
+                    keyvalues={"user_id": user_id},
+                    retcols=("token", "id", "device_id"),
+                )
+
+                self.db_pool.simple_delete_many_txn(
+                    txn,
+                    table="access_tokens",
+                    keyvalues={"user_id": user_id},
+                    column="device_id",
+                    values=batch_device_ids,
+                )
+
+            self._invalidate_cache_and_stream_bulk(
+                txn,
+                self.get_user_by_access_token,
+                [(t[0],) for t in tokens_and_devices],
+            )
+            return tokens_and_devices
+
+        results = []
+        for batch_device_ids in batch_iter(device_ids, 1000):
+            tokens_and_devices = await self.db_pool.runInteraction(
+                "user_delete_access_tokens_for_devices",
+                user_delete_access_tokens_for_devices_txn,
+                batch_device_ids,
+            )
+            results.extend(tokens_and_devices)
+
+        return results
+
+    async def delete_access_token(self, access_token: str) -> None:
+        def f(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_delete_one_txn(
+                txn, table="access_tokens", keyvalues={"token": access_token}
+            )
+
+            self._invalidate_cache_and_stream(
+                txn, self.get_user_by_access_token, (access_token,)
+            )
+
+        await self.db_pool.runInteraction("delete_access_token", f)
+
 
 class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
     def __init__(
@@ -2742,162 +2890,6 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
             self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
 
         await self.db_pool.runInteraction("user_set_consent_server_notice_sent", f)
-
-    async def user_delete_access_tokens(
-        self,
-        user_id: str,
-        except_token_id: Optional[int] = None,
-        device_id: Optional[str] = None,
-    ) -> List[Tuple[str, int, Optional[str]]]:
-        """
-        Invalidate access and refresh tokens belonging to a user
-
-        Args:
-            user_id: ID of user the tokens belong to
-            except_token_id: access_tokens ID which should *not* be deleted
-            device_id: ID of device the tokens are associated with.
-                If None, tokens associated with any device (or no device) will
-                be deleted
-        Returns:
-            A tuple of (token, token id, device id) for each of the deleted tokens
-        """
-
-        def f(txn: LoggingTransaction) -> List[Tuple[str, int, Optional[str]]]:
-            keyvalues = {"user_id": user_id}
-            if device_id is not None:
-                keyvalues["device_id"] = device_id
-
-            items = keyvalues.items()
-            where_clause = " AND ".join(k + " = ?" for k, _ in items)
-            values: List[Union[str, int]] = [v for _, v in items]
-            # Conveniently, refresh_tokens and access_tokens both use the user_id and device_id fields. Only caveat
-            # is the `except_token_id` param that is tricky to get right, so for now we're just using the same where
-            # clause and values before we handle that. This seems to be only used in the "set password" handler.
-            refresh_where_clause = where_clause
-            refresh_values = values.copy()
-            if except_token_id:
-                # TODO: support that for refresh tokens
-                where_clause += " AND id != ?"
-                values.append(except_token_id)
-
-            txn.execute(
-                "SELECT token, id, device_id FROM access_tokens WHERE %s"
-                % where_clause,
-                values,
-            )
-            tokens_and_devices = [(r[0], r[1], r[2]) for r in txn]
-
-            self._invalidate_cache_and_stream_bulk(
-                txn,
-                self.get_user_by_access_token,
-                [(token,) for token, _, _ in tokens_and_devices],
-            )
-
-            txn.execute("DELETE FROM access_tokens WHERE %s" % where_clause, values)
-
-            txn.execute(
-                "DELETE FROM refresh_tokens WHERE %s" % refresh_where_clause,
-                refresh_values,
-            )
-
-            return tokens_and_devices
-
-        return await self.db_pool.runInteraction("user_delete_access_tokens", f)
-
-    async def user_delete_access_tokens_for_devices(
-        self,
-        user_id: str,
-        device_ids: StrCollection,
-    ) -> List[Tuple[str, int, Optional[str]]]:
-        """
-        Invalidate access and refresh tokens belonging to a user
-
-        Args:
-            user_id: ID of user the tokens belong to
-            device_ids: The devices to delete tokens for.
-        Returns:
-            A tuple of (token, token id, device id) for each of the deleted tokens
-        """
-
-        def user_delete_access_tokens_for_devices_txn(
-            txn: LoggingTransaction, batch_device_ids: StrCollection
-        ) -> List[Tuple[str, int, Optional[str]]]:
-            self.db_pool.simple_delete_many_txn(
-                txn,
-                table="refresh_tokens",
-                keyvalues={"user_id": user_id},
-                column="device_id",
-                values=batch_device_ids,
-            )
-
-            clause, args = make_in_list_sql_clause(
-                txn.database_engine, "device_id", batch_device_ids
-            )
-            args.append(user_id)
-
-            if self.database_engine.supports_returning:
-                sql = f"""
-                    DELETE FROM access_tokens
-                    WHERE {clause} AND user_id = ?
-                    RETURNING token, id, device_id
-                """
-                txn.execute(sql, args)
-                tokens_and_devices = txn.fetchall()
-            else:
-                tokens_and_devices = self.db_pool.simple_select_many_txn(
-                    txn,
-                    table="access_tokens",
-                    column="device_id",
-                    iterable=batch_device_ids,
-                    keyvalues={"user_id": user_id},
-                    retcols=("token", "id", "device_id"),
-                )
-
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table="access_tokens",
-                    keyvalues={"user_id": user_id},
-                    column="device_id",
-                    values=batch_device_ids,
-                )
-
-            self._invalidate_cache_and_stream_bulk(
-                txn,
-                self.get_user_by_access_token,
-                [(t[0],) for t in tokens_and_devices],
-            )
-            return tokens_and_devices
-
-        results = []
-        for batch_device_ids in batch_iter(device_ids, 1000):
-            tokens_and_devices = await self.db_pool.runInteraction(
-                "user_delete_access_tokens_for_devices",
-                user_delete_access_tokens_for_devices_txn,
-                batch_device_ids,
-            )
-            results.extend(tokens_and_devices)
-
-        return results
-
-    async def delete_access_token(self, access_token: str) -> None:
-        def f(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_delete_one_txn(
-                txn, table="access_tokens", keyvalues={"token": access_token}
-            )
-
-            self._invalidate_cache_and_stream(
-                txn, self.get_user_by_access_token, (access_token,)
-            )
-
-        await self.db_pool.runInteraction("delete_access_token", f)
-
-    async def delete_refresh_token(self, refresh_token: str) -> None:
-        def f(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_delete_one_txn(
-                txn, table="refresh_tokens", keyvalues={"token": refresh_token}
-            )
-
-        await self.db_pool.runInteraction("delete_refresh_token", f)
 
     async def add_user_pending_deactivation(self, user_id: str) -> None:
         """
