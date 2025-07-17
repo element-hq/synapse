@@ -455,6 +455,29 @@ class ProxyAgentTests(TestCase):
             expected_auth_credentials=None,
         )
 
+    def test_given_http_proxy_config(self) -> None:
+        self._do_http_request_via_proxy(
+            proxy_config=parse_proxy_config({"http_proxy": "proxy.com:8888"}),
+            expect_proxy_ssl=False,
+            expected_auth_credentials=None,
+        )
+
+    def test_given_https_proxy_config(self) -> None:
+        self._do_https_request_via_proxy(
+            proxy_config=parse_proxy_config({"https_proxy": "proxy.com"}),
+            expect_proxy_ssl=False,
+            expected_auth_credentials=None,
+        )
+
+    def test_given_no_proxy_hosts_config(self) -> None:
+        agent = ProxyAgent(
+            reactor=self.reactor,
+            proxy_config=parse_proxy_config(
+                {"http_proxy": "proxy.com:8888", "no_proxy_hosts": ["test.com"]}
+            ),
+        )
+        self._test_request_direct_connection(agent, b"http", b"test.com", b"")
+
     @patch.dict(
         os.environ,
         {"http_proxy": "unused.com", "no_proxy": "unused.com"},
