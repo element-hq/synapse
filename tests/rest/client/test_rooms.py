@@ -552,6 +552,51 @@ class RoomStateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
         self.assertEqual(channel.json_body, {"membership": "join"})
 
+    def test_get_state_format_content(self) -> None:
+        """Test response of a `/rooms/$room_id/state/$event_type?format=content` request."""
+        room_id = self.helper.create_room_as(self.user_id)
+        channel1 = self.make_request(
+            "GET",
+            "/rooms/%s/state/m.room.member/%s?format=content"
+            % (
+                room_id,
+                self.user_id,
+            ),
+        )
+        self.assertEqual(channel1.code, HTTPStatus.OK, channel1.json_body)
+        self.assertEqual(channel1.json_body, {"membership": "join"})
+        channel2 = self.make_request(
+            "GET",
+            "/rooms/%s/state/m.room.member/%s"
+            % (
+                room_id,
+                self.user_id,
+            ),
+        )
+        self.assertEqual(channel2.code, HTTPStatus.OK, channel2.json_body)
+        # "content" is the default format.
+        self.assertEqual(channel1.json_body, channel2.json_body)
+
+    def test_get_state_format_event(self) -> None:
+        """Test response of a `/rooms/$room_id/state/$event_type?format=event` request."""
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state/m.room.member/%s?format=event"
+            % (
+                room_id,
+                self.user_id,
+            ),
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["content"], {"membership": "join"})
+        self.assertEqual(channel.json_body["room_id"], room_id)
+        self.assertRegex(channel.json_body["event_id"], r"\$.+")
+        self.assertEqual(channel.json_body["type"], "m.room.member")
+        self.assertEqual(channel.json_body["sender"], self.user_id)
+        self.assertEqual(channel.json_body["state_key"], self.user_id)
+        self.assertTrue(type(channel.json_body["origin_server_ts"]) is int)
+
 
 class RoomsMemberListTestCase(RoomBase):
     """Tests /rooms/$room_id/members/list REST events."""

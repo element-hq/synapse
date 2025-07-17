@@ -1958,9 +1958,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_delayed_event_mgmt:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:

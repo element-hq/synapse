@@ -25,6 +25,7 @@ import logging
 import os
 import platform
 import threading
+from importlib import metadata
 from typing import (
     Callable,
     Dict,
@@ -41,7 +42,15 @@ from typing import (
 )
 
 import attr
-from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, Metric
+from pkg_resources import parse_version
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    Histogram,
+    Metric,
+    generate_latest,
+)
 from prometheus_client.core import (
     REGISTRY,
     GaugeHistogramMetricFamily,
@@ -49,11 +58,12 @@ from prometheus_client.core import (
 )
 
 from twisted.python.threadpool import ThreadPool
+from twisted.web.resource import Resource
+from twisted.web.server import Request
 
 # This module is imported for its side effects; flake8 needn't warn that it's unused.
 import synapse.metrics._reactor_metrics  # noqa: F401
 from synapse.metrics._gc import MIN_TIME_BETWEEN_GCS, install_gc_manager
-from synapse.metrics._twisted_exposition import MetricsResource, generate_latest
 from synapse.metrics._types import Collector
 from synapse.types import StrSequence
 from synapse.util import SYNAPSE_VERSION
@@ -80,6 +90,53 @@ We're purposely not using the `instance` label for this purpose as that should b
 terms, an endpoint you can scrape is called an *instance*, usually corresponding to a
 single process." (source: https://prometheus.io/docs/concepts/jobs_instances/)
 """
+
+CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
+"""
+Content type of the latest text format for Prometheus metrics.
+
+Pulled directly from the prometheus_client library.
+"""
+
+
+def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
+    """
+    Sets whether prometheus_client should expose `_created`-suffixed metrics for
+    all gauges, histograms and summaries.
+
+    There is no programmatic way in the old versions of `prometheus_client` to disable
+    this without poking at internals; the proper way in the old `prometheus_client`
+    versions (> `0.14.0` < `0.18.0`) is to use an environment variable which
+    prometheus_client loads at import time. For versions > `0.18.0`, we can use the
+    dedicated `disable_created_metrics()`/`enable_created_metrics()`.
+
+    The motivation for disabling these `_created` metrics is that they're a waste of
+    space as they're not useful but they take up space in Prometheus. It's not the end
+    of the world if this doesn't work.
+    """
+    import prometheus_client.metrics
+
+    if hasattr(prometheus_client.metrics, "_use_created"):
+        prometheus_client.metrics._use_created = new_value
+    # Just log an error for old versions that don't support disabling the unecessary
+    # metrics. It's not the end of the world if this doesn't work as it just means extra
+    # wasted space taken up in Prometheus but things keep working.
+    elif parse_version(metadata.version("prometheus_client")) < parse_version("0.14.0"):
+        logger.error(
+            "Can't disable `_created` metrics in prometheus_client (unsupported `prometheus_client` version, too old)"
+        )
+    # If the attribute doesn't exist on a newer version, this is a sign that the brittle
+    # hack is broken. We should consider updating the minimum version of
+    # `prometheus_client` to a version (> `0.18.0`) where we can use dedicated
+    # `disable_created_metrics()`/`enable_created_metrics()` functions.
+    else:
+        raise Exception(
+            "Can't disable `_created` metrics in prometheus_client (brittle hack broken?)"
+        )
+
+
+# Set this globally so it applies wherever we generate/collect metrics
+_set_prometheus_client_use_created_metrics(False)
 
 
 class _RegistryProxy:
@@ -506,6 +563,23 @@ def register_threadpool(name: str, threadpool: ThreadPool) -> None:
     threadpool_total_working_threads.labels(name).set_function(
         lambda: len(threadpool.working)
     )
+
+
+class MetricsResource(Resource):
+    """
+    Twisted ``Resource`` that serves prometheus metrics.
+    """
+
+    isLeaf = True
+
+    def __init__(self, registry: CollectorRegistry = REGISTRY):
+        self.registry = registry
+
+    def render_GET(self, request: Request) -> bytes:
+        request.setHeader(b"Content-Type", CONTENT_TYPE_LATEST.encode("ascii"))
+        response = generate_latest(self.registry)
+        request.setHeader(b"Content-Length", str(len(response)))
+        return response
 
 
 __all__ = [
