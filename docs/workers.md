@@ -238,6 +238,7 @@ information.
     ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
+    ^/_matrix/client/(r0|v3)/delete_devices$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
     ^/_matrix/client/versions$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$
