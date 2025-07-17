@@ -990,7 +990,12 @@ class DeviceWriterHandler(DeviceHandler):
         self._handle_new_device_update_new_data = False
 
         # Only the main device list writer handles device list EDUs and converts
-        # device list updates to outbound federation pokes.
+        # device list updates to outbound federation pokes. This allows us to
+        # use in-memory per-user locks instead of cross-worker locks, and
+        # simplifies the logic for converting outbound pokes. This makes the
+        # device_list writers a little bit unbalanced in terms of load, but
+        # still unlocks local device changes (and therefore login/logouts) when
+        # rolling-restarting Synapse.
         if self._is_main_device_list_writer:
             # On start up check if there are any updates pending.
             hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
