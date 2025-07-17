@@ -143,8 +143,6 @@ jobs:
       - name: Run ruff format
         run: poetry run ruff format --check .
 
-      - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
-        run: git diff --exit-code Cargo.lock
 
   lint-mypy:
     runs-on: ubuntu-latest
@@ -265,6 +263,37 @@ jobs:
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - run: cargo clippy --all-features -- -D warnings
+
+  lint-rust:
+    runs-on: ubuntu-latest
+    name: Typechecking
+    needs: changes
+    if: ${{ needs.changes.outputs.linting == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
+
+      - name: Setup Poetry
+        uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
+        with:
+          # We want to make use of type hints in optional dependencies too.
+          extras: all
+          # We have seen odd mypy failures that were resolved when we started
+          # installing the project again:
+          # https://github.com/matrix-org/synapse/pull/15376#issuecomment-1498983775
+          # To make CI green, err towards caution and install the project.
+          install-project: "true"
+          poetry-version: "2.1.1"
+
+      - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
+        run: git diff --exit-code Cargo.lock
 
   lint-rustfmt:
     runs-on: ubuntu-latest
