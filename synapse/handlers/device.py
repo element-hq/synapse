@@ -893,7 +893,7 @@ class DeviceHandler:
         await self._notify_device_update_client(
             instance_name=random.choice(self._device_list_writers),
             user_id=user_id,
-            device_ids=device_ids,
+            device_ids=list(device_ids),
         )
 
     async def notify_user_signature_update(
