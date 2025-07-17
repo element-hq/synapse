@@ -1739,7 +1739,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         min_stream_id = await self._get_min_device_lists_changes_in_room()
 
-        # XXX: is that right?
+        # Return early if there are no rows to process in device_lists_changes_in_room
         if min_stream_id > from_token.stream:
             return None
 

@@ -698,10 +698,19 @@ class FederationHandler:
                     #     We may want to reset the partial state info if it's from an
                     #     old, failed partial state join.
                     #     https://github.com/matrix-org/synapse/issues/13000
+
+                    # FIXME: Ideally, we would store the full stream token here
+                    # not just the minimum stream ID, so that we can compute an
+                    # accurate list of device changes when un-partial-ing the
+                    # room. The only side effect of this is that we may send
+                    # extra unecessary device list outbound pokes through
+                    # federation, which is harmless.
+                    device_lists_stream_id = self.store.get_device_stream_token().stream
+
                     await self.store.store_partial_state_room(
                         room_id=room_id,
                         servers=ret.servers_in_room,
-                        device_lists_stream_id=self.store.get_device_stream_token().stream,
+                        device_lists_stream_id=device_lists_stream_id,
                         joined_via=origin,
                     )
 
