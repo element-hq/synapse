@@ -2970,14 +2970,14 @@ files = [
 
 [[package]]
 name = "types-jsonschema"
-version = "4.24.0.20250528"
+version = "4.24.0.20250708"
 description = "Typing stubs for jsonschema"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types_jsonschema-4.24.0.20250528-py3-none-any.whl", hash = "sha256:6a906b5ff73ac11c8d1e0b6c30a9693e1e4e1ab56c56c932b3a7e081b86d187b"},
-    {file = "types_jsonschema-4.24.0.20250528.tar.gz", hash = "sha256:7e28c64e0ae7980eeb158105b20663fc6a6b8f81d5f86ea6614aa0014417bd1e"},
+    {file = "types_jsonschema-4.24.0.20250708-py3-none-any.whl", hash = "sha256:d574aa3421d178a8435cc898cf4cf5e5e8c8f37b949c8e3ceeff06da433a18bf"},
+    {file = "types_jsonschema-4.24.0.20250708.tar.gz", hash = "sha256:a910e4944681cbb1b18a93ffb502e09910db788314312fc763df08d8ac2aadb7"},
 ]
 
 [package.dependencies]
