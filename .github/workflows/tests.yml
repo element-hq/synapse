@@ -266,9 +266,8 @@ jobs:
 
   lint-rust:
     runs-on: ubuntu-latest
-    name: Typechecking
     needs: changes
-    if: ${{ needs.changes.outputs.linting == 'true' }}
+    if: ${{ needs.changes.outputs.rust == 'true' }}
 
     steps:
       - name: Checkout repository
@@ -277,7 +276,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master
+        with:
+          # We use nightly so that it correctly groups together imports
+          toolchain: nightly-2025-04-23
+          components: rustfmt
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
 
       - name: Setup Poetry
@@ -292,26 +296,11 @@ jobs:
           install-project: "true"
           poetry-version: "2.1.1"
 
+      - name: Check Rust code formatting
+        run: cargo fmt --check
+
       - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
         run: git diff --exit-code Cargo.lock
-
-  lint-rustfmt:
-    runs-on: ubuntu-latest
-    needs: changes
-    if: ${{ needs.changes.outputs.rust == 'true' }}
-
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master
-        with:
-          # We use nightly so that it correctly groups together imports
-          toolchain: nightly-2025-04-23
-          components: rustfmt
-      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
-
-      - run: cargo fmt --check
 
   # This is to detect issues with the rst file, which can otherwise cause issues
   # when uploading packages to PyPi.
@@ -341,7 +330,7 @@ jobs:
       - check-lockfile
       - lint-clippy
       - lint-clippy-nightly
-      - lint-rustfmt
+      - lint-rust
       - lint-readme
     runs-on: ubuntu-latest
     steps:
@@ -359,7 +348,7 @@ jobs:
             lint-pydantic
             lint-clippy
             lint-clippy-nightly
-            lint-rustfmt
+            lint-rust
             lint-readme
 
 
