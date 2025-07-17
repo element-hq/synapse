@@ -243,8 +243,6 @@ def run_as_background_process(
         rules.
     """
 
-    logger.info("asdf %s %s %s", desc, server_name, func)
-
     async def run() -> Optional[R]:
         with _bg_metrics_lock:
             count = _background_process_counts.get(desc, 0)
