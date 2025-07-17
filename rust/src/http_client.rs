@@ -44,24 +44,97 @@ impl RustPanicError {
     }
 }
 
-/// The tokio runtime that we're using to run async Rust libs.
-static RUNTIME: OnceCell<Runtime> = OnceCell::new();
+/// This is the name of the attribute where we store the runtime on the reactor
+static TOKIO_RUNTIME_ATTR: &str = "__synapse_rust_tokio_runtime";
 
-/// A reference to the `twisted.internet.defer` module.
-static DEFER: OnceCell<PyObject> = OnceCell::new();
+/// A Python wrapper around a Tokio runtime.
+///
+/// This allows us to 'store' the runtime on the reactor instance, starting it
+/// when the reactor starts, and stopping it when the reactor shuts down.
+#[pyclass]
+struct PyTokioRuntime {
+    runtime: Option<Runtime>,
+}
 
-/// Access the tokio runtime.
-fn runtime() -> PyResult<&'static Runtime> {
-    RUNTIME.get_or_try_init(|| {
+#[pymethods]
+impl PyTokioRuntime {
+    fn start(&mut self) -> PyResult<()> {
+        // TODO: allow customization of the runtime like the number of threads
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(4)
             .enable_all()
-            .build()
-            .context("building tokio runtime")?;
+            .build()?;
 
-        Ok(runtime)
-    })
+        self.runtime = Some(runtime);
+
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> PyResult<()> {
+        let runtime = self
+            .runtime
+            .take()
+            .context("Runtime was already shutdown")?;
+
+        // Dropping the runtime will shut it down
+        drop(runtime);
+
+        Ok(())
+    }
 }
+
+impl PyTokioRuntime {
+    /// Get the handle to the Tokio runtime, if it is running.
+    fn handle(&self) -> PyResult<&tokio::runtime::Handle> {
+        let handle = self
+            .runtime
+            .as_ref()
+            .context("Tokio runtime is not running")?
+            .handle();
+
+        Ok(handle)
+    }
+}
+
+/// Get a handle to the Tokio runtime stored on the reactor instance, or create
+/// a new one.
+fn runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
+    if !reactor.hasattr(TOKIO_RUNTIME_ATTR)? {
+        install_runtime(reactor)?;
+    }
+
+    get_runtime(reactor)
+}
+
+/// Install a new Tokio runtime on the reactor instance.
+fn install_runtime(reactor: &Bound<PyAny>) -> PyResult<()> {
+    let py = reactor.py();
+    let runtime = PyTokioRuntime { runtime: None };
+    let runtime = runtime.into_pyobject(py)?;
+
+    // Attach the runtime to the reactor, starting it when the reactor is
+    // running, stopping it when the reactor is shutting down
+    reactor.call_method1("callWhenRunning", (runtime.getattr("start")?,))?;
+    reactor.call_method1(
+        "addSystemEventTrigger",
+        ("after", "shutdown", runtime.getattr("shutdown")?),
+    )?;
+    reactor.setattr(TOKIO_RUNTIME_ATTR, runtime)?;
+
+    Ok(())
+}
+
+/// Get a reference to a Tokio runtime handle stored on the reactor instance.
+fn get_runtime<'a>(reactor: &Bound<'a, PyAny>) -> PyResult<PyRef<'a, PyTokioRuntime>> {
+    // This will raise if `TOKIO_RUNTIME_ATTR` is not set or if it is
+    // not a `Runtime`. Careful that this could happen if the user sets it
+    // manually, or if multiple versions of `pyo3-twisted` are used!
+    let runtime: Bound<PyTokioRuntime> = reactor.getattr(TOKIO_RUNTIME_ATTR)?.extract()?;
+    Ok(runtime.borrow())
+}
+
+/// A reference to the `twisted.internet.defer` module.
+static DEFER: OnceCell<PyObject> = OnceCell::new();
 
 /// Access to the `twisted.internet.defer` module.
 fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
@@ -75,8 +148,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     let child_module: Bound<'_, PyModule> = PyModule::new(py, "http_client")?;
     child_module.add_class::<HttpClient>()?;
 
-    // Make sure we fail early if we can't build the lazy statics.
-    runtime()?;
+    // Make sure we fail early if we can't load some modules
     defer(py)?;
 
     m.add_submodule(&child_module)?;
@@ -99,13 +171,16 @@ struct HttpClient {
 #[pymethods]
 impl HttpClient {
     #[new]
-    pub fn py_new(reactor: PyObject, user_agent: &str) -> PyResult<HttpClient> {
+    pub fn py_new(reactor: Bound<PyAny>, user_agent: &str) -> PyResult<HttpClient> {
+        // Make sure the runtime gets installed
+        let _ = runtime(&reactor)?;
+
         Ok(HttpClient {
             client: reqwest::Client::builder()
                 .user_agent(user_agent)
                 .build()
                 .context("building reqwest client")?,
-            reactor,
+            reactor: reactor.unbind(),
         })
     }
 
@@ -143,7 +218,7 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
-        create_deferred(py, self.reactor.clone_ref(py), async move {
+        create_deferred(py, self.reactor.bind(py), async move {
             let response = builder.send().await.context("sending request")?;
 
             let status = response.status();
@@ -173,7 +248,11 @@ impl HttpClient {
 /// tokio runtime.
 ///
 /// Does not handle deferred cancellation or contextvars.
-fn create_deferred<F, O>(py: Python, reactor: PyObject, fut: F) -> PyResult<Bound<'_, PyAny>>
+fn create_deferred<'py, F, O>(
+    py: Python<'py>,
+    reactor: &Bound<'py, PyAny>,
+    fut: F,
+) -> PyResult<Bound<'py, PyAny>>
 where
     F: Future<Output = PyResult<O>> + Send + 'static,
     for<'a> O: IntoPyObject<'a> + Send + 'static,
@@ -182,10 +261,13 @@ where
     let deferred_callback = deferred.getattr("callback")?.unbind();
     let deferred_errback = deferred.getattr("errback")?.unbind();
 
-    let rt = runtime()?;
-    let task = rt.spawn(fut);
+    let rt = runtime(reactor)?;
+    let handle = rt.handle()?;
+    let task = handle.spawn(fut);
 
-    rt.spawn(async move {
+    // Unbind the reactor so that we can pass it to the task
+    let reactor = reactor.clone().unbind();
+    handle.spawn(async move {
         let res = task.await;
 
         Python::with_gil(move |py| {
@@ -198,6 +280,7 @@ where
                 },
             };
 
+            // Re-bind the reactor
             let reactor = reactor.bind(py);
 
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
