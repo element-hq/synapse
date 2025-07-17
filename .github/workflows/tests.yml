@@ -289,6 +289,8 @@ jobs:
       - name: Ensure `Cargo.lock` is up to date (no stray changes after install)
         run: git diff --exit-code Cargo.lock
 
+  # This job is split from `lint-rust` because it requires a nightly Rust toolchain
+  # for some of the unstable options we use in `.rustfmt.toml`.
   lint-rustfmt:
     runs-on: ubuntu-latest
     needs: changes
@@ -300,8 +302,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master
         with:
-          # We use nightly so that it correctly groups together imports (see
-          # `group_imports` in `.rustfmt.toml`)
+          # We use nightly so that we can use some unstable options that we use in
+          # `.rustfmt.toml`.
           toolchain: nightly-2025-04-23
           components: rustfmt
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2.8.0
