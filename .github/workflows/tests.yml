@@ -283,9 +283,8 @@ jobs:
       - name: Setup Poetry
         uses: matrix-org/setup-python-poetry@5bbf6603c5c930615ec8a29f1b5d7d258d905aa4 # v2.0.0
         with:
-          # We want to make use of type hints in optional dependencies too.
+          # Install like a normal project from source with all optional dependencies
           extras: all
-          # Install like a normal project from source
           install-project: "true"
           poetry-version: "2.1.1"
 
