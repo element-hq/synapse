@@ -12,44 +12,59 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future, panic::AssertUnwindSafe, sync::LazyLock};
+use std::{collections::HashMap, future::Future};
 
 use anyhow::Context;
-use futures::{FutureExt, TryStreamExt};
-use pyo3::{exceptions::PyException, prelude::*, types::PyString};
+use futures::TryStreamExt;
+use once_cell::sync::OnceCell;
+use pyo3::{create_exception, exceptions::PyException, prelude::*, types::PyString};
 use reqwest::RequestBuilder;
 use tokio::runtime::Runtime;
 
 use crate::errors::HttpResponseException;
 
+create_exception!(
+    synapse.synapse_rust.http_client,
+    RustPanicError,
+    PyException,
+    "A panic which happened in a Rust future"
+);
+
 /// The tokio runtime that we're using to run async Rust libs.
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-        .unwrap()
-});
+static RUNTIME: OnceCell<Runtime> = OnceCell::new();
 
-/// A reference to the `Deferred` python class.
-static DEFERRED_CLASS: LazyLock<PyObject> = LazyLock::new(|| {
-    Python::with_gil(|py| {
-        py.import("twisted.internet.defer")
-            .expect("module 'twisted.internet.defer' should be importable")
-            .getattr("Deferred")
-            .expect("module 'twisted.internet.defer' should have a 'Deferred' class")
-            .unbind()
-    })
-});
+/// A reference to the `twisted.internet.defer` module.
+static DEFER: OnceCell<PyObject> = OnceCell::new();
 
-/// A reference to the twisted `reactor`.
-static TWISTED_REACTOR: LazyLock<Py<PyModule>> = LazyLock::new(|| {
-    Python::with_gil(|py| {
-        py.import("twisted.internet.reactor")
-            .expect("module 'twisted.internet.reactor' should be importable")
-            .unbind()
+/// A reference to the `twisted.internet.reactor`.
+static REACTOR: OnceCell<Py<PyModule>> = OnceCell::new();
+
+/// Access the tokio runtime.
+fn runtime() -> PyResult<&'static Runtime> {
+    RUNTIME.get_or_try_init(|| {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .context("building tokio runtime")?;
+
+        Ok(runtime)
     })
-});
+}
+
+/// Access to the `twisted.internet.defer` module.
+fn defer(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
+    Ok(DEFER
+        .get_or_try_init(|| py.import("twisted.internet.defer").map(Into::into))?
+        .bind(py))
+}
+
+/// Access to the `twisted.internet.reactor` module.
+fn reactor(py: Python<'_>) -> PyResult<&Bound<PyAny>> {
+    Ok(REACTOR
+        .get_or_try_init(|| py.import("twisted.internet.reactor").map(Into::into))?
+        .bind(py))
+}
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -57,8 +72,8 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
     child_module.add_class::<HttpClient>()?;
 
     // Make sure we fail early if we can't build the lazy statics.
-    LazyLock::force(&RUNTIME);
-    LazyLock::force(&DEFERRED_CLASS);
+    runtime()?;
+    defer(py)?;
 
     m.add_submodule(&child_module)?;
 
@@ -80,12 +95,12 @@ struct HttpClient {
 #[pymethods]
 impl HttpClient {
     #[new]
-    pub fn py_new(user_agent: &str) -> PyResult<HttpClient> {
+    pub fn py_new(py: Python<'_>, user_agent: &str) -> PyResult<HttpClient> {
         // The twisted reactor can only be imported after Synapse has been
         // imported, to allow Synapse to change the twisted reactor. If we try
         // and import the reactor too early twisted installs a default reactor,
         // which can't be replaced.
-        LazyLock::force(&TWISTED_REACTOR);
+        reactor(py)?;
 
         Ok(HttpClient {
             client: reqwest::Client::builder()
@@ -162,40 +177,45 @@ impl HttpClient {
 fn create_deferred<F, O>(py: Python, fut: F) -> PyResult<Bound<'_, PyAny>>
 where
     F: Future<Output = PyResult<O>> + Send + 'static,
-    for<'a> O: IntoPyObject<'a>,
+    for<'a> O: IntoPyObject<'a> + Send + 'static,
 {
-    let deferred = DEFERRED_CLASS.bind(py).call0()?;
+    let deferred = defer(py)?.call_method0("Deferred")?;
     let deferred_callback = deferred.getattr("callback")?.unbind();
     let deferred_errback = deferred.getattr("errback")?.unbind();
 
-    RUNTIME.spawn(async move {
-        // TODO: Is it safe to assert unwind safety here? I think so, as we
-        // don't use anything that could be tainted by the panic afterwards.
-        // Note that `.spawn(..)` asserts unwind safety on the future too.
-        let res = AssertUnwindSafe(fut).catch_unwind().await;
+    let rt = runtime()?;
+    let task = rt.spawn(fut);
+
+    rt.spawn(async move {
+        let res = task.await;
 
         Python::with_gil(move |py| {
             // Flatten the panic into standard python error
             let res = match res {
                 Ok(r) => r,
-                Err(panic_err) => {
-                    let panic_message = get_panic_message(&panic_err);
-                    Err(PyException::new_err(
-                        PyString::new(py, panic_message).unbind(),
-                    ))
-                }
+                Err(join_err) => match join_err.try_into_panic() {
+                    Ok(panic_err) => {
+                        let panic_message = get_panic_message(&panic_err);
+                        Err(RustPanicError::new_err(
+                            PyString::new(py, panic_message).unbind(),
+                        ))
+                    }
+                    Err(err) => Err(PyException::new_err(format!("Task cancelled: {err}"))),
+                },
             };
 
             // Send the result to the deferred, via `.callback(..)` or `.errback(..)`
             match res {
                 Ok(obj) => {
-                    TWISTED_REACTOR
-                        .call_method(py, "callFromThread", (deferred_callback, obj), None)
+                    reactor(py)
+                        .expect("failed to load reactor")
+                        .call_method("callFromThread", (deferred_callback, obj), None)
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
                 Err(err) => {
-                    TWISTED_REACTOR
-                        .call_method(py, "callFromThread", (deferred_errback, err), None)
+                    reactor(py)
+                        .expect("failed to load reactor")
+                        .call_method("callFromThread", (deferred_errback, err), None)
                         .expect("callFromThread should not fail"); // There's nothing we can really do with errors here
                 }
             }
