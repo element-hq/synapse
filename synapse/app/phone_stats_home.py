@@ -223,7 +223,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     )
     hs.get_datastores().main.reap_monthly_active_users()
 
-    async def generate_monthly_active_users() -> None:
+    def generate_monthly_active_users() -> None:
         async def _generate_monthly_active_users() -> None:
             current_mau_count = 0
             current_mau_count_by_service: Mapping[str, int] = {}
@@ -243,7 +243,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
             registered_reserved_users_mau_gauge.set(float(len(reserved_users)))
             max_mau_gauge.set(float(hs.config.server.max_mau_value))
 
-        await run_as_background_process(
+        run_as_background_process(
             "generate_monthly_active_users",
             server_name,
             _generate_monthly_active_users,
