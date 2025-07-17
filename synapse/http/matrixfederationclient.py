@@ -417,12 +417,12 @@ class MatrixFederationHttpClient:
         if hs.get_instance_name() in outbound_federation_restricted_to:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
-                self.server_name,
-                self.reactor,
-                tls_client_options_factory,
-                user_agent.encode("ascii"),
-                hs.config.server.federation_ip_range_allowlist,
-                hs.config.server.federation_ip_range_blocklist,
+                server_name=self.server_name,
+                reactor=self.reactor,
+                tls_client_options_factory=tls_client_options_factory,
+                user_agent=user_agent.encode("ascii"),
+                ip_allowlist=hs.config.server.federation_ip_range_allowlist,
+                ip_blocklist=hs.config.server.federation_ip_range_blocklist,
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret

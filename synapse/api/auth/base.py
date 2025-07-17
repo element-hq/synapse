@@ -172,7 +172,7 @@ class BaseAuth:
         """
 
         # It's ok if the app service is trying to use the sender from their registration
-        if app_service.sender == user_id:
+        if app_service.sender.to_string() == user_id:
             pass
         # Check to make sure the app service is allowed to control the user
         elif not app_service.is_interested_in_user(user_id):

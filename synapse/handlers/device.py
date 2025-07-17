@@ -1458,6 +1458,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         # resyncs.
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
             cache_name="device_update_edu",
+            server_name=self.server_name,
             clock=self.clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,

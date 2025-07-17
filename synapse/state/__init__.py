@@ -641,6 +641,7 @@ class StateResolutionHandler:
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
             ExpiringCache(
                 cache_name="state_cache",
+                server_name=self.server_name,
                 clock=self.clock,
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,

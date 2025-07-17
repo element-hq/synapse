@@ -5,7 +5,7 @@ from synapse.appservice import ApplicationService
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.module_api import RatelimitOverride
 from synapse.module_api.callbacks.ratelimit_callbacks import RatelimitModuleApiCallbacks
-from synapse.types import create_requester
+from synapse.types import UserID, create_requester
 
 from tests import unittest
 
@@ -40,7 +40,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             token="fake_token",
             id="foo",
             rate_limited=True,
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
         )
         as_requester = create_requester("@user:example.com", app_service=appservice)
 
@@ -76,7 +76,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
             token="fake_token",
             id="foo",
             rate_limited=False,
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
         )
         as_requester = create_requester("@user:example.com", app_service=appservice)
 

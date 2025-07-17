@@ -157,8 +157,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
             limit=10000,
         )
         self._receipts_stream_cache = StreamChangeCache(
-            "ReceiptsRoomChangeCache",
-            min_receipts_stream_id,
+            name="ReceiptsRoomChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_receipts_stream_id,
             prefilled_cache=receipts_stream_prefill,
         )
 

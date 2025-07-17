@@ -104,6 +104,13 @@ class MatrixFederationAgent:
         """
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
+            reactor
+            tls_client_options_factory
+            user_agent
+            ip_allowlist
+            ip_blocklist
+            _srv_resolver
+            _well_known_resolver
         """
 
         # proxy_reactor is not blocklisting reactor
@@ -133,8 +140,8 @@ class MatrixFederationAgent:
 
         if _well_known_resolver is None:
             _well_known_resolver = WellKnownResolver(
-                server_name,
-                reactor,
+                server_name=server_name,
+                reactor=reactor,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(
                         reactor,

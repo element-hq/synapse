@@ -616,12 +616,15 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             max_value=events_max,
         )
         self._events_stream_cache = StreamChangeCache(
-            "EventsRoomStreamChangeCache",
-            min_event_val,
+            name="EventsRoomStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_event_val,
             prefilled_cache=event_cache_prefill,
         )
         self._membership_stream_cache = StreamChangeCache(
-            "MembershipStreamChangeCache", events_max
+            name="MembershipStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=events_max,
         )
 
         self._stream_order_on_start = self.get_room_max_stream_ordering()
