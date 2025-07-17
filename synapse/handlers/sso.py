@@ -818,13 +818,13 @@ class SsoHandler:
                 server_name = avatar_url_parts[-2]
                 media_id = avatar_url_parts[-1]
                 if self._is_mine_server_name(server_name):
-                    media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
+                    media = await self._media_repo.store.get_local_media(media_id)
                     if media is not None and upload_name == media.upload_name:
                         logger.info("skipping saving the user avatar")
                         return True
 
             # store it in media repository
-            avatar_mxc_url = await self._media_repo.create_content(
+            avatar_mxc_url = await self._media_repo.create_or_update_content(
                 media_type=headers[b"Content-Type"][0].decode("utf-8"),
                 upload_name=upload_name,
                 content=picture,
