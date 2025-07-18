@@ -93,6 +93,7 @@ from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util import stringutils
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import parse_and_validate_server_name
 from synapse.visibility import filter_events_for_client
 
@@ -616,22 +617,23 @@ class RoomCreationHandler:
             # `update_membership`, however in this case its fine to bypass as
             # these bans don't need any special treatment, i.e. the sender is in
             # the room and they don't need any extra signatures, etc.
-            await self.event_creation_handler.create_and_send_new_client_events(
-                requester=requester,
-                room_id=new_room_id,
-                prev_event_id=last_event_id,
-                event_dicts=[
-                    {
-                        "type": EventTypes.Member,
-                        "state_key": ban_event.state_key,
-                        "room_id": new_room_id,
-                        "sender": requester.user.to_string(),
-                        "content": ban_event.content,
-                    }
-                    for ban_event in ban_events
-                ],
-                ratelimit=False,
-            )
+            for batched_events in batch_iter(ban_events, 1000):
+                await self.event_creation_handler.create_and_send_new_client_events(
+                    requester=requester,
+                    room_id=new_room_id,
+                    prev_event_id=last_event_id,
+                    event_dicts=[
+                        {
+                            "type": EventTypes.Member,
+                            "state_key": ban_event.state_key,
+                            "room_id": new_room_id,
+                            "sender": requester.user.to_string(),
+                            "content": ban_event.content,
+                        }
+                        for ban_event in batched_events
+                    ],
+                    ratelimit=False,
+                )
 
         # XXX invites/joins
         # XXX 3pid invites

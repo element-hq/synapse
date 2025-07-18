@@ -1530,6 +1530,8 @@ class EventCreationHandler:
         sending membership events here as its useful when copying e.g. bans
         between rooms.
 
+        All other events and state events are supported.
+
         Args:
             requester: The requester sending the events.
             room_id: The room ID to send the events in.
