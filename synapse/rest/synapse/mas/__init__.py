@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 
 
 class MasResource(Resource):
+    """
+    Provides endpoints for MAS to manage user accounts and devices.
+
+    All endpoints are mounted under the path `/_synapse/mas/` and only work
+    using the MAS admin token.
+    """
+
     def __init__(self, hs: "HomeServer"):
         Resource.__init__(self)
         self.putChild(b"query_user", MasQueryUserResource(hs))

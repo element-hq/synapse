@@ -33,6 +33,16 @@ logger = logging.getLogger(__name__)
 
 
 class MasCreateDeviceResource(MasBaseResource):
+    """
+    Endpoint for MAS to create or update user devices.
+
+    Takes a localpart, device ID, and optional display name to create new devices
+    or update existing ones.
+
+    POST /_synapse/mas/create_device
+    {"localpart": "alice", "device_id": "DEVICE123", "display_name": "Alice's Phone"}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -66,6 +76,15 @@ class MasCreateDeviceResource(MasBaseResource):
 
 
 class MasDeleteDeviceResource(MasBaseResource):
+    """
+    Endpoint for MAS to delete user devices.
+
+    Takes a localpart and device ID to remove the specified device from the user's account.
+
+    POST /_synapse/mas/delete_device
+    {"localpart": "alice", "device_id": "DEVICE123"}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -97,6 +116,15 @@ class MasDeleteDeviceResource(MasBaseResource):
 
 
 class MasUpdateDeviceDisplayNameResource(MasBaseResource):
+    """
+    Endpoint for MAS to update a device's display name.
+
+    Takes a localpart, device ID, and new display name to update the device's name.
+
+    POST /_synapse/mas/update_device_display_name
+    {"localpart": "alice", "device_id": "DEVICE123", "display_name": "Alice's New Phone"}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -130,6 +158,16 @@ class MasUpdateDeviceDisplayNameResource(MasBaseResource):
 
 
 class MasSyncDevicesResource(MasBaseResource):
+    """
+    Endpoint for MAS to synchronize a user's complete device list.
+
+    Takes a localpart and a set of device IDs to ensure the user's device list
+    matches the provided set by adding missing devices and removing extra ones.
+
+    POST /_synapse/mas/sync_devices
+    {"localpart": "alice", "devices": ["DEVICE123", "DEVICE456"]}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 

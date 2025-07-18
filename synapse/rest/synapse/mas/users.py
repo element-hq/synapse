@@ -37,6 +37,15 @@ logger = logging.getLogger(__name__)
 
 
 class MasQueryUserResource(MasBaseResource):
+    """
+    Endpoint for MAS to query user information by localpart.
+
+    Takes a localpart parameter and returns user profile data including display name,
+    avatar URL, and account status (suspended/deactivated).
+
+    GET /_synapse/mas/query_user?localpart=alice
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -71,6 +80,16 @@ class MasQueryUserResource(MasBaseResource):
 
 
 class MasProvisionUserResource(MasBaseResource):
+    """
+    Endpoint for MAS to create or update user accounts and their profile data.
+
+    Takes a localpart and optional profile fields (display name, avatar URL, email addresses).
+    Can create new users or update existing ones by setting or unsetting profile fields.
+
+    POST /_synapse/mas/provision_user
+    {"localpart": "alice", "set_displayname": "Alice", "set_emails": ["alice@example.com"]}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
         self.registration_handler = hs.get_registration_handler()
@@ -203,6 +222,15 @@ class MasProvisionUserResource(MasBaseResource):
 
 
 class MasIsLocalpartAvailableResource(MasBaseResource):
+    """
+    Endpoint for MAS to check if a localpart is available for user registration.
+
+    Takes a localpart parameter and validates its format and availability,
+    checking for conflicts with existing users or application service namespaces.
+
+    GET /_synapse/mas/is_localpart_available?localpart=alice
+    """
+
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
@@ -222,6 +250,16 @@ class MasIsLocalpartAvailableResource(MasBaseResource):
 
 
 class MasDeleteUserResource(MasBaseResource):
+    """
+    Endpoint for MAS to delete/deactivate user accounts.
+
+    Takes a localpart and an erase flag to determine whether to deactivate
+    the account and optionally erase user data for compliance purposes.
+
+    POST /_synapse/mas/delete_user
+    {"localpart": "alice", "erase": true}
+    """
+
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
@@ -254,6 +292,15 @@ class MasDeleteUserResource(MasBaseResource):
 
 
 class MasReactivateUserResource(MasBaseResource):
+    """
+    Endpoint for MAS to reactivate previously deactivated user accounts.
+
+    Takes a localpart parameter to restore access to deactivated accounts.
+
+    POST /_synapse/mas/reactivate_user
+    {"localpart": "alice"}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -281,6 +328,15 @@ class MasReactivateUserResource(MasBaseResource):
 
 
 class MasSetDisplayNameResource(MasBaseResource):
+    """
+    Endpoint for MAS to set a user's display name.
+
+    Takes a localpart and display name to update the user's profile.
+
+    POST /_synapse/mas/set_displayname
+    {"localpart": "alice", "displayname": "Alice"}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -317,6 +373,15 @@ class MasSetDisplayNameResource(MasBaseResource):
 
 
 class MasUnsetDisplayNameResource(MasBaseResource):
+    """
+    Endpoint for MAS to clear a user's display name.
+
+    Takes a localpart parameter to remove the display name for the specified user.
+
+    POST /_synapse/mas/unset_displayname
+    {"localpart": "alice"}
+    """
+
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
@@ -352,6 +417,16 @@ class MasUnsetDisplayNameResource(MasBaseResource):
 
 
 class MasAllowCrossSigningResetResource(MasBaseResource):
+    """
+    Endpoint for MAS to allow cross-signing key reset without user interaction.
+
+    Takes a localpart parameter to temporarily allow cross-signing key replacement
+    without requiring User-Interactive Authentication (UIA).
+
+    POST /_synapse/mas/allow_cross_signing_reset
+    {"localpart": "alice"}
+    """
+
     REPLACEMENT_PERIOD_MS = 10 * 60 * 1000  # 10 minutes
 
     def __init__(self, hs: "HomeServer"):
