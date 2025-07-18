@@ -357,11 +357,34 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_typing_map)
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadSubscriptionsExtension:
+            """The Thread Subscriptions extension (MSC4308)
+
+            Attributes:
+                changes: list of changes to thread subscriptions
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadSubscriptionChange:
+                room_id: str
+                root_event_id: str
+                subscribed: bool
+
+                # always present when `subscribed`
+                automatic: Optional[bool]
+
+            changed: Optional[List[ThreadSubscriptionChange]]
+
+            def __bool__(self) -> bool:
+                return bool(self.changed)
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
+        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -370,6 +393,7 @@ class SlidingSyncResult:
                 or self.account_data
                 or self.receipts
                 or self.typing
+                or self.thread_subscriptions
             )
 
     next_pos: SlidingSyncStreamToken

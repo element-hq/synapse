@@ -23,6 +23,8 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
+import attrs
+
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
@@ -1254,6 +1256,17 @@ class SlidingSyncRestServlet(RestServlet):
         if extensions.typing is not None:
             serialized_extensions["typing"] = {
                 "rooms": extensions.typing.room_id_to_typing_map,
+            }
+
+        if (
+            extensions.thread_subscriptions is not None
+            and extensions.thread_subscriptions.changed is not None
+        ):
+            serialized_extensions["thread_subscriptions"] = {
+                "changes": [
+                    attrs.asdict(change, filter=lambda _attr, v: v is not None)
+                    for change in extensions.thread_subscriptions.changed
+                ]
             }
 
         return serialized_extensions
