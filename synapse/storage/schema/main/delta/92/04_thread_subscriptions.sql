@@ -29,7 +29,10 @@ CREATE TABLE thread_subscriptions (
 
   CONSTRAINT thread_subscriptions_fk_rooms
     FOREIGN KEY (room_id)
-    REFERENCES rooms(room_id),
+    -- When we delete a room, we should already have deleted all the events in that room
+    -- and so there shouldn't be any subscriptions left in that room.
+    -- So the `ON DELETE CASCADE` should be optional, but included anyway for good measure.
+    REFERENCES rooms(room_id) ON DELETE CASCADE,
 
   CONSTRAINT thread_subscriptions_fk_events
     FOREIGN KEY (event_id)
