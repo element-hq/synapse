@@ -20,6 +20,7 @@
 #
 #
 import logging
+import random
 from threading import Lock
 from typing import (
     TYPE_CHECKING,
@@ -31,6 +32,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    cast,
 )
 
 from synapse.api import errors
@@ -47,6 +49,13 @@ from synapse.logging.opentracing import log_kv, set_tag, trace
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
+)
+from synapse.replication.http.devices import (
+    ReplicationDeviceHandleRoomUnPartialStated,
+    ReplicationHandleNewDeviceUpdateRestServlet,
+    ReplicationMultiUserDevicesResyncRestServlet,
+    ReplicationNotifyDeviceUpdateRestServlet,
+    ReplicationNotifyUserSignatureUpdateRestServlet,
 )
 from synapse.storage.databases.main.client_ips import DeviceLastConnectionInfo
 from synapse.storage.databases.main.roommember import EventIdMembership
@@ -75,6 +84,7 @@ from synapse.util.retryutils import (
 )
 
 if TYPE_CHECKING:
+    from synapse.app.generic_worker import GenericWorkerStore
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -84,31 +94,318 @@ MAX_DEVICE_DISPLAY_NAME_LEN = 100
 DELETE_STALE_DEVICES_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 
-class DeviceWorkerHandler:
+def _check_device_name_length(name: Optional[str]) -> None:
+    """
+    Checks whether a device name is longer than the maximum allowed length.
+
+    Args:
+        name: The name of the device.
+
+    Raises:
+        SynapseError: if the device name is too long.
+    """
+    if name and len(name) > MAX_DEVICE_DISPLAY_NAME_LEN:
+        raise SynapseError(
+            400,
+            "Device display name is too long (max %i)" % (MAX_DEVICE_DISPLAY_NAME_LEN,),
+            errcode=Codes.TOO_LARGE,
+        )
+
+
+class DeviceHandler:
+    """
+    Handles most things related to devices. This doesn't do any writing to the
+    device list stream on its own, and will call to device list writers through
+    replication when necessary (see DeviceWriterHandler).
+    """
+
     device_list_updater: "DeviceListWorkerUpdater"
+    store: "GenericWorkerStore"
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.hs = hs
-        self.store = hs.get_datastores().main
+        self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()
         self._appservice_handler = hs.get_application_service_handler()
         self._state_storage = hs.get_storage_controllers().state
         self._auth_handler = hs.get_auth_handler()
+        self._account_data_handler = hs.get_account_data_handler()
         self._event_sources = hs.get_event_sources()
-        self.server_name = hs.hostname
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
         )
         self._task_scheduler = hs.get_task_scheduler()
 
+        self._dont_notify_new_devices_for = (
+            hs.config.registration.dont_notify_new_devices_for
+        )
+
         self.device_list_updater = DeviceListWorkerUpdater(hs)
 
         self._task_scheduler.register_action(
             self._delete_device_messages, DELETE_DEVICE_MSGS_TASK_NAME
         )
+
+        self._device_list_writers = hs.config.worker.writers.device_lists
+
+        # Ensure a few operations are only running on the first device list writer
+        #
+        # This is needed because of a few linearizers in the DeviceListUpdater,
+        # and avoid using cross-worker locks.
+        #
+        # The main logic update is that the DeviceListUpdater is now only
+        # instantiated on the first device list writer, and a few methods that
+        # were safe to move to any worker were moved to the DeviceListWorkerUpdater
+        # This must be kept in sync with DeviceListWorkerUpdater
+        self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
+
+        self._notify_device_update_client = (
+            ReplicationNotifyDeviceUpdateRestServlet.make_client(hs)
+        )
+        self._notify_user_signature_update_client = (
+            ReplicationNotifyUserSignatureUpdateRestServlet.make_client(hs)
+        )
+        self._handle_new_device_update_client = (
+            ReplicationHandleNewDeviceUpdateRestServlet.make_client(hs)
+        )
+        self._handle_room_un_partial_stated_client = (
+            ReplicationDeviceHandleRoomUnPartialStated.make_client(hs)
+        )
+
+        # The EDUs are handled on a single writer, as it needs to acquire a
+        # per-user lock, for which it is cheaper to use in-memory linearizers
+        # than cross-worker locks.
+        hs.get_federation_registry().register_instances_for_edu(
+            EduTypes.DEVICE_LIST_UPDATE,
+            [self._main_device_list_writer],
+        )
+
+        self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
+
+        if (
+            hs.config.worker.run_background_tasks
+            and self._delete_stale_devices_after is not None
+        ):
+            self.clock.looping_call(
+                run_as_background_process,
+                DELETE_STALE_DEVICES_INTERVAL_MS,
+                "delete_stale_devices",
+                self._delete_stale_devices,
+            )
+
+    async def _delete_stale_devices(self) -> None:
+        """Background task that deletes devices which haven't been accessed for more than
+        a configured time period.
+        """
+        # We should only be running this job if the config option is defined.
+        assert self._delete_stale_devices_after is not None
+        now_ms = self.clock.time_msec()
+        since_ms = now_ms - self._delete_stale_devices_after
+        devices = await self.store.get_local_devices_not_accessed_since(since_ms)
+
+        for user_id, user_devices in devices.items():
+            await self.delete_devices(user_id, user_devices)
+
+    async def check_device_registered(
+        self,
+        user_id: str,
+        device_id: Optional[str],
+        initial_device_display_name: Optional[str] = None,
+        auth_provider_id: Optional[str] = None,
+        auth_provider_session_id: Optional[str] = None,
+    ) -> str:
+        """
+        If the given device has not been registered, register it with the
+        supplied display name.
+
+        If no device_id is supplied, we make one up.
+
+        Args:
+            user_id:  @user:id
+            device_id: device id supplied by client
+            initial_device_display_name: device display name from client
+            auth_provider_id: The SSO IdP the user used, if any.
+            auth_provider_session_id: The session ID (sid) got from the SSO IdP.
+        Returns:
+            device id (generated if none was supplied)
+        """
+
+        _check_device_name_length(initial_device_display_name)
+
+        # Check if we should send out device lists updates for this new device.
+        notify = user_id not in self._dont_notify_new_devices_for
+
+        if device_id is not None:
+            new_device = await self.store.store_device(
+                user_id=user_id,
+                device_id=device_id,
+                initial_device_display_name=initial_device_display_name,
+                auth_provider_id=auth_provider_id,
+                auth_provider_session_id=auth_provider_session_id,
+            )
+            if new_device:
+                if notify:
+                    await self.notify_device_update(user_id, [device_id])
+            return device_id
+
+        # if the device id is not specified, we'll autogen one, but loop a few
+        # times in case of a clash.
+        attempts = 0
+        while attempts < 5:
+            new_device_id = stringutils.random_string(10).upper()
+            new_device = await self.store.store_device(
+                user_id=user_id,
+                device_id=new_device_id,
+                initial_device_display_name=initial_device_display_name,
+                auth_provider_id=auth_provider_id,
+                auth_provider_session_id=auth_provider_session_id,
+            )
+            if new_device:
+                if notify:
+                    await self.notify_device_update(user_id, [new_device_id])
+                return new_device_id
+            attempts += 1
+
+        raise errors.StoreError(500, "Couldn't generate a device ID.")
+
+    @trace
+    async def delete_all_devices_for_user(
+        self, user_id: str, except_device_id: Optional[str] = None
+    ) -> None:
+        """Delete all of the user's devices
+
+        Args:
+            user_id: The user to remove all devices from
+            except_device_id: optional device id which should not be deleted
+        """
+        device_map = await self.store.get_devices_by_user(user_id)
+        if except_device_id is not None:
+            device_map.pop(except_device_id, None)
+        user_device_ids = device_map.keys()
+        await self.delete_devices(user_id, user_device_ids)
+
+    async def delete_devices(self, user_id: str, device_ids: StrCollection) -> None:
+        """Delete several devices
+
+        Args:
+            user_id: The user to delete devices from.
+            device_ids: The list of device IDs to delete
+        """
+        to_device_stream_id = self._event_sources.get_current_token().to_device_key
+
+        try:
+            await self.store.delete_devices(user_id, device_ids)
+        except errors.StoreError as e:
+            if e.code == 404:
+                # no match
+                set_tag("error", True)
+                set_tag("reason", "User doesn't have that device id.")
+            else:
+                raise
+
+        # Delete data specific to each device. Not optimised as its an
+        # experimental MSC.
+        if self.hs.config.experimental.msc3890_enabled:
+            for device_id in device_ids:
+                # Remove any local notification settings for this device in accordance
+                # with MSC3890.
+                await self._account_data_handler.remove_account_data_for_user(
+                    user_id,
+                    f"org.matrix.msc3890.local_notification_settings.{device_id}",
+                )
+
+        # If we're deleting a lot of devices, a bunch of them may not have any
+        # to-device messages queued up. We filter those out to avoid scheduling
+        # unnecessary tasks.
+        devices_with_messages = await self.store.get_devices_with_messages(
+            user_id, device_ids
+        )
+        for device_id in devices_with_messages:
+            # Delete device messages asynchronously and in batches using the task scheduler
+            # We specify an upper stream id to avoid deleting non delivered messages
+            # if an user re-uses a device ID.
+            await self._task_scheduler.schedule_task(
+                DELETE_DEVICE_MSGS_TASK_NAME,
+                resource_id=device_id,
+                params={
+                    "user_id": user_id,
+                    "device_id": device_id,
+                    "up_to_stream_id": to_device_stream_id,
+                },
+            )
+
+        await self._auth_handler.delete_access_tokens_for_devices(
+            user_id, device_ids=device_ids
+        )
+
+        # Pushers are deleted after `delete_access_tokens_for_user` is called so that
+        # modules using `on_logged_out` hook can use them if needed.
+        await self.hs.get_pusherpool().remove_pushers_by_devices(user_id, device_ids)
+
+        await self.notify_device_update(user_id, device_ids)
+
+    async def upsert_device(
+        self, user_id: str, device_id: str, display_name: Optional[str] = None
+    ) -> bool:
+        """Create or update a device
+
+        Args:
+            user_id: The user to update devices of.
+            device_id: The device to update.
+            display_name: The new display name for this device.
+
+        Returns:
+            True if the device was created, False if it was updated.
+
+        """
+
+        # Reject a new displayname which is too long.
+        _check_device_name_length(display_name)
+
+        created = await self.store.store_device(
+            user_id,
+            device_id,
+            initial_device_display_name=display_name,
+        )
+
+        if not created:
+            await self.store.update_device(
+                user_id,
+                device_id,
+                new_display_name=display_name,
+            )
+
+        await self.notify_device_update(user_id, [device_id])
+        return created
+
+    async def update_device(self, user_id: str, device_id: str, content: dict) -> None:
+        """Update the given device
+
+        Args:
+            user_id: The user to update devices of.
+            device_id: The device to update.
+            content: body of update request
+        """
+
+        # Reject a new displayname which is too long.
+        new_display_name = content.get("display_name")
+
+        _check_device_name_length(new_display_name)
+
+        try:
+            await self.store.update_device(
+                user_id, device_id, new_display_name=new_display_name
+            )
+            await self.notify_device_update(user_id, [device_id])
+        except errors.StoreError as e:
+            if e.code == 404:
+                raise errors.NotFoundError()
+            else:
+                raise
 
     @trace
     async def get_devices_by_user(self, user_id: str) -> List[JsonDict]:
@@ -145,6 +442,98 @@ class DeviceWorkerHandler:
             the dehydrated device information
         """
         return await self.store.get_dehydrated_device(user_id)
+
+    async def store_dehydrated_device(
+        self,
+        user_id: str,
+        device_id: Optional[str],
+        device_data: JsonDict,
+        initial_device_display_name: Optional[str] = None,
+        keys_for_device: Optional[JsonDict] = None,
+    ) -> str:
+        """Store a dehydrated device for a user, optionally storing the keys associated with
+        it as well.  If the user had a previous dehydrated device, it is removed.
+
+        Args:
+            user_id: the user that we are storing the device for
+            device_id: device id supplied by client
+            device_data: the dehydrated device information
+            initial_device_display_name: The display name to use for the device
+            keys_for_device: keys for the dehydrated device
+        Returns:
+            device id of the dehydrated device
+        """
+        device_id = await self.check_device_registered(
+            user_id,
+            device_id,
+            initial_device_display_name,
+        )
+
+        time_now = self.clock.time_msec()
+
+        old_device_id = await self.store.store_dehydrated_device(
+            user_id, device_id, device_data, time_now, keys_for_device
+        )
+
+        if old_device_id is not None:
+            await self.delete_devices(user_id, [old_device_id])
+
+        return device_id
+
+    async def rehydrate_device(
+        self, user_id: str, access_token: str, device_id: str
+    ) -> dict:
+        """Process a rehydration request from the user.
+
+        Args:
+            user_id: the user who is rehydrating the device
+            access_token: the access token used for the request
+            device_id: the ID of the device that will be rehydrated
+        Returns:
+            a dict containing {"success": True}
+        """
+        success = await self.store.remove_dehydrated_device(user_id, device_id)
+
+        if not success:
+            raise errors.NotFoundError()
+
+        # If the dehydrated device was successfully deleted (the device ID
+        # matched the stored dehydrated device), then modify the access
+        # token and refresh token to use the dehydrated device's ID and
+        # copy the old device display name to the dehydrated device,
+        # and destroy the old device ID
+        old_device_id = await self.store.set_device_for_access_token(
+            access_token, device_id
+        )
+        await self.store.set_device_for_refresh_token(user_id, old_device_id, device_id)
+        old_device = await self.store.get_device(user_id, old_device_id)
+        if old_device is None:
+            raise errors.NotFoundError()
+        await self.store.update_device(user_id, device_id, old_device["display_name"])
+        # can't call self.delete_device because that will clobber the
+        # access token so call the storage layer directly
+        await self.store.delete_devices(user_id, [old_device_id])
+
+        # tell everyone that the old device is gone and that the dehydrated
+        # device has a new display name
+        await self.notify_device_update(user_id, [old_device_id, device_id])
+
+        return {"success": True}
+
+    async def delete_dehydrated_device(self, user_id: str, device_id: str) -> None:
+        """
+        Delete a stored dehydrated device.
+
+        Args:
+            user_id: the user_id to delete the device from
+            device_id: id of the dehydrated device to delete
+        """
+        success = await self.store.remove_dehydrated_device(user_id, device_id)
+
+        if not success:
+            raise errors.NotFoundError()
+
+        await self.delete_devices(user_id, [device_id])
 
     @trace
     async def get_device(self, user_id: str, device_id: str) -> JsonDict:
@@ -484,10 +873,53 @@ class DeviceWorkerHandler:
         gone from partial to full state.
         """
 
-        # TODO(faster_joins): worker mode support
-        #   https://github.com/matrix-org/synapse/issues/12994
-        logger.error(
-            "Trying handling device list state for partial join: not supported on workers."
+        await self._handle_room_un_partial_stated_client(
+            instance_name=random.choice(self._device_list_writers),
+            room_id=room_id,
+        )
+
+    @trace
+    @measure_func("notify_device_update")
+    async def notify_device_update(
+        self, user_id: str, device_ids: StrCollection
+    ) -> None:
+        """Notify that a user's device(s) has changed. Pokes the notifier, and
+        remote servers if the user is local.
+
+        Args:
+            user_id: The Matrix ID of the user who's device list has been updated.
+            device_ids: The device IDs that have changed.
+        """
+        await self._notify_device_update_client(
+            instance_name=random.choice(self._device_list_writers),
+            user_id=user_id,
+            device_ids=list(device_ids),
+        )
+
+    async def notify_user_signature_update(
+        self,
+        from_user_id: str,
+        user_ids: List[str],
+    ) -> None:
+        """Notify a device writer that a user have made new signatures of other users.
+
+        Args:
+            from_user_id: The Matrix ID of the user who's signatures have been updated.
+            user_ids: The Matrix IDs of the users that have changed.
+        """
+        await self._notify_user_signature_update_client(
+            instance_name=random.choice(self._device_list_writers),
+            from_user_id=from_user_id,
+            user_ids=user_ids,
+        )
+
+    async def handle_new_device_update(self) -> None:
+        """Wake up a device writer to send local device list changes as federation outbound pokes."""
+        # This is only sent to the first device writer to avoid cross-worker
+        # locks in _handle_new_device_update_async, as it makes assumptions
+        # about being the only instance running.
+        await self._handle_new_device_update_client(
+            instance_name=self._device_list_writers[0],
         )
 
     DEVICE_MSGS_DELETE_BATCH_LIMIT = 1000
@@ -511,39 +943,43 @@ class DeviceWorkerHandler:
                 device_id=device_id,
                 from_stream_id=from_stream_id,
                 to_stream_id=up_to_stream_id,
-                limit=DeviceHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT,
+                limit=DeviceWriterHandler.DEVICE_MSGS_DELETE_BATCH_LIMIT,
             )
 
             if from_stream_id is None:
                 return TaskStatus.COMPLETE, None, None
 
-            await self.clock.sleep(DeviceHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0)
+            await self.clock.sleep(
+                DeviceWriterHandler.DEVICE_MSGS_DELETE_SLEEP_MS / 1000.0
+            )
 
 
-class DeviceHandler(DeviceWorkerHandler):
-    device_list_updater: "DeviceListUpdater"
+class DeviceWriterHandler(DeviceHandler):
+    """
+    Superclass of the DeviceHandler which gets instantiated on workers that can
+    write to the device list stream.
+    """
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        self.server_name = hs.hostname  # nb must be called this for @measure_func
-        self.clock = hs.get_clock()  # nb must be called this for @measure_func
-        self.federation_sender = hs.get_federation_sender()
-        self._account_data_handler = hs.get_account_data_handler()
+        # We only need to poke the federation sender explicitly if its on the
+        # same instance. Other federation sender instances will get notified by
+        # `synapse.app.generic_worker.FederationSenderHandler` when it sees it
+        # in the device lists stream.
+        self.federation_sender = None
+        if hs.should_send_federation():
+            self.federation_sender = hs.get_federation_sender()
+
         self._storage_controllers = hs.get_storage_controllers()
-        self.db_pool = hs.get_datastores().main.db_pool
 
-        self._dont_notify_new_devices_for = (
-            hs.config.registration.dont_notify_new_devices_for
-        )
-
-        self.device_list_updater = DeviceListUpdater(hs, self)
-
-        federation_registry = hs.get_federation_registry()
-
-        federation_registry.register_edu_handler(
-            EduTypes.DEVICE_LIST_UPDATE,
-            self.device_list_updater.incoming_device_list_update,
+        # There are a few things that are only handled on the main device list
+        # writer to avoid cross-worker locks
+        #
+        # This mainly concerns the `DeviceListUpdater` class, which is only
+        # instantiated on the first device list writer.
+        self._is_main_device_list_writer = (
+            hs.get_instance_name() == self._main_device_list_writer
         )
 
         # Whether `_handle_new_device_update_async` is currently processing.
@@ -553,249 +989,21 @@ class DeviceHandler(DeviceWorkerHandler):
         # processing.
         self._handle_new_device_update_new_data = False
 
-        # On start up check if there are any updates pending.
-        hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
-
-        self._delete_stale_devices_after = hs.config.server.delete_stale_devices_after
-
-        # Ideally we would run this on a worker and condition this on the
-        # "run_background_tasks_on" setting, but this would mean making the notification
-        # of device list changes over federation work on workers, which is nontrivial.
-        if self._delete_stale_devices_after is not None:
-            self.clock.looping_call(
-                run_as_background_process,
-                DELETE_STALE_DEVICES_INTERVAL_MS,
-                "delete_stale_devices",
-                self._delete_stale_devices,
+        # Only the main device list writer handles device list EDUs and converts
+        # device list updates to outbound federation pokes. This allows us to
+        # use in-memory per-user locks instead of cross-worker locks, and
+        # simplifies the logic for converting outbound pokes. This makes the
+        # device_list writers a little bit unbalanced in terms of load, but
+        # still unlocks local device changes (and therefore login/logouts) when
+        # rolling-restarting Synapse.
+        if self._is_main_device_list_writer:
+            # On start up check if there are any updates pending.
+            hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
+            self.device_list_updater = DeviceListUpdater(hs, self)
+            hs.get_federation_registry().register_edu_handler(
+                EduTypes.DEVICE_LIST_UPDATE,
+                self.device_list_updater.incoming_device_list_update,
             )
-
-    def _check_device_name_length(self, name: Optional[str]) -> None:
-        """
-        Checks whether a device name is longer than the maximum allowed length.
-
-        Args:
-            name: The name of the device.
-
-        Raises:
-            SynapseError: if the device name is too long.
-        """
-        if name and len(name) > MAX_DEVICE_DISPLAY_NAME_LEN:
-            raise SynapseError(
-                400,
-                "Device display name is too long (max %i)"
-                % (MAX_DEVICE_DISPLAY_NAME_LEN,),
-                errcode=Codes.TOO_LARGE,
-            )
-
-    async def check_device_registered(
-        self,
-        user_id: str,
-        device_id: Optional[str],
-        initial_device_display_name: Optional[str] = None,
-        auth_provider_id: Optional[str] = None,
-        auth_provider_session_id: Optional[str] = None,
-    ) -> str:
-        """
-        If the given device has not been registered, register it with the
-        supplied display name.
-
-        If no device_id is supplied, we make one up.
-
-        Args:
-            user_id:  @user:id
-            device_id: device id supplied by client
-            initial_device_display_name: device display name from client
-            auth_provider_id: The SSO IdP the user used, if any.
-            auth_provider_session_id: The session ID (sid) got from the SSO IdP.
-        Returns:
-            device id (generated if none was supplied)
-        """
-
-        self._check_device_name_length(initial_device_display_name)
-
-        # Check if we should send out device lists updates for this new device.
-        notify = user_id not in self._dont_notify_new_devices_for
-
-        if device_id is not None:
-            new_device = await self.store.store_device(
-                user_id=user_id,
-                device_id=device_id,
-                initial_device_display_name=initial_device_display_name,
-                auth_provider_id=auth_provider_id,
-                auth_provider_session_id=auth_provider_session_id,
-            )
-            if new_device:
-                if notify:
-                    await self.notify_device_update(user_id, [device_id])
-            return device_id
-
-        # if the device id is not specified, we'll autogen one, but loop a few
-        # times in case of a clash.
-        attempts = 0
-        while attempts < 5:
-            new_device_id = stringutils.random_string(10).upper()
-            new_device = await self.store.store_device(
-                user_id=user_id,
-                device_id=new_device_id,
-                initial_device_display_name=initial_device_display_name,
-                auth_provider_id=auth_provider_id,
-                auth_provider_session_id=auth_provider_session_id,
-            )
-            if new_device:
-                if notify:
-                    await self.notify_device_update(user_id, [new_device_id])
-                return new_device_id
-            attempts += 1
-
-        raise errors.StoreError(500, "Couldn't generate a device ID.")
-
-    async def _delete_stale_devices(self) -> None:
-        """Background task that deletes devices which haven't been accessed for more than
-        a configured time period.
-        """
-        # We should only be running this job if the config option is defined.
-        assert self._delete_stale_devices_after is not None
-        now_ms = self.clock.time_msec()
-        since_ms = now_ms - self._delete_stale_devices_after
-        devices = await self.store.get_local_devices_not_accessed_since(since_ms)
-
-        for user_id, user_devices in devices.items():
-            await self.delete_devices(user_id, user_devices)
-
-    @trace
-    async def delete_all_devices_for_user(
-        self, user_id: str, except_device_id: Optional[str] = None
-    ) -> None:
-        """Delete all of the user's devices
-
-        Args:
-            user_id: The user to remove all devices from
-            except_device_id: optional device id which should not be deleted
-        """
-        device_map = await self.store.get_devices_by_user(user_id)
-        if except_device_id is not None:
-            device_map.pop(except_device_id, None)
-        user_device_ids = device_map.keys()
-        await self.delete_devices(user_id, user_device_ids)
-
-    async def delete_devices(self, user_id: str, device_ids: StrCollection) -> None:
-        """Delete several devices
-
-        Args:
-            user_id: The user to delete devices from.
-            device_ids: The list of device IDs to delete
-        """
-        to_device_stream_id = self._event_sources.get_current_token().to_device_key
-
-        try:
-            await self.store.delete_devices(user_id, device_ids)
-        except errors.StoreError as e:
-            if e.code == 404:
-                # no match
-                set_tag("error", True)
-                set_tag("reason", "User doesn't have that device id.")
-            else:
-                raise
-
-        # Delete data specific to each device. Not optimised as its an
-        # experimental MSC.
-        if self.hs.config.experimental.msc3890_enabled:
-            for device_id in device_ids:
-                # Remove any local notification settings for this device in accordance
-                # with MSC3890.
-                await self._account_data_handler.remove_account_data_for_user(
-                    user_id,
-                    f"org.matrix.msc3890.local_notification_settings.{device_id}",
-                )
-
-        # If we're deleting a lot of devices, a bunch of them may not have any
-        # to-device messages queued up. We filter those out to avoid scheduling
-        # unnecessary tasks.
-        devices_with_messages = await self.store.get_devices_with_messages(
-            user_id, device_ids
-        )
-        for device_id in devices_with_messages:
-            # Delete device messages asynchronously and in batches using the task scheduler
-            # We specify an upper stream id to avoid deleting non delivered messages
-            # if an user re-uses a device ID.
-            await self._task_scheduler.schedule_task(
-                DELETE_DEVICE_MSGS_TASK_NAME,
-                resource_id=device_id,
-                params={
-                    "user_id": user_id,
-                    "device_id": device_id,
-                    "up_to_stream_id": to_device_stream_id,
-                },
-            )
-
-        await self._auth_handler.delete_access_tokens_for_devices(
-            user_id, device_ids=device_ids
-        )
-
-        # Pushers are deleted after `delete_access_tokens_for_user` is called so that
-        # modules using `on_logged_out` hook can use them if needed.
-        await self.hs.get_pusherpool().remove_pushers_by_devices(user_id, device_ids)
-
-        await self.notify_device_update(user_id, device_ids)
-
-    async def upsert_device(
-        self, user_id: str, device_id: str, display_name: Optional[str] = None
-    ) -> bool:
-        """Create or update a device
-
-        Args:
-            user_id: The user to update devices of.
-            device_id: The device to update.
-            display_name: The new display name for this device.
-
-        Returns:
-            True if the device was created, False if it was updated.
-
-        """
-
-        # Reject a new displayname which is too long.
-        self._check_device_name_length(display_name)
-
-        created = await self.store.store_device(
-            user_id,
-            device_id,
-            initial_device_display_name=display_name,
-        )
-
-        if not created:
-            await self.store.update_device(
-                user_id,
-                device_id,
-                new_display_name=display_name,
-            )
-
-        await self.notify_device_update(user_id, [device_id])
-        return created
-
-    async def update_device(self, user_id: str, device_id: str, content: dict) -> None:
-        """Update the given device
-
-        Args:
-            user_id: The user to update devices of.
-            device_id: The device to update.
-            content: body of update request
-        """
-
-        # Reject a new displayname which is too long.
-        new_display_name = content.get("display_name")
-
-        self._check_device_name_length(new_display_name)
-
-        try:
-            await self.store.update_device(
-                user_id, device_id, new_display_name=new_display_name
-            )
-            await self.notify_device_update(user_id, [device_id])
-        except errors.StoreError as e:
-            if e.code == 404:
-                raise errors.NotFoundError()
-            else:
-                raise
 
     @trace
     @measure_func("notify_device_update")
@@ -839,7 +1047,7 @@ class DeviceHandler(DeviceWorkerHandler):
 
         # We may need to do some processing asynchronously for local user IDs.
         if self.hs.is_mine_id(user_id):
-            self._handle_new_device_update_async()
+            await self.handle_new_device_update()
 
     async def notify_user_signature_update(
         self, from_user_id: str, user_ids: List[str]
@@ -859,97 +1067,16 @@ class DeviceHandler(DeviceWorkerHandler):
             StreamKeyType.DEVICE_LIST, position, users=[from_user_id]
         )
 
-    async def store_dehydrated_device(
-        self,
-        user_id: str,
-        device_id: Optional[str],
-        device_data: JsonDict,
-        initial_device_display_name: Optional[str] = None,
-        keys_for_device: Optional[JsonDict] = None,
-    ) -> str:
-        """Store a dehydrated device for a user, optionally storing the keys associated with
-        it as well.  If the user had a previous dehydrated device, it is removed.
+    async def handle_new_device_update(self) -> None:
+        # _handle_new_device_update_async is only called on the first device
+        # writer, as it makes assumptions about only having one instance running
+        # at a time. If this is not the first device writer, we defer to the
+        # superclass, which will make the call go through replication.
+        if not self._is_main_device_list_writer:
+            return await super().handle_new_device_update()
 
-        Args:
-            user_id: the user that we are storing the device for
-            device_id: device id supplied by client
-            device_data: the dehydrated device information
-            initial_device_display_name: The display name to use for the device
-            keys_for_device: keys for the dehydrated device
-        Returns:
-            device id of the dehydrated device
-        """
-        device_id = await self.check_device_registered(
-            user_id,
-            device_id,
-            initial_device_display_name,
-        )
-
-        time_now = self.clock.time_msec()
-
-        old_device_id = await self.store.store_dehydrated_device(
-            user_id, device_id, device_data, time_now, keys_for_device
-        )
-
-        if old_device_id is not None:
-            await self.delete_devices(user_id, [old_device_id])
-
-        return device_id
-
-    async def rehydrate_device(
-        self, user_id: str, access_token: str, device_id: str
-    ) -> dict:
-        """Process a rehydration request from the user.
-
-        Args:
-            user_id: the user who is rehydrating the device
-            access_token: the access token used for the request
-            device_id: the ID of the device that will be rehydrated
-        Returns:
-            a dict containing {"success": True}
-        """
-        success = await self.store.remove_dehydrated_device(user_id, device_id)
-
-        if not success:
-            raise errors.NotFoundError()
-
-        # If the dehydrated device was successfully deleted (the device ID
-        # matched the stored dehydrated device), then modify the access
-        # token and refresh token to use the dehydrated device's ID and
-        # copy the old device display name to the dehydrated device,
-        # and destroy the old device ID
-        old_device_id = await self.store.set_device_for_access_token(
-            access_token, device_id
-        )
-        await self.store.set_device_for_refresh_token(user_id, old_device_id, device_id)
-        old_device = await self.store.get_device(user_id, old_device_id)
-        if old_device is None:
-            raise errors.NotFoundError()
-        await self.store.update_device(user_id, device_id, old_device["display_name"])
-        # can't call self.delete_device because that will clobber the
-        # access token so call the storage layer directly
-        await self.store.delete_devices(user_id, [old_device_id])
-
-        # tell everyone that the old device is gone and that the dehydrated
-        # device has a new display name
-        await self.notify_device_update(user_id, [old_device_id, device_id])
-
-        return {"success": True}
-
-    async def delete_dehydrated_device(self, user_id: str, device_id: str) -> None:
-        """
-        Delete a stored dehydrated device.
-
-        Args:
-            user_id: the user_id to delete the device from
-            device_id: id of the dehydrated device to delete
-        """
-        success = await self.store.remove_dehydrated_device(user_id, device_id)
-
-        if not success:
-            raise errors.NotFoundError()
-
-        await self.delete_devices(user_id, [device_id])
+        self._handle_new_device_update_async()
+        return
 
     @wrap_as_background_process("_handle_new_device_update_async")
     async def _handle_new_device_update_async(self) -> None:
@@ -959,11 +1086,26 @@ class DeviceHandler(DeviceWorkerHandler):
         This happens in the background so as not to block the original request
         that generated the device update.
         """
+        # This should only ever be called on the main device list writer, as it
+        # expects to only have a single instance of this loop running at a time.
+        # See `handle_new_device_update`.
+        assert self._is_main_device_list_writer
+
         if self._handle_new_device_update_is_processing:
             self._handle_new_device_update_new_data = True
             return
 
         self._handle_new_device_update_is_processing = True
+
+        # Note that this logic only deals with the minimum stream ID, and not
+        # the full stream token. This means that oubound pokes are only sent
+        # once every writer on the device_lists stream has caught up. This is
+        # fine, it may only introduces a bit of lag on the outbound pokes.
+        # To fix this, 'device_lists_changes_converted_stream_position' would
+        # need to include the full stream token instead of just a stream ID.
+        # We could also consider have each writer converting their own device
+        # list updates, but that can quickly become complex to handle changes in
+        # the list of device writers.
 
         # The stream ID we processed previous iteration (if any), and the set of
         # hosts we've already poked about for this update. This is so that we
@@ -976,7 +1118,7 @@ class DeviceHandler(DeviceWorkerHandler):
 
             while True:
                 self._handle_new_device_update_new_data = False
-                max_stream_id = self.store.get_device_stream_token()
+                max_stream_id = self.store.get_device_stream_token().stream
                 rows = await self.store.get_uncoverted_outbound_room_pokes(
                     stream_id, room_id
                 )
@@ -1041,7 +1183,7 @@ class DeviceHandler(DeviceWorkerHandler):
                     # Notify replication that we've updated the device list stream.
                     self.notifier.notify_replication()
 
-                    if hosts:
+                    if hosts and self.federation_sender:
                         logger.info(
                             "Sending device list update notif for %r to: %r",
                             user_id,
@@ -1161,9 +1303,10 @@ class DeviceHandler(DeviceWorkerHandler):
 
         # Notify things that device lists need to be sent out.
         self.notifier.notify_replication()
-        await self.federation_sender.send_device_messages(
-            potentially_changed_hosts, immediate=False
-        )
+        if self.federation_sender:
+            await self.federation_sender.send_device_messages(
+                potentially_changed_hosts, immediate=False
+            )
 
 
 def _update_device_from_client_ips(
@@ -1180,19 +1323,21 @@ def _update_device_from_client_ips(
 
 
 class DeviceListWorkerUpdater:
-    "Handles incoming device list updates from federation and contacts the main process over replication"
+    "Handles incoming device list updates from federation and contacts the main device list writer over replication"
 
     def __init__(self, hs: "HomeServer"):
-        from synapse.replication.http.devices import (
-            ReplicationMultiUserDevicesResyncRestServlet,
-        )
-
+        self.store = hs.get_datastores().main
+        self._notifier = hs.get_notifier()
+        # On which instance the DeviceListUpdater is running
+        # Must be kept in sync with DeviceHandler
+        self._main_device_list_writer = hs.config.worker.writers.device_lists[0]
         self._multi_user_device_resync_client = (
             ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
         )
 
     async def multi_user_device_resync(
-        self, user_ids: List[str], mark_failed_as_stale: bool = True
+        self,
+        user_ids: List[str],
     ) -> Dict[str, Optional[JsonMapping]]:
         """
         Like `user_device_resync` but operates on multiple users **from the same origin**
@@ -1201,27 +1346,104 @@ class DeviceListWorkerUpdater:
         Returns:
             Dict from User ID to the same Dict as `user_device_resync`.
         """
-        # mark_failed_as_stale is not sent. Ensure this doesn't break expectations.
-        assert mark_failed_as_stale
 
         if not user_ids:
             # Shortcut empty requests
             return {}
 
-        return await self._multi_user_device_resync_client(user_ids=user_ids)
+        # This uses a per-user-id lock; to avoid using cross-worker locks, we
+        # forward the request to the main device list writer.
+        # See DeviceListUpdater
+        return await self._multi_user_device_resync_client(
+            instance_name=self._main_device_list_writer,
+            user_ids=user_ids,
+        )
+
+    async def process_cross_signing_key_update(
+        self,
+        user_id: str,
+        master_key: Optional[JsonDict],
+        self_signing_key: Optional[JsonDict],
+    ) -> List[str]:
+        """Process the given new master and self-signing key for the given remote user.
+
+        Args:
+            user_id: The ID of the user these keys are for.
+            master_key: The dict of the cross-signing master key as returned by the
+                remote server.
+            self_signing_key: The dict of the cross-signing self-signing key as returned
+                by the remote server.
+
+        Return:
+            The device IDs for the given keys.
+        """
+        device_ids = []
+
+        current_keys_map = await self.store.get_e2e_cross_signing_keys_bulk([user_id])
+        current_keys = current_keys_map.get(user_id) or {}
+
+        if master_key and master_key != current_keys.get("master"):
+            await self.store.set_e2e_cross_signing_key(user_id, "master", master_key)
+            _, verify_key = get_verify_key_from_cross_signing_key(master_key)
+            # verify_key is a VerifyKey from signedjson, which uses
+            # .version to denote the portion of the key ID after the
+            # algorithm and colon, which is the device ID
+            device_ids.append(verify_key.version)
+        if self_signing_key and self_signing_key != current_keys.get("self_signing"):
+            await self.store.set_e2e_cross_signing_key(
+                user_id, "self_signing", self_signing_key
+            )
+            _, verify_key = get_verify_key_from_cross_signing_key(self_signing_key)
+            device_ids.append(verify_key.version)
+
+        return device_ids
+
+    async def handle_room_un_partial_stated(self, room_id: str) -> None:
+        """Handles sending appropriate device list updates in a room that has
+        gone from partial to full state.
+        """
+
+        pending_updates = (
+            await self.store.get_pending_remote_device_list_updates_for_room(room_id)
+        )
+
+        for user_id, device_id in pending_updates:
+            logger.info(
+                "Got pending device list update in room %s: %s / %s",
+                room_id,
+                user_id,
+                device_id,
+            )
+            position = await self.store.add_device_change_to_streams(
+                user_id,
+                [device_id],
+                room_ids=[room_id],
+            )
+
+            if not position:
+                # This should only happen if there are no updates, which
+                # shouldn't happen when we've passed in a non-empty set of
+                # device IDs.
+                continue
+
+            self._notifier.on_new_event(
+                StreamKeyType.DEVICE_LIST, position, rooms=[room_id]
+            )
 
 
 class DeviceListUpdater(DeviceListWorkerUpdater):
-    "Handles incoming device list updates from federation and updates the DB"
+    """Handles incoming device list updates from federation and updates the DB.
 
-    def __init__(self, hs: "HomeServer", device_handler: DeviceHandler):
-        self.server_name = hs.hostname
-        self.store = hs.get_datastores().main
+    This is only instanciated on the first device list writer, as it uses
+    in-process linearizers for some operations."""
+
+    def __init__(self, hs: "HomeServer", device_handler: DeviceWriterHandler):
+        super().__init__(hs)
+
         self.federation = hs.get_federation_client()
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
-        self._notifier = hs.get_notifier()
 
         self._remote_edu_linearizer = Linearizer(name="remote_device_list")
         self._resync_linearizer = Linearizer(name="remote_device_resync")
@@ -1646,74 +1868,3 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._seen_updates[user_id] = {stream_id}
 
         return result, False
-
-    async def process_cross_signing_key_update(
-        self,
-        user_id: str,
-        master_key: Optional[JsonDict],
-        self_signing_key: Optional[JsonDict],
-    ) -> List[str]:
-        """Process the given new master and self-signing key for the given remote user.
-
-        Args:
-            user_id: The ID of the user these keys are for.
-            master_key: The dict of the cross-signing master key as returned by the
-                remote server.
-            self_signing_key: The dict of the cross-signing self-signing key as returned
-                by the remote server.
-
-        Return:
-            The device IDs for the given keys.
-        """
-        device_ids = []
-
-        current_keys_map = await self.store.get_e2e_cross_signing_keys_bulk([user_id])
-        current_keys = current_keys_map.get(user_id) or {}
-
-        if master_key and master_key != current_keys.get("master"):
-            await self.store.set_e2e_cross_signing_key(user_id, "master", master_key)
-            _, verify_key = get_verify_key_from_cross_signing_key(master_key)
-            # verify_key is a VerifyKey from signedjson, which uses
-            # .version to denote the portion of the key ID after the
-            # algorithm and colon, which is the device ID
-            device_ids.append(verify_key.version)
-        if self_signing_key and self_signing_key != current_keys.get("self_signing"):
-            await self.store.set_e2e_cross_signing_key(
-                user_id, "self_signing", self_signing_key
-            )
-            _, verify_key = get_verify_key_from_cross_signing_key(self_signing_key)
-            device_ids.append(verify_key.version)
-
-        return device_ids
-
-    async def handle_room_un_partial_stated(self, room_id: str) -> None:
-        """Handles sending appropriate device list updates in a room that has
-        gone from partial to full state.
-        """
-
-        pending_updates = (
-            await self.store.get_pending_remote_device_list_updates_for_room(room_id)
-        )
-
-        for user_id, device_id in pending_updates:
-            logger.info(
-                "Got pending device list update in room %s: %s / %s",
-                room_id,
-                user_id,
-                device_id,
-            )
-            position = await self.store.add_device_change_to_streams(
-                user_id,
-                [device_id],
-                room_ids=[room_id],
-            )
-
-            if not position:
-                # This should only happen if there are no updates, which
-                # shouldn't happen when we've passed in a non-empty set of
-                # device IDs.
-                continue
-
-            self.device_handler.notifier.on_new_event(
-                StreamKeyType.DEVICE_LIST, position, rooms=[room_id]
-            )
