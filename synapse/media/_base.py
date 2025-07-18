@@ -381,7 +381,7 @@ async def respond_with_multipart_responder(
         try:
             await responder.write_to_consumer(multipart_consumer)
         except ConsumerStopProducingError as e:
-            logger.info("Failed to write to consumer: %s %s", type(e), e)
+            logger.debug("Failed to write to consumer: %s %s", type(e), e)
         except Exception as e:
             logger.warning("Failed to write to consumer: %s %s", type(e), e)
         finally:
