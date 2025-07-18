@@ -124,7 +124,7 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-        # create a string which is larger than 255 bytes
+        # create a string which is larger than 255 bytes (275)
         tag = "👩‍🚒" * 25
 
         # Make the request
@@ -146,7 +146,7 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-        # create a string of acceptable length
+        # create a string of acceptable length (220 bytes)
         tag = "👩‍🚒" * 20
 
         # Make the request
