@@ -189,12 +189,12 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
                 limit=50,
             )
         )
-        min_id = min(id for (id, _, _) in subscriptions)
+        min_id = min(id for (id, _, _, _, _) in subscriptions)
         self.assertEqual(
             subscriptions,
             [
-                (min_id, self.room_id, self.thread_root_id),
-                (min_id + 1, self.room_id, self.other_thread_root_id),
+                (min_id, self.room_id, self.thread_root_id, True, True),
+                (min_id + 1, self.room_id, self.other_thread_root_id, True, False),
             ],
         )
 
@@ -259,7 +259,9 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
                 self.user_id, 0, stream_id2, 10
             )
         )
-        self.assertEqual(updates, [(stream_id1, self.room_id, self.thread_root_id)])
+        self.assertEqual(
+            updates, [(stream_id1, self.room_id, self.thread_root_id, True, True)]
+        )
 
         # Get updates for other user
         updates = self.get_success(
@@ -268,5 +270,5 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(
-            updates, [(stream_id2, self.room_id, self.other_thread_root_id)]
+            updates, [(stream_id2, self.room_id, self.other_thread_root_id, True, True)]
         )
