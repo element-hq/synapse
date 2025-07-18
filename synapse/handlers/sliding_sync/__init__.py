@@ -201,7 +201,7 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
@@ -283,7 +283,7 @@ class SlidingSyncHandler:
             with start_active_span("sliding_sync.generate_room_entries"):
                 await concurrently_execute(handle_room, relevant_rooms_to_send_map, 20)
 
-        extensions = await self.extensions.get_extensions_response(
+        extensions, to_token = await self.extensions.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
