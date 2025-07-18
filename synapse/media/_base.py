@@ -382,9 +382,11 @@ async def respond_with_multipart_responder(
             await responder.write_to_consumer(multipart_consumer)
         except ConsumerStopProducingError as e:
             logger.debug("Failed to write to consumer: %s %s", type(e), e)
+            # Unregister the producer, if it has one, so Twisted doesn't complain
+            if request.producer:
+                request.unregisterProducer()
         except Exception as e:
             logger.warning("Failed to write to consumer: %s %s", type(e), e)
-        finally:
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
                 request.unregisterProducer()
@@ -427,9 +429,11 @@ async def respond_with_responder(
             await responder.write_to_consumer(request)
         except ConsumerStopProducingError as e:
             logger.info("Failed to write to consumer: %s %s", type(e), e)
+            # Unregister the producer, if it has one, so Twisted doesn't complain
+            if request.producer:
+                request.unregisterProducer()
         except Exception as e:
             logger.warning("Failed to write to consumer: %s %s", type(e), e)
-        finally:
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
                 request.unregisterProducer()
