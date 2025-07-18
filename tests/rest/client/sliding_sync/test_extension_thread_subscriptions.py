@@ -38,6 +38,11 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
         sync.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4306_enabled": True}
+        return config
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()

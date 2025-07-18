@@ -70,6 +70,7 @@ class SlidingSyncExtensionHandler:
         self.event_sources = hs.get_event_sources()
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
+        self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
 
     @trace
     async def get_extensions_response(
@@ -163,7 +164,10 @@ class SlidingSyncExtensionHandler:
             )
 
         thread_subs_coro = None
-        if sync_config.extensions.thread_subscriptions is not None:
+        if (
+            sync_config.extensions.thread_subscriptions is not None
+            and self._enable_thread_subscriptions
+        ):
             thread_subs_coro = self.get_thread_subscriptions_extension_response(
                 sync_config=sync_config,
                 thread_subscriptions_request=sync_config.extensions.thread_subscriptions,
