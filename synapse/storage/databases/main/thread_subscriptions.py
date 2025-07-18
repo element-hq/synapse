@@ -165,9 +165,8 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 values=values,
             )
 
-            self._invalidate_cache_and_stream(
-                txn,
-                self.get_subscription_for_thread,
+            txn.call_after(
+                self.get_subscription_for_thread.invalidate,
                 (user_id, room_id, thread_root_event_id),
             )
 
@@ -230,9 +229,8 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 },
             )
 
-            self._invalidate_cache_and_stream(
-                txn,
-                self.get_subscription_for_thread,
+            txn.call_after(
+                self.get_subscription_for_thread.invalidate,
                 (user_id, room_id, thread_root_event_id),
             )
 
