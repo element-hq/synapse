@@ -505,6 +505,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         """
         return self._thread_subscriptions_id_gen.get_current_token()
 
+    def get_thread_subscriptions_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._thread_subscriptions_id_gen
+
     async def get_updated_thread_subscriptions(
         self, *, from_id: int, to_id: int, limit: int
     ) -> List[Tuple[int, str, str, str]]:
