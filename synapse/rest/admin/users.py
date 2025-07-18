@@ -1083,7 +1083,9 @@ class UserTokenRestServlet(RestServlet):
                 HTTPStatus.BAD_REQUEST, "Only local users can be logged in as"
             )
 
-        _user_info_dict = await self.admin_handler.get_user(UserID.from_string(user_id))
+        # Validate user_id
+        UserID.from_string(user_id)
+        _user_info_dict = await self.store.get_user_by_id(user_id)
         if not _user_info_dict:
             raise NotFoundError("User not found")
 
