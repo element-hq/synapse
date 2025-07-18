@@ -119,7 +119,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         """
         assert self._can_write_to_thread_subscriptions
 
-        def _txn(txn: LoggingTransaction) -> Optional[int]:
+        def _subscribe_user_to_thread_txn(txn: LoggingTransaction) -> Optional[int]:
             already_automatic = self.db_pool.simple_select_one_onecol_txn(
                 txn,
                 table="thread_subscriptions",
@@ -173,7 +173,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
             return stream_id
 
-        return await self.db_pool.runInteraction("subscribe_user_to_thread", _txn)
+        return await self.db_pool.runInteraction(
+            "subscribe_user_to_thread", _subscribe_user_to_thread_txn
+        )
 
     async def unsubscribe_user_from_thread(
         self, user_id: str, room_id: str, thread_root_event_id: str
@@ -193,7 +195,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         assert self._can_write_to_thread_subscriptions
 
-        def _txn(txn: LoggingTransaction) -> Optional[int]:
+        def _unsubscribe_user_from_thread_txn(txn: LoggingTransaction) -> Optional[int]:
             already_subscribed = self.db_pool.simple_select_one_onecol_txn(
                 txn,
                 table="thread_subscriptions",
@@ -236,7 +238,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
             return stream_id
 
-        return await self.db_pool.runInteraction("unsubscribe_user_from_thread", _txn)
+        return await self.db_pool.runInteraction(
+            "unsubscribe_user_from_thread", _unsubscribe_user_from_thread_txn
+        )
 
     async def purge_thread_subscription_settings_for_user(self, user_id: str) -> None:
         """
@@ -246,7 +250,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         This is intended only for dealing with user deactivation.
         """
 
-        def _txn(txn: LoggingTransaction) -> None:
+        def _purge_thread_subscription_settings_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> None:
             self.db_pool.simple_delete_txn(
                 txn,
                 table="thread_subscriptions",
@@ -257,7 +263,8 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             )
 
         await self.db_pool.runInteraction(
-            desc="purge_thread_subscription_settings_for_user", func=_txn
+            desc="purge_thread_subscription_settings_for_user",
+            func=_purge_thread_subscription_settings_for_user_txn,
         )
 
     @cached(tree=True)
