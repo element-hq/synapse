@@ -1,1 +1,1 @@
-Downgrade consumer asked to stop producing logs to INFO level.
+Reduce log spam when client stops downloading media while it is being streamed to them.
