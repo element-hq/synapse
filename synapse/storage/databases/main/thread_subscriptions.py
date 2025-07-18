@@ -553,14 +553,14 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             limit: The maximum number of rows to return
 
         Returns:
-            A list of (stream_id, room_id, thread_root_event_id) tuples.
+            A list of (stream_id, room_id, thread_root_event_id, subscribed, automatic) tuples.
         """
 
         def get_updated_thread_subscriptions_for_user_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[int, str, str]]:
+        ) -> List[Tuple[int, str, str, bool, Optional[bool]]]:
             sql = """
-                SELECT stream_id, room_id, event_id
+                SELECT stream_id, room_id, event_id, subscribed, automatic
                 FROM thread_subscriptions
                 WHERE user_id = ? AND ? < stream_id AND stream_id <= ?
                 ORDER BY stream_id ASC
@@ -568,7 +568,17 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             """
 
             txn.execute(sql, (user_id, from_id, to_id, limit))
-            return [(row[0], row[1], row[2]) for row in txn]
+            return [
+                (
+                    stream_id,
+                    room_id,
+                    event_id,
+                    # SQLite integer to boolean conversions
+                    bool(subscribed),
+                    bool(automatic) if subscribed else None,
+                )
+                for (stream_id, room_id, event_id, subscribed, automatic) in txn
+            ]
 
         return await self.db_pool.runInteraction(
             "get_updated_thread_subscriptions_for_user",
