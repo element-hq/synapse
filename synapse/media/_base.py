@@ -428,7 +428,7 @@ async def respond_with_responder(
         try:
             await responder.write_to_consumer(request)
         except ConsumerStopProducingError as e:
-            logger.info("Failed to write to consumer: %s %s", type(e), e)
+            logger.debug("Failed to write to consumer: %s %s", type(e), e)
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
                 request.unregisterProducer()
