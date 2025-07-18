@@ -380,7 +380,7 @@ async def respond_with_multipart_responder(
 
         try:
             await responder.write_to_consumer(multipart_consumer)
-        except ConsumerStopProducingError as e:
+        except ConsumerRequestedStopError as e:
             logger.debug("Failed to write to consumer: %s %s", type(e), e)
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
@@ -427,7 +427,7 @@ async def respond_with_responder(
         add_file_headers(request, media_type, file_size, upload_name)
         try:
             await responder.write_to_consumer(request)
-        except ConsumerStopProducingError as e:
+        except ConsumerRequestedStopError as e:
             logger.debug("Failed to write to consumer: %s %s", type(e), e)
             # Unregister the producer, if it has one, so Twisted doesn't complain
             if request.producer:
@@ -676,7 +676,7 @@ def _parseparam(s: bytes) -> Generator[bytes, None, None]:
         s = s[end:]
 
 
-class ConsumerStopProducingError(Exception):
+class ConsumerRequestedStopError(Exception):
     """A consumer asked us to stop producing"""
 
 
@@ -758,7 +758,7 @@ class ThreadedFileSender:
 
         if not self.deferred.called:
             self.deferred.errback(
-                ConsumerStopProducingError("Consumer asked us to stop producing")
+                ConsumerRequestedStopError("Consumer asked us to stop producing")
             )
 
     async def start_read_loop(self) -> None:
