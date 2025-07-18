@@ -1925,9 +1925,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_delayed_event_mgmt:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -4341,6 +4340,8 @@ This setting has the following sub-options:
 * `presence` (string): Name of a worker assigned to the `presence` stream.
 
 * `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
+
+* `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
 
 Example configuration:
 ```yaml

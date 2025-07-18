@@ -184,7 +184,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
         self._rust_http_client = HttpClient(
-            user_agent=self._http_client.user_agent.decode("utf8")
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
         )
 
         # # Token Introspection Cache
@@ -479,7 +480,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
-            logger.info("Admin toked used")
+            logger.info("Admin token used")
             # XXX: that user doesn't exist and won't be provisioned.
             # This is mostly fine for admin calls, but we should also think about doing
             # requesters without a user_id.

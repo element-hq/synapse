@@ -1575,6 +1575,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """Get the event ID of the initial join that started the partial
         join, and the device list stream ID at the point we started the partial
         join.
+
+        This only returns the minimum device list stream ID at the time of
+        joining, not the full device list stream token. The only impact of this
+        is that we may be sending again device list updates that we've already
+        sent to some destinations, which is harmless.
         """
 
         return cast(

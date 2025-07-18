@@ -1470,6 +1470,7 @@ dependencies = [
  "lazy_static",
  "log",
  "mime",
+ "once_cell",
  "pyo3",
  "pyo3-log",
  "pythonize",
