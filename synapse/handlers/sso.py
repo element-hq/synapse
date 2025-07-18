@@ -46,7 +46,6 @@ from twisted.web.server import Request
 from synapse.api.constants import LoginType, ProfileFields
 from synapse.api.errors import Codes, NotFoundError, RedirectException, SynapseError
 from synapse.config.sso import SsoAttributeRequirement
-from synapse.handlers.device import DeviceHandler
 from synapse.handlers.register import init_counters_for_auth_provider
 from synapse.handlers.ui_auth import UIAuthSessionDataConstants
 from synapse.http import get_request_user_agent
@@ -818,7 +817,7 @@ class SsoHandler:
                 server_name = avatar_url_parts[-2]
                 media_id = avatar_url_parts[-1]
                 if self._is_mine_server_name(server_name):
-                    media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
+                    media = await self._media_repo.store.get_local_media(media_id)
                     if media is not None and upload_name == media.upload_name:
                         logger.info("skipping saving the user avatar")
                         return True
@@ -1181,8 +1180,6 @@ class SsoHandler:
     ) -> None:
         """Revoke any devices and in-flight logins tied to a provider session.
 
-        Can only be called from the main process.
-
         Args:
             auth_provider_id: A unique identifier for this SSO provider, e.g.
                 "oidc" or "saml".
@@ -1190,11 +1187,6 @@ class SsoHandler:
             expected_user_id: The user we're expecting to logout. If set, it will ignore
                 sessions belonging to other users and log an error.
         """
-
-        # It is expected that this is the main process.
-        assert isinstance(self._device_handler, DeviceHandler), (
-            "revoking SSO sessions can only be called on the main process"
-        )
 
         # Invalidate any running user-mapping sessions
         to_delete = []

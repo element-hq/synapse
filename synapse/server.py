@@ -69,7 +69,7 @@ from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
 from synapse.handlers.delayed_events import DelayedEventsHandler
-from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
+from synapse.handlers.device import DeviceHandler, DeviceWriterHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.e2e_keys import E2eKeysHandler
@@ -587,11 +587,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
-    def get_device_handler(self) -> DeviceWorkerHandler:
-        if self.config.worker.worker_app:
-            return DeviceWorkerHandler(self)
-        else:
-            return DeviceHandler(self)
+    def get_device_handler(self) -> DeviceHandler:
+        if self.get_instance_name() in self.config.worker.writers.device_lists:
+            return DeviceWriterHandler(self)
+
+        return DeviceHandler(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:
