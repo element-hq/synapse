@@ -54,7 +54,6 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
     export SYNAPSE_WORKER_TYPES="\
       event_persister:2, \
       background_worker, \
-      frontend_proxy, \
       event_creator, \
       user_dir, \
       media_repository, \
@@ -65,6 +64,7 @@ if [[ -n "$SYNAPSE_COMPLEMENT_USE_WORKERS" ]]; then
       client_reader, \
       appservice, \
       pusher, \
+      device_lists:2, \
       stream_writers=account_data+presence+receipts+to_device+typing"
 
   fi

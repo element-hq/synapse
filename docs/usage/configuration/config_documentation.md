@@ -4341,6 +4341,8 @@ This setting has the following sub-options:
 
 * `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
 
+* `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
+
 Example configuration:
 ```yaml
 stream_writers:
