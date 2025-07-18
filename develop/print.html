@@ -7553,6 +7553,9 @@ Setting this to a high value allows users to report content quickly, possibly in
 <li>
 <p><code>push_rules</code> (string): Name of a worker assigned to the <code>push_rules</code> stream.</p>
 </li>
+<li>
+<p><code>device_lists</code> (string): Name of a worker assigned to the <code>device_lists</code> stream.</p>
+</li>
 </ul>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">stream_writers:
@@ -11817,7 +11820,8 @@ information.</p>
 ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
 ^/_matrix/client/(r0|v3|unstable)/account/3pid$
 ^/_matrix/client/(r0|v3|unstable)/account/whoami$
-^/_matrix/client/(r0|v3|unstable)/devices$
+^/_matrix/client/(r0|v3)/delete_devices$
+^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
 ^/_matrix/client/versions$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/rooms/.*/event/
@@ -11836,7 +11840,9 @@ information.</p>
 ^/_matrix/client/(r0|v3|unstable)/keys/changes$
 ^/_matrix/client/(r0|v3|unstable)/keys/claim$
 ^/_matrix/client/(r0|v3|unstable)/room_keys/
-^/_matrix/client/(r0|v3|unstable)/keys/upload$
+^/_matrix/client/(r0|v3|unstable)/keys/upload
+^/_matrix/client/(api/v1|r0|v3|unstable/keys/device_signing/upload$
+^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
 # Registration/login requests
 ^/_matrix/client/(api/v1|r0|v3|unstable)/login$
@@ -11860,7 +11866,6 @@ information.</p>
 <p>Additionally, the following REST endpoints can be handled for GET requests:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
-^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
 
 # Account data requests
 ^/_matrix/client/(r0|v3|unstable)/.*/tags
@@ -11903,7 +11908,6 @@ set to <code>true</code>), the following endpoints can be handled by the worker:
 <pre><code>^/_synapse/admin/v2/users/[^/]+$
 ^/_synapse/admin/v1/username_available$
 ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-# Only the GET method:
 ^/_synapse/admin/v1/users/[^/]+/devices$
 </code></pre>
 <p>Note that a <a href="usage/configuration/config_documentation.html#listeners">HTTP listener</a>
@@ -12103,6 +12107,16 @@ the stream writer for the <code>presence</code> stream:</p>
 <p>The following endpoints should be routed directly to the worker configured as
 the stream writer for the <code>push_rules</code> stream:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
+</code></pre>
+<h5 id="the-device_lists-stream"><a class="header" href="#the-device_lists-stream">The <code>device_lists</code> stream</a></h5>
+<p>The <code>device_lists</code> stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly one of the workers
+configured as stream writer for the <code>device_lists</code> stream:</p>
+<pre><code>^/_matrix/client/(r0|v3)/delete_devices$
+^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
+^/_matrix/client/(r0|v3|unstable)/keys/upload
+^/_matrix/client/(api/v1|r0|v3|unstable/keys/device_signing/upload$
+^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
 <p>The

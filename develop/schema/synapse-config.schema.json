@@ -4457,6 +4457,10 @@
         "push_rules": {
           "type": "string",
           "description": "Name of a worker assigned to the `push_rules` stream."
+        },
+        "device_lists": {
+          "type": "string",
+          "description": "Name of a worker assigned to the `device_lists` stream."
         }
       },
       "default": {},
