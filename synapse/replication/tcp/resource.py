@@ -161,7 +161,11 @@ class ReplicationStreamer:
             while self.pending_updates:
                 self.pending_updates = False
 
-                with Measure(self.clock, "repl.stream.get_updates"):
+                with Measure(
+                    self.clock,
+                    name="repl.stream.get_updates",
+                    server_name=self.server_name,
+                ):
                     all_streams = self.streams
 
                     if self._replication_torture_level is not None:

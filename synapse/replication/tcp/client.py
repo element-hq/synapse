@@ -75,6 +75,7 @@ class ReplicationDataHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
@@ -115,7 +116,11 @@ class ReplicationDataHandler:
         all_room_ids: Set[str] = set()
         if stream_name == DeviceListsStream.NAME:
             if any(not row.is_signature and not row.hosts_calculated for row in rows):
-                prev_token = self.store.get_device_stream_token()
+                # This only uses the minimum stream position on the device lists
+                # stream, which means that we may process a device list change
+                # twice in case of concurrent writes. This is fine, as this only
+                # triggers cache invalidation, which is harmless if done twice.
+                prev_token = self.store.get_device_stream_token().stream
                 all_room_ids = await self.store.get_all_device_list_changes(
                     prev_token, token
                 )
@@ -342,7 +347,11 @@ class ReplicationDataHandler:
         waiting_list.add((position, deferred))
 
         # We measure here to get in flight counts and average waiting time.
-        with Measure(self._clock, "repl.wait_for_stream_position"):
+        with Measure(
+            self._clock,
+            name="repl.wait_for_stream_position",
+            server_name=self.server_name,
+        ):
             logger.info(
                 "Waiting for repl stream %r to reach %s (%s); currently at: %s",
                 stream_name,

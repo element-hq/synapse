@@ -36,7 +36,6 @@ from typing import (
 )
 
 import attr
-from immutabledict import immutabledict
 
 from synapse.api.constants import EduTypes
 from synapse.replication.tcp.streams import ReceiptsStream
@@ -159,33 +158,16 @@ class ReceiptsWorkerStore(SQLBaseStore):
             limit=10000,
         )
         self._receipts_stream_cache = StreamChangeCache(
-            "ReceiptsRoomChangeCache",
-            min_receipts_stream_id,
+            name="ReceiptsRoomChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_receipts_stream_id,
             prefilled_cache=receipts_stream_prefill,
         )
 
     def get_max_receipt_stream_id(self) -> MultiWriterStreamToken:
         """Get the current max stream ID for receipts stream"""
 
-        min_pos = self._receipts_id_gen.get_current_token()
-
-        positions = {}
-        if isinstance(self._receipts_id_gen, MultiWriterIdGenerator):
-            # The `min_pos` is the minimum position that we know all instances
-            # have finished persisting to, so we only care about instances whose
-            # positions are ahead of that. (Instance positions can be behind the
-            # min position as there are times we can work out that the minimum
-            # position is ahead of the naive minimum across all current
-            # positions. See MultiWriterIdGenerator for details)
-            positions = {
-                i: p
-                for i, p in self._receipts_id_gen.get_positions().items()
-                if p > min_pos
-            }
-
-        return MultiWriterStreamToken(
-            stream=min_pos, instance_map=immutabledict(positions)
-        )
+        return MultiWriterStreamToken.from_generator(self._receipts_id_gen)
 
     def get_receipt_stream_id_for_instance(self, instance_name: str) -> int:
         return self._receipts_id_gen.get_current_token_for_writer(instance_name)

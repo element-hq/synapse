@@ -134,7 +134,10 @@ class ApplicationServiceApi(SimpleHttpClient):
         self.config = hs.config.appservice
 
         self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "as_protocol_meta", timeout_ms=HOUR_IN_MS
+            clock=hs.get_clock(),
+            name="as_protocol_meta",
+            server_name=self.server_name,
+            timeout_ms=HOUR_IN_MS,
         )
 
     def _get_headers(self, service: "ApplicationService") -> Dict[bytes, List[bytes]]:
@@ -560,6 +563,9 @@ class ApplicationServiceApi(SimpleHttpClient):
                         )
                         and service.is_interested_in_user(e.state_key)
                     ),
+                    # Appservices are considered 'trusted' by the admin and should have
+                    # applicable metadata on their events.
+                    include_admin_metadata=True,
                 ),
             )
             for e in events

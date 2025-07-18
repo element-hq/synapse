@@ -175,6 +175,7 @@ def login_id_phone_to_thirdparty(identifier: JsonDict) -> Dict[str, str]:
 
     # Accept both "phone" and "number" as valid keys in m.id.phone
     phone_number = identifier.get("phone", identifier["number"])
+    assert isinstance(phone_number, str)
 
     # Convert user-provided phone number to a consistent representation
     msisdn = phone_number_to_msisdn(identifier["country"], phone_number)

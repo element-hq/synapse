@@ -909,7 +909,10 @@ class RootConfig:
 
 
 def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]:
-    """Read the config files into a dict
+    """Read the config files and shallowly merge them into a dict.
+
+    Successive configurations are shallowly merged into ones provided earlier,
+    i.e., entirely replacing top-level sections of the configuration.
 
     Args:
         config_files: A list of the config files to read

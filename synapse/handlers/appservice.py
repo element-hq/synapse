@@ -124,7 +124,9 @@ class ApplicationServicesHandler:
 
     @wrap_as_background_process("notify_interested_services")
     async def _notify_interested_services(self, max_token: RoomStreamToken) -> None:
-        with Measure(self.clock, "notify_interested_services"):
+        with Measure(
+            self.clock, name="notify_interested_services", server_name=self.server_name
+        ):
             self.is_processing = True
             try:
                 upper_bound = -1
@@ -341,7 +343,11 @@ class ApplicationServicesHandler:
         users: Collection[Union[str, UserID]],
     ) -> None:
         logger.debug("Checking interested services for %s", stream_key)
-        with Measure(self.clock, "notify_interested_services_ephemeral"):
+        with Measure(
+            self.clock,
+            name="notify_interested_services_ephemeral",
+            server_name=self.server_name,
+        ):
             for service in services:
                 if stream_key == StreamKeyType.TYPING:
                     # Note that we don't persist the token (via set_appservice_stream_type_pos)
@@ -643,7 +649,8 @@ class ApplicationServicesHandler:
 
         # Fetch the users who have modified their device list since then.
         users_with_changed_device_lists = await self.store.get_all_devices_changed(
-            from_key, to_key=new_key
+            MultiWriterStreamToken(stream=from_key),
+            to_key=MultiWriterStreamToken(stream=new_key),
         )
 
         # Filter out any users the application service is not interested in
@@ -851,7 +858,7 @@ class ApplicationServicesHandler:
 
         # user not found; could be the AS though, so check.
         services = self.store.get_app_services()
-        service_list = [s for s in services if s.sender == user_id]
+        service_list = [s for s in services if s.sender.to_string() == user_id]
         return len(service_list) == 0
 
     async def _check_user_exists(self, user_id: str) -> bool:

@@ -44,7 +44,11 @@ from synapse.api.errors import (
     UnredactedContentDeletedError,
 )
 from synapse.api.filtering import Filter
-from synapse.events.utils import SerializeEventConfig, format_event_for_client_v2
+from synapse.events.utils import (
+    SerializeEventConfig,
+    format_event_for_client_v2,
+    serialize_event,
+)
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     ResolveRoomIdMixin,
@@ -198,6 +202,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.message_handler = hs.get_message_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
@@ -268,7 +273,14 @@ class RoomStateEventRestServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         if format == "event":
-            event = format_event_for_client_v2(data.get_dict())
+            event = serialize_event(
+                data,
+                self.clock.time_msec(),
+                config=SerializeEventConfig(
+                    event_format=format_event_for_client_v2,
+                    requester=requester,
+                ),
+            )
             return 200, event
         elif format == "content":
             return 200, data.get_dict()["content"]

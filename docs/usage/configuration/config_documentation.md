@@ -1925,9 +1925,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_delayed_event_mgmt:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -2084,6 +2083,23 @@ Defaults to `"50M"`.
 Example configuration:
 ```yaml
 max_upload_size: 60M
+```
+---
+### `media_upload_limits`
+
+*(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+
+An empty list means no limits are applied.
+
+Defaults to `[]`.
+
+Example configuration:
+```yaml
+media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
 ```
 ---
 ### `max_image_pixels`
@@ -2340,6 +2356,21 @@ Example configuration:
 recaptcha_public_key: YOUR_PUBLIC_KEY
 ```
 ---
+### `recaptcha_public_key_path`
+
+*(string|null)* An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows the public key to be specified in an external file.
+
+The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
+
+_Added in Synapse 1.135.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_public_key_path: /path/to/key/file
+```
+---
 ### `recaptcha_private_key`
 
 *(string|null)* This homeserver's ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
@@ -2347,6 +2378,21 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 Example configuration:
 ```yaml
 recaptcha_private_key: YOUR_PRIVATE_KEY
+```
+---
+### `recaptcha_private_key_path`
+
+*(string|null)* An alternative to [`recaptcha_private_key`](#recaptcha_private_key): allows the private key to be specified in an external file.
+
+The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
+
+_Added in Synapse 1.135.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_private_key_path: /path/to/key/file
 ```
 ---
 ### `enable_registration_captcha`
@@ -3761,7 +3807,11 @@ encryption_enabled_by_default_for_room_type: invite
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): Defines whether users can search the user directory. If false then empty responses are returned to all queries. Defaults to `true`.
+* `enabled` (boolean): Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.
+
+  *Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.*
+
+  Defaults to `true`.
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 
@@ -4290,6 +4340,8 @@ This setting has the following sub-options:
 * `presence` (string): Name of a worker assigned to the `presence` stream.
 
 * `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
+
+* `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
 
 Example configuration:
 ```yaml

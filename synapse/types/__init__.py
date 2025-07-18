@@ -75,6 +75,7 @@ if TYPE_CHECKING:
     from synapse.appservice.api import ApplicationService
     from synapse.storage.databases.main import DataStore, PurgeEventsStore
     from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
+    from synapse.storage.util.id_generators import MultiWriterIdGenerator
 
 
 logger = logging.getLogger(__name__)
@@ -570,6 +571,25 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
             ),
         )
 
+    @classmethod
+    def from_generator(cls, generator: "MultiWriterIdGenerator") -> Self:
+        """Get the current token out of a MultiWriterIdGenerator"""
+
+        # The `min_pos` is the minimum position that we know all instances
+        # have finished persisting to, so we only care about instances whose
+        # positions are ahead of that. (Instance positions can be behind the
+        # min position as there are times we can work out that the minimum
+        # position is ahead of the naive minimum across all current
+        # positions. See MultiWriterIdGenerator for details)
+        min_pos = generator.get_current_token()
+        positions = {
+            instance: position
+            for instance, position in generator.get_positions().items()
+            if position > min_pos
+        }
+
+        return cls(stream=min_pos, instance_map=immutabledict(positions))
+
 
 @attr.s(frozen=True, slots=True, order=False)
 class RoomStreamToken(AbstractMultiWriterStreamToken):
@@ -980,7 +1000,9 @@ class StreamToken:
     account_data_key: int
     push_rules_key: int
     to_device_key: int
-    device_list_key: int
+    device_list_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
     # Note that the groups key is no longer used and may have bogus values.
     groups_key: int
     un_partial_stated_rooms_key: int
@@ -1021,7 +1043,9 @@ class StreamToken:
                 account_data_key=int(account_data_key),
                 push_rules_key=int(push_rules_key),
                 to_device_key=int(to_device_key),
-                device_list_key=int(device_list_key),
+                device_list_key=await MultiWriterStreamToken.parse(
+                    store, device_list_key
+                ),
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
             )
@@ -1040,7 +1064,7 @@ class StreamToken:
                 str(self.account_data_key),
                 str(self.push_rules_key),
                 str(self.to_device_key),
-                str(self.device_list_key),
+                await self.device_list_key.to_string(store),
                 # Note that the groups key is no longer used, but it is still
                 # serialized so that there will not be confusion in the future
                 # if additional tokens are added.
@@ -1069,6 +1093,12 @@ class StreamToken:
                 StreamKeyType.RECEIPT, self.receipt_key.copy_and_advance(new_value)
             )
             return new_token
+        elif key == StreamKeyType.DEVICE_LIST:
+            new_token = self.copy_and_replace(
+                StreamKeyType.DEVICE_LIST,
+                self.device_list_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1087,7 +1117,11 @@ class StreamToken:
 
     @overload
     def get_field(
-        self, key: Literal[StreamKeyType.RECEIPT]
+        self,
+        key: Literal[
+            StreamKeyType.RECEIPT,
+            StreamKeyType.DEVICE_LIST,
+        ],
     ) -> MultiWriterStreamToken: ...
 
     @overload
@@ -1095,7 +1129,6 @@ class StreamToken:
         self,
         key: Literal[
             StreamKeyType.ACCOUNT_DATA,
-            StreamKeyType.DEVICE_LIST,
             StreamKeyType.PRESENCE,
             StreamKeyType.PUSH_RULES,
             StreamKeyType.TO_DEVICE,
@@ -1161,7 +1194,16 @@ class StreamToken:
 
 
 StreamToken.START = StreamToken(
-    RoomStreamToken(stream=0), 0, 0, MultiWriterStreamToken(stream=0), 0, 0, 0, 0, 0, 0
+    room_key=RoomStreamToken(stream=0),
+    presence_key=0,
+    typing_key=0,
+    receipt_key=MultiWriterStreamToken(stream=0),
+    account_data_key=0,
+    push_rules_key=0,
+    to_device_key=0,
+    device_list_key=MultiWriterStreamToken(stream=0),
+    groups_key=0,
+    un_partial_stated_rooms_key=0,
 )
 
 

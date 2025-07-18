@@ -1,0 +1,1 @@
+Fix the MAS integration not working when Synapse is started with `--daemonize` or using `synctl`.

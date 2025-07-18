@@ -200,6 +200,7 @@ class UrlPreviewer:
         # JSON-encoded OG metadata
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
             cache_name="url_previews",
+            server_name=self.server_name,
             clock=self.clock,
             # don't spider URLs more often than once an hour
             expiry_ms=ONE_HOUR,

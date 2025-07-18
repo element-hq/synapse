@@ -79,6 +79,7 @@ from synapse.types import (
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.util import json_encoder
+from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.stringutils import non_null_str_or_none
 
@@ -3113,7 +3114,10 @@ class PersistEventsStore:
     def _store_room_topic_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
         if isinstance(event.content.get("topic"), str):
             self.store_event_search_txn(
-                txn, event, "content.topic", event.content["topic"]
+                txn,
+                event,
+                "content.topic",
+                get_plain_text_topic_from_event_content(event.content) or "",
             )
 
     def _store_room_name_txn(self, txn: LoggingTransaction, event: EventBase) -> None:

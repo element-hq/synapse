@@ -12,8 +12,10 @@
 
 from typing import Awaitable, Mapping
 
+from synapse.types import ISynapseReactor
+
 class HttpClient:
-    def __init__(self, user_agent: str) -> None: ...
+    def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None: ...
     def get(self, url: str, response_limit: int) -> Awaitable[bytes]: ...
     def post(
         self,
