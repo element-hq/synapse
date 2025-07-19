@@ -29,7 +29,7 @@ SLAs. ESS supports any Matrix-compatible clients.
 .. contents::
 
 🛠️ Installation and configuration
-===============================
+==================================
 
 The Synapse documentation describes `how to install Synapse <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. We recommend using
 `Docker images <https://element-hq.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
