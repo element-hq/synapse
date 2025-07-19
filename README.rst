@@ -24,7 +24,7 @@ ESS builds on Synapse to offer a complete Matrix-based backend including the ful
 giving admins the power to easily manage an organization-wide
 deployment. It includes advanced identity management, auditing,
 moderation and data retention options as well as Long-Term Support and
-SLAs. ESS can be used to support any Matrix-based frontend client.
+SLAs. ESS can be used to support any Matrix-compatible client.
 
 .. contents::
 
