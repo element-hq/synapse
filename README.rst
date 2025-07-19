@@ -162,16 +162,15 @@ the public internet. Without it, anyone can freely register accounts on your hom
 This can be exploited by attackers to create spambots targeting the rest of the Matrix
 federation.
 
-Your new user name will be formed partly from the ``server_name``, and partly
-from a localpart you specify when you create the account. Your name will take
-the form of::
+Your new Matrix ID will be formed partly from the ``server_name``, and partly
+from a localpart you specify when you create the account in the form of::
 
     @localpart:my.domain.name
 
 (pronounced "at localpart on my dot domain dot name").
 
 As when logging in, you will need to specify a "Custom server".  Specify your
-desired ``localpart`` in the 'User name' box.
+desired ``localpart`` in the 'Username' box.
 
 🎯 Troubleshooting and support
 ==============================
