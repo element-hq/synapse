@@ -176,7 +176,7 @@ class MasProvisionUserResource(BaseTestCase):
             },
         )
 
-        # This crated the user, hence the 201 status code
+        # This created the user, hence the 201 status code
         self.assertEqual(channel.code, 201, channel.json_body)
         self.assertEqual(channel.json_body, {})
 
