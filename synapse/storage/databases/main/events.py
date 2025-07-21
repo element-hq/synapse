@@ -78,6 +78,7 @@ from synapse.types import (
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.util import json_encoder
+from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.stringutils import non_null_str_or_none
 
@@ -3081,6 +3082,10 @@ class PersistEventsStore:
             # Upsert into the threads table, but only overwrite the value if the
             # new event is of a later topological order OR if the topological
             # ordering is equal, but the stream ordering is later.
+            # (Note by definition that the stream ordering will always be later
+            # unless this is a backfilled event [= negative stream ordering]
+            # because we are only persisting this event now and stream_orderings
+            # are strictly monotonically increasing)
             sql = """
             INSERT INTO threads (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
             VALUES (?, ?, ?, ?, ?)
@@ -3198,7 +3203,10 @@ class PersistEventsStore:
     def _store_room_topic_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
         if isinstance(event.content.get("topic"), str):
             self.store_event_search_txn(
-                txn, event, "content.topic", event.content["topic"]
+                txn,
+                event,
+                "content.topic",
+                get_plain_text_topic_from_event_content(event.content) or "",
             )
 
     def _store_room_name_txn(self, txn: LoggingTransaction, event: EventBase) -> None:

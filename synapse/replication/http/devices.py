@@ -34,6 +34,92 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class ReplicationNotifyDeviceUpdateRestServlet(ReplicationEndpoint):
+    """Notify a device writer that a user's device list has changed.
+
+    Request format:
+
+        POST /_synapse/replication/notify_device_update/:user_id
+
+        {
+            "device_ids": ["JLAFKJWSCS", "JLAFKJWSCS"]
+        }
+    """
+
+    NAME = "notify_device_update"
+    PATH_ARGS = ("user_id",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+        self.store = hs.get_datastores().main
+        self.clock = hs.get_clock()
+
+    @staticmethod
+    async def _serialize_payload(  # type: ignore[override]
+        user_id: str, device_ids: List[str]
+    ) -> JsonDict:
+        return {"device_ids": device_ids}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        device_ids = content["device_ids"]
+
+        span = active_span()
+        if span:
+            span.set_tag("user_id", user_id)
+            span.set_tag("device_ids", f"{device_ids!r}")
+
+        await self.device_handler.notify_device_update(user_id, device_ids)
+
+        return 200, {}
+
+
+class ReplicationNotifyUserSignatureUpdateRestServlet(ReplicationEndpoint):
+    """Notify a device writer that a user have made new signatures of other users.
+
+    Request format:
+
+        POST /_synapse/replication/notify_user_signature_update/:from_user_id
+
+        {
+            "user_ids": ["@alice:example.org", "@bob:example.org", ...]
+        }
+    """
+
+    NAME = "notify_user_signature_update"
+    PATH_ARGS = ("from_user_id",)
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+        self.store = hs.get_datastores().main
+        self.clock = hs.get_clock()
+
+    @staticmethod
+    async def _serialize_payload(from_user_id: str, user_ids: List[str]) -> JsonDict:  # type: ignore[override]
+        return {"user_ids": user_ids}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, from_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        user_ids = content["user_ids"]
+
+        span = active_span()
+        if span:
+            span.set_tag("from_user_id", from_user_id)
+            span.set_tag("user_ids", f"{user_ids!r}")
+
+        await self.device_handler.notify_user_signature_update(from_user_id, user_ids)
+
+        return 200, {}
+
+
 class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
     """Ask master to resync the device list for multiple users from the same
     remote server by contacting their server.
@@ -73,11 +159,7 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        from synapse.handlers.device import DeviceHandler
-
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_list_updater = handler.device_list_updater
+        self.device_list_updater = hs.get_device_handler().device_list_updater
 
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
@@ -103,32 +185,10 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
         return 200, multi_user_devices
 
 
+# FIXME(2025-07-22): Remove this on the next release, this will only get used
+# during rollout to Synapse 1.135 and can be removed after that release.
 class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
-    """Ask master to upload keys for the user and send them out over federation to
-    update other servers.
-
-    For now, only the master is permitted to handle key upload requests;
-    any worker can handle key query requests (since they're read-only).
-
-    Calls to e2e_keys_handler.upload_keys_for_user(user_id, device_id, keys) on
-    the main process to accomplish this.
-
-    Request format for this endpoint (borrowed and expanded from KeyUploadServlet):
-
-        POST /_synapse/replication/upload_keys_for_user
-
-    {
-        "user_id": "<user_id>",
-        "device_id": "<device_id>",
-        "keys": {
-            ....this part can be found in KeyUploadServlet in rest/client/keys.py....
-            or as defined in https://spec.matrix.org/v1.4/client-server-api/#post_matrixclientv3keysupload
-        }
-    }
-
-    Response is equivalent to ` /_matrix/client/v3/keys/upload` found in KeyUploadServlet
-
-    """
+    """Unused endpoint, kept for backwards compatibility during rollout."""
 
     NAME = "upload_keys_for_user"
     PATH_ARGS = ()
@@ -165,6 +225,71 @@ class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
         return 200, results
 
 
+class ReplicationHandleNewDeviceUpdateRestServlet(ReplicationEndpoint):
+    """Wake up a device writer to send local device list changes as federation outbound pokes.
+
+    Request format:
+
+        POST /_synapse/replication/handle_new_device_update
+
+        {}
+    """
+
+    NAME = "handle_new_device_update"
+    PATH_ARGS = ()
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+
+    @staticmethod
+    async def _serialize_payload() -> JsonDict:  # type: ignore[override]
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict
+    ) -> Tuple[int, JsonDict]:
+        await self.device_handler.handle_new_device_update()
+        return 200, {}
+
+
+class ReplicationDeviceHandleRoomUnPartialStated(ReplicationEndpoint):
+    """Handles sending appropriate device list updates in a room that has
+    gone from partial to full state.
+
+    Request format:
+
+        POST /_synapse/replication/device_handle_room_un_partial_stated/:room_id
+
+        {}
+    """
+
+    NAME = "device_handle_room_un_partial_stated"
+    PATH_ARGS = ("room_id",)
+    CACHE = True
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self.device_handler = hs.get_device_handler()
+
+    @staticmethod
+    async def _serialize_payload(room_id: str) -> JsonDict:  # type: ignore[override]
+        return {}
+
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict, room_id: str
+    ) -> Tuple[int, JsonDict]:
+        await self.device_handler.handle_room_un_partial_stated(room_id)
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    ReplicationNotifyDeviceUpdateRestServlet(hs).register(http_server)
+    ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
     ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
+    ReplicationHandleNewDeviceUpdateRestServlet(hs).register(http_server)
     ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
+    ReplicationDeviceHandleRoomUnPartialStated(hs).register(http_server)

@@ -28,7 +28,7 @@ from tests import unittest
 class DictCacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.cache: DictionaryCache[str, str, str] = DictionaryCache(
-            "foobar", max_entries=10
+            name="foobar", server_name="test_server", max_entries=10
         )
 
     def test_simple_cache_hit_full(self) -> None:

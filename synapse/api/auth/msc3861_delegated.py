@@ -176,6 +176,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         assert self._config.client_id, "No client_id provided"
         assert auth_method is not None, "Invalid client_auth_method provided"
 
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
@@ -183,7 +184,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
 
         self._rust_http_client = HttpClient(
-            user_agent=self._http_client.user_agent.decode("utf8")
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
         )
 
         # # Token Introspection Cache
@@ -206,8 +208,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         #   In this case, the device still exists and it's not the end of the world for
         #   the old access token to continue working for a short time.
         self._introspection_cache: ResponseCache[str] = ResponseCache(
-            self._clock,
-            "token_introspection",
+            clock=self._clock,
+            name="token_introspection",
+            server_name=self.server_name,
             timeout_ms=120_000,
             # don't log because the keys are access tokens
             enable_logging=False,
@@ -366,6 +369,12 @@ class MSC3861DelegatedAuth(BaseAuth):
     async def is_server_admin(self, requester: Requester) -> bool:
         return "urn:synapse:admin:*" in requester.scope
 
+    def _is_access_token_the_admin_token(self, token: str) -> bool:
+        admin_token = self._admin_token()
+        if admin_token is None:
+            return False
+        return token == admin_token
+
     async def get_user_by_req(
         self,
         request: SynapseRequest,
@@ -431,7 +440,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             requester = await self.get_user_by_access_token(access_token, allow_expired)
 
         # Do not record requests from MAS using the virtual `__oidc_admin` user.
-        if access_token != self._admin_token():
+        if not self._is_access_token_the_admin_token(access_token):
             await self._record_request(request, requester)
 
         if not allow_guest and requester.is_guest:
@@ -467,17 +476,29 @@ class MSC3861DelegatedAuth(BaseAuth):
 
             raise UnrecognizedRequestError(code=404)
 
+    def is_request_using_the_admin_token(self, request: SynapseRequest) -> bool:
+        """
+        Check if the request is using the admin token.
+
+        Args:
+            request: The request to check.
+
+        Returns:
+            True if the request is using the admin token, False otherwise.
+        """
+        access_token = self.get_access_token_from_request(request)
+        return self._is_access_token_the_admin_token(access_token)
+
     async def get_user_by_access_token(
         self,
         token: str,
         allow_expired: bool = False,
     ) -> Requester:
-        admin_token = self._admin_token()
-        if admin_token is not None and token == admin_token:
+        if self._is_access_token_the_admin_token(token):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
-            logger.info("Admin toked used")
+            logger.info("Admin token used")
             # XXX: that user doesn't exist and won't be provisioned.
             # This is mostly fine for admin calls, but we should also think about doing
             # requesters without a user_id.

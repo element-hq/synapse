@@ -237,7 +237,9 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "user_dir_delta"):
+            with Measure(
+                self.clock, name="user_dir_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
                 if self.pos == room_max_stream_ordering:
                     return

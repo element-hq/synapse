@@ -42,6 +42,9 @@ class CasConfig(Config):
         self.cas_enabled = cas_config and cas_config.get("enabled", True)
 
         if self.cas_enabled:
+            if not isinstance(cas_config, dict):
+                raise ConfigError("Must be a dictionary", ("cas_config",))
+
             self.cas_server_url = cas_config["server_url"]
 
             # TODO Update this to a _synapse URL.

@@ -553,6 +553,51 @@ class RoomStateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
         self.assertEqual(channel.json_body, {"membership": "join"})
 
+    def test_get_state_format_content(self) -> None:
+        """Test response of a `/rooms/$room_id/state/$event_type?format=content` request."""
+        room_id = self.helper.create_room_as(self.user_id)
+        channel1 = self.make_request(
+            "GET",
+            "/rooms/%s/state/m.room.member/%s?format=content"
+            % (
+                room_id,
+                self.user_id,
+            ),
+        )
+        self.assertEqual(channel1.code, HTTPStatus.OK, channel1.json_body)
+        self.assertEqual(channel1.json_body, {"membership": "join"})
+        channel2 = self.make_request(
+            "GET",
+            "/rooms/%s/state/m.room.member/%s"
+            % (
+                room_id,
+                self.user_id,
+            ),
+        )
+        self.assertEqual(channel2.code, HTTPStatus.OK, channel2.json_body)
+        # "content" is the default format.
+        self.assertEqual(channel1.json_body, channel2.json_body)
+
+    def test_get_state_format_event(self) -> None:
+        """Test response of a `/rooms/$room_id/state/$event_type?format=event` request."""
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state/m.room.member/%s?format=event"
+            % (
+                room_id,
+                self.user_id,
+            ),
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["content"], {"membership": "join"})
+        self.assertEqual(channel.json_body["room_id"], room_id)
+        self.assertRegex(channel.json_body["event_id"], r"\$.+")
+        self.assertEqual(channel.json_body["type"], "m.room.member")
+        self.assertEqual(channel.json_body["sender"], self.user_id)
+        self.assertEqual(channel.json_body["state_key"], self.user_id)
+        self.assertTrue(type(channel.json_body["origin_server_ts"]) is int)
+
 
 class RoomsMemberListTestCase(RoomBase):
     """Tests /rooms/$room_id/members/list REST events."""
@@ -757,6 +802,59 @@ class RoomsCreateTestCase(RoomBase):
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
         self.assertEqual(37, channel.resource_usage.db_txn_count)
+
+    def test_post_room_topic(self) -> None:
+        # POST with topic key, expect new room id
+        channel = self.make_request("POST", "/createRoom", b'{"topic":"shenanigans"}')
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertTrue("room_id" in channel.json_body)
+        room_id = channel.json_body["room_id"]
+
+        # GET topic event, expect content from topic key
+        channel = self.make_request("GET", "/rooms/%s/state/m.room.topic" % (room_id,))
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertEqual(
+            {"topic": "shenanigans", "m.topic": {"m.text": [{"body": "shenanigans"}]}},
+            channel.json_body,
+        )
+
+    def test_post_room_topic_initial_state(self) -> None:
+        # POST with m.room.topic in initial state, expect new room id
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            b'{"initial_state":[{"type": "m.room.topic", "content": {"topic": "foobar"}}]}',
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertTrue("room_id" in channel.json_body)
+        room_id = channel.json_body["room_id"]
+
+        # GET topic event, expect content from initial state
+        channel = self.make_request("GET", "/rooms/%s/state/m.room.topic" % (room_id,))
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertEqual(
+            {"topic": "foobar"},
+            channel.json_body,
+        )
+
+    def test_post_room_topic_overriding_initial_state(self) -> None:
+        # POST with m.room.topic in initial state and topic key, expect new room id
+        channel = self.make_request(
+            "POST",
+            "/createRoom",
+            b'{"initial_state":[{"type": "m.room.topic", "content": {"topic": "foobar"}}], "topic":"shenanigans"}',
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertTrue("room_id" in channel.json_body)
+        room_id = channel.json_body["room_id"]
+
+        # GET topic event, expect content from topic key
+        channel = self.make_request("GET", "/rooms/%s/state/m.room.topic" % (room_id,))
+        self.assertEqual(HTTPStatus.OK, channel.code)
+        self.assertEqual(
+            {"topic": "shenanigans", "m.topic": {"m.text": [{"body": "shenanigans"}]}},
+            channel.json_body,
+        )
 
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
@@ -1427,7 +1525,7 @@ class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
 
         mock_load_appservices = Mock(return_value=[self.appservice])

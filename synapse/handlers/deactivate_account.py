@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
-from synapse.handlers.device import DeviceHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import Codes, Requester, UserID, create_requester
 
@@ -84,10 +83,6 @@ class DeactivateAccountHandler:
         Returns:
             True if identity server supports removing threepids, otherwise False.
         """
-
-        # This can only be called on the main process.
-        assert isinstance(self._device_handler, DeviceHandler)
-
         # Check if this user can be deactivated
         if not await self._third_party_rules.check_can_deactivate_user(
             user_id, by_admin
@@ -191,6 +186,9 @@ class DeactivateAccountHandler:
 
         # Remove account data (including ignored users and push rules).
         await self.store.purge_account_data_for_user(user_id)
+
+        # Remove thread subscriptions for the user
+        await self.store.purge_thread_subscription_settings_for_user(user_id)
 
         # Delete any server-side backup keys
         await self.store.bulk_delete_backup_keys_and_versions_for_user(user_id)

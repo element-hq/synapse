@@ -55,6 +55,7 @@ class ProfileHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.hs = hs
@@ -92,9 +93,7 @@ class ProfileHandler:
 
         if self.hs.is_mine(target_user):
             profileinfo = await self.store.get_profileinfo(target_user)
-            extra_fields = {}
-            if self.hs.config.experimental.msc4133_enabled:
-                extra_fields = await self.store.get_profile_fields(target_user)
+            extra_fields = await self.store.get_profile_fields(target_user)
 
             if (
                 profileinfo.display_name is None
@@ -539,21 +538,27 @@ class ProfileHandler:
         response: JsonDict = {}
         try:
             if just_field is None or just_field == ProfileFields.DISPLAYNAME:
-                response["displayname"] = await self.store.get_profile_displayname(user)
-
+                displayname = await self.store.get_profile_displayname(user)
+                # do not set the displayname field if it is None,
+                # since then we send a null in the JSON response
+                if displayname is not None:
+                    response["displayname"] = displayname
             if just_field is None or just_field == ProfileFields.AVATAR_URL:
-                response["avatar_url"] = await self.store.get_profile_avatar_url(user)
+                avatar_url = await self.store.get_profile_avatar_url(user)
+                # do not set the avatar_url field if it is None,
+                # since then we send a null in the JSON response
+                if avatar_url is not None:
+                    response["avatar_url"] = avatar_url
 
-            if self.hs.config.experimental.msc4133_enabled:
-                if just_field is None:
-                    response.update(await self.store.get_profile_fields(user))
-                elif just_field not in (
-                    ProfileFields.DISPLAYNAME,
-                    ProfileFields.AVATAR_URL,
-                ):
-                    response[just_field] = await self.store.get_profile_field(
-                        user, just_field
-                    )
+            if just_field is None:
+                response.update(await self.store.get_profile_fields(user))
+            elif just_field not in (
+                ProfileFields.DISPLAYNAME,
+                ProfileFields.AVATAR_URL,
+            ):
+                response[just_field] = await self.store.get_profile_field(
+                    user, just_field
+                )
         except StoreError as e:
             if e.code == 404:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)

@@ -33,7 +33,7 @@ from twisted.internet.asyncioreactor import AsyncioSelectorReactor
 from synapse.metrics._types import Collector
 
 try:
-    from selectors import KqueueSelector
+    from selectors import KqueueSelector  # type: ignore[attr-defined]
 except ImportError:
 
     class KqueueSelector:  # type: ignore[no-redef]

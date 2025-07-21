@@ -126,7 +126,7 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
             The application service or None.
         """
         for service in self.services_cache:
-            if service.sender == user_id:
+            if service.sender.to_string() == user_id:
                 return service
         return None
 

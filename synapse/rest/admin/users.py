@@ -1414,7 +1414,7 @@ class RedactUser(RestServlet):
     """
     Redact all the events of a given user in the given rooms or if empty dict is provided
     then all events in all rooms user is member of. Kicks off a background process and
-    returns an id that can be used to check on the progress of the redaction progress
+    returns an id that can be used to check on the progress of the redaction progress.
     """
 
     PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
@@ -1428,6 +1428,7 @@ class RedactUser(RestServlet):
         rooms: List[StrictStr]
         reason: Optional[StrictStr]
         limit: Optional[StrictInt]
+        use_admin: Optional[StrictBool]
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1455,8 +1456,12 @@ class RedactUser(RestServlet):
             )
             rooms = current_rooms + banned_rooms
 
+        use_admin = body.use_admin
+        if not use_admin:
+            use_admin = False
+
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, rooms, requester.serialize(), body.reason, limit
+            user_id, rooms, requester.serialize(), use_admin, body.reason, limit
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}

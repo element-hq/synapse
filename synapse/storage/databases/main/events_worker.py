@@ -269,8 +269,9 @@ class EventsWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._curr_state_delta_stream_cache: StreamChangeCache = StreamChangeCache(
-            "_curr_state_delta_stream_cache",
-            min_curr_state_delta_id,
+            name="_curr_state_delta_stream_cache",
+            server_name=self.server_name,
+            current_stream_pos=min_curr_state_delta_id,
             prefilled_cache=curr_state_delta_prefill,
         )
 
@@ -283,6 +284,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
             AsyncLruCache(
+                server_name=self.server_name,
                 cache_name="*getEvent*",
                 max_size=hs.config.caches.event_cache_size,
                 # `extra_index_cb` Returns a tuple as that is the key type
@@ -347,6 +349,19 @@ class EventsWorkerStore(SQLBaseStore):
             table="events",
             columns=("received_ts",),
             where_clause="type = 'm.room.member'",
+        )
+
+        # Added to support efficient reverse lookups on the foreign key
+        # (user_id, device_id) when deleting devices.
+        # We already had a UNIQUE index on these 4 columns but out-of-order
+        # so replace that one.
+        self.db_pool.updates.register_background_index_update(
+            update_name="event_txn_id_device_id_txn_id2",
+            index_name="event_txn_id_device_id_txn_id2",
+            table="event_txn_id_device_id",
+            columns=("user_id", "device_id", "room_id", "txn_id"),
+            unique=True,
+            replaces_index="event_txn_id_device_id_txn_id",
         )
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
@@ -1240,7 +1255,9 @@ class EventsWorkerStore(SQLBaseStore):
                 to event row. Note that it may well contain additional events that
                 were not part of this request.
         """
-        with Measure(self._clock, "_fetch_event_list"):
+        with Measure(
+            self._clock, name="_fetch_event_list", server_name=self.server_name
+        ):
             try:
                 events_to_fetch = {
                     event_id for events, _ in event_list for event_id in events
