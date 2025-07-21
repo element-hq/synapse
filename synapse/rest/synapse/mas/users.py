@@ -307,7 +307,7 @@ class MasReactivateUserResource(MasBaseResource):
 
         self.deactivate_account_handler = hs.get_deactivate_account_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
 
     async def _async_render_POST(
@@ -344,7 +344,7 @@ class MasSetDisplayNameResource(MasBaseResource):
         self.profile_handler = hs.get_profile_handler()
         self.auth_handler = hs.get_auth_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
         displayname: StrictStr
 
@@ -389,7 +389,7 @@ class MasUnsetDisplayNameResource(MasBaseResource):
         self.profile_handler = hs.get_profile_handler()
         self.auth_handler = hs.get_auth_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
 
     async def _async_render_POST(
@@ -435,7 +435,7 @@ class MasAllowCrossSigningResetResource(MasBaseResource):
 
         self.auth_handler = hs.get_auth_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
 
     async def _async_render_POST(

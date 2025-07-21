@@ -17,10 +17,11 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Tuple
 
-from synapse._pydantic_compat import BaseModel, StrictStr
+from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import NotFoundError
 from synapse.http.servlet import parse_and_validate_json_object_from_request
 from synapse.types import JsonDict, UserID
+from synapse.types.rest import RequestBodyModel
 
 if TYPE_CHECKING:
     from synapse.http.site import SynapseRequest
@@ -48,7 +49,7 @@ class MasUpsertDeviceResource(MasBaseResource):
 
         self.device_handler = hs.get_device_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
         display_name: Optional[StrictStr]
@@ -90,7 +91,7 @@ class MasDeleteDeviceResource(MasBaseResource):
 
         self.device_handler = hs.get_device_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
 
@@ -130,7 +131,7 @@ class MasUpdateDeviceDisplayNameResource(MasBaseResource):
 
         self.device_handler = hs.get_device_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
         display_name: StrictStr
@@ -173,7 +174,7 @@ class MasSyncDevicesResource(MasBaseResource):
 
         self.device_handler = hs.get_device_handler()
 
-    class PostBody(BaseModel):
+    class PostBody(RequestBodyModel):
         localpart: StrictStr
         devices: set[StrictStr]
 
