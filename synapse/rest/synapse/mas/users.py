@@ -15,9 +15,9 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple, TypedDict
 
-from synapse._pydantic_compat import BaseModel, StrictBool, StrictStr, root_validator
+from synapse._pydantic_compat import StrictBool, StrictStr, root_validator
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.http.servlet import (
     parse_and_validate_json_object_from_request,
@@ -49,16 +49,16 @@ class MasQueryUserResource(MasBaseResource):
     def __init__(self, hs: "HomeServer"):
         MasBaseResource.__init__(self, hs)
 
-    class Response(BaseModel):
-        user_id: StrictStr
-        display_name: Optional[StrictStr]
-        avatar_url: Optional[StrictStr]
-        is_suspended: StrictBool
-        is_deactivated: StrictBool
+    class Response(TypedDict):
+        user_id: str
+        display_name: Optional[str]
+        avatar_url: Optional[str]
+        is_suspended: bool
+        is_deactivated: bool
 
     async def _async_render_GET(
         self, request: "SynapseRequest"
-    ) -> Tuple[int, JsonDict]:
+    ) -> Tuple[int, Response]:
         self.assert_request_is_from_mas(request)
 
         localpart = parse_string(request, "localpart", required=True)
@@ -70,13 +70,13 @@ class MasQueryUserResource(MasBaseResource):
 
         profile = await self.store.get_profileinfo(user_id=user_id)
 
-        return HTTPStatus.OK, self.Response(
-            user_id=user_id.to_string(),
-            display_name=profile.display_name,
-            avatar_url=profile.avatar_url,
-            is_suspended=user.suspended,
-            is_deactivated=user.is_deactivated,
-        ).dict()
+        return HTTPStatus.OK, {
+            "user_id": user_id.to_string(),
+            "display_name": profile.display_name,
+            "avatar_url": profile.avatar_url,
+            "is_suspended": user.suspended,
+            "is_deactivated": user.is_deactivated,
+        }
 
 
 class MasProvisionUserResource(MasBaseResource):
