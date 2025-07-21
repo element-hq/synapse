@@ -168,8 +168,7 @@ class MasCreateDeviceResource(BaseTestCase):
             },
         )
 
-        # This might succeed or fail depending on implementation
-        # The device handler may create the device anyway
+        # We get a 404 here as the user doesn't exist
         self.assertEqual(channel.code, 404, channel.json_body)
 
 
