@@ -13,7 +13,7 @@
 
 from urllib.parse import urlencode
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
