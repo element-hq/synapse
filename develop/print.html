@@ -15802,7 +15802,7 @@ Max length, 512 bytes.</p>
 <p>See also the
 <a href="https://matrix.org/docs/spec/client_server/latest#get-matrix-client-r0-pushers">Client-Server API Spec on pushers</a>.</p>
 <h2 id="controlling-whether-a-user-is-shadow-banned"><a class="header" href="#controlling-whether-a-user-is-shadow-banned">Controlling whether a user is shadow-banned</a></h2>
-<p>Shadow-banning is a useful tool for moderating malicious or egregiously abusive users.
+<p>Shadow-banning is a useful tool for moderating malicious or egregiously abusive users. 
 A shadow-banned users receives successful responses to their client-server API requests,
 but the events are not propagated into rooms. This can be an effective tool as it
 (hopefully) takes longer for the user to realise they are being moderated before
@@ -15959,8 +15959,11 @@ for more information.</p>
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
 <h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
-<p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on redactions for a 
-local user. By default, we puppet the user who sent the message to redact it themselves. Redactions for non-local users are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified power level to issue redactions. </p>
+<p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on
+redactions for a local user. By default, we puppet the user who sent the message to redact it themselves.
+Redactions for non-local users are issued using the admin user, and will fail in rooms where the
+admin user is not admin/does not have the specified power level to issue redactions. An option
+is provided to override the default and allow the admin to issue the redactions in all cases.</p>
 <p>The API is </p>
 <pre><code>POST /_synapse/admin/v1/user/$user_id/redact
 
@@ -15968,7 +15971,7 @@ local user. By default, we puppet the user who sent the message to redact it the
   &quot;rooms&quot;: [&quot;!roomid1&quot;, &quot;!roomid2&quot;]
 }
 </code></pre>
-<p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted, 
+<p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted,
 otherwise all the events in the rooms provided in the request will be redacted. </p>
 <p>The API starts redaction process running, and returns immediately with a JSON body with
 a redact id which can be used to query the status of the redaction process:</p>
@@ -15989,7 +15992,10 @@ the user is a member of will be redacted</li>
 <p>The following JSON body parameters are optional:</p>
 <ul>
 <li><code>reason</code> - Reason the redaction is being requested, ie &quot;spam&quot;, &quot;abuse&quot;, etc. This will be included in each redaction event, and be visible to users.</li>
-<li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided</li>
+<li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided.</li>
+<li><code>use_admin</code> - If set to <code>true</code>, the admin user is used to issue the redactions, rather than puppeting the user. Useful
+when the admin is also the moderator of the rooms that require redactions. Note that the redactions will fail in rooms
+where the admin does not have the sufficient power level to issue the redactions.</li>
 </ul>
 <p><em>Added in Synapse 1.116.0.</em></p>
 <h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
