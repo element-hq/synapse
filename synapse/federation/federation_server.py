@@ -66,7 +66,7 @@ from synapse.federation.federation_base import (
     event_from_pdu_json,
 )
 from synapse.federation.persistence import TransactionActions
-from synapse.federation.units import Edu, Transaction
+from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import (
@@ -85,7 +85,6 @@ from synapse.logging.opentracing import (
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
-    ReplicationGetQueryRestServlet,
 )
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
@@ -160,7 +159,10 @@ class FederationServer(FederationBase):
 
         # We cache results for transaction with the same ID
         self._transaction_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "fed_txn_handler", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="fed_txn_handler",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self.transaction_actions = TransactionActions(self.store)
@@ -170,10 +172,18 @@ class FederationServer(FederationBase):
         # We cache responses to state queries, as they take a while and often
         # come in waves.
         self._state_resp_cache: ResponseCache[Tuple[str, Optional[str]]] = (
-            ResponseCache(hs.get_clock(), "state_resp", timeout_ms=30000)
+            ResponseCache(
+                clock=hs.get_clock(),
+                name="state_resp",
+                server_name=self.server_name,
+                timeout_ms=30000,
+            )
         )
         self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "state_ids_resp", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="state_ids_resp",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self._federation_metrics_domains = (
@@ -469,7 +479,12 @@ class FederationServer(FederationBase):
                 logger.info("Ignoring PDU: %s", e)
                 continue
 
-            event = event_from_pdu_json(p, room_version)
+            try:
+                event = event_from_pdu_json(p, room_version)
+            except SynapseError as e:
+                logger.info("Ignoring PDU for failing to deserialize: %s", e)
+                continue
+
             pdus_by_room.setdefault(room_id, []).append(event)
 
             if event.origin_server_ts > newest_pdu_ts:
@@ -636,8 +651,8 @@ class FederationServer(FederationBase):
         )
 
         return {
-            "pdus": [pdu.get_pdu_json() for pdu in pdus],
-            "auth_chain": [pdu.get_pdu_json() for pdu in auth_chain],
+            "pdus": serialize_and_filter_pdus(pdus),
+            "auth_chain": serialize_and_filter_pdus(auth_chain),
         }
 
     async def on_pdu_request(
@@ -696,6 +711,12 @@ class FederationServer(FederationBase):
         pdu = event_from_pdu_json(content, room_version)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, pdu.room_id)
+        if await self._spam_checker_module_callbacks.should_drop_federated_event(pdu):
+            logger.info(
+                "Federated event contains spam, dropping %s",
+                pdu.event_id,
+            )
+            raise SynapseError(403, Codes.FORBIDDEN)
         try:
             pdu = await self._check_sigs_and_hash(room_version, pdu)
         except InvalidEventSignatureError as e:
@@ -761,8 +782,8 @@ class FederationServer(FederationBase):
         event_json = event.get_pdu_json(time_now)
         resp = {
             "event": event_json,
-            "state": [p.get_pdu_json(time_now) for p in state_events],
-            "auth_chain": [p.get_pdu_json(time_now) for p in auth_chain_events],
+            "state": serialize_and_filter_pdus(state_events, time_now),
+            "auth_chain": serialize_and_filter_pdus(auth_chain_events, time_now),
             "members_omitted": caller_supports_partial_state,
         }
 
@@ -917,7 +938,8 @@ class FederationServer(FederationBase):
             # joins) or the full state (for full joins).
             # Return a 404 as we would if we weren't in the room at all.
             logger.info(
-                f"Rejecting /send_{membership_type} to %s because it's a partial state room",
+                "Rejecting /send_%s to %s because it's a partial state room",
+                membership_type,
                 room_id,
             )
             raise SynapseError(
@@ -1005,7 +1027,7 @@ class FederationServer(FederationBase):
 
             time_now = self._clock.time_msec()
             auth_pdus = await self.handler.on_event_auth(event_id)
-            res = {"auth_chain": [a.get_pdu_json(time_now) for a in auth_pdus]}
+            res = {"auth_chain": serialize_and_filter_pdus(auth_pdus, time_now)}
         return 200, res
 
     async def on_query_client_keys(
@@ -1090,7 +1112,7 @@ class FederationServer(FederationBase):
 
             time_now = self._clock.time_msec()
 
-        return {"events": [ev.get_pdu_json(time_now) for ev in missing_events]}
+        return {"events": serialize_and_filter_pdus(missing_events, time_now)}
 
     async def on_openid_userinfo(self, token: str) -> Optional[str]:
         ts_now_ms = self._clock.time_msec()
@@ -1368,7 +1390,6 @@ class FederationHandlerRegistry:
         # and use them. However we have guards before we use them to ensure that
         # we don't route to ourselves, and in monolith mode that will always be
         # the case.
-        self._get_query_client = ReplicationGetQueryRestServlet.make_client(hs)
         self._send_edu = ReplicationFederationSendEduRestServlet.make_client(hs)
 
         self.edu_handlers: Dict[str, Callable[[str, dict], Awaitable[None]]] = {}
@@ -1456,10 +1477,6 @@ class FederationHandlerRegistry:
         handler = self.query_handlers.get(query_type)
         if handler:
             return await handler(args)
-
-        # Check if we can route it somewhere else that isn't us
-        if self._instance_name == "master":
-            return await self._get_query_client(query_type=query_type, args=args)
 
         # Uh oh, no handler! Let's raise an exception so the request returns an
         # error.

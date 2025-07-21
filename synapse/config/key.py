@@ -43,7 +43,7 @@ from unpaddedbase64 import decode_base64
 from synapse.types import JsonDict
 from synapse.util.stringutils import random_string, random_string_with_symbols
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, read_file
 
 if TYPE_CHECKING:
     from signedjson.key import VerifyKeyWithExpiry
@@ -91,6 +91,16 @@ To suppress this warning and continue using 'matrix.org', admins should set
 'suppress_key_server_warning' to 'true' in homeserver.yaml.
 --------------------------------------------------------------------------------"""
 
+CONFLICTING_MACAROON_SECRET_KEY_OPTS_ERROR = """\
+Conflicting options 'macaroon_secret_key' and 'macaroon_secret_key_path' are
+both defined in config file.
+"""
+
+CONFLICTING_FORM_SECRET_OPTS_ERROR = """\
+Conflicting options 'form_secret' and 'form_secret_path' are both defined in
+config file.
+"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -107,7 +117,11 @@ class KeyConfig(Config):
     section = "key"
 
     def read_config(
-        self, config: JsonDict, config_dir_path: str, **kwargs: Any
+        self,
+        config: JsonDict,
+        config_dir_path: str,
+        allow_secrets_in_config: bool,
+        **kwargs: Any,
     ) -> None:
         # the signing key can be specified inline or in a separate file
         if "signing_key" in config:
@@ -166,10 +180,21 @@ class KeyConfig(Config):
             )
         )
 
-        macaroon_secret_key: Optional[str] = config.get(
-            "macaroon_secret_key", self.root.registration.registration_shared_secret
-        )
-
+        macaroon_secret_key = config.get("macaroon_secret_key")
+        if macaroon_secret_key and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("macaroon_secret_key",),
+            )
+        macaroon_secret_key_path = config.get("macaroon_secret_key_path")
+        if macaroon_secret_key_path:
+            if macaroon_secret_key:
+                raise ConfigError(CONFLICTING_MACAROON_SECRET_KEY_OPTS_ERROR)
+            macaroon_secret_key = read_file(
+                macaroon_secret_key_path, ("macaroon_secret_key_path",)
+            ).strip()
+        if not macaroon_secret_key:
+            macaroon_secret_key = self.root.registration.registration_shared_secret
         if not macaroon_secret_key:
             # Unfortunately, there are people out there that don't have this
             # set. Lets just be "nice" and derive one from their secret key.
@@ -181,7 +206,24 @@ class KeyConfig(Config):
 
         # a secret which is used to calculate HMACs for form values, to stop
         # falsification of values
-        self.form_secret = config.get("form_secret", None)
+        form_secret = config.get("form_secret", None)
+        if form_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("form_secret",),
+            )
+        if form_secret is not None and not isinstance(form_secret, str):
+            raise ConfigError("Config option must be a string", ("form_secret",))
+
+        form_secret_path = config.get("form_secret_path", None)
+        if form_secret_path:
+            if form_secret:
+                raise ConfigError(CONFLICTING_FORM_SECRET_OPTS_ERROR)
+            self.form_secret: Optional[str] = read_file(
+                form_secret_path, ("form_secret_path",)
+            ).strip()
+        else:
+            self.form_secret = form_secret
 
     def generate_config_section(
         self,

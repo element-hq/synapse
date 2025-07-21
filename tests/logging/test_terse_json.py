@@ -160,11 +160,17 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         logger = self.get_logger(handler)
 
         # A full request isn't needed here.
-        site = Mock(spec=["site_tag", "server_version_string", "getResourceFor"])
+        site = Mock(
+            spec=[
+                "site_tag",
+                "server_version_string",
+                "getResourceFor",
+                "_parsePOSTFormSubmission",
+            ]
+        )
         site.site_tag = "test-site"
         site.server_version_string = "Server v1"
         site.reactor = Mock()
-        site.experimental_cors_msc3886 = False
         request = SynapseRequest(
             cast(HTTPChannel, FakeChannel(site, self.reactor)), site
         )

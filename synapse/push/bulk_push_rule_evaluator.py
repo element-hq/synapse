@@ -50,8 +50,9 @@ from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
 from synapse.events.snapshot import EventContext
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.state import POWER_KEY
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
+from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import ProfileInfo
 from synapse.synapse_rust.push import FilteredPushRules, PushRuleEvaluator
 from synapse.types import JsonValue
@@ -127,18 +128,21 @@ class BulkPushRuleEvaluator:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self._event_auth_handler = hs.get_event_auth_handler()
         self.should_calculate_push_rules = self.hs.config.push.enable_push
 
         self._related_event_match_enabled = self.hs.config.experimental.msc3664_enabled
 
         self.room_push_rule_cache_metrics = register_cache(
-            "cache",
-            "room_push_rule_cache",
+            cache_type="cache",
+            cache_name="room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,
             resizable=False,
+            server_name=self.server_name,
         )
 
     async def _get_rules_for_event(
@@ -191,9 +195,17 @@ class BulkPushRuleEvaluator:
 
         # if this event is an invite event, we may need to run rules for the user
         # who's been invited, otherwise they won't get told they've been invited
-        if event.type == EventTypes.Member and event.membership == Membership.INVITE:
+        if (
+            event.is_state()
+            and event.type == EventTypes.Member
+            and event.membership == Membership.INVITE
+        ):
             invited = event.state_key
-            if invited and self.hs.is_mine_id(invited) and invited not in local_users:
+            invite_config = await self.store.get_invite_config_for_user(invited)
+            if invite_config.get_invite_rule(event.sender) != InviteRule.ALLOW:
+                # Invite was blocked or ignored, never notify.
+                return {}
+            if self.hs.is_mine_id(invited) and invited not in local_users:
                 local_users.append(invited)
 
         if not local_users:
@@ -237,6 +249,7 @@ class BulkPushRuleEvaluator:
             StateFilter.from_types(event_types)
         )
         pl_event_id = prev_state_ids.get(POWER_KEY)
+        create_event_id = prev_state_ids.get(CREATE_KEY)
 
         # fastpath: if there's a power level event, that's all we need, and
         # not having a power level event is an extreme edge case
@@ -259,6 +272,26 @@ class BulkPushRuleEvaluator:
                 if auth_event:
                     auth_events_dict[auth_event_id] = auth_event
             auth_events = {(e.type, e.state_key): e for e in auth_events_dict.values()}
+            if auth_events.get(CREATE_KEY) is None:
+                # if the event being checked is the create event, use its own permissions
+                if event.type == EventTypes.Create and event.get_state_key() == "":
+                    auth_events[CREATE_KEY] = event
+                else:
+                    auth_events[
+                        CREATE_KEY
+                    ] = await self.store.get_create_event_for_room(event.room_id)
+
+        # if we are evaluating the create event, then use itself to determine power levels.
+        if event.type == EventTypes.Create and event.get_state_key() == "":
+            auth_events[CREATE_KEY] = event
+        else:
+            # if we aren't processing the create event, create_event_id should always be set
+            assert create_event_id is not None
+            create_event = event_id_to_event.get(create_event_id)
+            if create_event:
+                auth_events[CREATE_KEY] = create_event
+            else:
+                auth_events[CREATE_KEY] = await self.store.get_event(create_event_id)
 
         sender_level = get_user_power_level(event.sender, auth_events)
 
@@ -371,7 +404,7 @@ class BulkPushRuleEvaluator:
                 "Deferred[Tuple[int, Tuple[dict, Optional[int]], Dict[str, Dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
-                        run_in_background(  # type: ignore[call-arg]
+                        run_in_background(  # type: ignore[call-overload]
                             self.store.get_number_joined_users_in_room,
                             event.room_id,  # type: ignore[arg-type]
                         ),
@@ -382,10 +415,10 @@ class BulkPushRuleEvaluator:
                             event_id_to_event,
                         ),
                         run_in_background(self._related_events, event),
-                        run_in_background(  # type: ignore[call-arg]
+                        run_in_background(  # type: ignore[call-overload]
                             self.store.get_subset_users_in_room_with_profiles,
-                            event.room_id,  # type: ignore[arg-type]
-                            rules_by_user.keys(),  # type: ignore[arg-type]
+                            event.room_id,
+                            rules_by_user.keys(),
                         ),
                     ),
                     consumeErrors=True,

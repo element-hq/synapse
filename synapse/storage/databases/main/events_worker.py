@@ -30,6 +30,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
@@ -41,7 +42,6 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
-from typing_extensions import Literal
 
 from twisted.internet import defer
 
@@ -193,6 +193,14 @@ class _EventRow:
     outlier: bool
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class EventMetadata:
+    """Event metadata returned by `get_metadata_for_event(..)`"""
+
+    sender: str
+    received_ts: int
+
+
 class EventRedactBehaviour(Enum):
     """
     What to do when retrieving a redacted event from the database.
@@ -261,8 +269,9 @@ class EventsWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._curr_state_delta_stream_cache: StreamChangeCache = StreamChangeCache(
-            "_curr_state_delta_stream_cache",
-            min_curr_state_delta_id,
+            name="_curr_state_delta_stream_cache",
+            server_name=self.server_name,
+            current_stream_pos=min_curr_state_delta_id,
             prefilled_cache=curr_state_delta_prefill,
         )
 
@@ -275,6 +284,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
             AsyncLruCache(
+                server_name=self.server_name,
                 cache_name="*getEvent*",
                 max_size=hs.config.caches.event_cache_size,
                 # `extra_index_cb` Returns a tuple as that is the key type
@@ -329,6 +339,29 @@ class EventsWorkerStore(SQLBaseStore):
             sequence_name="un_partial_stated_event_stream_sequence",
             # TODO(faster_joins, multiple writers) Support multiple writers.
             writers=["master"],
+        )
+
+        # Added to accommodate some queries for the admin API in order to fetch/filter
+        # membership events by when it was received
+        self.db_pool.updates.register_background_index_update(
+            update_name="events_received_ts_index",
+            index_name="received_ts_idx",
+            table="events",
+            columns=("received_ts",),
+            where_clause="type = 'm.room.member'",
+        )
+
+        # Added to support efficient reverse lookups on the foreign key
+        # (user_id, device_id) when deleting devices.
+        # We already had a UNIQUE index on these 4 columns but out-of-order
+        # so replace that one.
+        self.db_pool.updates.register_background_index_update(
+            update_name="event_txn_id_device_id_txn_id2",
+            index_name="event_txn_id_device_id_txn_id2",
+            table="event_txn_id_device_id",
+            columns=("user_id", "device_id", "room_id", "txn_id"),
+            unique=True,
+            replaces_index="event_txn_id_device_id_txn_id",
         )
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
@@ -806,9 +839,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         if missing_events_ids:
 
-            async def get_missing_events_from_cache_or_db() -> (
-                Dict[str, EventCacheEntry]
-            ):
+            async def get_missing_events_from_cache_or_db() -> Dict[
+                str, EventCacheEntry
+            ]:
                 """Fetches the events in `missing_event_ids` from the database.
 
                 Also creates entries in `self._current_event_fetches` to allow
@@ -1215,7 +1248,9 @@ class EventsWorkerStore(SQLBaseStore):
                 to event row. Note that it may well contain additional events that
                 were not part of this request.
         """
-        with Measure(self._clock, "_fetch_event_list"):
+        with Measure(
+            self._clock, name="_fetch_event_list", server_name=self.server_name
+        ):
             try:
                 events_to_fetch = {
                     event_id for events, _ in event_list for event_id in events
@@ -2579,4 +2614,61 @@ class EventsWorkerStore(SQLBaseStore):
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             )
+        )
+
+    async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
+        """
+        Get the number of invites sent by the given user at or after the provided timestamp.
+
+        Args:
+            user_id: user ID to search against
+            from_ts: a timestamp in milliseconds from the unix epoch. Filters against
+                `events.received_ts`
+
+        """
+
+        def _get_sent_invite_count_by_user_txn(
+            txn: LoggingTransaction, user_id: str, from_ts: int
+        ) -> int:
+            sql = """
+                  SELECT COUNT(rm.event_id)
+                  FROM room_memberships AS rm
+                  INNER JOIN events AS e USING(event_id)
+                  WHERE rm.sender = ?
+                    AND rm.membership = 'invite'
+                    AND e.type = 'm.room.member'
+                    AND e.received_ts >= ?
+            """
+
+            txn.execute(sql, (user_id, from_ts))
+            res = txn.fetchone()
+
+            if res is None:
+                return 0
+            return int(res[0])
+
+        return await self.db_pool.runInteraction(
+            "_get_sent_invite_count_by_user_txn",
+            _get_sent_invite_count_by_user_txn,
+            user_id,
+            from_ts,
+        )
+
+    @cached(tree=True)
+    async def get_metadata_for_event(
+        self, room_id: str, event_id: str
+    ) -> Optional[EventMetadata]:
+        row = await self.db_pool.simple_select_one(
+            table="events",
+            keyvalues={"room_id": room_id, "event_id": event_id},
+            retcols=("sender", "received_ts"),
+            allow_none=True,
+            desc="get_metadata_for_event",
+        )
+        if row is None:
+            return None
+
+        return EventMetadata(
+            sender=row[0],
+            received_ts=row[1],
         )

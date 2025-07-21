@@ -30,10 +30,11 @@ from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender.per_destination_queue import MAX_PRESENCE_STATES_PER_EDU
 from synapse.federation.units import Transaction
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceListUpdater, DeviceWriterHandler
 from synapse.rest import admin
 from synapse.rest.client import login
 from synapse.server import HomeServer
+from synapse.storage.databases.main.events_worker import EventMetadata
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util import Clock
 
@@ -55,12 +56,15 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
             federation_transport_client=self.federation_transport_client,
         )
 
-        hs.get_storage_controllers().state.get_current_hosts_in_room = AsyncMock(  # type: ignore[method-assign]
+        self.main_store = hs.get_datastores().main
+        self.state_controller = hs.get_storage_controllers().state
+
+        self.state_controller.get_current_hosts_in_room = AsyncMock(  # type: ignore[method-assign]
             return_value={"test", "host2"}
         )
 
-        hs.get_storage_controllers().state.get_current_hosts_in_room_or_partial_state_approximation = (  # type: ignore[method-assign]
-            hs.get_storage_controllers().state.get_current_hosts_in_room
+        self.state_controller.get_current_hosts_in_room_or_partial_state_approximation = (  # type: ignore[method-assign]
+            self.state_controller.get_current_hosts_in_room
         )
 
         return hs
@@ -185,11 +189,14 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
             ],
         )
 
-    def test_send_receipts_with_backoff(self) -> None:
-        """Send two receipts in quick succession; the second should be flushed, but
-        only after 20ms"""
+    def test_send_receipts_with_backoff_small_room(self) -> None:
+        """Read receipt in small rooms should not be delayed"""
         mock_send_transaction = self.federation_transport_client.send_transaction
         mock_send_transaction.return_value = {}
+
+        self.state_controller.get_current_hosts_in_room_or_partial_state_approximation = AsyncMock(  # type: ignore[method-assign]
+            return_value={"test", "host2"}
+        )
 
         sender = self.hs.get_federation_sender()
         receipt = ReadReceipt(
@@ -206,7 +213,104 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
 
         # expect a call to send_transaction
         mock_send_transaction.assert_called_once()
-        json_cb = mock_send_transaction.call_args[0][1]
+        self._assert_edu_in_call(mock_send_transaction.call_args[0][1])
+
+    def test_send_receipts_with_backoff_recent_event(self) -> None:
+        """Read receipt for a recent message should not be delayed"""
+        mock_send_transaction = self.federation_transport_client.send_transaction
+        mock_send_transaction.return_value = {}
+
+        # Pretend this is a big room
+        self.state_controller.get_current_hosts_in_room_or_partial_state_approximation = AsyncMock(  # type: ignore[method-assign]
+            return_value={"test"} | {f"host{i}" for i in range(20)}
+        )
+
+        self.main_store.get_metadata_for_event = AsyncMock(
+            return_value=EventMetadata(
+                received_ts=self.clock.time_msec(),
+                sender="@test:test",
+            )
+        )
+
+        sender = self.hs.get_federation_sender()
+        receipt = ReadReceipt(
+            "room_id",
+            "m.read",
+            "user_id",
+            ["event_id"],
+            thread_id=None,
+            data={"ts": 1234},
+        )
+        self.get_success(sender.send_read_receipt(receipt))
+
+        self.pump()
+
+        # expect a call to send_transaction for each host
+        self.assertEqual(mock_send_transaction.call_count, 20)
+        self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
+
+        mock_send_transaction.reset_mock()
+
+    def test_send_receipts_with_backoff_sender(self) -> None:
+        """Read receipt for a message should not be delayed to the sender, but
+        is delayed to everyone else"""
+        mock_send_transaction = self.federation_transport_client.send_transaction
+        mock_send_transaction.return_value = {}
+
+        # Pretend this is a big room
+        self.state_controller.get_current_hosts_in_room_or_partial_state_approximation = AsyncMock(  # type: ignore[method-assign]
+            return_value={"test"} | {f"host{i}" for i in range(20)}
+        )
+
+        self.main_store.get_metadata_for_event = AsyncMock(
+            return_value=EventMetadata(
+                received_ts=self.clock.time_msec() - 5 * 60_000,
+                sender="@test:host1",
+            )
+        )
+
+        sender = self.hs.get_federation_sender()
+        receipt = ReadReceipt(
+            "room_id",
+            "m.read",
+            "user_id",
+            ["event_id"],
+            thread_id=None,
+            data={"ts": 1234},
+        )
+        self.get_success(sender.send_read_receipt(receipt))
+
+        self.pump()
+
+        # First, expect a call to send_transaction for the sending host
+        mock_send_transaction.assert_called()
+
+        transaction = mock_send_transaction.call_args_list[0].args[0]
+        self.assertEqual(transaction.destination, "host1")
+        self._assert_edu_in_call(mock_send_transaction.call_args_list[0].args[1])
+
+        # We also expect a call to one of the other hosts, as the first
+        # destination to wake up.
+        self.assertEqual(mock_send_transaction.call_count, 2)
+        self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
+
+        mock_send_transaction.reset_mock()
+
+        # We now expect to see 18 more transactions to the remaining hosts
+        # periodically.
+        for _ in range(18):
+            self.reactor.advance(
+                1.0
+                / self.hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
+            )
+
+            mock_send_transaction.assert_called_once()
+            self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
+            mock_send_transaction.reset_mock()
+
+    def _assert_edu_in_call(self, json_cb: Callable[[], JsonDict]) -> None:
+        """Assert that the given `json_cb` from a `send_transaction` has a
+        receipt in it."""
         data = json_cb()
         self.assertEqual(
             data["edus"],
@@ -218,46 +322,6 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
                             "m.read": {
                                 "user_id": {
                                     "event_ids": ["event_id"],
-                                    "data": {"ts": 1234},
-                                }
-                            }
-                        }
-                    },
-                }
-            ],
-        )
-        mock_send_transaction.reset_mock()
-
-        # send the second RR
-        receipt = ReadReceipt(
-            "room_id",
-            "m.read",
-            "user_id",
-            ["other_id"],
-            thread_id=None,
-            data={"ts": 1234},
-        )
-        self.successResultOf(defer.ensureDeferred(sender.send_read_receipt(receipt)))
-        self.pump()
-        mock_send_transaction.assert_not_called()
-
-        self.reactor.advance(19)
-        mock_send_transaction.assert_not_called()
-
-        self.reactor.advance(10)
-        mock_send_transaction.assert_called_once()
-        json_cb = mock_send_transaction.call_args[0][1]
-        data = json_cb()
-        self.assertEqual(
-            data["edus"],
-            [
-                {
-                    "edu_type": EduTypes.RECEIPT,
-                    "content": {
-                        "room_id": {
-                            "m.read": {
-                                "user_id": {
-                                    "event_ids": ["other_id"],
                                     "data": {"ts": 1234},
                                 }
                             }
@@ -436,7 +500,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
         hs.get_datastores().main.get_current_hosts_in_room = get_current_hosts_in_room  # type: ignore[assignment]
 
         device_handler = hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         self.device_handler = device_handler
 
         # whenever send_transaction is called, record the edu data
@@ -489,6 +553,8 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
             "user_id": "@user2:host2",
             "devices": [{"device_id": "D1"}],
         }
+
+        assert isinstance(self.device_handler.device_list_updater, DeviceListUpdater)
 
         self.get_success(
             self.device_handler.device_list_updater.incoming_device_list_update(
@@ -608,7 +674,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
             self.assertEqual(edu["edu_type"], EduTypes.DEVICE_LIST_UPDATE)
             c = edu["content"]
             if stream_id is not None:
-                self.assertEqual(c["prev_id"], [stream_id])  # type: ignore[unreachable]
+                self.assertEqual(c["prev_id"], [stream_id])
                 self.assertGreaterEqual(c["stream_id"], stream_id)
             stream_id = c["stream_id"]
         devices = {edu["content"]["device_id"] for edu in self.edus}

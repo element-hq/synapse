@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import itertools
 import logging
 from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, Tuple
@@ -38,6 +39,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import (
     MemberSummary,
@@ -47,6 +49,7 @@ from synapse.types import (
     MutableStateMap,
     PersistedEventPosition,
     Requester,
+    RoomStreamToken,
     SlidingSyncStreamToken,
     StateMap,
     StrCollection,
@@ -78,6 +81,15 @@ sync_processing_time = Histogram(
     "Time taken to generate a sliding sync response, ignoring wait times.",
     ["initial"],
 )
+
+# Limit the number of state_keys we should remember sending down the connection for each
+# (room_id, user_id). We don't want to store and pull out too much data in the database.
+#
+# 100 is an arbitrary but small-ish number. The idea is that we probably won't send down
+# too many redundant member state events (that the client already knows about) for a
+# given ongoing conversation if we keep 100 around. Most rooms don't have 100 members
+# anyway and it takes a while to cycle through 100 members.
+MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
 
 
 class SlidingSyncHandler:
@@ -259,6 +271,7 @@ class SlidingSyncHandler:
                 from_token=from_token,
                 to_token=to_token,
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
+                newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
@@ -461,6 +474,64 @@ class SlidingSyncHandler:
         return state_map
 
     @trace
+    async def get_current_state_deltas_for_room(
+        self,
+        room_id: str,
+        room_membership_for_user_at_to_token: RoomsForUserType,
+        from_token: RoomStreamToken,
+        to_token: RoomStreamToken,
+    ) -> List[StateDelta]:
+        """
+        Get the state deltas between two tokens taking into account the user's
+        membership. If the user is LEAVE/BAN, we will only get the state deltas up to
+        their LEAVE/BAN event (inclusive).
+
+        (> `from_token` and <= `to_token`)
+        """
+        membership = room_membership_for_user_at_to_token.membership
+        # We don't know how to handle `membership` values other than these. The
+        # code below would need to be updated.
+        assert membership in (
+            Membership.JOIN,
+            Membership.INVITE,
+            Membership.KNOCK,
+            Membership.LEAVE,
+            Membership.BAN,
+        )
+
+        # People shouldn't see past their leave/ban event
+        if membership in (
+            Membership.LEAVE,
+            Membership.BAN,
+        ):
+            to_bound = (
+                room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
+            )
+        # If we are participating in the room, we can get the latest current state in
+        # the room
+        elif membership == Membership.JOIN:
+            to_bound = to_token
+        # We can only rely on the stripped state included in the invite/knock event
+        # itself so there will never be any state deltas to send down.
+        elif membership in (Membership.INVITE, Membership.KNOCK):
+            return []
+        else:
+            # We don't know how to handle this type of membership yet
+            #
+            # FIXME: We should use `assert_never` here but for some reason
+            # the exhaustive matching doesn't recognize the `Never` here.
+            # assert_never(membership)
+            raise AssertionError(
+                f"Unexpected membership {membership} that we don't know how to handle yet"
+            )
+
+        return await self.store.get_current_state_deltas_for_room(
+            room_id=room_id,
+            from_token=from_token,
+            to_token=to_bound,
+        )
+
+    @trace
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
@@ -472,6 +543,7 @@ class SlidingSyncHandler:
         from_token: Optional[SlidingSyncStreamToken],
         to_token: StreamToken,
         newly_joined: bool,
+        newly_left: bool,
         is_dm: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
@@ -489,6 +561,7 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
             newly_joined: If the user has newly joined the room
+            newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
         """
         user = sync_config.user
@@ -745,13 +818,19 @@ class SlidingSyncHandler:
 
             stripped_state = []
             if invite_or_knock_event.membership == Membership.INVITE:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("invite_room_state", [])
+                invite_state = invite_or_knock_event.unsigned.get(
+                    "invite_room_state", []
                 )
+                if not isinstance(invite_state, list):
+                    invite_state = []
+
+                stripped_state.extend(invite_state)
             elif invite_or_knock_event.membership == Membership.KNOCK:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("knock_room_state", [])
-                )
+                knock_state = invite_or_knock_event.unsigned.get("knock_room_state", [])
+                if not isinstance(knock_state, list):
+                    knock_state = []
+
+                stripped_state.extend(knock_state)
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
@@ -780,8 +859,29 @@ class SlidingSyncHandler:
             # TODO: Limit the number of state events we're about to send down
             # the room, if its too many we should change this to an
             # `initial=True`?
-            deltas = await self.store.get_current_state_deltas_for_room(
+
+            # For the case of rejecting remote invites, the leave event won't be
+            # returned by `get_current_state_deltas_for_room`. This is due to the current
+            # state only being filled out for rooms the server is in, and so doesn't pick
+            # up out-of-band leaves (including locally rejected invites) as these events
+            # are outliers and not added to the `current_state_delta_stream`.
+            #
+            # We rely on being explicitly told that the room has been `newly_left` to
+            # ensure we extract the out-of-band leave.
+            if newly_left and room_membership_for_user_at_to_token.event_id is not None:
+                membership_changed = True
+                leave_event = await self.store.get_event(
+                    room_membership_for_user_at_to_token.event_id
+                )
+                state_key = leave_event.get_state_key()
+                if state_key is not None:
+                    room_state_delta_id_map[(leave_event.type, state_key)] = (
+                        room_membership_for_user_at_to_token.event_id
+                    )
+
+            deltas = await self.get_current_state_deltas_for_room(
                 room_id=room_id,
+                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
                 from_token=from_bound,
                 to_token=to_token.room_key,
             )
@@ -873,6 +973,14 @@ class SlidingSyncHandler:
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
         required_state_filter = StateFilter.none()
+        # The requested `required_state_map` with the lazy membership expanded and
+        # `$ME` replaced with the user's ID. This allows us to see what membership we've
+        # sent down to the client in the next request.
+        #
+        # Make a copy so we can modify it. Still need to be careful to make a copy of
+        # the state key sets if we want to add/remove from them. We could make a deep
+        # copy but this saves us some work.
+        expanded_required_state_map = dict(room_sync_config.required_state_map)
         if room_membership_for_user_at_to_token.membership not in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -937,22 +1045,55 @@ class SlidingSyncHandler:
                             and state_key == StateValues.LAZY
                         ):
                             lazy_load_room_members = True
+
                             # Everyone in the timeline is relevant
                             timeline_membership: Set[str] = set()
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
+                                    # Anyone who sent a message is relevant
                                     timeline_membership.add(timeline_event.sender)
 
+                                    # We also care about invite, ban, kick, targets,
+                                    # etc.
+                                    if timeline_event.type == EventTypes.Member:
+                                        timeline_membership.add(
+                                            timeline_event.state_key
+                                        )
+
+                            # Update the required state filter so we pick up the new
+                            # membership
                             for user_id in timeline_membership:
                                 required_state_types.append(
                                     (EventTypes.Member, user_id)
                                 )
 
-                            # FIXME: We probably also care about invite, ban, kick, targets, etc
-                            # but the spec only mentions "senders".
+                            # Add an explicit entry for each user in the timeline
+                            #
+                            # Make a new set or copy of the state key set so we can
+                            # modify it without affecting the original
+                            # `required_state_map`
+                            expanded_required_state_map[EventTypes.Member] = (
+                                expanded_required_state_map.get(
+                                    EventTypes.Member, set()
+                                )
+                                | timeline_membership
+                            )
                         elif state_key == StateValues.ME:
                             num_others += 1
                             required_state_types.append((state_type, user.to_string()))
+                            # Replace `$ME` with the user's ID so we can deduplicate
+                            # when someone requests the same state with `$ME` or with
+                            # their user ID.
+                            #
+                            # Make a new set or copy of the state key set so we can
+                            # modify it without affecting the original
+                            # `required_state_map`
+                            expanded_required_state_map[EventTypes.Member] = (
+                                expanded_required_state_map.get(
+                                    EventTypes.Member, set()
+                                )
+                                | {user.to_string()}
+                            )
                         else:
                             num_others += 1
                             required_state_types.append((state_type, state_key))
@@ -1016,8 +1157,8 @@ class SlidingSyncHandler:
                 changed_required_state_map, added_state_filter = (
                     _required_state_changes(
                         user.to_string(),
-                        previous_room_config=prev_room_sync_config,
-                        room_sync_config=room_sync_config,
+                        prev_required_state_map=prev_room_sync_config.required_state_map,
+                        request_required_state_map=expanded_required_state_map,
                         state_deltas=room_state_delta_id_map,
                     )
                 )
@@ -1131,7 +1272,9 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
-        room_sync_required_state_map_to_persist = room_sync_config.required_state_map
+        room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
+            expanded_required_state_map
+        )
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
 
@@ -1185,7 +1328,10 @@ class SlidingSyncHandler:
                 )
 
         else:
-            new_connection_state.room_configs[room_id] = room_sync_config
+            new_connection_state.room_configs[room_id] = RoomSyncConfig(
+                timeline_limit=room_sync_config.timeline_limit,
+                required_state_map=room_sync_required_state_map_to_persist,
+            )
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
@@ -1320,8 +1466,8 @@ class SlidingSyncHandler:
 def _required_state_changes(
     user_id: str,
     *,
-    previous_room_config: "RoomSyncConfig",
-    room_sync_config: RoomSyncConfig,
+    prev_required_state_map: Mapping[str, AbstractSet[str]],
+    request_required_state_map: Mapping[str, AbstractSet[str]],
     state_deltas: StateMap[str],
 ) -> Tuple[Optional[Mapping[str, AbstractSet[str]]], StateFilter]:
     """Calculates the changes between the required state room config from the
@@ -1342,10 +1488,6 @@ def _required_state_changes(
         and the state filter to use to fetch extra current state that we need to
         return.
     """
-
-    prev_required_state_map = previous_room_config.required_state_map
-    request_required_state_map = room_sync_config.required_state_map
-
     if prev_required_state_map == request_required_state_map:
         # There has been no change. Return immediately.
         return None, StateFilter.none()
@@ -1378,12 +1520,19 @@ def _required_state_changes(
     # client. Passed to `StateFilter.from_types(...)`
     added: List[Tuple[str, Optional[str]]] = []
 
+    # Convert the list of state deltas to map from type to state_keys that have
+    # changed.
+    changed_types_to_state_keys: Dict[str, Set[str]] = {}
+    for event_type, state_key in state_deltas:
+        changed_types_to_state_keys.setdefault(event_type, set()).add(state_key)
+
     # First we calculate what, if anything, has been *added*.
     for event_type in (
         prev_required_state_map.keys() | request_required_state_map.keys()
     ):
         old_state_keys = prev_required_state_map.get(event_type, set())
         request_state_keys = request_required_state_map.get(event_type, set())
+        changed_state_keys = changed_types_to_state_keys.get(event_type, set())
 
         if old_state_keys == request_state_keys:
             # No change to this type
@@ -1393,8 +1542,55 @@ def _required_state_changes(
             # Nothing *added*, so we skip. Removals happen below.
             continue
 
-        # Always update changes to include the newly added keys
-        changes[event_type] = request_state_keys
+        # We only remove state keys from the effective state if they've been
+        # removed from the request *and* the state has changed. This ensures
+        # that if a client removes and then re-adds a state key, we only send
+        # down the associated current state event if its changed (rather than
+        # sending down the same event twice).
+        invalidated_state_keys = (
+            old_state_keys - request_state_keys
+        ) & changed_state_keys
+
+        # Figure out which state keys we should remember sending down the connection
+        inheritable_previous_state_keys = (
+            # Retain the previous state_keys that we've sent down before.
+            # Wildcard and lazy state keys are not sticky from previous requests.
+            (old_state_keys - {StateValues.WILDCARD, StateValues.LAZY})
+            - invalidated_state_keys
+        )
+
+        # Always update changes to include the newly added keys (we've expanded the set
+        # of state keys), use the new requested set with whatever hasn't been
+        # invalidated from the previous set.
+        changes[event_type] = request_state_keys | inheritable_previous_state_keys
+        # Limit the number of state_keys we should remember sending down the connection
+        # for each (room_id, user_id). We don't want to store and pull out too much data
+        # in the database. This is a happy-medium between remembering nothing and
+        # everything. We can avoid sending redundant state down the connection most of
+        # the time given that most rooms don't have 100 members anyway and it takes a
+        # while to cycle through 100 members.
+        #
+        # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER)
+        if len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
+            # Reset back to only the requested state keys
+            changes[event_type] = request_state_keys
+
+            # Skip if there isn't any room to fill in the rest with previous state keys
+            if len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
+                # Fill the rest with previous state_keys. Ideally, we could sort
+                # these by recency but it's just a set so just pick an arbitrary
+                # subset (good enough).
+                changes[event_type] = changes[event_type] | set(
+                    itertools.islice(
+                        inheritable_previous_state_keys,
+                        # Just taking the difference isn't perfect as there could be
+                        # overlap in the keys between the requested and previous but we
+                        # will decide to just take the easy route for now and avoid
+                        # additional set operations to figure it out.
+                        MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                        - len(request_state_keys),
+                    )
+                )
 
         if StateValues.WILDCARD in old_state_keys:
             # We were previously fetching everything for this type, so we don't need to
@@ -1421,12 +1617,6 @@ def _required_state_changes(
 
     added_state_filter = StateFilter.from_types(added)
 
-    # Convert the list of state deltas to map from type to state_keys that have
-    # changed.
-    changed_types_to_state_keys: Dict[str, Set[str]] = {}
-    for event_type, state_key in state_deltas:
-        changed_types_to_state_keys.setdefault(event_type, set()).add(state_key)
-
     # Figure out what changes we need to apply to the effective required state
     # config.
     for event_type, changed_state_keys in changed_types_to_state_keys.items():
@@ -1437,15 +1627,23 @@ def _required_state_changes(
             # No change.
             continue
 
+        # If we see the `user_id` as a state_key, also add "$ME" to the list of state
+        # that has changed to account for people requesting `required_state` with `$ME`
+        # or their user ID.
+        if user_id in changed_state_keys:
+            changed_state_keys.add(StateValues.ME)
+
+        # We only remove state keys from the effective state if they've been
+        # removed from the request *and* the state has changed. This ensures
+        # that if a client removes and then re-adds a state key, we only send
+        # down the associated current state event if its changed (rather than
+        # sending down the same event twice).
+        invalidated_state_keys = (
+            old_state_keys - request_state_keys
+        ) & changed_state_keys
+
+        # We've expanded the set of state keys, ... (already handled above)
         if request_state_keys - old_state_keys:
-            # We've expanded the set of state keys, so we just clobber the
-            # current set with the new set.
-            #
-            # We could also ensure that we keep entries where the state hasn't
-            # changed, but are no longer in the requested required state, but
-            # that's a sufficient edge case that we can ignore (as its only a
-            # performance optimization).
-            changes[event_type] = request_state_keys
             continue
 
         old_state_key_wildcard = StateValues.WILDCARD in old_state_keys
@@ -1467,11 +1665,6 @@ def _required_state_changes(
                 changes[event_type] = request_state_keys
                 continue
 
-        # Handle "$ME" values by adding "$ME" if the state key matches the user
-        # ID.
-        if user_id in changed_state_keys:
-            changed_state_keys.add(StateValues.ME)
-
         # At this point there are no wildcards and no additions to the set of
         # state keys requested, only deletions.
         #
@@ -1480,9 +1673,8 @@ def _required_state_changes(
         # that if a client removes and then re-adds a state key, we only send
         # down the associated current state event if its changed (rather than
         # sending down the same event twice).
-        invalidated = (old_state_keys - request_state_keys) & changed_state_keys
-        if invalidated:
-            changes[event_type] = old_state_keys - invalidated
+        if invalidated_state_keys:
+            changes[event_type] = old_state_keys - invalidated_state_keys
 
     if changes:
         # Update the required state config based on the changes.

@@ -77,9 +77,6 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.replication.http.devices import (
-    ReplicationMultiUserDevicesResyncRestServlet,
-)
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -151,6 +148,8 @@ class FederationEventHandler:
     def __init__(self, hs: "HomeServer"):
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
+        self._state_store = hs.get_datastores().state
+        self._state_deletion_store = hs.get_datastores().state_deletion
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
 
@@ -178,12 +177,7 @@ class FederationEventHandler:
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
 
         self._send_events = ReplicationFederationSendEventsRestServlet.make_client(hs)
-        if hs.config.worker.worker_app:
-            self._multi_user_device_resync = (
-                ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
-            )
-        else:
-            self._device_list_updater = hs.get_device_handler().device_list_updater
+        self._device_list_updater = hs.get_device_handler().device_list_updater
 
         # When joining a room we need to queue any events for that room up.
         # For each room, a list of (pdu, origin) tuples.
@@ -580,7 +574,9 @@ class FederationEventHandler:
                         room_version.identifier,
                         state_maps_to_resolve,
                         event_map=None,
-                        state_res_store=StateResolutionStore(self._store),
+                        state_res_store=StateResolutionStore(
+                            self._store, self._state_deletion_store
+                        ),
                     )
                 )
             else:
@@ -1179,7 +1175,9 @@ class FederationEventHandler:
                 room_version,
                 state_maps,
                 event_map={event_id: event},
-                state_res_store=StateResolutionStore(self._store),
+                state_res_store=StateResolutionStore(
+                    self._store, self._state_deletion_store
+                ),
             )
 
         except Exception as e:
@@ -1538,12 +1536,7 @@ class FederationEventHandler:
             await self._store.mark_remote_users_device_caches_as_stale((sender,))
 
             # Immediately attempt a resync in the background
-            if self._config.worker.worker_app:
-                await self._multi_user_device_resync(user_ids=[sender])
-            else:
-                await self._device_list_updater.multi_user_device_resync(
-                    user_ids=[sender]
-                )
+            await self._device_list_updater.multi_user_device_resync(user_ids=[sender])
         except Exception:
             logger.exception("Failed to resync device for %s", sender)
 
@@ -1874,7 +1867,9 @@ class FederationEventHandler:
                     room_version,
                     [local_state_id_map, claimed_auth_events_id_map],
                     event_map=None,
-                    state_res_store=StateResolutionStore(self._store),
+                    state_res_store=StateResolutionStore(
+                        self._store, self._state_deletion_store
+                    ),
                 )
             )
         else:
@@ -2014,7 +2009,9 @@ class FederationEventHandler:
                     room_version,
                     state_sets,
                     event_map=None,
-                    state_res_store=StateResolutionStore(self._store),
+                    state_res_store=StateResolutionStore(
+                        self._store, self._state_deletion_store
+                    ),
                 )
             )
         else:
@@ -2272,8 +2269,9 @@ class FederationEventHandler:
                 event_and_contexts, backfilled=backfilled
             )
 
-            # After persistence we always need to notify replication there may
-            # be new data.
+            # After persistence, we never notify clients (wake up `/sync` streams) about
+            # backfilled events but it's important to let all the workers know about any
+            # new event (backfilled or not) because TODO
             self._notifier.notify_replication()
 
             if self._ephemeral_messages_enabled:

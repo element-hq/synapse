@@ -40,6 +40,8 @@ import attr
 from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import (
+    CANONICALJSON_MAX_INT,
+    CANONICALJSON_MIN_INT,
     MAX_PDU_SIZE,
     EventContentFields,
     EventTypes,
@@ -60,9 +62,6 @@ if TYPE_CHECKING:
 SPLIT_FIELD_REGEX = re.compile(r"\\*\.")
 # Find escaped characters, e.g. those with a \ in front of them.
 ESCAPE_SEQUENCE_PATTERN = re.compile(r"\\(.)")
-
-CANONICALJSON_MAX_INT = (2**53) - 1
-CANONICALJSON_MIN_INT = -CANONICALJSON_MAX_INT
 
 
 # Module API callback that allows adding fields to the unsigned section of
@@ -422,9 +421,19 @@ class SerializeEventConfig:
     # False, that state will be removed from the event before it is returned.
     # Otherwise, it will be kept.
     include_stripped_room_state: bool = False
+    # When True, sets unsigned fields to help clients identify events which
+    # only server admins can see through other configuration. For example,
+    # whether an event was soft failed by the server.
+    include_admin_metadata: bool = False
 
 
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
+
+
+def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfig:
+    # Set the options which are only available to server admins,
+    # and copy the rest.
+    return attr.evolve(existing, include_admin_metadata=True)
 
 
 def serialize_event(
@@ -529,6 +538,9 @@ def serialize_event(
             d["content"] = dict(d["content"])
             d["content"]["redacts"] = e.redacts
 
+    if config.include_admin_metadata and e.internal_metadata.is_soft_failed():
+        d["unsigned"]["io.element.synapse.soft_failed"] = True
+
     only_event_fields = config.only_event_fields
     if only_event_fields:
         if not isinstance(only_event_fields, list) or not all(
@@ -549,6 +561,7 @@ class EventClientSerializer:
 
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
+        self._auth = hs.get_auth()
         self._add_extra_fields_to_unsigned_client_event_callbacks: List[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
@@ -576,6 +589,15 @@ class EventClientSerializer:
         # To handle the case of presence events and the like
         if not isinstance(event, EventBase):
             return event
+
+        # Force-enable server admin metadata because the only time an event with
+        # relevant metadata will be when the admin requested it via their admin
+        # client config account data. Also, it's "just" some `unsigned` fields, so
+        # shouldn't cause much in terms of problems to downstream consumers.
+        if config.requester is not None and await self._auth.is_server_admin(
+            config.requester
+        ):
+            config = make_config_for_admin(config)
 
         serialized_event = serialize_event(event, time_now, config=config)
 

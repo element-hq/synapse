@@ -73,6 +73,8 @@ class AdminHandler:
             self._redact_all_events, REDACT_ALL_EVENTS_ACTION_NAME
         )
 
+        self.hs = hs
+
     async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
         """Get the current status of an active redaction process
 
@@ -122,6 +124,7 @@ class AdminHandler:
             "consent_ts": user_info.consent_ts,
             "user_type": user_info.user_type,
             "is_guest": user_info.is_guest,
+            "suspended": user_info.suspended,
         }
 
         if self._msc3866_enabled:
@@ -355,6 +358,7 @@ class AdminHandler:
         user_id: str,
         rooms: list,
         requester: JsonMapping,
+        use_admin: bool,
         reason: Optional[str],
         limit: Optional[int],
     ) -> str:
@@ -365,6 +369,7 @@ class AdminHandler:
             user_id: the user ID of the user whose events should be redacted
             rooms: the rooms in which to redact the user's events
             requester: the user requesting the events
+            use_admin: whether to use the admin account to issue the redactions
             reason: reason for requesting the redaction, ie spam, etc
             limit: limit on the number of events in each room to redact
 
@@ -392,6 +397,7 @@ class AdminHandler:
                 "rooms": rooms,
                 "requester": requester,
                 "user_id": user_id,
+                "use_admin": use_admin,
                 "reason": reason,
                 "limit": limit,
             },
@@ -423,8 +429,18 @@ class AdminHandler:
         user_id = task.params.get("user_id")
         assert user_id is not None
 
+        use_admin = task.params.get("use_admin", False)
+
+        # default to puppeting the user unless they are not local or it's been requested to
+        # use the admin user to issue the redactions
+        requester_id = (
+            admin.user.to_string()
+            if use_admin or not self.hs.is_mine_id(user_id)
+            else user_id
+        )
         requester = create_requester(
-            user_id, authenticated_entity=admin.user.to_string()
+            requester_id,
+            authenticated_entity=admin.user.to_string(),
         )
 
         reason = task.params.get("reason")
@@ -440,7 +456,7 @@ class AdminHandler:
                 user_id,
                 room,
                 limit,
-                ["m.room.member", "m.room.message"],
+                ["m.room.member", "m.room.message", "m.room.encrypted"],
             )
             if not event_ids:
                 # nothing to redact in this room
@@ -468,7 +484,7 @@ class AdminHandler:
                     "type": EventTypes.Redaction,
                     "content": {"reason": reason} if reason else {},
                     "room_id": room,
-                    "sender": user_id,
+                    "sender": requester.user.to_string(),
                 }
                 if room_version.updated_redaction_rules:
                     event_dict["content"]["redacts"] = event.event_id
@@ -490,7 +506,7 @@ class AdminHandler:
                     )
                 except Exception as ex:
                     logger.info(
-                        f"Redaction of event {event.event_id} failed due to: {ex}"
+                        "Redaction of event %s failed due to: %s", event.event_id, ex
                     )
                     result["failed_redactions"][event.event_id] = str(ex)
                     await self._task_scheduler.update_task(task.id, result=result)

@@ -133,7 +133,7 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
 
     # write a log line on SIGTERM.
     def sigterm(signum: int, frame: Optional[FrameType]) -> NoReturn:
-        logger.warning("Caught signal %s. Stopping daemon." % signum)
+        logger.warning("Caught signal %s. Stopping daemon.", signum)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, sigterm)

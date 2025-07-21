@@ -771,9 +771,12 @@ class RegisterRestServlet(RestServlet):
         body: JsonDict,
         should_issue_refresh_token: bool = False,
     ) -> JsonDict:
-        user_id = await self.registration_handler.appservice_register(
+        user_id, appservice = await self.registration_handler.appservice_register(
             username, as_token
         )
+        if appservice.msc4190_device_management:
+            body["inhibit_login"] = True
+
         return await self._create_registration_details(
             user_id,
             body,
@@ -905,6 +908,14 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
 
         await self.ratelimiter.ratelimit(None, client_addr, update=False)
 
+        # Allow only ASes to use this API.
+        if body.get("type") != APP_SERVICE_REGISTRATION_TYPE:
+            raise SynapseError(
+                403,
+                "Registration has been disabled. Only m.login.application_service registrations are allowed.",
+                errcode=Codes.FORBIDDEN,
+            )
+
         kind = parse_string(request, "kind", default="user")
 
         if kind == "guest":
@@ -920,10 +931,6 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
         if not isinstance(desired_username, str) or len(desired_username) > 512:
             raise SynapseError(400, "Invalid username")
 
-        # Allow only ASes to use this API.
-        if body.get("type") != APP_SERVICE_REGISTRATION_TYPE:
-            raise SynapseError(403, "Non-application service registration type")
-
         if not self.auth.has_access_token(request):
             raise SynapseError(
                 400,
@@ -937,7 +944,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
 
         as_token = self.auth.get_access_token_from_request(request)
 
-        user_id = await self.registration_handler.appservice_register(
+        user_id, _ = await self.registration_handler.appservice_register(
             desired_username, as_token
         )
         return 200, {"user_id": user_id}

@@ -5,10 +5,13 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import FrozenEventV3
+from synapse.federation.federation_base import (
+    event_from_pdu_json,
+)
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
@@ -172,20 +175,25 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             )
         )
 
-        with patch.object(
-            self.handler.federation_handler.federation_client,
-            "make_membership_event",
-            mock_make_membership_event,
-        ), patch.object(
-            self.handler.federation_handler.federation_client,
-            "send_join",
-            mock_send_join,
-        ), patch(
-            "synapse.event_auth._is_membership_change_allowed",
-            return_value=None,
-        ), patch(
-            "synapse.handlers.federation_event.check_state_dependent_auth_rules",
-            return_value=None,
+        with (
+            patch.object(
+                self.handler.federation_handler.federation_client,
+                "make_membership_event",
+                mock_make_membership_event,
+            ),
+            patch.object(
+                self.handler.federation_handler.federation_client,
+                "send_join",
+                mock_send_join,
+            ),
+            patch(
+                "synapse.event_auth._is_membership_change_allowed",
+                return_value=None,
+            ),
+            patch(
+                "synapse.handlers.federation_event.check_state_dependent_auth_rules",
+                return_value=None,
+            ),
         ):
             self.get_success(
                 self.handler.update_membership(
@@ -448,3 +456,165 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         new_count = rows[0][0]
 
         self.assertEqual(initial_count, new_count)
+
+
+class TestInviteFiltering(FederatingHomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        synapse.rest.client.login.register_servlets,
+        synapse.rest.client.room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.handler = hs.get_room_member_handler()
+        self.fed_handler = hs.get_federation_handler()
+        self.store = hs.get_datastores().main
+
+        # Create three users.
+        self.alice = self.register_user("alice", "pass")
+        self.alice_token = self.login("alice", "pass")
+        self.bob = self.register_user("bob", "pass")
+        self.bob_token = self.login("bob", "pass")
+
+    @override_config({"experimental_features": {"msc4155_enabled": True}})
+    def test_misc4155_block_invite_local(self) -> None:
+        """Test that MSC4155 will block a user from being invited to a room"""
+        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {
+                    "blocked_users": [self.alice],
+                },
+            )
+        )
+
+        f = self.get_failure(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=UserID.from_string(self.bob),
+                room_id=room_id,
+                action=Membership.INVITE,
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 403)
+        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+
+    @override_config({"experimental_features": {"msc4155_enabled": False}})
+    def test_msc4155_disabled_allow_invite_local(self) -> None:
+        """Test that MSC4155 will block a user from being invited to a room"""
+        room_id = self.helper.create_room_as(self.alice, tok=self.alice_token)
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {
+                    "blocked_users": [self.alice],
+                },
+            )
+        )
+
+        self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.alice),
+                target=UserID.from_string(self.bob),
+                room_id=room_id,
+                action=Membership.INVITE,
+            ),
+        )
+
+    @override_config({"experimental_features": {"msc4155_enabled": True}})
+    def test_msc4155_block_invite_remote(self) -> None:
+        """Test that MSC4155 will block a remote user from being invited to a room"""
+        # A remote user who sends the invite
+        remote_server = "otherserver"
+        remote_user = "@otheruser:" + remote_server
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {"blocked_users": [remote_user]},
+            )
+        )
+
+        room_id = self.helper.create_room_as(
+            room_creator=self.alice, tok=self.alice_token
+        )
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        invite_event = event_from_pdu_json(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": "invite"},
+                "room_id": room_id,
+                "sender": remote_user,
+                "state_key": self.bob,
+                "depth": 32,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+
+        f = self.get_failure(
+            self.fed_handler.on_invite_request(
+                remote_server,
+                invite_event,
+                invite_event.room_version,
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 403)
+        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")
+
+    @override_config({"experimental_features": {"msc4155_enabled": True}})
+    def test_msc4155_block_invite_remote_server(self) -> None:
+        """Test that MSC4155 will block a remote server's user from being invited to a room"""
+        # A remote user who sends the invite
+        remote_server = "otherserver"
+        remote_user = "@otheruser:" + remote_server
+
+        self.get_success(
+            self.store.add_account_data_for_user(
+                self.bob,
+                AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG,
+                {"blocked_servers": [remote_server]},
+            )
+        )
+
+        room_id = self.helper.create_room_as(
+            room_creator=self.alice, tok=self.alice_token
+        )
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        invite_event = event_from_pdu_json(
+            {
+                "type": EventTypes.Member,
+                "content": {"membership": "invite"},
+                "room_id": room_id,
+                "sender": remote_user,
+                "state_key": self.bob,
+                "depth": 32,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            room_version,
+        )
+
+        f = self.get_failure(
+            self.fed_handler.on_invite_request(
+                remote_server,
+                invite_event,
+                invite_event.room_version,
+            ),
+            SynapseError,
+        ).value
+        self.assertEqual(f.code, 403)
+        self.assertEqual(f.errcode, "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED")

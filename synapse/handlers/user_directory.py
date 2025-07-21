@@ -26,7 +26,13 @@ from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 from twisted.internet.interfaces import IDelayedCall
 
 import synapse.metrics
-from synapse.api.constants import EventTypes, HistoryVisibility, JoinRules, Membership
+from synapse.api.constants import (
+    EventTypes,
+    HistoryVisibility,
+    JoinRules,
+    Membership,
+    ProfileFields,
+)
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -102,6 +108,9 @@ class UserDirectoryHandler(StateDeltasHandler):
         self.is_mine_id = hs.is_mine_id
         self.update_user_directory = hs.config.worker.should_update_user_directory
         self.search_all_users = hs.config.userdirectory.user_directory_search_all_users
+        self.exclude_remote_users = (
+            hs.config.userdirectory.user_directory_exclude_remote_users
+        )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self._hs = hs
@@ -161,7 +170,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         non_spammy_users = []
         for user in results["results"]:
             if not await self._spam_checker_module_callbacks.check_username_for_spam(
-                user
+                user, user_id
             ):
                 non_spammy_users.append(user)
         results["results"] = non_spammy_users
@@ -228,7 +237,9 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "user_dir_delta"):
+            with Measure(
+                self.clock, name="user_dir_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
                 if self.pos == room_max_stream_ordering:
                     return
@@ -740,10 +751,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                     )
                     continue
                 except Exception:
-                    logger.error(
+                    logger.exception(
                         "Failed to refresh profile for %r due to unhandled exception",
                         user_id,
-                        exc_info=True,
                     )
                     await self.store.set_remote_user_profile_in_user_dir_stale(
                         user_id,
@@ -756,6 +766,10 @@ class UserDirectoryHandler(StateDeltasHandler):
 
                 await self.store.update_profile_in_user_dir(
                     user_id,
-                    display_name=non_null_str_or_none(profile.get("displayname")),
-                    avatar_url=non_null_str_or_none(profile.get("avatar_url")),
+                    display_name=non_null_str_or_none(
+                        profile.get(ProfileFields.DISPLAYNAME)
+                    ),
+                    avatar_url=non_null_str_or_none(
+                        profile.get(ProfileFields.AVATAR_URL)
+                    ),
                 )

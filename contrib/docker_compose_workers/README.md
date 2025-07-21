@@ -8,6 +8,9 @@ All examples and snippets assume that your Synapse service is called `synapse` i
 
 An example Docker Compose file can be found [here](docker-compose.yaml).
 
+**For a more comprehensive Docker Compose example, showcasing a full Matrix 2.0 stack (originally based on this
+docker-compose.yaml), please see https://github.com/element-hq/element-docker-demo**
+
 ## Worker Service Examples in Docker Compose
 
 In order to start the Synapse container as a worker, you must specify an `entrypoint` that loads both the `homeserver.yaml` and the configuration for the worker (`synapse-generic-worker-1.yaml` in the example below). You must also include the worker type in the environment variable `SYNAPSE_WORKER` or alternatively pass `-m synapse.app.generic_worker` as part of the `entrypoint` after `"/start.py", "run"`).

@@ -68,6 +68,7 @@ class StateStorageController:
     """
 
     def __init__(self, hs: "HomeServer", stores: "Databases"):
+        self.server_name = hs.hostname  # nb must be called this for @cached
         self._is_mine_id = hs.is_mine_id
         self._clock = hs.get_clock()
         self.stores = stores
@@ -234,8 +235,11 @@ class StateStorageController:
             RuntimeError if we don't have a state group for one or more of the events
                (ie they are outliers or unknown)
         """
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         await_full_state = True
-        if state_filter and not state_filter.must_await_full_state(self._is_mine_id):
+        if not state_filter.must_await_full_state(self._is_mine_id):
             await_full_state = False
 
         event_to_groups = await self.get_state_group_for_events(
@@ -244,7 +248,7 @@ class StateStorageController:
 
         groups = set(event_to_groups.values())
         group_to_state = await self.stores.state._get_state_for_groups(
-            groups, state_filter or StateFilter.all()
+            groups, state_filter
         )
 
         state_event_map = await self.stores.main.get_events(
@@ -292,10 +296,11 @@ class StateStorageController:
             RuntimeError if we don't have a state group for one or more of the events
                 (ie they are outliers or unknown)
         """
-        if (
-            await_full_state
-            and state_filter
-            and not state_filter.must_await_full_state(self._is_mine_id)
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
+        if await_full_state and not state_filter.must_await_full_state(
+            self._is_mine_id
         ):
             # Full state is not required if the state filter is restrictive enough.
             await_full_state = False
@@ -306,7 +311,7 @@ class StateStorageController:
 
         groups = set(event_to_groups.values())
         group_to_state = await self.stores.state._get_state_for_groups(
-            groups, state_filter or StateFilter.all()
+            groups, state_filter
         )
 
         event_to_state = {
@@ -335,9 +340,10 @@ class StateStorageController:
             RuntimeError if we don't have a state group for the event (ie it is an
                 outlier or is unknown)
         """
-        state_map = await self.get_state_for_events(
-            [event_id], state_filter or StateFilter.all()
-        )
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
+        state_map = await self.get_state_for_events([event_id], state_filter)
         return state_map[event_id]
 
     @trace
@@ -365,9 +371,12 @@ class StateStorageController:
             RuntimeError if we don't have a state group for the event (ie it is an
                 outlier or is unknown)
         """
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         state_map = await self.get_state_ids_for_events(
             [event_id],
-            state_filter or StateFilter.all(),
+            state_filter,
             await_full_state=await_full_state,
         )
         return state_map[event_id]
@@ -388,9 +397,12 @@ class StateStorageController:
                 at the event and `state_filter` is not satisfied by partial state.
                 Defaults to `True`.
         """
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         state_ids = await self.get_state_ids_for_event(
             event_id,
-            state_filter=state_filter or StateFilter.all(),
+            state_filter=state_filter,
             await_full_state=await_full_state,
         )
 
@@ -426,6 +438,9 @@ class StateStorageController:
                 at the last event in the room before `stream_position` and
                 `state_filter` is not satisfied by partial state. Defaults to `True`.
         """
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         # FIXME: This gets the state at the latest event before the stream ordering,
         # which might not be the same as the "current state" of the room at the time
         # of the stream token if there were multiple forward extremities at the time.
@@ -442,7 +457,7 @@ class StateStorageController:
         if last_event_id:
             state = await self.get_state_after_event(
                 last_event_id,
-                state_filter=state_filter or StateFilter.all(),
+                state_filter=state_filter,
                 await_full_state=await_full_state,
             )
 
@@ -500,9 +515,10 @@ class StateStorageController:
         Returns:
             Dict of state group to state map.
         """
-        return await self.stores.state._get_state_for_groups(
-            groups, state_filter or StateFilter.all()
-        )
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
+        return await self.stores.state._get_state_for_groups(groups, state_filter)
 
     @trace
     @tag_args
@@ -583,12 +599,13 @@ class StateStorageController:
         Returns:
             The current state of the room.
         """
-        if await_full_state and (
-            not state_filter or state_filter.must_await_full_state(self._is_mine_id)
-        ):
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
+        if await_full_state and state_filter.must_await_full_state(self._is_mine_id):
             await self._partial_state_room_tracker.await_full_state(room_id)
 
-        if state_filter and not state_filter.is_full():
+        if state_filter is not None and not state_filter.is_full():
             return await self.stores.main.get_partial_filtered_current_state_ids(
                 room_id, state_filter
             )
@@ -796,7 +813,9 @@ class StateStorageController:
             state_group = object()
 
         assert state_group is not None
-        with Measure(self._clock, "get_joined_hosts"):
+        with Measure(
+            self._clock, name="get_joined_hosts", server_name=self.server_name
+        ):
             return await self._get_joined_hosts(
                 room_id, state_group, state_entry=state_entry
             )

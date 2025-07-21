@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, Mock
 from twisted.internet import defer
 
 from synapse.appservice import ApplicationService, Namespace
+from synapse.types import UserID
 
 from tests import unittest
 
@@ -37,7 +38,7 @@ class ApplicationServiceTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.service = ApplicationService(
             id="unique_identifier",
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
             url="some_url",
             token="some_token",
         )
@@ -226,11 +227,11 @@ class ApplicationServiceTestCase(unittest.TestCase):
     @defer.inlineCallbacks
     def test_interested_in_self(self) -> Generator["defer.Deferred[Any]", object, None]:
         # make sure invites get through
-        self.service.sender = "@appservice:name"
+        self.service.sender = UserID.from_string("@appservice:name")
         self.service.namespaces[ApplicationService.NS_USERS].append(_regex("@irc_.*"))
         self.event.type = "m.room.member"
         self.event.content = {"membership": "invite"}
-        self.event.state_key = self.service.sender
+        self.event.state_key = self.service.sender.to_string()
         self.assertTrue(
             (
                 yield self.service.is_interested_in_event(

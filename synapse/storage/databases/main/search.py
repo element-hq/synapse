@@ -49,6 +49,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict
+from synapse.util.events import get_plain_text_topic_from_event_content
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -94,7 +95,7 @@ class SearchWorkerStore(SQLBaseStore):
             VALUES (?,?,?,to_tsvector('english', ?),?,?)
             """
 
-            args1 = (
+            args1 = [
                 (
                     entry.event_id,
                     entry.room_id,
@@ -104,7 +105,7 @@ class SearchWorkerStore(SQLBaseStore):
                     entry.origin_server_ts,
                 )
                 for entry in entries
-            )
+            ]
 
             txn.execute_batch(sql, args1)
 
@@ -212,7 +213,9 @@ class SearchBackgroundUpdateStore(SearchWorkerStore):
                         value = content["body"]
                     elif etype == "m.room.topic":
                         key = "content.topic"
-                        value = content["topic"]
+                        value = (
+                            get_plain_text_topic_from_event_content(content) or "",
+                        )
                     elif etype == "m.room.name":
                         key = "content.name"
                         value = content["name"]

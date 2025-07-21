@@ -332,10 +332,12 @@ class EventsPersistenceStorageController:
         # store for now.
         self.main_store = stores.main
         self.state_store = stores.state
+        self._state_deletion_store = stores.state_deletion
 
         assert stores.persist_events
         self.persist_events_store = stores.persist_events
 
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self.is_mine_id = hs.is_mine_id
@@ -549,7 +551,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_maps_by_state_group,
             event_map=None,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_deletion_store
+            ),
         )
 
         return await res.get_state(self._state_controller, StateFilter.all())
@@ -613,7 +617,11 @@ class EventsPersistenceStorageController:
             state_delta_for_room = None
 
             if not backfilled:
-                with Measure(self._clock, "_calculate_state_and_extrem"):
+                with Measure(
+                    self._clock,
+                    name="_calculate_state_and_extrem",
+                    server_name=self.server_name,
+                ):
                     # Work out the new "current state" for the room.
                     # We do this by working out what the new extremities are and then
                     # calculating the state from that.
@@ -624,7 +632,11 @@ class EventsPersistenceStorageController:
                         room_id, chunk
                     )
 
-            with Measure(self._clock, "calculate_chain_cover_index_for_events"):
+            with Measure(
+                self._clock,
+                name="calculate_chain_cover_index_for_events",
+                server_name=self.server_name,
+            ):
                 # We now calculate chain ID/sequence numbers for any state events we're
                 # persisting. We ignore out of band memberships as we're not in the room
                 # and won't have their auth chain (we'll fix it up later if we join the
@@ -635,15 +647,20 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
-            await self.persist_events_store._persist_events_and_state_updates(
-                room_id,
-                chunk,
-                state_delta_for_room=state_delta_for_room,
-                new_forward_extremities=new_forward_extremities,
-                use_negative_stream_ordering=backfilled,
-                inhibit_local_membership_updates=backfilled,
-                new_event_links=new_event_links,
-            )
+            # Stop the state groups from being deleted while we're persisting
+            # them.
+            async with self._state_deletion_store.persisting_state_group_references(
+                events_and_contexts
+            ):
+                await self.persist_events_store._persist_events_and_state_updates(
+                    room_id,
+                    chunk,
+                    state_delta_for_room=state_delta_for_room,
+                    new_forward_extremities=new_forward_extremities,
+                    use_negative_stream_ordering=backfilled,
+                    inhibit_local_membership_updates=backfilled,
+                    new_event_links=new_event_links,
+                )
 
         return replaced_events
 
@@ -711,7 +728,11 @@ class EventsPersistenceStorageController:
                     break
 
         logger.debug("Calculating state delta for room %s", room_id)
-        with Measure(self._clock, "persist_events.get_new_state_after_events"):
+        with Measure(
+            self._clock,
+            name="persist_events.get_new_state_after_events",
+            server_name=self.server_name,
+        ):
             res = await self._get_new_state_after_events(
                 room_id,
                 ev_ctx_rm,
@@ -738,7 +759,11 @@ class EventsPersistenceStorageController:
             # removed keys entirely.
             delta = DeltaState([], delta_ids)
         elif current_state is not None:
-            with Measure(self._clock, "persist_events.calculate_state_delta"):
+            with Measure(
+                self._clock,
+                name="persist_events.calculate_state_delta",
+                server_name=self.server_name,
+            ):
                 delta = await self._calculate_state_delta(room_id, current_state)
 
         if delta:
@@ -862,8 +887,7 @@ class EventsPersistenceStorageController:
                 # This should only happen for outlier events.
                 if not ev.internal_metadata.is_outlier():
                     raise Exception(
-                        "Context for new event %s has no state "
-                        "group" % (ev.event_id,)
+                        "Context for new event %s has no state group" % (ev.event_id,)
                     )
                 continue
             if ctx.state_group_deltas:
@@ -965,7 +989,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_groups,
             events_map,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_deletion_store
+            ),
         )
 
         state_resolutions_during_persistence.inc()

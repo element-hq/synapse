@@ -43,6 +43,14 @@ CLIENT_SECRET_REGEX = re.compile(r"^[0-9a-zA-Z\.=_\-]+$")
 #
 MXC_REGEX = re.compile("^mxc://([^/]+)/([^/#?]+)$")
 
+# https://spec.matrix.org/v1.13/appendices/#common-namespaced-identifier-grammar
+#
+# At least one character, less than or equal to 255 characters. Must start with
+# a-z, the rest is a-z, 0-9, -, _, or ..
+#
+# This doesn't check anything about validity of namespaces.
+NAMESPACED_GRAMMAR = re.compile(r"^[a-z][a-z0-9_.-]{0,254}$")
+
 
 def random_string(length: int) -> str:
     """Generate a cryptographically secure string of random letters.
@@ -66,6 +74,10 @@ def is_ascii(s: bytes) -> bool:
     except UnicodeError:
         return False
     return True
+
+
+def is_namedspaced_grammar(s: str) -> bool:
+    return bool(NAMESPACED_GRAMMAR.match(s))
 
 
 def assert_valid_client_secret(client_secret: str) -> None:

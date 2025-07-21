@@ -22,7 +22,7 @@
 import logging
 import os
 from typing import Any, Dict, List, Tuple
-from urllib.request import getproxies_environment  # type: ignore
+from urllib.request import getproxies_environment
 
 import attr
 
@@ -117,6 +117,15 @@ def parse_thumbnail_requirements(
     return {
         media_type: tuple(thumbnails) for media_type, thumbnails in requirements.items()
     }
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class MediaUploadLimit:
+    """A limit on the amount of data a user can upload in a given time
+    period."""
+
+    max_bytes: int
+    time_period_ms: int
 
 
 class ContentRepositoryConfig(Config):
@@ -272,9 +281,14 @@ class ContentRepositoryConfig(Config):
                 remote_media_lifetime
             )
 
-        self.enable_authenticated_media = config.get(
-            "enable_authenticated_media", False
-        )
+        self.enable_authenticated_media = config.get("enable_authenticated_media", True)
+
+        self.media_upload_limits: List[MediaUploadLimit] = []
+        for limit_config in config.get("media_upload_limits", []):
+            time_period_ms = self.parse_duration(limit_config["time_period"])
+            max_bytes = self.parse_size(limit_config["max_size"])
+
+            self.media_upload_limits.append(MediaUploadLimit(max_bytes, time_period_ms))
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None

@@ -73,11 +73,8 @@ from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.module_api import NOT_SPAM
-from synapse.replication.http.federation import (
-    ReplicationCleanRoomRestServlet,
-    ReplicationStoreRoomOnOutlierMembershipRestServlet,
-)
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
@@ -161,19 +158,6 @@ class FederationHandler:
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
         self._notifier = hs.get_notifier()
         self._worker_locks = hs.get_worker_locks_handler()
-
-        self._clean_room_for_join_client = ReplicationCleanRoomRestServlet.make_client(
-            hs
-        )
-
-        if hs.config.worker.worker_app:
-            self._maybe_store_room_on_outlier_membership = (
-                ReplicationStoreRoomOnOutlierMembershipRestServlet.make_client(hs)
-            )
-        else:
-            self._maybe_store_room_on_outlier_membership = (
-                self.store.maybe_store_room_on_outlier_membership
-            )
 
         self._room_backfill = Linearizer("room_backfill")
 
@@ -646,7 +630,7 @@ class FederationHandler:
             #    room.
             # In short, the races either have an acceptable outcome or should be
             # impossible.
-            await self._clean_room_for_join(room_id)
+            await self.store.clean_room_for_join(room_id)
 
         try:
             # Try the host we successfully got a response to /make_join/
@@ -714,10 +698,19 @@ class FederationHandler:
                     #     We may want to reset the partial state info if it's from an
                     #     old, failed partial state join.
                     #     https://github.com/matrix-org/synapse/issues/13000
+
+                    # FIXME: Ideally, we would store the full stream token here
+                    # not just the minimum stream ID, so that we can compute an
+                    # accurate list of device changes when un-partial-ing the
+                    # room. The only side effect of this is that we may send
+                    # extra unecessary device list outbound pokes through
+                    # federation, which is harmless.
+                    device_lists_stream_id = self.store.get_device_stream_token().stream
+
                     await self.store.store_partial_state_room(
                         room_id=room_id,
                         servers=ret.servers_in_room,
-                        device_lists_stream_id=self.store.get_device_stream_token(),
+                        device_lists_stream_id=device_lists_stream_id,
                         joined_via=origin,
                     )
 
@@ -856,7 +849,7 @@ class FederationHandler:
         event.internal_metadata.out_of_band_membership = True
 
         # Record the room ID and its version so that we have a record of the room
-        await self._maybe_store_room_on_outlier_membership(
+        await self.store.maybe_store_room_on_outlier_membership(
             room_id=event.room_id, room_version=event_format_version
         )
 
@@ -879,6 +872,9 @@ class FederationHandler:
 
         if stripped_room_state is None:
             raise KeyError("Missing 'knock_room_state' field in send_knock response")
+
+        if not isinstance(stripped_room_state, list):
+            raise TypeError("'knock_room_state' has wrong type")
 
         event.unsigned["knock_room_state"] = stripped_room_state
 
@@ -1058,8 +1054,8 @@ class FederationHandler:
         if self.hs.config.server.block_non_admin_invites:
             raise SynapseError(403, "This server does not accept room invites")
 
-        spam_check = await self._spam_checker_module_callbacks.user_may_invite(
-            event.sender, event.state_key, event.room_id
+        spam_check = (
+            await self._spam_checker_module_callbacks.federated_user_may_invite(event)
         )
         if spam_check != NOT_SPAM:
             raise SynapseError(
@@ -1086,6 +1082,22 @@ class FederationHandler:
         if event.state_key == self._server_notices_mxid:
             raise SynapseError(HTTPStatus.FORBIDDEN, "Cannot invite this user")
 
+        # check the invitee's configuration and apply rules
+        invite_config = await self.store.get_invite_config_for_user(event.state_key)
+        rule = invite_config.get_invite_rule(event.sender)
+        if rule == InviteRule.BLOCK:
+            logger.info(
+                "Automatically rejecting invite from %s due to the invite filtering rules of %s",
+                event.sender,
+                event.state_key,
+            )
+            raise SynapseError(
+                403,
+                "You are not permitted to invite this user.",
+                errcode=Codes.INVITE_BLOCKED,
+            )
+        # InviteRule.IGNORE is handled at the sync layer
+
         # We retrieve the room member handler here as to not cause a cyclic dependency
         member_handler = self.hs.get_room_member_handler()
         # We don't rate limit based on room ID, as that should be done by
@@ -1095,7 +1107,7 @@ class FederationHandler:
         # keep a record of the room version, if we don't yet know it.
         # (this may get overwritten if we later get a different room version in a
         # join dance).
-        await self._maybe_store_room_on_outlier_membership(
+        await self.store.maybe_store_room_on_outlier_membership(
             room_id=event.room_id, room_version=room_version
         )
 
@@ -1309,9 +1321,9 @@ class FederationHandler:
         if state_key is not None:
             # the event was not rejected (get_event raises a NotFoundError for rejected
             # events) so the state at the event should include the event itself.
-            assert (
-                state_map.get((event.type, state_key)) == event.event_id
-            ), "State at event did not include event itself"
+            assert state_map.get((event.type, state_key)) == event.event_id, (
+                "State at event did not include event itself"
+            )
 
             # ... but we need the state *before* that event
             if "replaces_state" in event.unsigned:
@@ -1740,18 +1752,6 @@ class FederationHandler:
             raise SynapseError(502, "Third party certificate could not be checked")
         if "valid" not in response or not response["valid"]:
             raise AuthError(403, "Third party certificate was invalid")
-
-    async def _clean_room_for_join(self, room_id: str) -> None:
-        """Called to clean up any data in DB for a given room, ready for the
-        server to join the room.
-
-        Args:
-            room_id
-        """
-        if self.config.worker.worker_app:
-            await self._clean_room_for_join_client(room_id)
-        else:
-            await self.store.clean_room_for_join(room_id)
 
     async def get_room_complexity(
         self, remote_room_hosts: List[str], room_id: str

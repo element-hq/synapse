@@ -31,18 +31,17 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Tuple,
     Union,
 )
 
 import attr
-import multipart
 import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
 from prometheus_client import Counter
-from typing_extensions import Protocol
-from zope.interface import implementer, provider
+from zope.interface import implementer
 
 from OpenSSL import SSL
 from OpenSSL.SSL import VERIFY_NONE
@@ -92,6 +91,20 @@ from synapse.util.async_helpers import timeout_deferred
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+# Support both import names for the `python-multipart` (PyPI) library,
+# which renamed its package name from `multipart` to `python_multipart`
+# in 0.0.13 (though supports the old import name for compatibility).
+# Note that the `multipart` package name conflicts with `multipart` (PyPI)
+# so we should prefer importing from `python_multipart` when possible.
+try:
+    from python_multipart import MultipartParser
+
+    if TYPE_CHECKING:
+        from python_multipart import multipart
+except ImportError:
+    from multipart import MultipartParser  # type: ignore[no-redef]
+
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +213,7 @@ class _IPBlockingResolver:
 
                 if _is_ip_blocked(ip_address, self._ip_allowlist, self._ip_blocklist):
                     logger.info(
-                        "Blocked %s from DNS resolution to %s" % (ip_address, hostname)
+                        "Blocked %s from DNS resolution to %s", ip_address, hostname
                     )
                     has_bad_ip = True
 
@@ -212,7 +225,7 @@ class _IPBlockingResolver:
                     recv.addressResolved(address)
             recv.resolutionComplete()
 
-        @provider(IResolutionReceiver)
+        @implementer(IResolutionReceiver)
         class EndpointReceiver:
             @staticmethod
             def resolutionBegan(resolutionInProgress: IHostResolution) -> None:
@@ -226,8 +239,9 @@ class _IPBlockingResolver:
             def resolutionComplete() -> None:
                 _callback()
 
+        endpoint_receiver_wrapper = EndpointReceiver()
         self._reactor.nameResolver.resolveHostName(
-            EndpointReceiver, hostname, portNumber=portNumber
+            endpoint_receiver_wrapper, hostname, portNumber=portNumber
         )
 
         return recv
@@ -304,7 +318,7 @@ class BlocklistingAgentWrapper(Agent):
             pass
         else:
             if _is_ip_blocked(ip_address, self._ip_allowlist, self._ip_blocklist):
-                logger.info("Blocking access to %s" % (ip_address,))
+                logger.info("Blocking access to %s", ip_address)
                 e = SynapseError(HTTPStatus.FORBIDDEN, "IP address blocked")
                 return defer.fail(Failure(e))
 
@@ -709,7 +723,7 @@ class BaseHttpClient:
         resp_headers = dict(response.headers.getAllRawHeaders())
 
         if response.code > 299:
-            logger.warning("Got %d when downloading %s" % (response.code, url))
+            logger.warning("Got %d when downloading %s", response.code, url)
             raise SynapseError(
                 HTTPStatus.BAD_GATEWAY, "Got error %d" % (response.code,), Codes.UNKNOWN
             )
@@ -1039,7 +1053,7 @@ class _MultipartParserProtocol(protocol.Protocol):
         self.deferred = deferred
         self.boundary = boundary
         self.max_length = max_length
-        self.parser: Optional[multipart.MultipartParser] = None
+        self.parser: Optional[MultipartParser] = None
         self.multipart_response = MultipartResponse()
         self.has_redirect = False
         self.in_json = False
@@ -1092,17 +1106,17 @@ class _MultipartParserProtocol(protocol.Protocol):
                         self.stream.write(data[start:end])
                     except Exception as e:
                         logger.warning(
-                            f"Exception encountered writing file data to stream: {e}"
+                            "Exception encountered writing file data to stream: %s", e
                         )
                         self.deferred.errback()
                     self.file_length += end - start
 
-            callbacks: "multipart.multipart.MultipartCallbacks" = {
+            callbacks: "multipart.MultipartCallbacks" = {
                 "on_header_field": on_header_field,
                 "on_header_value": on_header_value,
                 "on_part_data": on_part_data,
             }
-            self.parser = multipart.MultipartParser(self.boundary, callbacks)
+            self.parser = MultipartParser(self.boundary, callbacks)
 
         self.total_length += len(incoming_data)
         if self.max_length is not None and self.total_length >= self.max_length:
@@ -1115,7 +1129,7 @@ class _MultipartParserProtocol(protocol.Protocol):
         try:
             self.parser.write(incoming_data)
         except Exception as e:
-            logger.warning(f"Exception writing to multipart parser: {e}")
+            logger.warning("Exception writing to multipart parser: %s", e)
             self.deferred.errback()
             return
 

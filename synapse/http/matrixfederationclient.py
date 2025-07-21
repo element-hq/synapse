@@ -34,6 +34,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Literal,
     Optional,
     TextIO,
     Tuple,
@@ -48,7 +49,6 @@ import treq
 from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
 from signedjson.sign import sign_json
-from typing_extensions import Literal
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError
@@ -417,17 +417,18 @@ class MatrixFederationHttpClient:
         if hs.get_instance_name() in outbound_federation_restricted_to:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
-                self.reactor,
-                tls_client_options_factory,
-                user_agent.encode("ascii"),
-                hs.config.server.federation_ip_range_allowlist,
-                hs.config.server.federation_ip_range_blocklist,
+                server_name=self.server_name,
+                reactor=self.reactor,
+                tls_client_options_factory=tls_client_options_factory,
+                user_agent=user_agent.encode("ascii"),
+                ip_allowlist=hs.config.server.federation_ip_range_allowlist,
+                ip_blocklist=hs.config.server.federation_ip_range_blocklist,
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret
-            assert (
-                proxy_authorization_secret is not None
-            ), "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+            assert proxy_authorization_secret is not None, (
+                "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+            )
             federation_proxy_credentials = BearerProxyCredentials(
                 proxy_authorization_secret.encode("ascii")
             )
@@ -602,7 +603,7 @@ class MatrixFederationHttpClient:
         try:
             parse_and_validate_server_name(request.destination)
         except ValueError:
-            logger.exception(f"Invalid destination: {request.destination}.")
+            logger.exception("Invalid destination: %s.", request.destination)
             raise FederationDeniedError(request.destination)
 
         if timeout is not None:
@@ -697,7 +698,11 @@ class MatrixFederationHttpClient:
                     outgoing_requests_counter.labels(request.method).inc()
 
                     try:
-                        with Measure(self.clock, "outbound_request"):
+                        with Measure(
+                            self.clock,
+                            name="outbound_request",
+                            server_name=self.server_name,
+                        ):
                             # we don't want all the fancy cookie and redirect handling
                             # that treq.request gives: just use the raw Agent.
 

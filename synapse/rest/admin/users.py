@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 import attr
 
 from synapse._pydantic_compat import StrictBool, StrictInt, StrictStr
-from synapse.api.constants import Direction, UserTypes
+from synapse.api.constants import Direction
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
     RestServlet,
@@ -230,6 +230,7 @@ class UserRestServletV2(RestServlet):
         self.registration_handler = hs.get_registration_handler()
         self.pusher_pool = hs.get_pusherpool()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
+        self._all_user_types = hs.config.user_types.all_user_types
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -277,7 +278,7 @@ class UserRestServletV2(RestServlet):
                 assert_params_in_dict(external_id, ["auth_provider", "external_id"])
 
         user_type = body.get("user_type", None)
-        if user_type is not None and user_type not in UserTypes.ALL_USER_TYPES:
+        if user_type is not None and user_type not in self._all_user_types:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid user type")
 
         set_admin_to = body.get("admin", False)
@@ -524,6 +525,7 @@ class UserRegisterServlet(RestServlet):
         self.reactor = hs.get_reactor()
         self.nonces: Dict[str, int] = {}
         self.hs = hs
+        self._all_user_types = hs.config.user_types.all_user_types
 
     def _clear_old_nonces(self) -> None:
         """
@@ -605,7 +607,7 @@ class UserRegisterServlet(RestServlet):
         user_type = body.get("user_type", None)
         displayname = body.get("displayname", None)
 
-        if user_type is not None and user_type not in UserTypes.ALL_USER_TYPES:
+        if user_type is not None and user_type not in self._all_user_types:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Invalid user type")
 
         if "mac" not in body:
@@ -983,7 +985,7 @@ class UserAdminServlet(RestServlet):
 
 class UserMembershipRestServlet(RestServlet):
     """
-    Get room list of an user.
+    Get list of joined room ID's for a user.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/joined_rooms$")
@@ -999,8 +1001,9 @@ class UserMembershipRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         room_ids = await self.store.get_rooms_for_user(user_id)
-        ret = {"joined_rooms": list(room_ids), "total": len(room_ids)}
-        return HTTPStatus.OK, ret
+        rooms_response = {"joined_rooms": list(room_ids), "total": len(room_ids)}
+
+        return HTTPStatus.OK, rooms_response
 
 
 class PushersRestServlet(RestServlet):
@@ -1411,7 +1414,7 @@ class RedactUser(RestServlet):
     """
     Redact all the events of a given user in the given rooms or if empty dict is provided
     then all events in all rooms user is member of. Kicks off a background process and
-    returns an id that can be used to check on the progress of the redaction progress
+    returns an id that can be used to check on the progress of the redaction progress.
     """
 
     PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
@@ -1425,6 +1428,7 @@ class RedactUser(RestServlet):
         rooms: List[StrictStr]
         reason: Optional[StrictStr]
         limit: Optional[StrictInt]
+        use_admin: Optional[StrictBool]
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1452,8 +1456,12 @@ class RedactUser(RestServlet):
             )
             rooms = current_rooms + banned_rooms
 
+        use_admin = body.use_admin
+        if not use_admin:
+            use_admin = False
+
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, rooms, requester.serialize(), body.reason, limit
+            user_id, rooms, requester.serialize(), use_admin, body.reason, limit
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}
@@ -1501,3 +1509,50 @@ class RedactUserStatus(RestServlet):
                 }
         else:
             raise NotFoundError("redact id '%s' not found" % redact_id)
+
+
+class UserInvitesCount(RestServlet):
+    """
+    Return the count of invites that the user has sent after the given timestamp
+    """
+
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/sent_invite_count")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+        from_ts = parse_integer(request, "from_ts", required=True)
+
+        sent_invite_count = await self.store.get_sent_invite_count_by_user(
+            user_id, from_ts
+        )
+
+        return HTTPStatus.OK, {"invite_count": sent_invite_count}
+
+
+class UserJoinedRoomCount(RestServlet):
+    """
+    Return the count of rooms that the user has joined at or after the given timestamp, even
+    if they have subsequently left/been banned from those rooms.
+    """
+
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/cumulative_joined_room_count")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+        from_ts = parse_integer(request, "from_ts", required=True)
+
+        joined_rooms = await self.store.get_rooms_for_user_by_date(user_id, from_ts)
+
+        return HTTPStatus.OK, {"cumulative_joined_room_count": len(joined_rooms)}

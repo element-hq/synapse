@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH
+from synapse.api.constants import MAX_DEPTH, EventTypes
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -109,6 +109,19 @@ class EventBuilder:
     def is_state(self) -> bool:
         return self._state_key is not None
 
+    def is_mine_id(self, user_id: str) -> bool:
+        """Determines whether a user ID or room alias originates from this homeserver.
+
+        Returns:
+            `True` if the hostname part of the user ID or room alias matches this
+            homeserver.
+            `False` otherwise, or if the user ID or room alias is malformed.
+        """
+        localpart_hostname = user_id.split(":", 1)
+        if len(localpart_hostname) < 2:
+            return False
+        return localpart_hostname[1] == self._hostname
+
     async def build(
         self,
         prev_event_ids: List[str],
@@ -141,6 +154,46 @@ class EventBuilder:
             auth_event_ids = self._event_auth_handler.compute_auth_events(
                 self, state_ids
             )
+
+            # Check for out-of-band membership that may have been exposed on `/sync` but
+            # the events have not been de-outliered yet so they won't be part of the
+            # room state yet.
+            #
+            # This helps in situations where a remote homeserver invites a local user to
+            # a room that we're already participating in; and we've persisted the invite
+            # as an out-of-band membership (outlier), but it hasn't been pushed to us as
+            # part of a `/send` transaction yet and de-outliered. This also helps for
+            # any of the other out-of-band membership transitions.
+            #
+            # As an optimization, we could check if the room state already includes a
+            # non-`leave` membership event, then we can assume the membership event has
+            # been de-outliered and we don't need to check for an out-of-band
+            # membership. But we don't have the necessary information from a
+            # `StateMap[str]` and we'll just have to take the hit of this extra lookup
+            # for any membership event for now.
+            if self.type == EventTypes.Member and self.is_mine_id(self.state_key):
+                (
+                    _membership,
+                    member_event_id,
+                ) = await self._store.get_local_current_membership_for_user_in_room(
+                    user_id=self.state_key,
+                    room_id=self.room_id,
+                )
+                # There is no need to check if the membership is actually an
+                # out-of-band membership (`outlier`) as we would end up with the
+                # same result either way (adding the member event to the
+                # `auth_event_ids`).
+                if (
+                    member_event_id is not None
+                    # We only need to be careful about duplicating the event in the
+                    # `auth_event_ids` list (duplicate `type`/`state_key` is part of the
+                    # authorization rules)
+                    and member_event_id not in auth_event_ids
+                ):
+                    auth_event_ids.append(member_event_id)
+                    # Also make sure to point to the previous membership event that will
+                    # allow this one to happen so the computed state works out.
+                    prev_event_ids.append(member_event_id)
 
         format_version = self.room_version.event_format
         # The types of auth/prev events changes between event versions.
@@ -249,8 +302,8 @@ def create_local_event_from_event_dict(
     event_dict: JsonDict,
     internal_metadata_dict: Optional[JsonDict] = None,
 ) -> EventBase:
-    """Takes a fully formed event dict, ensuring that fields like `origin`
-    and `origin_server_ts` have correct values for a locally produced event,
+    """Takes a fully formed event dict, ensuring that fields like
+    `origin_server_ts` have correct values for a locally produced event,
     then signs and hashes it.
     """
 
@@ -266,7 +319,6 @@ def create_local_event_from_event_dict(
     if format_version == EventFormatVersions.ROOM_V1_V2:
         event_dict["event_id"] = _create_event_id(clock, hostname)
 
-    event_dict["origin"] = hostname
     event_dict.setdefault("origin_server_ts", time_now)
 
     event_dict.setdefault("unsigned", {})

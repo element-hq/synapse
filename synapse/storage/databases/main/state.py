@@ -572,10 +572,10 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         Returns:
             Map from type/state_key to event ID.
         """
+        if state_filter is None:
+            state_filter = StateFilter.all()
 
-        where_clause, where_args = (
-            state_filter or StateFilter.all()
-        ).make_sql_filter_clause()
+        where_clause, where_args = (state_filter).make_sql_filter_clause()
 
         if not where_clause:
             # We delegate to the cached version
@@ -584,7 +584,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         def _get_filtered_current_state_ids_txn(
             txn: LoggingTransaction,
         ) -> StateMap[str]:
-            results = StateMapWrapper(state_filter=state_filter or StateFilter.all())
+            results = StateMapWrapper(state_filter=state_filter)
 
             sql = """
                 SELECT type, state_key, event_id FROM current_state_events
@@ -681,7 +681,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         context: EventContext,
     ) -> None:
         """Update the state group for a partial state event"""
-        async with self._un_partial_stated_events_stream_id_gen.get_next() as un_partial_state_event_stream_id:
+        async with (
+            self._un_partial_stated_events_stream_id_gen.get_next() as un_partial_state_event_stream_id
+        ):
             await self.db_pool.runInteraction(
                 "update_state_for_partial_state_event",
                 self._update_state_for_partial_state_event_txn,
@@ -988,11 +990,12 @@ class StateMapWrapper(Dict[StateKey, str]):
             raise Exception("State map was filtered and doesn't include: %s", key)
         return super().__getitem__(key)
 
+    @overload  # type: ignore[override]
+    def get(self, key: StateKey, default: None = None, /) -> Optional[str]: ...
     @overload
-    def get(self, key: Tuple[str, str]) -> Optional[str]: ...
-
+    def get(self, key: StateKey, default: str, /) -> str: ...
     @overload
-    def get(self, key: Tuple[str, str], default: Union[str, _T]) -> Union[str, _T]: ...
+    def get(self, key: StateKey, default: _T, /) -> Union[str, _T]: ...
 
     def get(
         self, key: StateKey, default: Union[str, _T, None] = None

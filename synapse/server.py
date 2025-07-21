@@ -69,7 +69,7 @@ from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
 from synapse.handlers.delayed_events import DelayedEventsHandler
-from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
+from synapse.handlers.device import DeviceHandler, DeviceWriterHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.e2e_keys import E2eKeysHandler
@@ -94,6 +94,7 @@ from synapse.handlers.read_marker import ReadMarkerHandler
 from synapse.handlers.receipts import ReceiptsHandler
 from synapse.handlers.register import RegistrationHandler
 from synapse.handlers.relations import RelationsHandler
+from synapse.handlers.reports import ReportsHandler
 from synapse.handlers.room import (
     RoomContextHandler,
     RoomCreationHandler,
@@ -107,6 +108,7 @@ from synapse.handlers.room_member import (
     RoomMemberMasterHandler,
 )
 from synapse.handlers.room_member_worker import RoomMemberWorkerHandler
+from synapse.handlers.room_policy import RoomPolicyHandler
 from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
@@ -115,6 +117,7 @@ from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
+from synapse.handlers.thread_subscriptions import ThreadSubscriptionsHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
 from synapse.handlers.user_directory import UserDirectoryHandler
 from synapse.handlers.worker_lock import WorkerLocksHandler
@@ -249,10 +252,12 @@ class HomeServer(metaclass=abc.ABCMeta):
     """
 
     REQUIRED_ON_BACKGROUND_TASK_STARTUP = [
+        "admin",
         "account_validity",
         "auth",
         "deactivate_account",
         "delayed_events",
+        "e2e_keys",  # for the `delete_old_otks` scheduled-task handler
         "message",
         "pagination",
         "profile",
@@ -389,7 +394,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     def is_mine(self, domain_specific_string: DomainSpecificString) -> bool:
         return domain_specific_string.domain == self.hostname
 
-    def is_mine_id(self, string: str) -> bool:
+    def is_mine_id(self, user_id: str) -> bool:
         """Determines whether a user ID or room alias originates from this homeserver.
 
         Returns:
@@ -397,7 +402,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             homeserver.
             `False` otherwise, or if the user ID or room alias is malformed.
         """
-        localpart_hostname = string.split(":", 1)
+        localpart_hostname = user_id.split(":", 1)
         if len(localpart_hostname) < 2:
             return False
         return localpart_hostname[1] == self.hostname
@@ -582,11 +587,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
-    def get_device_handler(self) -> DeviceWorkerHandler:
-        if self.config.worker.worker_app:
-            return DeviceWorkerHandler(self)
-        else:
-            return DeviceHandler(self)
+    def get_device_handler(self) -> DeviceHandler:
+        if self.get_instance_name() in self.config.worker.writers.device_lists:
+            return DeviceWriterHandler(self)
+
+        return DeviceHandler(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:
@@ -716,6 +721,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return ReceiptsHandler(self)
 
     @cache_in_self
+    def get_reports_handler(self) -> ReportsHandler:
+        return ReportsHandler(self)
+
+    @cache_in_self
     def get_read_marker_handler(self) -> ReadMarkerHandler:
         return ReadMarkerHandler(self)
 
@@ -782,6 +791,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return TimestampLookupHandler(self)
 
     @cache_in_self
+    def get_thread_subscriptions_handler(self) -> ThreadSubscriptionsHandler:
+        return ThreadSubscriptionsHandler(self)
+
+    @cache_in_self
     def get_registration_handler(self) -> RegistrationHandler:
         return RegistrationHandler(self)
 
@@ -804,6 +817,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         from synapse.handlers.oidc import OidcHandler
 
         return OidcHandler(self)
+
+    @cache_in_self
+    def get_room_policy_handler(self) -> RoomPolicyHandler:
+        return RoomPolicyHandler(self)
 
     @cache_in_self
     def get_event_client_serializer(self) -> EventClientSerializer:

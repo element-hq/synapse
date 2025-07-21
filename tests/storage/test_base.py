@@ -370,7 +370,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         )
 
         self.mock_txn.execute.assert_called_once_with(
-            "UPDATE tablename SET colC = ?, colD = ? WHERE" " colA = ? AND colB = ?",
+            "UPDATE tablename SET colC = ?, colD = ? WHERE colA = ? AND colB = ?",
             [3, 4, 1, 2],
         )
 

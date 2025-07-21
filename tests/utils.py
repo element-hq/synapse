@@ -28,6 +28,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -37,7 +38,7 @@ from typing import (
 )
 
 import attr
-from typing_extensions import Literal, ParamSpec
+from typing_extensions import ParamSpec
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import RoomVersions
@@ -203,6 +204,7 @@ def default_config(
             "per_user": {"per_second": 10000, "burst_count": 10000},
         },
         "rc_3pid_validation": {"per_second": 10000, "burst_count": 10000},
+        "rc_presence": {"per_user": {"per_second": 10000, "burst_count": 10000}},
         "saml2_enabled": False,
         "public_baseurl": None,
         "default_identity_server": None,
@@ -402,11 +404,24 @@ class TestTimeout(Exception):
 
 
 class test_timeout:
+    """
+    FIXME: This implementation is not robust against other code tight-looping and
+    preventing the signals propagating and timing out the test. You may need to add
+    `time.sleep(0.1)` to your code in order to allow this timeout to work correctly.
+
+    ```py
+    with test_timeout(3):
+        while True:
+            my_checking_func()
+            time.sleep(0.1)
+    ```
+    """
+
     def __init__(self, seconds: int, error_message: Optional[str] = None) -> None:
-        if error_message is None:
-            error_message = "test timed out after {}s.".format(seconds)
+        self.error_message = f"Test timed out after {seconds}s"
+        if error_message is not None:
+            self.error_message += f": {error_message}"
         self.seconds = seconds
-        self.error_message = error_message
 
     def handle_timeout(self, signum: int, frame: Optional[FrameType]) -> None:
         raise TestTimeout(self.error_message)

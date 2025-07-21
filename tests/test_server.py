@@ -226,16 +226,13 @@ class OptionsResourceTests(unittest.TestCase):
             isLeaf = True
 
             def render(self, request: SynapseRequest) -> bytes:
-                # Type-ignore: mypy thinks request.path is Optional[Any], not bytes.
-                return request.path  # type: ignore[return-value]
+                return request.path
 
         # Setup a resource with some children.
         self.resource = OptionsResource()
         self.resource.putChild(b"res", DummyResource())
 
-    def _make_request(
-        self, method: bytes, path: bytes, experimental_cors_msc3886: bool = False
-    ) -> FakeChannel:
+    def _make_request(self, method: bytes, path: bytes) -> FakeChannel:
         """Create a request from the method/path and return a channel with the response."""
         # Create a site and query for the resource.
         site = SynapseSite(
@@ -246,7 +243,6 @@ class OptionsResourceTests(unittest.TestCase):
                 {
                     "type": "http",
                     "port": 0,
-                    "experimental_cors_msc3886": experimental_cors_msc3886,
                 },
             ),
             self.resource,
@@ -283,32 +279,6 @@ class OptionsResourceTests(unittest.TestCase):
             [b"Synapse-Trace-Id, Server"],
         )
 
-    def _check_cors_msc3886_headers(self, channel: FakeChannel) -> None:
-        # Ensure the correct CORS headers have been added
-        # as per https://github.com/matrix-org/matrix-spec-proposals/blob/hughns/simple-rendezvous-capability/proposals/3886-simple-rendezvous-capability.md#cors
-        self.assertEqual(
-            channel.headers.getRawHeaders(b"Access-Control-Allow-Origin"),
-            [b"*"],
-            "has correct CORS Origin header",
-        )
-        self.assertEqual(
-            channel.headers.getRawHeaders(b"Access-Control-Allow-Methods"),
-            [b"GET, HEAD, POST, PUT, DELETE, OPTIONS"],  # HEAD isn't in the spec
-            "has correct CORS Methods header",
-        )
-        self.assertEqual(
-            channel.headers.getRawHeaders(b"Access-Control-Allow-Headers"),
-            [
-                b"X-Requested-With, Content-Type, Authorization, Date, If-Match, If-None-Match"
-            ],
-            "has correct CORS Headers header",
-        )
-        self.assertEqual(
-            channel.headers.getRawHeaders(b"Access-Control-Expose-Headers"),
-            [b"ETag, Location, X-Max-Bytes"],
-            "has correct CORS Expose Headers header",
-        )
-
     def test_unknown_options_request(self) -> None:
         """An OPTIONS requests to an unknown URL still returns 204 No Content."""
         channel = self._make_request(b"OPTIONS", b"/foo/")
@@ -324,16 +294,6 @@ class OptionsResourceTests(unittest.TestCase):
         self.assertNotIn("body", channel.result)
 
         self._check_cors_standard_headers(channel)
-
-    def test_known_options_request_msc3886(self) -> None:
-        """An OPTIONS requests to an known URL still returns 204 No Content."""
-        channel = self._make_request(
-            b"OPTIONS", b"/res/", experimental_cors_msc3886=True
-        )
-        self.assertEqual(channel.code, 204)
-        self.assertNotIn("body", channel.result)
-
-        self._check_cors_msc3886_headers(channel)
 
     def test_unknown_request(self) -> None:
         """A non-OPTIONS request to an unknown URL should 404."""
@@ -356,15 +316,16 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             await self.callback(request)
 
     def setUp(self) -> None:
-        reactor, _ = get_clock()
+        reactor, clock = get_clock()
         self.reactor = reactor
+        self.clock = clock
 
     def test_good_response(self) -> None:
         async def callback(request: SynapseRequest) -> None:
             request.write(b"response")
             request.finish()
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -384,7 +345,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
         async def callback(request: SynapseRequest, **kwargs: object) -> None:
             raise RedirectException(b"/look/an/eagle", 301)
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -406,7 +367,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             e.cookies.append(b"session=yespls")
             raise e
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -427,7 +388,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
             request.write(b"response")
             request.finish()
 
-        res = WrapHtmlRequestHandlerTests.TestResource()
+        res = WrapHtmlRequestHandlerTests.TestResource(clock=self.clock)
         res.callback = callback
 
         channel = make_request(
@@ -440,7 +401,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
 
 class CancellableDirectServeJsonResource(DirectServeJsonResource):
     def __init__(self, clock: Clock):
-        super().__init__()
+        super().__init__(clock=clock)
         self.clock = clock
 
     @cancellable
@@ -457,7 +418,7 @@ class CancellableDirectServeHtmlResource(DirectServeHtmlResource):
     ERROR_TEMPLATE = "{code} {msg}"
 
     def __init__(self, clock: Clock):
-        super().__init__()
+        super().__init__(clock=clock)
         self.clock = clock
 
     @cancellable

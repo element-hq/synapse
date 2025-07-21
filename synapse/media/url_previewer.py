@@ -41,7 +41,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.http.client import SimpleHttpClient
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.media._base import FileInfo, get_filename_from_headers
-from synapse.media.media_storage import MediaStorage
+from synapse.media.media_storage import MediaStorage, SHA256TransparentIOWriter
 from synapse.media.oembed import OEmbedProvider
 from synapse.media.preview_html import decode_body, parse_html_to_open_graph
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -200,6 +200,7 @@ class UrlPreviewer:
         # JSON-encoded OG metadata
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
             cache_name="url_previews",
+            server_name=self.server_name,
             clock=self.clock,
             # don't spider URLs more often than once an hour
             expiry_ms=ONE_HOUR,
@@ -287,7 +288,7 @@ class UrlPreviewer:
                 og["og:image:width"] = dims["width"]
                 og["og:image:height"] = dims["height"]
             else:
-                logger.warning("Couldn't get dims for %s" % url)
+                logger.warning("Couldn't get dims for %s", url)
 
             # define our OG response for this media
         elif _is_html(media_info.media_type):
@@ -593,17 +594,26 @@ class UrlPreviewer:
         file_info = FileInfo(server_name=None, file_id=file_id, url_cache=True)
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
+            sha256writer = SHA256TransparentIOWriter(f)
             if url.startswith("data:"):
                 if not allow_data_urls:
                     raise SynapseError(
                         500, "Previewing of data: URLs is forbidden", Codes.UNKNOWN
                     )
 
-                download_result = await self._parse_data_url(url, f)
+                download_result = await self._parse_data_url(url, sha256writer.wrap())
             else:
-                download_result = await self._download_url(url, f)
+                download_result = await self._download_url(url, sha256writer.wrap())
 
         try:
+            sha256 = sha256writer.hexdigest()
+            should_quarantine = await self.store.get_is_hash_quarantined(sha256)
+
+            if should_quarantine:
+                logger.warning(
+                    "Media has been automatically quarantined as it matched existing quarantined media"
+                )
+
             time_now_ms = self.clock.time_msec()
 
             await self.store.store_local_media(
@@ -614,6 +624,8 @@ class UrlPreviewer:
                 media_length=download_result.length,
                 user_id=user,
                 url_cache=url,
+                sha256=sha256,
+                quarantined_by="system" if should_quarantine else None,
             )
 
         except Exception as e:

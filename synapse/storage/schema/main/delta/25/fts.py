@@ -75,8 +75,7 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
         progress_json = json.dumps(progress)
 
         sql = (
-            "INSERT into background_updates (update_name, progress_json)"
-            " VALUES (?, ?)"
+            "INSERT into background_updates (update_name, progress_json) VALUES (?, ?)"
         )
 
         cur.execute(sql, ("event_search", progress_json))

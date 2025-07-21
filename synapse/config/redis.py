@@ -34,7 +34,9 @@ These are mutually incompatible.
 class RedisConfig(Config):
     section = "redis"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         redis_config = config.get("redis") or {}
         self.redis_enabled = redis_config.get("enabled", False)
 
@@ -48,6 +50,11 @@ class RedisConfig(Config):
         self.redis_path = redis_config.get("path", None)
         self.redis_dbid = redis_config.get("dbid", None)
         self.redis_password = redis_config.get("password")
+        if self.redis_password and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("redis", "password"),
+            )
         redis_password_path = redis_config.get("password_path")
         if redis_password_path:
             if self.redis_password:

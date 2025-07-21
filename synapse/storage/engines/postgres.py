@@ -100,8 +100,8 @@ class PostgresEngine(
         allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
 
         # Are we on a supported PostgreSQL version?
-        if not allow_outdated_version and self._version < 110000:
-            raise RuntimeError("Synapse requires PostgreSQL 11 or above.")
+        if not allow_outdated_version and self._version < 130000:
+            raise RuntimeError("Synapse requires PostgreSQL 13 or above.")
 
         # psycopg and psycopg2 both support using cursors as context managers.
         with db_conn.cursor() as txn:  # type: ignore[attr-defined]

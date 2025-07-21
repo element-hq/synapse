@@ -20,7 +20,15 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
@@ -112,8 +120,8 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         Returns:
             Map from state_group to a StateMap at that point.
         """
-
-        state_filter = state_filter or StateFilter.all()
+        if state_filter is None:
+            state_filter = StateFilter.all()
 
         results: Dict[int, MutableStateMap[str]] = {group: {} for group in groups}
 
@@ -282,16 +290,6 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
     STATE_GROUPS_ROOM_INDEX_UPDATE_NAME = "state_groups_room_id_idx"
     STATE_GROUP_EDGES_UNIQUE_INDEX_UPDATE_NAME = "state_group_edges_unique_idx"
 
-    CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME = (
-        "current_state_events_stream_ordering_idx"
-    )
-    ROOM_MEMBERSHIPS_STREAM_ORDERING_INDEX_UPDATE_NAME = (
-        "room_memberships_stream_ordering_idx"
-    )
-    LOCAL_CURRENT_MEMBERSHIP_STREAM_ORDERING_INDEX_UPDATE_NAME = (
-        "local_current_membership_stream_ordering_idx"
-    )
-
     def __init__(
         self,
         database: DatabasePool,
@@ -326,27 +324,6 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
             unique=True,
             # The old index was on (state_group) and was not unique.
             replaces_index="state_group_edges_idx",
-        )
-
-        # These indices are needed to validate the foreign key constraint
-        # when events are deleted.
-        self.db_pool.updates.register_background_index_update(
-            self.CURRENT_STATE_EVENTS_STREAM_ORDERING_INDEX_UPDATE_NAME,
-            index_name="current_state_events_stream_ordering_idx",
-            table="current_state_events",
-            columns=["event_stream_ordering"],
-        )
-        self.db_pool.updates.register_background_index_update(
-            self.ROOM_MEMBERSHIPS_STREAM_ORDERING_INDEX_UPDATE_NAME,
-            index_name="room_memberships_stream_ordering_idx",
-            table="room_memberships",
-            columns=["event_stream_ordering"],
-        )
-        self.db_pool.updates.register_background_index_update(
-            self.LOCAL_CURRENT_MEMBERSHIP_STREAM_ORDERING_INDEX_UPDATE_NAME,
-            index_name="local_current_membership_stream_ordering_idx",
-            table="local_current_membership",
-            columns=["event_stream_ordering"],
         )
 
     async def _background_deduplicate_state(
@@ -388,8 +365,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     return True, count
 
                 txn.execute(
-                    "SELECT state_group FROM state_group_edges"
-                    " WHERE state_group = ?",
+                    "SELECT state_group FROM state_group_edges WHERE state_group = ?",
                     (state_group,),
                 )
 

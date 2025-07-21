@@ -24,6 +24,7 @@ from typing import (
     TYPE_CHECKING,
     Dict,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -31,8 +32,6 @@ from typing import (
     Type,
     Union,
 )
-
-from typing_extensions import Literal
 
 from synapse.api.constants import Direction, EduTypes
 from synapse.api.errors import Codes, SynapseError
@@ -508,6 +507,9 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         room_version = content["room_version"]
         event = content["event"]
         invite_room_state = content.get("invite_room_state", [])
+
+        if not isinstance(invite_room_state, list):
+            invite_room_state = []
 
         # Synapse expects invite_room_state to be in unsigned, as it is in v1
         # API

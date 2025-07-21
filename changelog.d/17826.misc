@@ -1,1 +1,0 @@
-Enable the `.org.matrix.msc4028.encrypted_event` push rule by default in accordance with [MSC4028](https://github.com/matrix-org/matrix-spec-proposals/pull/4028). Note that the corresponding experimental feature must still be switched on for this push rule to have any effect.

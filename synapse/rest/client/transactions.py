@@ -94,9 +94,9 @@ class HttpTransactionCache:
         # (appservice and guest users), but does not cover access tokens minted
         # by the admin API. Use the access token ID instead.
         else:
-            assert (
-                requester.access_token_id is not None
-            ), "Requester must have an access_token_id"
+            assert requester.access_token_id is not None, (
+                "Requester must have an access_token_id"
+            )
             return (path, "user_admin", requester.access_token_id)
 
     def fetch_or_execute_request(

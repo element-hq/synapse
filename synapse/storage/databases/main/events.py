@@ -35,12 +35,12 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypedDict,
     cast,
 )
 
 import attr
 from prometheus_client import Counter
-from typing_extensions import TypedDict
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -78,6 +78,7 @@ from synapse.types import (
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.util import json_encoder
+from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.stringutils import non_null_str_or_none
 
@@ -246,9 +247,9 @@ class PersistEventsStore:
         self.is_mine_id = hs.is_mine_id
 
         # This should only exist on instances that are configured to write
-        assert (
-            hs.get_instance_name() in hs.config.worker.writers.events
-        ), "Can only instantiate EventsStore on master"
+        assert hs.get_instance_name() in hs.config.worker.writers.events, (
+            "Can only instantiate EventsStore on master"
+        )
 
         # Since we have been configured to write, we ought to have id generators,
         # rather than id trackers.
@@ -465,9 +466,9 @@ class PersistEventsStore:
                     missing_membership_event_ids
                 )
                 # There shouldn't be any missing events
-                assert (
-                    remaining_events.keys() == missing_membership_event_ids
-                ), missing_membership_event_ids.difference(remaining_events.keys())
+                assert remaining_events.keys() == missing_membership_event_ids, (
+                    missing_membership_event_ids.difference(remaining_events.keys())
+                )
                 membership_event_map.update(remaining_events)
 
             for (
@@ -534,9 +535,9 @@ class PersistEventsStore:
                         missing_state_event_ids
                     )
                     # There shouldn't be any missing events
-                    assert (
-                        remaining_events.keys() == missing_state_event_ids
-                    ), missing_state_event_ids.difference(remaining_events.keys())
+                    assert remaining_events.keys() == missing_state_event_ids, (
+                        missing_state_event_ids.difference(remaining_events.keys())
+                    )
                     for event in remaining_events.values():
                         current_state_map[(event.type, event.state_key)] = event
 
@@ -644,9 +645,9 @@ class PersistEventsStore:
             if missing_event_ids:
                 remaining_events = await self.store.get_events(missing_event_ids)
                 # There shouldn't be any missing events
-                assert (
-                    remaining_events.keys() == missing_event_ids
-                ), missing_event_ids.difference(remaining_events.keys())
+                assert remaining_events.keys() == missing_event_ids, (
+                    missing_event_ids.difference(remaining_events.keys())
+                )
                 for event in remaining_events.values():
                     current_state_map[(event.type, event.state_key)] = event
 
@@ -1605,7 +1606,13 @@ class PersistEventsStore:
             room_id
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
-            stream_id: TODO
+            stream_id: This is expected to be the minimum `stream_ordering` for the
+                batch of events that we are persisting; which means we do not end up in a
+                situation where workers see events before the `current_state_delta` updates.
+                FIXME: However, this function also gets called with next upcoming
+                `stream_ordering` when we re-sync the state of a partial stated room (see
+                `update_current_state(...)`) which may be "correct" but it would be good to
+                nail down what exactly is the expected value here.
             sliding_sync_table_changes: Changes to the
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
@@ -1686,7 +1693,7 @@ class PersistEventsStore:
                 """
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         stream_id,
                         self._instance_name,
@@ -1699,17 +1706,17 @@ class PersistEventsStore:
                         state_key,
                     )
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
             # Now we actually update the current_state_events table
 
             txn.execute_batch(
                 "DELETE FROM current_state_events"
                 " WHERE room_id = ? AND type = ? AND state_key = ?",
-                (
+                [
                     (room_id, etype, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
 
             # We include the membership in the current state table, hence we do
@@ -1799,11 +1806,11 @@ class PersistEventsStore:
             txn.execute_batch(
                 "DELETE FROM local_current_membership"
                 " WHERE room_id = ? AND user_id = ?",
-                (
+                [
                     (room_id, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
                     if etype == EventTypes.Member and self.is_mine_id(state_key)
-                ),
+                ],
             )
 
         if to_insert:
@@ -1907,6 +1914,13 @@ class PersistEventsStore:
             room_id,
             stream_id,
         )
+
+        for user_id in members_to_cache_bust:
+            txn.call_after(
+                self.store._membership_stream_cache.entity_has_changed,
+                user_id,
+                stream_id,
+            )
 
         # Invalidate the various caches
         self.store._invalidate_state_caches_and_stream(
@@ -2972,6 +2986,10 @@ class PersistEventsStore:
             # Upsert into the threads table, but only overwrite the value if the
             # new event is of a later topological order OR if the topological
             # ordering is equal, but the stream ordering is later.
+            # (Note by definition that the stream ordering will always be later
+            # unless this is a backfilled event [= negative stream ordering]
+            # because we are only persisting this event now and stream_orderings
+            # are strictly monotonically increasing)
             sql = """
             INSERT INTO threads (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
             VALUES (?, ?, ?, ?, ?)
@@ -3089,7 +3107,10 @@ class PersistEventsStore:
     def _store_room_topic_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
         if isinstance(event.content.get("topic"), str):
             self.store_event_search_txn(
-                txn, event, "content.topic", event.content["topic"]
+                txn,
+                event,
+                "content.topic",
+                get_plain_text_topic_from_event_content(event.content) or "",
             )
 
     def _store_room_name_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
@@ -3208,7 +3229,7 @@ class PersistEventsStore:
         if notifiable_events:
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         event.room_id,
                         event.internal_metadata.stream_ordering,
@@ -3216,18 +3237,18 @@ class PersistEventsStore:
                         event.event_id,
                     )
                     for event in notifiable_events
-                ),
+                ],
             )
 
         # Now we delete the staging area for *all* events that were being
         # persisted.
         txn.execute_batch(
             "DELETE FROM event_push_actions_staging WHERE event_id = ?",
-            (
+            [
                 (event.event_id,)
                 for event, _ in all_events_and_contexts
                 if event.internal_metadata.is_notifiable()
-            ),
+            ],
         )
 
     def _remove_push_actions_for_event_id_txn(
@@ -3435,8 +3456,7 @@ class PersistEventsStore:
         # Delete all these events that we've already fetched and now know that their
         # prev events are the new backwards extremeties.
         query = (
-            "DELETE FROM event_backward_extremities"
-            " WHERE event_id = ? AND room_id = ?"
+            "DELETE FROM event_backward_extremities WHERE event_id = ? AND room_id = ?"
         )
         backward_extremity_tuples_to_remove = [
             (ev.event_id, ev.room_id)

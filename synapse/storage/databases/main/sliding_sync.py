@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -21,7 +21,11 @@ import attr
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.logging.opentracing import log_kv
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+)
 from synapse.types import MultiWriterStreamToken, RoomStreamToken
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoom,
@@ -35,12 +39,43 @@ from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 
 if TYPE_CHECKING:
+    from synapse.server import HomeServer
     from synapse.storage.databases.main import DataStore
 
 logger = logging.getLogger(__name__)
 
 
 class SlidingSyncStore(SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_connection_room_configs_required_state_id_idx",
+            index_name="sliding_sync_connection_room_configs_required_state_id_idx",
+            table="sliding_sync_connection_room_configs",
+            columns=("required_state_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_membership_event_id_idx",
+            index_name="sliding_sync_membership_snapshots_membership_event_id_idx",
+            table="sliding_sync_membership_snapshots",
+            columns=("membership_event_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            index_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            table="sliding_sync_membership_snapshots",
+            columns=("user_id", "event_stream_ordering"),
+            replaces_index="sliding_sync_membership_snapshots_user_id",
+        )
+
     async def get_latest_bump_stamp_for_room(
         self,
         room_id: str,

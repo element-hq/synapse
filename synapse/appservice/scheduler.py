@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2015, 2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -69,6 +69,8 @@ from typing import (
     Set,
     Tuple,
 )
+
+from twisted.internet.interfaces import IDelayedCall
 
 from synapse.appservice import (
     ApplicationService,
@@ -317,7 +319,7 @@ class _ServiceQueuer:
         users: Set[str] = set()
 
         # The sender is always included
-        users.add(service.sender)
+        users.add(service.sender.to_string())
 
         # All AS users that would receive the PDUs or EDUs sent to these rooms
         # are classed as 'interesting'.
@@ -450,6 +452,20 @@ class _TransactionController:
         recoverer.recover()
         logger.info("Now %i active recoverers", len(self.recoverers))
 
+    def force_retry(self, service: ApplicationService) -> None:
+        """Forces a Recoverer to attempt delivery of transations immediately.
+
+        Args:
+            service:
+        """
+        recoverer = self.recoverers.get(service.id)
+        if not recoverer:
+            # No need to force a retry on a happy AS.
+            logger.info("%s is not in recovery, not forcing retry", service.id)
+            return
+
+        recoverer.force_retry()
+
     async def _is_service_up(self, service: ApplicationService) -> bool:
         state = await self.store.get_appservice_state(service)
         return state == ApplicationServiceState.UP or state is None
@@ -482,11 +498,12 @@ class _Recoverer:
         self.service = service
         self.callback = callback
         self.backoff_counter = 1
+        self.scheduled_recovery: Optional[IDelayedCall] = None
 
     def recover(self) -> None:
         delay = 2**self.backoff_counter
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
-        self.clock.call_later(
+        self.scheduled_recovery = self.clock.call_later(
             delay, run_as_background_process, "as-recoverer", self.retry
         )
 
@@ -495,6 +512,21 @@ class _Recoverer:
         if self.backoff_counter < 9:
             self.backoff_counter += 1
         self.recover()
+
+    def force_retry(self) -> None:
+        """Cancels the existing timer and forces an immediate retry in the background.
+
+        Args:
+            service:
+        """
+        # Prevent the existing backoff from occuring
+        if self.scheduled_recovery:
+            self.clock.cancel_call_later(self.scheduled_recovery)
+        # Run a retry, which will resechedule a recovery if it fails.
+        run_as_background_process(
+            "retry",
+            self.retry,
+        )
 
     async def retry(self) -> None:
         logger.info("Starting retries on %s", self.service.id)

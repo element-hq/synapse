@@ -248,7 +248,7 @@ class EventContext(UnpersistedEventContextBase):
     @tag_args
     async def get_current_state_ids(
         self, state_filter: Optional["StateFilter"] = None
-    ) -> Optional[StateMap[str]]:
+    ) -> StateMap[str]:
         """
         Gets the room state map, including this event - ie, the state in ``state_group``
 
@@ -256,13 +256,12 @@ class EventContext(UnpersistedEventContextBase):
         not make it into the room state. This method will raise an exception if
         ``rejected`` is set.
 
+        It is also an error to access this for an outlier event.
+
         Arg:
            state_filter: specifies the type of state event to fetch from DB, example: EventTypes.JoinRules
 
         Returns:
-            Returns None if state_group is None, which happens when the associated
-            event is an outlier.
-
             Maps a (type, state_key) to the event ID of the state event matching
             this tuple.
         """
@@ -300,7 +299,8 @@ class EventContext(UnpersistedEventContextBase):
             this tuple.
         """
 
-        assert self.state_group_before_event is not None
+        if self.state_group_before_event is None:
+            return {}
         return await self._storage.state.get_state_ids_for_group(
             self.state_group_before_event, state_filter
         )

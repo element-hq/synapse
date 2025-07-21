@@ -23,7 +23,6 @@ use anyhow::bail;
 use anyhow::Context;
 use anyhow::Error;
 use lazy_static::lazy_static;
-use regex;
 use regex::Regex;
 use regex::RegexBuilder;
 

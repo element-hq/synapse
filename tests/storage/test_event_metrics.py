@@ -18,9 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from prometheus_client import generate_latest
 
-from synapse.metrics import REGISTRY
+from synapse.metrics import REGISTRY, generate_latest
 from synapse.types import UserID, create_requester
 
 from tests.unittest import HomeserverTestCase

@@ -41,8 +41,10 @@ use pyo3::{
     pybacked::PyBackedStr,
     pyclass, pymethods,
     types::{PyAnyMethods, PyDict, PyDictMethods, PyString},
-    Bound, IntoPy, PyAny, PyObject, PyResult, Python,
+    Bound, IntoPyObject, PyAny, PyObject, PyResult, Python,
 };
+
+use crate::UnwrapInfallible;
 
 /// Definitions of the various fields of the internal metadata.
 #[derive(Clone)]
@@ -60,31 +62,59 @@ enum EventInternalMetadataData {
 
 impl EventInternalMetadataData {
     /// Convert the field to its name and python object.
-    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, PyObject) {
+    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, Bound<'a, PyAny>) {
         match self {
-            EventInternalMetadataData::OutOfBandMembership(o) => {
-                (pyo3::intern!(py, "out_of_band_membership"), o.into_py(py))
-            }
-            EventInternalMetadataData::SendOnBehalfOf(o) => {
-                (pyo3::intern!(py, "send_on_behalf_of"), o.into_py(py))
-            }
-            EventInternalMetadataData::RecheckRedaction(o) => {
-                (pyo3::intern!(py, "recheck_redaction"), o.into_py(py))
-            }
-            EventInternalMetadataData::SoftFailed(o) => {
-                (pyo3::intern!(py, "soft_failed"), o.into_py(py))
-            }
-            EventInternalMetadataData::ProactivelySend(o) => {
-                (pyo3::intern!(py, "proactively_send"), o.into_py(py))
-            }
-            EventInternalMetadataData::Redacted(o) => {
-                (pyo3::intern!(py, "redacted"), o.into_py(py))
-            }
-            EventInternalMetadataData::TxnId(o) => (pyo3::intern!(py, "txn_id"), o.into_py(py)),
-            EventInternalMetadataData::TokenId(o) => (pyo3::intern!(py, "token_id"), o.into_py(py)),
-            EventInternalMetadataData::DeviceId(o) => {
-                (pyo3::intern!(py, "device_id"), o.into_py(py))
-            }
+            EventInternalMetadataData::OutOfBandMembership(o) => (
+                pyo3::intern!(py, "out_of_band_membership"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::SendOnBehalfOf(o) => (
+                pyo3::intern!(py, "send_on_behalf_of"),
+                o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
+            EventInternalMetadataData::RecheckRedaction(o) => (
+                pyo3::intern!(py, "recheck_redaction"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::SoftFailed(o) => (
+                pyo3::intern!(py, "soft_failed"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::ProactivelySend(o) => (
+                pyo3::intern!(py, "proactively_send"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::Redacted(o) => (
+                pyo3::intern!(py, "redacted"),
+                o.into_pyobject(py)
+                    .unwrap_infallible()
+                    .to_owned()
+                    .into_any(),
+            ),
+            EventInternalMetadataData::TxnId(o) => (
+                pyo3::intern!(py, "txn_id"),
+                o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
+            EventInternalMetadataData::TokenId(o) => (
+                pyo3::intern!(py, "token_id"),
+                o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
+            EventInternalMetadataData::DeviceId(o) => (
+                pyo3::intern!(py, "device_id"),
+                o.into_pyobject(py).unwrap_infallible().into_any(),
+            ),
         }
     }
 
@@ -247,7 +277,7 @@ impl EventInternalMetadata {
     ///
     /// Note that `outlier` and `stream_ordering` are stored in separate columns so are not returned here.
     fn get_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
 
         for entry in &self.data {
             let (key, value) = entry.to_python_pair(py);

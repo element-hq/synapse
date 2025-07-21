@@ -53,6 +53,7 @@ from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
+from synapse.storage.invite_rule import InviteRule
 from synapse.types import (
     JsonDict,
     Requester,
@@ -158,6 +159,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_room,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         # Ratelimiter for invites, keyed by recipient (across all rooms, all
@@ -166,6 +168,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_user,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         # Ratelimiter for invites, keyed by issuer (across all rooms, all
@@ -174,6 +177,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_issuer,
+            ratelimit_callbacks=hs.get_module_api_callbacks().ratelimit,
         )
 
         self._third_party_invite_limiter = Ratelimiter(
@@ -384,11 +388,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
     async def _local_membership_update(
         self,
+        *,
         requester: Requester,
         target: UserID,
         room_id: str,
         membership: str,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
@@ -410,11 +414,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 desired membership event.
             room_id:
             membership:
-
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids: The event IDs to use as the prev events
             state_event_ids:
                 The full state at a given event. This was previously used particularly
@@ -482,7 +481,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         "origin_server_ts": origin_server_ts,
                     },
                     txn_id=txn_id,
-                    allow_no_prev_events=allow_no_prev_events,
                     prev_event_ids=prev_event_ids,
                     state_event_ids=state_event_ids,
                     depth=depth,
@@ -579,7 +577,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         new_room: bool = False,
         require_consent: bool = True,
         outlier: bool = False,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
@@ -603,10 +600,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             outlier: Indicates whether the event is an `outlier`, i.e. if
                 it's from an arbitrary point and floating in the DAG as
                 opposed to being inline with the current DAG.
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids: The event IDs to use as the prev events
             state_event_ids:
                 The full state at a given event. This was previously used particularly
@@ -676,7 +669,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             new_room=new_room,
                             require_consent=require_consent,
                             outlier=outlier,
-                            allow_no_prev_events=allow_no_prev_events,
                             prev_event_ids=prev_event_ids,
                             state_event_ids=state_event_ids,
                             depth=depth,
@@ -699,7 +691,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         new_room: bool = False,
         require_consent: bool = True,
         outlier: bool = False,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
@@ -725,10 +716,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             outlier: Indicates whether the event is an `outlier`, i.e. if
                 it's from an arbitrary point and floating in the DAG as
                 opposed to being inline with the current DAG.
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids: The event IDs to use as the prev events
             state_event_ids:
                 The full state at a given event. This was previously used particularly
@@ -912,7 +899,23 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     additional_fields=block_invite_result[1],
                 )
 
-        # An empty prev_events list is allowed as long as the auth_event_ids are present
+            # check the invitee's configuration and apply rules. Admins on the server can bypass.
+            if not is_requester_admin:
+                invite_config = await self.store.get_invite_config_for_user(target_id)
+                rule = invite_config.get_invite_rule(requester.user.to_string())
+                if rule == InviteRule.BLOCK:
+                    logger.info(
+                        "Automatically rejecting invite from %s due to the the invite filtering rules of %s",
+                        target_id,
+                        requester.user,
+                    )
+                    raise SynapseError(
+                        403,
+                        "You are not permitted to invite this user.",
+                        errcode=Codes.INVITE_BLOCKED,
+                    )
+                # InviteRule.IGNORE is handled at the sync layer.
+
         if prev_event_ids is not None:
             return await self._local_membership_update(
                 requester=requester,
@@ -921,7 +924,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 membership=effective_membership_state,
                 txn_id=txn_id,
                 ratelimit=ratelimit,
-                allow_no_prev_events=allow_no_prev_events,
                 prev_event_ids=prev_event_ids,
                 state_event_ids=state_event_ids,
                 depth=depth,
@@ -1189,6 +1191,26 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             outlier=outlier,
             origin_server_ts=origin_server_ts,
         )
+
+    async def check_for_any_membership_in_room(
+        self, *, user_id: str, room_id: str
+    ) -> None:
+        """
+        Check if the user has any membership in the room and raise error if not.
+
+        Args:
+            user_id: The user to check.
+            room_id: The room to check.
+
+        Raises:
+            AuthError if the user doesn't have any membership in the room.
+        """
+        result = await self.store.get_local_current_membership_for_user_in_room(
+            user_id=user_id, room_id=room_id
+        )
+
+        if result is None or result == (None, None):
+            raise AuthError(403, f"User {user_id} has no membership in room {room_id}")
 
     async def _should_perform_remote_join(
         self,
@@ -1531,7 +1553,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     require_consent=False,
                 )
             except Exception as e:
-                logger.exception("Error kicking guest user: %s" % (e,))
+                logger.exception("Error kicking guest user: %s", e)
 
     async def lookup_room_alias(
         self, room_alias: RoomAlias

@@ -34,8 +34,10 @@ from typing import (
 )
 
 from synapse.api.constants import AccountDataTypes
+from synapse.api.errors import Codes, SynapseError
 from synapse.replication.tcp.streams import AccountDataStream
 from synapse.storage._base import db_to_json
+from synapse.storage.admin_client_config import AdminClientConfig
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -43,6 +45,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
+from synapse.storage.invite_rule import InviteRulesConfig
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
 from synapse.util import json_encoder
@@ -87,7 +90,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         account_max = self.get_max_account_data_stream_id()
         self._account_data_stream_cache = StreamChangeCache(
-            "AccountDataAndTagsChangeCache", account_max
+            name="AccountDataAndTagsChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=account_max,
         )
 
         self.db_pool.updates.register_background_index_update(
@@ -101,6 +106,8 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             "delete_account_data_for_deactivated_users",
             self._delete_account_data_for_deactivated_users,
         )
+
+        self._msc4155_enabled = hs.config.experimental.msc4155_enabled
 
     def get_max_account_data_stream_id(self) -> int:
         """Get the current max stream ID for account data stream
@@ -557,6 +564,38 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             )
         )
 
+    async def get_invite_config_for_user(self, user_id: str) -> InviteRulesConfig:
+        """
+        Get the invite configuration for the current user.
+
+        Args:
+            user_id:
+        """
+
+        if not self._msc4155_enabled:
+            # This equates to allowing all invites, as if the setting was off.
+            return InviteRulesConfig(None)
+
+        data = await self.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
+        )
+        return InviteRulesConfig(data)
+
+    async def get_admin_client_config_for_user(self, user_id: str) -> AdminClientConfig:
+        """
+        Get the admin client configuration for the specified user.
+
+        The admin client config contains Synapse-specific settings that clients running
+        server admin accounts can use. They have no effect on non-admin users.
+
+        Args:
+            user_id: The user ID to get config for.
+        """
+        data = await self.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG
+        )
+        return AdminClientConfig(data)
+
     def process_replication_rows(
         self,
         stream_name: str,
@@ -759,6 +798,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             currently_ignored_users = set(ignored_users_content)
         else:
             currently_ignored_users = set()
+
+        if user_id in currently_ignored_users:
+            raise SynapseError(400, "You cannot ignore yourself", Codes.INVALID_PARAM)
 
         # If the data has not changed, nothing to do.
         if previously_ignored_users == currently_ignored_users:

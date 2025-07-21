@@ -21,9 +21,7 @@
 
 import logging
 import string
-from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence
-
-from typing_extensions import Literal
+from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Sequence
 
 from synapse.api.constants import MAX_ALIAS_LENGTH, EventTypes
 from synapse.api.errors import (
@@ -284,7 +282,7 @@ class DirectoryHandler:
             except RequestSendFailed:
                 raise SynapseError(502, "Failed to fetch alias")
             except CodeMessageException as e:
-                logging.warning(
+                logger.warning(
                     "Error retrieving alias %s -> %s %s", room_alias, e.code, e.msg
                 )
                 if e.code == 404:
@@ -408,7 +406,7 @@ class DirectoryHandler:
         ]
 
         for service in interested_services:
-            if user_id == service.sender:
+            if user_id == service.sender.to_string():
                 # this user IS the app service so they can do whatever they like
                 return True
             elif service.is_exclusive_alias(alias.to_string()):

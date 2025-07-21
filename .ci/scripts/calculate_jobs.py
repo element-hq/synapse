@@ -36,11 +36,11 @@ IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
 # First calculate the various trial jobs.
 #
 # For PRs, we only run each type of test with the oldest Python version supported (which
-# is Python 3.8 right now)
+# is Python 3.9 right now)
 
 trial_sqlite_tests = [
     {
-        "python-version": "3.8",
+        "python-version": "3.9",
         "database": "sqlite",
         "extras": "all",
     }
@@ -53,15 +53,15 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.9", "3.10", "3.11", "3.12", "3.13")
+        for version in ("3.10", "3.11", "3.12", "3.13")
     )
 
 # Run with both psycopg2 and psycopg.
 trial_postgres_tests = [
     {
-        "python-version": "3.8",
+        "python-version": "3.9",
         "database": "postgres",
-        "postgres-version": "11",
+        "postgres-version": "13",
         "extras": "all",
     },
     {
@@ -92,7 +92,7 @@ if not IS_PR:
 
 trial_no_extra_tests = [
     {
-        "python-version": "3.8",
+        "python-version": "3.9",
         "database": "sqlite",
         "extras": "",
     }
@@ -114,24 +114,24 @@ set_output("trial_test_matrix", test_matrix)
 
 # First calculate the various sytest jobs.
 #
-# For each type of test we only run on focal on PRs
+# For each type of test we only run on bullseye on PRs
 
 
 sytest_tests = [
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
     },
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
         "postgres": "postgres",
     },
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
         "postgres": "multi-postgres",
         "workers": "workers",
     },
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
         "postgres": "multi-postgres",
         "workers": "workers",
         "reactor": "asyncio",
@@ -142,11 +142,11 @@ if not IS_PR:
     sytest_tests.extend(
         [
             {
-                "sytest-tag": "focal",
+                "sytest-tag": "bullseye",
                 "reactor": "asyncio",
             },
             {
-                "sytest-tag": "focal",
+                "sytest-tag": "bullseye",
                 "postgres": "postgres",
                 "reactor": "asyncio",
             },

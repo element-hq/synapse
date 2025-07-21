@@ -73,11 +73,23 @@ class StreamChangeCache:
 
     def __init__(
         self,
+        *,
         name: str,
+        server_name: str,
         current_stream_pos: int,
         max_size: int = 10000,
         prefilled_cache: Optional[Mapping[EntityType, int]] = None,
     ) -> None:
+        """
+        Args:
+            name
+            server_name: The homeserver name that this cache is associated with
+                (used to label the metric) (`hs.hostname`).
+            current_stream_pos
+            max_size
+            prefilled_cache
+        """
+
         self._original_max_size: int = max_size
         self._max_size = math.floor(max_size)
 
@@ -96,7 +108,11 @@ class StreamChangeCache:
 
         self.name = name
         self.metrics = caches.register_cache(
-            "cache", self.name, self._cache, resize_callback=self.set_cache_factor
+            cache_type="cache",
+            cache_name=self.name,
+            server_name=server_name,
+            cache=self._cache,
+            resize_callback=self.set_cache_factor,
         )
 
         if prefilled_cache:
@@ -313,6 +329,15 @@ class StreamChangeCache:
         e1.add(entity)
         self._entity_to_key[entity] = stream_pos
         self._evict()
+
+    def all_entities_changed(self, stream_pos: int) -> None:
+        """
+        Mark all entities as changed. This is useful when the cache is invalidated and
+        there may be some potential change for all of the entities.
+        """
+        self._cache.clear()
+        self._entity_to_key.clear()
+        self._earliest_known_stream_pos = stream_pos
 
     def _evict(self) -> None:
         """

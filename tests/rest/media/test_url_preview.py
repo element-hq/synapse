@@ -42,6 +42,7 @@ from synapse.util.stringutils import parse_and_validate_mxc_uri
 from tests import unittest
 from tests.server import FakeTransport
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 
 try:
     import lxml
@@ -877,7 +878,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         data = base64.b64encode(SMALL_PNG)
 
         end_content = (
-            b"<html><head>" b'<img src="data:image/png;base64,%s" />' b"</head></html>"
+            b'<html><head><img src="data:image/png;base64,%s" /></head></html>'
         ) % (data,)
 
         channel = self.make_request(
@@ -1259,6 +1260,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertIsNone(_port)
         return host, media_id
 
+    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_files(self) -> None:
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
@@ -1301,6 +1303,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "URL cache file was unexpectedly retrieved from a storage provider",
         )
 
+    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_thumbnails(self) -> None:
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()

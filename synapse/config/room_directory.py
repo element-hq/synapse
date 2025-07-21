@@ -54,9 +54,7 @@ class RoomDirectoryConfig(Config):
                 for rule in room_list_publication_rules
             ]
         else:
-            self._room_list_publication_rules = [
-                _RoomDirectoryRule("room_list_publication_rules", {"action": "allow"})
-            ]
+            self._room_list_publication_rules = []
 
     def is_alias_creation_allowed(self, user_id: str, room_id: str, alias: str) -> bool:
         """Checks if the given user is allowed to create the given alias

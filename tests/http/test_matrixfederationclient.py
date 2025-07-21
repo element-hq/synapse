@@ -436,8 +436,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # Send it the HTTP response
         client.dataReceived(
-            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-            b"Server: Fake\r\n\r\n"
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nServer: Fake\r\n\r\n"
         )
 
         # Push by enough to time it out
@@ -691,10 +690,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # Send it a huge HTTP response
         protocol.dataReceived(
-            b"HTTP/1.1 200 OK\r\n"
-            b"Server: Fake\r\n"
-            b"Content-Type: application/json\r\n"
-            b"\r\n"
+            b"HTTP/1.1 200 OK\r\nServer: Fake\r\nContent-Type: application/json\r\n\r\n"
         )
 
         self.pump()
@@ -903,12 +899,19 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
                     headers=Headers(
                         {
                             "Content-Type": ["application/json"],
-                            "Connection": ["close, X-Foo, X-Bar"],
+                            "X-Test": ["test"],
+                            # Define some hop-by-hop headers (try with varying casing to
+                            # make sure we still match-up the headers)
+                            "Connection": ["close, X-fOo, X-Bar, X-baz"],
                             # Should be removed because it's defined in the `Connection` header
                             "X-Foo": ["foo"],
                             "X-Bar": ["bar"],
+                            # (not in canonical case)
+                            "x-baZ": ["baz"],
                             # Should be removed because it's a hop-by-hop header
                             "Proxy-Authorization": "abcdef",
+                            # Should be removed because it's a hop-by-hop header (not in canonical case)
+                            "transfer-EnCoDiNg": "abcdef",
                         }
                     ),
                 )
@@ -938,9 +941,17 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
         header_names = set(headers.keys())
 
         # Make sure the response does not include the hop-by-hop headers
-        self.assertNotIn(b"X-Foo", header_names)
-        self.assertNotIn(b"X-Bar", header_names)
-        self.assertNotIn(b"Proxy-Authorization", header_names)
+        self.assertIncludes(
+            header_names,
+            {
+                b"Content-Type",
+                b"X-Test",
+                # Default headers from Twisted
+                b"Date",
+                b"Server",
+            },
+            exact=True,
+        )
         # Make sure the response is as expected back on the main worker
         self.assertEqual(res, {"foo": "bar"})
 

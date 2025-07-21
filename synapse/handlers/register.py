@@ -23,10 +23,9 @@
 """Contains functions for registering clients."""
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
 
 from prometheus_client import Counter
-from typing_extensions import TypedDict
 
 from synapse import types
 from synapse.api.constants import (
@@ -45,12 +44,10 @@ from synapse.api.errors import (
 )
 from synapse.appservice import ApplicationService
 from synapse.config.server import is_threepid_reserved
-from synapse.handlers.device import DeviceHandler
 from synapse.http.servlet import assert_params_in_dict
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,
-    ReplicationRegisterServlet,
 )
 from synapse.spam_checker_api import RegistrationBehaviour
 from synapse.types import GUEST_USER_ID_PATTERN, RoomAlias, UserID, create_requester
@@ -116,11 +113,11 @@ class RegistrationHandler:
         self._user_consent_version = self.hs.config.consent.user_consent_version
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
         self._server_name = hs.hostname
+        self._user_types_config = hs.config.user_types
 
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
         if hs.config.worker.worker_app:
-            self._register_client = ReplicationRegisterServlet.make_client(hs)
             self._register_device_client = RegisterDeviceReplicationServlet.make_client(
                 hs
             )
@@ -160,7 +157,10 @@ class RegistrationHandler:
         if not localpart:
             raise SynapseError(400, "User ID cannot be empty", Codes.INVALID_USERNAME)
 
-        if localpart[0] == "_":
+        if (
+            localpart[0] == "_"
+            and not self.hs.config.registration.allow_underscore_prefixed_localpart
+        ):
             raise SynapseError(
                 400, "User ID may not begin with _", Codes.INVALID_USERNAME
             )
@@ -303,6 +303,9 @@ class RegistrationHandler:
 
             elif default_display_name is None:
                 default_display_name = localpart
+
+            if user_type is None:
+                user_type = self._user_types_config.default_user_type
 
             await self.register_with_store(
                 user_id=user_id,
@@ -500,7 +503,7 @@ class RegistrationHandler:
                             ratelimit=False,
                         )
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _join_rooms(self, user_id: str) -> None:
         """
@@ -553,7 +556,7 @@ class RegistrationHandler:
                         if join_rules_event:
                             join_rule = join_rules_event.content.get("join_rule", None)
                             requires_invite = (
-                                join_rule and join_rule != JoinRules.PUBLIC
+                                join_rule is not None and join_rule != JoinRules.PUBLIC
                             )
 
                 # Send the invite, if necessary.
@@ -590,7 +593,7 @@ class RegistrationHandler:
                 # moving away from bare excepts is a good thing to do.
                 logger.error("Failed to join new user to %r: %r", r, e)
             except Exception as e:
-                logger.error("Failed to join new user to %r: %r", r, e, exc_info=True)
+                logger.exception("Failed to join new user to %r: %r", r, e)
 
     async def _auto_join_rooms(self, user_id: str) -> None:
         """Automatically joins users to auto join rooms - creating the room in the first place
@@ -630,7 +633,9 @@ class RegistrationHandler:
         """
         await self._auto_join_rooms(user_id)
 
-    async def appservice_register(self, user_localpart: str, as_token: str) -> str:
+    async def appservice_register(
+        self, user_localpart: str, as_token: str
+    ) -> Tuple[str, ApplicationService]:
         user = UserID(user_localpart, self.hs.hostname)
         user_id = user.to_string()
         service = self.store.get_app_service_by_token(as_token)
@@ -653,7 +658,7 @@ class RegistrationHandler:
             appservice_id=service_id,
             create_profile_with_displayname=user.localpart,
         )
-        return user_id
+        return (user_id, service)
 
     def check_user_id_not_appservice_exclusive(
         self, user_id: str, allowed_appservice: Optional[ApplicationService] = None
@@ -730,37 +735,20 @@ class RegistrationHandler:
             shadow_banned: Whether to shadow-ban the user
             approved: Whether to mark the user as approved by an administrator
         """
-        if self.hs.config.worker.worker_app:
-            await self._register_client(
-                user_id=user_id,
-                password_hash=password_hash,
-                was_guest=was_guest,
-                make_guest=make_guest,
-                appservice_id=appservice_id,
-                create_profile_with_displayname=create_profile_with_displayname,
-                admin=admin,
-                user_type=user_type,
-                address=address,
-                shadow_banned=shadow_banned,
-                approved=approved,
-            )
-        else:
-            await self.store.register_user(
-                user_id=user_id,
-                password_hash=password_hash,
-                was_guest=was_guest,
-                make_guest=make_guest,
-                appservice_id=appservice_id,
-                create_profile_with_displayname=create_profile_with_displayname,
-                admin=admin,
-                user_type=user_type,
-                shadow_banned=shadow_banned,
-                approved=approved,
-            )
+        await self.store.register_user(
+            user_id=user_id,
+            password_hash=password_hash,
+            was_guest=was_guest,
+            make_guest=make_guest,
+            appservice_id=appservice_id,
+            create_profile_with_displayname=create_profile_with_displayname,
+            admin=admin,
+            user_type=user_type,
+            shadow_banned=shadow_banned,
+            approved=approved,
+        )
 
-            # Only call the account validity module(s) on the main process, to avoid
-            # repeating e.g. database writes on all of the workers.
-            await self._account_validity_handler.on_user_registration(user_id)
+        await self._account_validity_handler.on_user_registration(user_id)
 
     async def register_device(
         self,
@@ -850,9 +838,6 @@ class RegistrationHandler:
 
         refresh_token = None
         refresh_token_id = None
-
-        # This can only run on the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
 
         registered_device_id = await self.device_handler.check_device_registered(
             user_id,

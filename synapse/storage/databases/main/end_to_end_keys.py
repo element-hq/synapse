@@ -27,6 +27,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -39,7 +40,6 @@ from typing import (
 
 import attr
 from canonicaljson import encode_canonical_json
-from typing_extensions import Literal
 
 from synapse.api.constants import DeviceKeyAlgorithms
 from synapse.appservice import (
@@ -59,7 +59,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.engines import PostgresEngine, Psycopg2Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, MultiWriterStreamToken
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.cancellation import cancellable
@@ -99,6 +99,13 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
             unique=True,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="add_otk_ts_added_index",
+            index_name="e2e_one_time_keys_json_user_id_device_id_algorithm_ts_added_idx",
+            table="e2e_one_time_keys_json",
+            columns=("user_id", "device_id", "algorithm", "ts_added_ms"),
+        )
+
 
 class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorkerStore):
     def __init__(
@@ -111,6 +118,20 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
         self._allow_device_name_lookup_over_federation = (
             self.hs.config.federation.allow_device_name_lookup_over_federation
+        )
+
+        self._cross_signing_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="e2e_cross_signing_keys",
+            instance_name=self._instance_name,
+            tables=[
+                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
+            ],
+            sequence_name="e2e_cross_signing_keys_sequence",
+            # No one reads the stream positions, so we're allowed to have an empty list of writers
+            writers=[],
         )
 
     def process_replication_rows(
@@ -138,7 +159,12 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         Returns:
             (stream_id, devices)
         """
-        now_stream_id = self.get_device_stream_token()
+        # Here, we don't use the individual instances positions, as we *need* to
+        # give out the stream_id as an integer in the federation API.
+        # This means that we'll potentially return the same data twice with a
+        # different stream_id, and invalidate cache more often than necessary,
+        # which is fine overall.
+        now_stream_id = self.get_device_stream_token().stream
 
         # We need to be careful with the caching here, as we need to always
         # return *all* persisted devices, however there may be a lag between a
@@ -157,8 +183,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             # have to check for potential invalidations after the
             # `now_stream_id`.
             sql = """
-                SELECT user_id FROM device_lists_stream
+                SELECT 1
+                FROM device_lists_stream
                 WHERE stream_id >= ? AND user_id = ?
+                LIMIT 1
             """
             rows = await self.db_pool.execute(
                 "get_e2e_device_keys_for_federation_query_check",
@@ -586,7 +614,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             txn, self.count_e2e_one_time_keys, (user_id, device_id)
         )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def count_e2e_one_time_keys(
         self, user_id: str, device_id: str
     ) -> Mapping[str, int]:
@@ -801,7 +829,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     },
                 )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def get_e2e_unused_fallback_key_types(
         self, user_id: str, device_id: str
     ) -> Sequence[str]:
@@ -1110,7 +1138,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     @abc.abstractmethod
-    def get_device_stream_token(self) -> int:
+    def get_device_stream_token(self) -> MultiWriterStreamToken:
         """Get the current stream id from the _device_list_id_gen"""
         ...
 
@@ -1122,7 +1150,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         """Take a list of one time keys out of the database.
 
         Args:
-            query_list: An iterable of tuples of (user ID, device ID, algorithm).
+            query_list: An iterable of tuples of (user ID, device ID, algorithm, number of keys).
 
         Returns:
             A tuple (results, missing) of:
@@ -1310,9 +1338,14 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             OTK was found.
         """
 
+        # Return the oldest keys from this device (based on `ts_added_ms`).
+        # Doing so means that keys are issued in the same order they were uploaded,
+        # which reduces the chances of a client expiring its copy of a (private)
+        # key while the public key is still on the server, waiting to be issued.
         sql = """
             SELECT key_id, key_json FROM e2e_one_time_keys_json
             WHERE user_id = ? AND device_id = ? AND algorithm = ?
+            ORDER BY ts_added_ms
             LIMIT ?
         """
 
@@ -1354,13 +1387,22 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             A list of tuples (user_id, device_id, algorithm, key_id, key_json)
             for each OTK claimed.
         """
+        # Find, delete, and return the oldest keys from each device (based on
+        # `ts_added_ms`).
+        #
+        # Doing so means that keys are issued in the same order they were uploaded,
+        # which reduces the chances of a client expiring its copy of a (private)
+        # key while the public key is still on the server, waiting to be issued.
         sql = """
             WITH claims(user_id, device_id, algorithm, claim_count) AS (
                 VALUES ?
             ), ranked_keys AS (
                 SELECT
                     user_id, device_id, algorithm, key_id, claim_count,
-                    ROW_NUMBER() OVER (PARTITION BY (user_id, device_id, algorithm)) AS r
+                    ROW_NUMBER() OVER (
+                        PARTITION BY (user_id, device_id, algorithm)
+                        ORDER BY ts_added_ms
+                    ) AS r
                 FROM e2e_one_time_keys_json
                     JOIN claims USING (user_id, device_id, algorithm)
             )
@@ -1432,27 +1474,131 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             impl,
         )
 
+    async def delete_old_otks_for_next_user_batch(
+        self, after_user_id: str, number_of_users: int
+    ) -> Tuple[List[str], int]:
+        """Deletes old OTKs belonging to the next batch of users
 
-class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
+        Returns:
+            `(users, rows)`, where:
+             * `users` is the user IDs of the updated users. An empty list if we are done.
+             * `rows` is the number of deleted rows
+        """
 
-        self._cross_signing_id_gen = MultiWriterIdGenerator(
-            db_conn=db_conn,
-            db=database,
-            notifier=hs.get_replication_notifier(),
-            stream_name="e2e_cross_signing_keys",
-            instance_name=self._instance_name,
-            tables=[
-                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
-            ],
-            sequence_name="e2e_cross_signing_keys_sequence",
-            writers=["master"],
+        def impl(txn: LoggingTransaction) -> Tuple[List[str], int]:
+            # Find a batch of users
+            txn.execute(
+                """
+                SELECT DISTINCT(user_id) FROM e2e_one_time_keys_json
+                    WHERE user_id > ?
+                    ORDER BY user_id
+                    LIMIT ?
+                """,
+                (after_user_id, number_of_users),
+            )
+            users = [row[0] for row in txn.fetchall()]
+            if len(users) == 0:
+                return users, 0
+
+            # Delete any old OTKs belonging to those users.
+            #
+            # We only actually consider OTKs whose key ID is 6 characters long. These
+            # keys were likely made by libolm rather than Vodozemac; libolm only kept
+            # 100 private OTKs, so was far more vulnerable than Vodozemac to throwing
+            # away keys prematurely.
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", users
+            )
+            sql = f"""
+                DELETE FROM e2e_one_time_keys_json
+                WHERE {clause} AND ts_added_ms < ? AND length(key_id) = 6
+                """
+            args.append(self._clock.time_msec() - (7 * 24 * 3600 * 1000))
+            txn.execute(sql, args)
+
+            return users, txn.rowcount
+
+        return await self.db_pool.runInteraction(
+            "delete_old_otks_for_next_user_batch", impl
+        )
+
+    async def allow_master_cross_signing_key_replacement_without_uia(
+        self, user_id: str, duration_ms: int
+    ) -> Optional[int]:
+        """Mark this user's latest master key as being replaceable without UIA.
+
+        Said replacement will only be permitted for a short time after calling this
+        function. That time period is controlled by the duration argument.
+
+        Returns:
+            None, if there is no such key.
+            Otherwise, the timestamp before which replacement is allowed without UIA.
+        """
+        timestamp = self._clock.time_msec() + duration_ms
+
+        def impl(txn: LoggingTransaction) -> Optional[int]:
+            txn.execute(
+                """
+                UPDATE e2e_cross_signing_keys
+                SET updatable_without_uia_before_ms = ?
+                WHERE stream_id = (
+                    SELECT stream_id
+                    FROM e2e_cross_signing_keys
+                    WHERE user_id = ? AND keytype = 'master'
+                    ORDER BY stream_id DESC
+                    LIMIT 1
+                )
+            """,
+                (timestamp, user_id),
+            )
+            if txn.rowcount == 0:
+                return None
+
+            return timestamp
+
+        return await self.db_pool.runInteraction(
+            "allow_master_cross_signing_key_replacement_without_uia",
+            impl,
+        )
+
+    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
+        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
+            log_kv(
+                {
+                    "message": "Deleting keys for device",
+                    "device_id": device_id,
+                    "user_id": user_id,
+                }
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_device_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_one_time_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.count_e2e_one_time_keys, (user_id, device_id)
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="dehydrated_devices",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_fallback_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
+            )
+
+        await self.db_pool.runInteraction(
+            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
         )
 
     async def set_e2e_device_keys(
@@ -1523,46 +1669,6 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
         )
         log_kv({"message": "Device keys stored."})
         return True
-
-    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
-        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
-            log_kv(
-                {
-                    "message": "Deleting keys for device",
-                    "device_id": device_id,
-                    "user_id": user_id,
-                }
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_device_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_one_time_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.count_e2e_one_time_keys, (user_id, device_id)
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="dehydrated_devices",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_fallback_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
-            )
-
-        await self.db_pool.runInteraction(
-            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
-        )
 
     def _set_e2e_cross_signing_key_txn(
         self,
@@ -1687,41 +1793,12 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
             desc="add_e2e_signing_key",
         )
 
-    async def allow_master_cross_signing_key_replacement_without_uia(
-        self, user_id: str, duration_ms: int
-    ) -> Optional[int]:
-        """Mark this user's latest master key as being replaceable without UIA.
 
-        Said replacement will only be permitted for a short time after calling this
-        function. That time period is controlled by the duration argument.
-
-        Returns:
-            None, if there is no such key.
-            Otherwise, the timestamp before which replacement is allowed without UIA.
-        """
-        timestamp = self._clock.time_msec() + duration_ms
-
-        def impl(txn: LoggingTransaction) -> Optional[int]:
-            txn.execute(
-                """
-                UPDATE e2e_cross_signing_keys
-                SET updatable_without_uia_before_ms = ?
-                WHERE stream_id = (
-                    SELECT stream_id
-                    FROM e2e_cross_signing_keys
-                    WHERE user_id = ? AND keytype = 'master'
-                    ORDER BY stream_id DESC
-                    LIMIT 1
-                )
-            """,
-                (timestamp, user_id),
-            )
-            if txn.rowcount == 0:
-                return None
-
-            return timestamp
-
-        return await self.db_pool.runInteraction(
-            "allow_master_cross_signing_key_replacement_without_uia",
-            impl,
-        )
+class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)

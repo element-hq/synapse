@@ -23,6 +23,7 @@ such as [Github][github-idp].
 [auth0]: https://auth0.com/
 [authentik]: https://goauthentik.io/
 [lemonldap]: https://lemonldap-ng.org/
+[pocket-id]: https://pocket-id.org/
 [okta]: https://www.okta.com/
 [dex-idp]: https://github.com/dexidp/dex
 [keycloak-idp]: https://www.keycloak.org/docs/latest/server_admin/#sso-protocols
@@ -336,6 +337,36 @@ but it has a `response_types_supported` which excludes "code" (which we rely on,
 is even mentioned in their [documentation](https://developers.facebook.com/docs/facebook-login/manually-build-a-login-flow#login)),
 so we have to disable discovery and configure the URIs manually.
 
+### Forgejo
+
+Forgejo is a fork of Gitea that can act as an OAuth2 provider.
+
+The implementation of OAuth2 is improved compared to Gitea, as it provides a correctly defined `subject_claim` and `scopes`.
+
+Synapse config:
+
+```yaml
+oidc_providers:
+  - idp_id: forgejo
+    idp_name: Forgejo
+    discover: false
+    issuer: "https://your-forgejo.com/"
+    client_id: "your-client-id" # TO BE FILLED
+    client_secret: "your-client-secret" # TO BE FILLED
+    client_auth_method: client_secret_post
+    scopes: ["openid", "profile", "email", "groups"]
+    authorization_endpoint: "https://your-forgejo.com/login/oauth/authorize"
+    token_endpoint: "https://your-forgejo.com/login/oauth/access_token"
+    userinfo_endpoint: "https://your-forgejo.com/api/v1/user"
+    user_mapping_provider:
+      config:
+        subject_claim: "sub"
+        picture_claim: "picture"
+        localpart_template: "{{ user.preferred_username }}"
+        display_name_template: "{{ user.name }}"
+        email_template: "{{ user.email }}"
+```
+
 ### GitHub
 
 [GitHub][github-idp] is a bit special as it is not an OpenID Connect compliant provider, but
@@ -593,6 +624,32 @@ oidc_providers:
 ```
 
 Note that the fields `client_id` and `client_secret` are taken from the CURL response above.
+
+### Pocket ID
+
+[Pocket ID][pocket-id] is a simple OIDC provider that allows users to authenticate with their passkeys.
+1. Go to `OIDC Clients`
+2. Click on `Add OIDC Client`
+3. Add a name, for example `Synapse`
+4. Add `"https://auth.example.org/_synapse/client/oidc/callback` to `Callback URLs`  # Replace `auth.example.org` with your domain
+5. Click on `Save`
+6. Note down your `Client ID` and `Client secret`, these will be used later
+
+Synapse config:
+
+```yaml
+oidc_providers:
+  - idp_id: pocket_id
+    idp_name: Pocket ID
+    issuer: "https://auth.example.org/" # Replace with your domain
+    client_id: "your-client-id" # Replace with the "Client ID" you noted down before
+    client_secret: "your-client-secret" # Replace with the "Client secret" you noted down before
+    scopes: ["openid", "profile"]
+    user_mapping_provider:
+      config:
+        localpart_template: "{{ user.preferred_username }}"
+        display_name_template: "{{ user.name }}"
+```
 
 ### Shibboleth with OIDC Plugin
 

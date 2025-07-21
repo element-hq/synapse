@@ -1209,12 +1209,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
-        )
-
         after_reset_token = self.event_sources.get_current_token()
 
         membership_changes = self.get_success(
@@ -1465,20 +1459,25 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             )
         )
 
-        with patch.object(
-            self.room_member_handler.federation_handler.federation_client,
-            "make_membership_event",
-            mock_make_membership_event,
-        ), patch.object(
-            self.room_member_handler.federation_handler.federation_client,
-            "send_join",
-            mock_send_join,
-        ), patch(
-            "synapse.event_auth._is_membership_change_allowed",
-            return_value=None,
-        ), patch(
-            "synapse.handlers.federation_event.check_state_dependent_auth_rules",
-            return_value=None,
+        with (
+            patch.object(
+                self.room_member_handler.federation_handler.federation_client,
+                "make_membership_event",
+                mock_make_membership_event,
+            ),
+            patch.object(
+                self.room_member_handler.federation_handler.federation_client,
+                "send_join",
+                mock_send_join,
+            ),
+            patch(
+                "synapse.event_auth._is_membership_change_allowed",
+                return_value=None,
+            ),
+            patch(
+                "synapse.handlers.federation_event.check_state_dependent_auth_rules",
+                return_value=None,
+            ),
         ):
             self.get_success(
                 self.room_member_handler.update_membership(

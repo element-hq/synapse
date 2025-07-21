@@ -69,7 +69,10 @@ class ReportEventRestServlet(RestServlet):
                 "Param 'reason' must be a string",
                 Codes.BAD_JSON,
             )
-        if type(body.get("score", 0)) is not int:  # noqa: E721
+        if (
+            not self.hs.config.experimental.msc4277_enabled
+            and type(body.get("score", 0)) is not int
+        ):  # noqa: E721
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Param 'score' must be an integer",
@@ -85,10 +88,15 @@ class ReportEventRestServlet(RestServlet):
             event = None
 
         if event is None:
-            raise NotFoundError(
-                "Unable to report event: "
-                "it does not exist or you aren't able to see it."
-            )
+            if self.hs.config.experimental.msc4277_enabled:
+                # Respond with 200 and no content regardless of whether the event
+                # exists to prevent enumeration attacks.
+                return 200, {}
+            else:
+                raise NotFoundError(
+                    "Unable to report event: "
+                    "it does not exist or you aren't able to see it."
+                )
 
         await self.store.add_event_report(
             room_id=room_id,
@@ -105,18 +113,17 @@ class ReportEventRestServlet(RestServlet):
 class ReportRoomRestServlet(RestServlet):
     """This endpoint lets clients report a room for abuse.
 
-    Whilst MSC4151 is not yet merged, this unstable endpoint is enabled on matrix.org
-    for content moderation purposes, and therefore backwards compatibility should be
-    carefully considered when changing anything on this endpoint.
-
-    More details on the MSC: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
+    Introduced by MSC4151: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
     """
 
-    PATTERNS = client_patterns(
-        "/org.matrix.msc4151/rooms/(?P<room_id>[^/]*)/report$",
-        releases=[],
-        v1=False,
-        unstable=True,
+    # Cast the Iterable to a list so that we can `append` below.
+    PATTERNS = list(
+        client_patterns(
+            "/rooms/(?P<room_id>[^/]*)/report$",
+            releases=("v3",),
+            unstable=False,
+            v1=False,
+        )
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -139,7 +146,12 @@ class ReportRoomRestServlet(RestServlet):
 
         room = await self.store.get_room(room_id)
         if room is None:
-            raise NotFoundError("Room does not exist")
+            if self.hs.config.experimental.msc4277_enabled:
+                # Respond with 200 and no content regardless of whether the room
+                # exists to prevent enumeration attacks.
+                return 200, {}
+            else:
+                raise NotFoundError("Room does not exist")
 
         await self.store.add_room_report(
             room_id=room_id,
@@ -151,8 +163,44 @@ class ReportRoomRestServlet(RestServlet):
         return 200, {}
 
 
+class ReportUserRestServlet(RestServlet):
+    """This endpoint lets clients report a user for abuse.
+
+    Introduced by MSC4260: https://github.com/matrix-org/matrix-spec-proposals/pull/4260
+    """
+
+    PATTERNS = list(
+        client_patterns(
+            "/users/(?P<target_user_id>[^/]*)/report$",
+            releases=("v3",),
+            unstable=False,
+            v1=False,
+        )
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
+        self.store = hs.get_datastores().main
+        self.handler = hs.get_reports_handler()
+
+    class PostBody(RequestBodyModel):
+        reason: StrictStr
+
+    async def on_POST(
+        self, request: SynapseRequest, target_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        await self.handler.report_user(requester, target_user_id, body.reason)
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
-
-    if hs.config.experimental.msc4151_enabled:
-        ReportRoomRestServlet(hs).register(http_server)
+    ReportRoomRestServlet(hs).register(http_server)
+    ReportUserRestServlet(hs).register(http_server)

@@ -43,12 +43,15 @@ class ExperimentalFeature(str, Enum):
 
     MSC3881 = "msc3881"
     MSC3575 = "msc3575"
+    MSC4222 = "msc4222"
 
     def is_globally_enabled(self, config: "HomeServerConfig") -> bool:
         if self is ExperimentalFeature.MSC3881:
             return config.experimental.msc3881_enabled
         if self is ExperimentalFeature.MSC3575:
             return config.experimental.msc3575_enabled
+        if self is ExperimentalFeature.MSC4222:
+            return config.experimental.msc4222_enabled
 
         assert_never(self)
 

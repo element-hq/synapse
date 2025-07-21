@@ -23,7 +23,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import NotFoundError, SynapseError
-from synapse.handlers.device import DeviceHandler
 from synapse.http.servlet import (
     RestServlet,
     assert_params_in_dict,
@@ -51,9 +50,7 @@ class DeviceRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 
@@ -116,15 +113,16 @@ class DeviceRestServlet(RestServlet):
 class DevicesRestServlet(RestServlet):
     """
     Retrieve the given user's devices
+
+    This can be mounted on workers as it is read-only, as opposed
+    to `DevicesRestServlet`.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/devices$", "v2")
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_worker_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 
@@ -141,7 +139,20 @@ class DevicesRestServlet(RestServlet):
         if u is None:
             raise NotFoundError("Unknown user")
 
-        devices = await self.device_handler.get_devices_by_user(target_user.to_string())
+        devices = await self.device_worker_handler.get_devices_by_user(
+            target_user.to_string()
+        )
+
+        # mark the dehydrated device by adding a "dehydrated" flag
+        dehydrated_device_info = await self.device_worker_handler.get_dehydrated_device(
+            target_user.to_string()
+        )
+        if dehydrated_device_info:
+            dehydrated_device_id = dehydrated_device_info[0]
+            for device in devices:
+                is_dehydrated = device["device_id"] == dehydrated_device_id
+                device["dehydrated"] = is_dehydrated
+
         return HTTPStatus.OK, {"devices": devices, "total": len(devices)}
 
     async def on_POST(
@@ -167,7 +178,7 @@ class DevicesRestServlet(RestServlet):
         if not isinstance(device_id, str):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "device_id must be a string")
 
-        await self.device_handler.check_device_registered(
+        await self.device_worker_handler.check_device_registered(
             user_id=user_id, device_id=device_id
         )
 
@@ -184,9 +195,7 @@ class DeleteDevicesRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
-        handler = hs.get_device_handler()
-        assert isinstance(handler, DeviceHandler)
-        self.device_handler = handler
+        self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
         self.is_mine = hs.is_mine
 

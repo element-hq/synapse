@@ -1,1 +1,0 @@
-Fix bug with sliding sync where the server would not return state that was added to the `required_state` config.

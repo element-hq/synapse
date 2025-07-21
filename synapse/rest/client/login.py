@@ -30,10 +30,9 @@ from typing import (
     List,
     Optional,
     Tuple,
+    TypedDict,
     Union,
 )
-
-from typing_extensions import TypedDict
 
 from synapse.api.constants import ApprovalNoticeMedium
 from synapse.api.errors import (
@@ -43,6 +42,7 @@ from synapse.api.errors import (
     NotApprovedError,
     SynapseError,
     UserDeactivatedError,
+    UserLockedError,
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.urls import CLIENT_API_PREFIX
@@ -314,7 +314,9 @@ class LoginRestServlet(RestServlet):
             should_issue_refresh_token=should_issue_refresh_token,
             # The user represented by an appservice's configured sender_localpart
             # is not actually created in Synapse.
-            should_check_deactivated=qualified_user_id != appservice.sender,
+            should_check_deactivated_or_locked=(
+                qualified_user_id != appservice.sender.to_string()
+            ),
             request_info=request_info,
         )
 
@@ -368,7 +370,7 @@ class LoginRestServlet(RestServlet):
         auth_provider_id: Optional[str] = None,
         should_issue_refresh_token: bool = False,
         auth_provider_session_id: Optional[str] = None,
-        should_check_deactivated: bool = True,
+        should_check_deactivated_or_locked: bool = True,
         *,
         request_info: RequestInfo,
     ) -> LoginResponse:
@@ -390,8 +392,8 @@ class LoginRestServlet(RestServlet):
             should_issue_refresh_token: True if this login should issue
                 a refresh token alongside the access token.
             auth_provider_session_id: The session ID got during login from the SSO IdP.
-            should_check_deactivated: True if the user should be checked for
-                deactivation status before logging in.
+            should_check_deactivated_or_locked: True if the user should be checked for
+                deactivation or locked status before logging in.
 
                 This exists purely for appservice's configured sender_localpart
                 which doesn't have an associated user in the database.
@@ -416,11 +418,14 @@ class LoginRestServlet(RestServlet):
                 )
             user_id = canonical_uid
 
-        # If the account has been deactivated, do not proceed with the login.
-        if should_check_deactivated:
+        # If the account has been deactivated or locked, do not proceed with the login.
+        if should_check_deactivated_or_locked:
             deactivated = await self._main_store.get_user_deactivated_status(user_id)
             if deactivated:
                 raise UserDeactivatedError("This account has been deactivated")
+            locked = await self._main_store.get_user_locked_status(user_id)
+            if locked:
+                raise UserLockedError()
 
         device_id = login_submission.get("device_id")
 
