@@ -477,6 +477,7 @@ class BulkPushRuleEvaluator:
             event.room_version.msc3931_push_features,
             self.hs.config.experimental.msc1767_enabled,  # MSC3931 flag
             self.hs.config.experimental.msc4210_enabled,
+            self.hs.config.experimental.msc4306_enabled,
         )
 
         for uid, rules in rules_by_user.items():
@@ -503,7 +504,19 @@ class BulkPushRuleEvaluator:
                 # current user, it'll be added to the dict later.
                 actions_by_user[uid] = []
 
-            actions = evaluator.run(rules, uid, display_name)
+            msc4306_thread_subscription_state: Optional[bool] = None
+            if (
+                self.hs.config.experimental.msc4306_enabled
+                and thread_id != MAIN_TIMELINE
+            ):
+                subscription = await self.store.get_subscription_for_thread(
+                    uid, event.room_id, thread_id
+                )
+                msc4306_thread_subscription_state = subscription is not None
+
+            actions = evaluator.run(
+                rules, uid, display_name, msc4306_thread_subscription_state
+            )
             if "notify" in actions:
                 # Push rules say we should notify the user of this event
                 actions_by_user[uid] = actions
