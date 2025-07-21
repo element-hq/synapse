@@ -20,9 +20,13 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 
+from tests.unittest import skip_unless
+from tests.utils import HAS_AUTHLIB
+
 from ._base import BaseTestCase
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasQueryUserResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(
@@ -145,6 +149,7 @@ class MasQueryUserResource(BaseTestCase):
         self.assertEqual(channel.code, 400, channel.json_body)
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasProvisionUserResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(
@@ -355,6 +360,7 @@ class MasProvisionUserResource(BaseTestCase):
             self.assertEqual(channel.code, 400, f"Should fail for content: {content}")
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasIsLocalpartAvailableResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -542,6 +548,7 @@ class MasIsLocalpartAvailableResource(BaseTestCase):
         self.assertEqual(channel.json_body["errcode"], "M_USER_IN_USE")
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasDeleteUserResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -749,6 +756,7 @@ class MasDeleteUserResource(BaseTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasReactivateUserResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(
@@ -906,6 +914,7 @@ class MasReactivateUserResource(BaseTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasSetDisplayNameResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(
@@ -1061,6 +1070,7 @@ class MasSetDisplayNameResource(BaseTestCase):
             )
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasUnsetDisplayNameResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(
@@ -1204,6 +1214,7 @@ class MasUnsetDisplayNameResource(BaseTestCase):
             )
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasAllowCrossSigningResetResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(

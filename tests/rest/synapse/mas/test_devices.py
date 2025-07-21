@@ -17,9 +17,13 @@ from synapse.server import HomeServer
 from synapse.types import UserID
 from synapse.util import Clock
 
+from tests.unittest import skip_unless
+from tests.utils import HAS_AUTHLIB
+
 from ._base import BaseTestCase
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasUpsertDeviceResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -172,6 +176,7 @@ class MasUpsertDeviceResource(BaseTestCase):
         self.assertEqual(channel.code, 404, channel.json_body)
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasDeleteDeviceResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -292,6 +297,7 @@ class MasDeleteDeviceResource(BaseTestCase):
         self.assertEqual(channel.code, 404, channel.json_body)
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasUpdateDeviceDisplayNameResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -434,6 +440,7 @@ class MasUpdateDeviceDisplayNameResource(BaseTestCase):
         self.assertEqual(channel.code, 404, channel.json_body)
 
 
+@skip_unless(HAS_AUTHLIB, "requires authlib")
 class MasSyncDevicesResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
