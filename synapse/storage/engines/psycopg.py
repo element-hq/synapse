@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 class PsycopgEngine(
     # mypy doesn't seem to like that the psycopg Connection and Cursor are Generics.
-    PostgresEngine[  # type: ignore[type-var]
-        psycopg.Connection[Tuple], psycopg.Cursor[Tuple], psycopg.IsolationLevel
+    PostgresEngine[
+        psycopg.Connection[Tuple], psycopg.Cursor[Tuple], psycopg.IsolationLevel  # type: ignore[type-var]
     ]
 ):
     def __init__(self, database_config: Mapping[str, Any]):
