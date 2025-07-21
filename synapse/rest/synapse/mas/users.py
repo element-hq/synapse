@@ -70,13 +70,13 @@ class MasQueryUserResource(MasBaseResource):
 
         profile = await self.store.get_profileinfo(user_id=user_id)
 
-        return HTTPStatus.OK, {
-            "user_id": user_id.to_string(),
-            "display_name": profile.display_name,
-            "avatar_url": profile.avatar_url,
-            "is_suspended": user.suspended,
-            "is_deactivated": user.is_deactivated,
-        }
+        return HTTPStatus.OK, self.Response(
+            user_id=user_id.to_string(),
+            display_name=profile.display_name,
+            avatar_url=profile.avatar_url,
+            is_suspended=user.suspended,
+            is_deactivated=user.is_deactivated,
+        )
 
 
 class MasProvisionUserResource(MasBaseResource):
