@@ -170,11 +170,12 @@ class MasProvisionUserResource(MasBaseResource):
                 new_email_list = set(body.set_emails)
 
             if new_email_list is not None:
+                medium = "email"
                 current_threepid_list = await self.store.user_get_threepids(
                     user_id=user_id.to_string()
                 )
                 current_email_list = {
-                    t.address for t in current_threepid_list if t.medium == "email"
+                    t.address for t in current_threepid_list if t.medium == medium
                 }
 
                 to_delete = current_email_list - new_email_list
@@ -183,14 +184,14 @@ class MasProvisionUserResource(MasBaseResource):
                 for address in to_delete:
                     await self.identity_handler.try_unbind_threepid(
                         mxid=user_id.to_string(),
-                        medium="email",
+                        medium=medium,
                         address=address,
                         id_server=None,
                     )
 
                     await self.auth_handler.delete_local_threepid(
                         user_id=user_id.to_string(),
-                        medium="email",
+                        medium=medium,
                         address=address,
                     )
 
@@ -198,7 +199,7 @@ class MasProvisionUserResource(MasBaseResource):
                 for address in to_add:
                     await self.auth_handler.add_threepid(
                         user_id=user_id.to_string(),
-                        medium="email",
+                        medium=medium,
                         address=address,
                         validated_at=current_time,
                     )
