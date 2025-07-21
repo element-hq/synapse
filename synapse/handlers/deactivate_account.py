@@ -187,6 +187,9 @@ class DeactivateAccountHandler:
         # Remove account data (including ignored users and push rules).
         await self.store.purge_account_data_for_user(user_id)
 
+        # Remove thread subscriptions for the user
+        await self.store.purge_thread_subscription_settings_for_user(user_id)
+
         # Delete any server-side backup keys
         await self.store.bulk_delete_backup_keys_and_versions_for_user(user_id)
 
