@@ -16,7 +16,6 @@
 
 from typing import TYPE_CHECKING, cast
 
-from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 from synapse.api.errors import SynapseError
 from synapse.http.server import DirectServeJsonResource
 
@@ -28,6 +27,10 @@ if TYPE_CHECKING:
 
 class MasBaseResource(DirectServeJsonResource):
     def __init__(self, hs: "HomeServer"):
+        # Importing this module requires authlib, which is an optional
+        # dependency but required if msc3861 is enabled
+        from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+
         DirectServeJsonResource.__init__(self, extract_context=True)
         auth = hs.get_auth()
         assert isinstance(auth, MSC3861DelegatedAuth)
