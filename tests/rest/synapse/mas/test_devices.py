@@ -20,7 +20,7 @@ from synapse.util import Clock
 from ._base import BaseTestCase
 
 
-class MasCreateDeviceResource(BaseTestCase):
+class MasUpsertDeviceResource(BaseTestCase):
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
@@ -35,7 +35,7 @@ class MasCreateDeviceResource(BaseTestCase):
     def test_other_token(self) -> None:
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token="other_token",
             content={
@@ -49,12 +49,12 @@ class MasCreateDeviceResource(BaseTestCase):
             channel.json_body["error"], "This endpoint must only be called by MAS"
         )
 
-    def test_create_device(self) -> None:
+    def test_upsert_device(self) -> None:
         store = self.hs.get_datastores().main
 
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token=self.SHARED_SECRET,
             content={
@@ -88,7 +88,7 @@ class MasCreateDeviceResource(BaseTestCase):
 
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token=self.SHARED_SECRET,
             content={
@@ -107,12 +107,12 @@ class MasCreateDeviceResource(BaseTestCase):
         assert device is not None
         self.assertEqual(device["display_name"], "New Name")
 
-    def test_create_device_with_display_name(self) -> None:
+    def test_upsert_device_with_display_name(self) -> None:
         store = self.hs.get_datastores().main
 
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token=self.SHARED_SECRET,
             content={
@@ -130,10 +130,10 @@ class MasCreateDeviceResource(BaseTestCase):
         assert device is not None
         self.assertEqual(device["display_name"], "Alice's Phone")
 
-    def test_create_device_missing_localpart(self) -> None:
+    def test_upsert_device_missing_localpart(self) -> None:
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token=self.SHARED_SECRET,
             content={
@@ -143,10 +143,10 @@ class MasCreateDeviceResource(BaseTestCase):
 
         self.assertEqual(channel.code, 400, channel.json_body)
 
-    def test_create_device_missing_device_id(self) -> None:
+    def test_upsert_device_missing_device_id(self) -> None:
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token=self.SHARED_SECRET,
             content={
@@ -156,10 +156,10 @@ class MasCreateDeviceResource(BaseTestCase):
 
         self.assertEqual(channel.code, 400, channel.json_body)
 
-    def test_create_device_nonexistent_user(self) -> None:
+    def test_upsert_device_nonexistent_user(self) -> None:
         channel = self.make_request(
             "POST",
-            "/_synapse/mas/create_device",
+            "/_synapse/mas/upsert_device",
             shorthand=False,
             access_token=self.SHARED_SECRET,
             content={

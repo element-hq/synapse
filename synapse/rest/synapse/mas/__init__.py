@@ -20,10 +20,10 @@ from typing import TYPE_CHECKING
 from twisted.web.resource import Resource
 
 from synapse.rest.synapse.mas.devices import (
-    MasCreateDeviceResource,
     MasDeleteDeviceResource,
     MasSyncDevicesResource,
     MasUpdateDeviceDisplayNameResource,
+    MasUpsertDeviceResource,
 )
 from synapse.rest.synapse.mas.users import (
     MasAllowCrossSigningResetResource,
@@ -57,7 +57,7 @@ class MasResource(Resource):
         self.putChild(b"provision_user", MasProvisionUserResource(hs))
         self.putChild(b"is_localpart_available", MasIsLocalpartAvailableResource(hs))
         self.putChild(b"delete_user", MasDeleteUserResource(hs))
-        self.putChild(b"create_device", MasCreateDeviceResource(hs))
+        self.putChild(b"upsert_device", MasUpsertDeviceResource(hs))
         self.putChild(b"delete_device", MasDeleteDeviceResource(hs))
         self.putChild(
             b"update_device_display_name", MasUpdateDeviceDisplayNameResource(hs)

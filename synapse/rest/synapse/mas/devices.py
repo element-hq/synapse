@@ -32,14 +32,14 @@ from ._base import MasBaseResource
 logger = logging.getLogger(__name__)
 
 
-class MasCreateDeviceResource(MasBaseResource):
+class MasUpsertDeviceResource(MasBaseResource):
     """
     Endpoint for MAS to create or update user devices.
 
     Takes a localpart, device ID, and optional display name to create new devices
     or update existing ones.
 
-    POST /_synapse/mas/create_device
+    POST /_synapse/mas/upsert_device
     {"localpart": "alice", "device_id": "DEVICE123", "display_name": "Alice's Phone"}
     """
 
