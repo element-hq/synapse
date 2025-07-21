@@ -554,6 +554,20 @@ class MasDeleteUserResource(BaseTestCase):
             )
         )
 
+    def test_other_token(self) -> None:
+        channel = self.make_request(
+            "POST",
+            "/_synapse/mas/delete_user",
+            shorthand=False,
+            access_token="other_token",
+            content={"localpart": "alice", "erase": False},
+        )
+
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(
+            channel.json_body["error"], "This endpoint must only be called by MAS"
+        )
+
     def test_delete_user_no_erase(self) -> None:
         alice = UserID("alice", "test")
         store = self.hs.get_datastores().main
@@ -599,20 +613,6 @@ class MasDeleteUserResource(BaseTestCase):
         )
         # And erased
         self.assertTrue(self.get_success(store.is_user_erased(user_id=str(alice))))
-
-    def test_other_token(self) -> None:
-        channel = self.make_request(
-            "POST",
-            "/_synapse/mas/delete_user",
-            shorthand=False,
-            access_token="other_token",
-            content={"localpart": "alice", "erase": False},
-        )
-
-        self.assertEqual(channel.code, 403, channel.json_body)
-        self.assertEqual(
-            channel.json_body["error"], "This endpoint must only be called by MAS"
-        )
 
     def test_delete_user_missing_localpart(self) -> None:
         channel = self.make_request(
