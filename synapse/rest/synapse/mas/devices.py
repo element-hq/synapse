@@ -197,7 +197,9 @@ class MasSyncDevicesResource(MasBaseResource):
         to_add = target_device_list - current_devices_list
         to_delete = current_devices_list - target_device_list
 
-        # Log what we're about to do, as this can be an expensive operation
+        # Log what we're about to do to make it easier to debug if it stops
+        # mid-way, as this can be a long operation if there are a lot of devices
+        # to delete or to add.
         if to_add and to_delete:
             logger.info(
                 "Syncing %d devices for user %s will add %d devices and delete %d devices",
