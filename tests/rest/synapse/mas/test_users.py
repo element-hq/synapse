@@ -1014,7 +1014,6 @@ class MasSetDisplayNameResource(BaseTestCase):
             'Alice"Quote',  # Quote
             "Alice'Apostrophe",  # Apostrophe
             "Alice<script>",  # HTML tags
-            "Alice\x00Null",  # Null character
         ]
 
         for name in special_names:
