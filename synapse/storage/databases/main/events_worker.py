@@ -1614,7 +1614,10 @@ class EventsWorkerStore(SQLBaseStore):
                         continue
                     redacting_event_id, redact_end_ordering = res
                     if redact_end_ordering:
-                        if e_row.stream_ordering > redact_end_ordering:
+                        # Avoid redacting any events arriving *after* the membership event which
+                        # ends an active redaction - note that this will always redact
+                        # backfilled events, as they have a negative stream ordering
+                        if e_row.stream_ordering >= redact_end_ordering:
                             continue
                     e_row.redactions.append(redacting_event_id)
         return event_dict

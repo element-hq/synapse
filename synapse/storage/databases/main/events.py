@@ -422,6 +422,10 @@ class PersistEventsStore:
 
                 # check that sender can redact
                 redact_allowed = await self._can_sender_redact(event)
+
+                # Signal that this user's past events in this room
+                # should be redacted by adding an entry to
+                # `room_ban_redactions`.
                 if redact_allowed:
                     await self.db_pool.simple_upsert(
                         "room_ban_redactions",
@@ -451,30 +455,44 @@ class PersistEventsStore:
                 )
 
     async def _can_sender_redact(self, event: EventBase) -> bool:
-        state_filter = StateFilter.from_types([(EventTypes.PowerLevels, "")])
+        state_filter = StateFilter.from_types(
+            [(EventTypes.PowerLevels, ""), (EventTypes.Create, "")]
+        )
         state = await self.store.get_partial_filtered_current_state_ids(
             event.room_id, state_filter
         )
         pl_id = state[(EventTypes.PowerLevels, "")]
-        pl_event = await self.store.get_event(pl_id)
-        if pl_event:
-            sender_level = pl_event.content.get("users", {}).get(event.sender)
-            if sender_level is None:
-                sender_level = pl_event.content.get("users_default", 0)
+        pl_event = await self.store.get_event(pl_id, allow_none=True)
 
-            redact_level = pl_event.content.get("redact")
-            if not redact_level:
-                redact_level = pl_event.content.get("events_default", 0)
-
-            room_redaction_level = pl_event.content.get("events", {}).get(
-                "m.room.redaction"
-            )
-            if room_redaction_level:
-                if sender_level < room_redaction_level:
-                    return False
-
-            if sender_level >= redact_level:
+        if pl_event is None:
+            # per the spec, if a power level event isn't in the room, grant the creator
+            # level 100 and all other users 0
+            create_id = state[(EventTypes.Create, "")]
+            create_event = await self.store.get_event(create_id, allow_none=True)
+            if create_event is None:
+                # not sure how this would happen but if it does then just deny the redaction
+                return False
+            if create_event.sender == event.sender:
                 return True
+
+        assert pl_event is not None
+        sender_level = pl_event.content.get("users", {}).get(event.sender)
+        if sender_level is None:
+            sender_level = pl_event.content.get("users_default", 0)
+
+        redact_level = pl_event.content.get("redact")
+        if not redact_level:
+            redact_level = pl_event.content.get("events_default", 0)
+
+        room_redaction_level = pl_event.content.get("events", {}).get(
+            "m.room.redaction"
+        )
+        if room_redaction_level:
+            if sender_level < room_redaction_level:
+                return False
+
+        if sender_level >= redact_level:
+            return True
 
         return False
 

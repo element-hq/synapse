@@ -4590,7 +4590,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_banning_local_member_with_flag_redacts_their_events(self) -> None:
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         originals = []
         for i in range(5):
             event = {"body": f"bothersome noise {i}", "msgtype": "m.text"}
@@ -4916,7 +4916,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         original_ids = []
         for i in range(15):
             event = {"body": f"being a menace {i}", "msgtype": "m.text"}
@@ -4955,7 +4955,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_kicking_local_member_with_flag_redacts_their_events(self) -> None:
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         originals = []
         for i in range(5):
             event = {"body": f"bothersome noise {i}", "msgtype": "m.text"}
@@ -5273,7 +5273,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         original_ids = []
         for i in range(15):
             event = {"body": f"being a menace {i}", "msgtype": "m.text"}
@@ -5312,7 +5312,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
     def test_MSC4293_flag_ignored_in_other_membership_events(self) -> None:
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         original_ids = []
         for i in range(15):
             event = {"body": f"being a menace {i}", "msgtype": "m.text"}
@@ -5399,7 +5399,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         """
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         original_ids = []
         for i in range(15):
             event = {"body": f"being a menace {i}", "msgtype": "m.text"}
@@ -5444,7 +5444,7 @@ class MSC4293RedactOnBanKickTestCase(unittest.FederatingHomeserverTestCase):
         """
         self.helper.join(self.room_id, self.bad_user_id, tok=self.bad_tok)
 
-        # bad user send some messages
+        # bad user sends some messages
         original_ids = []
         for i in range(15):
             event = {"body": f"being a menace {i}", "msgtype": "m.text"}
