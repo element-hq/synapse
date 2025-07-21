@@ -33,7 +33,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import PostgresEngine, Psycopg2Engine
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
@@ -353,7 +353,7 @@ class StateDeletionDataStore:
             )
             for state_group in state_groups
         ]
-        if isinstance(txn.database_engine, PostgresEngine):
+        if isinstance(txn.database_engine, Psycopg2Engine):
             txn.execute_values(sql % ("?",), rows, fetch=False)
         else:
             txn.execute_batch(sql % ("(?, ?)",), rows)
