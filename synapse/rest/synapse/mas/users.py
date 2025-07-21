@@ -137,8 +137,8 @@ class MasProvisionUserResource(MasBaseResource):
         user_id = UserID(localpart, self.hostname)
 
         requester = create_requester(user_id=user_id)
-        existing = await self.store.get_user_by_id(user_id=str(user_id))
-        if existing is None:
+        existing_user = await self.store.get_user_by_id(user_id=str(user_id))
+        if existing_user is None:
             created = True
             await self.registration_handler.register_user(
                 localpart=localpart,
