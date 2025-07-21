@@ -291,6 +291,26 @@ pub const BASE_APPEND_CONTENT_RULES: &[PushRule] = &[PushRule {
 
 pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
     PushRule {
+        rule_id: Cow::Borrowed("global/content/.io.element.msc4306.rule.unsubscribed_thread"),
+        priority_class: 1,
+        conditions: Cow::Borrowed(&[Condition::Known(
+            KnownCondition::Msc4306ThreadSubscription { subscribed: false },
+        )]),
+        actions: Cow::Borrowed(&[]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
+        rule_id: Cow::Borrowed("global/content/.io.element.msc4306.rule.subscribed_thread"),
+        priority_class: 1,
+        conditions: Cow::Borrowed(&[Condition::Known(
+            KnownCondition::Msc4306ThreadSubscription { subscribed: true },
+        )]),
+        actions: Cow::Borrowed(&[Action::Notify, SOUND_ACTION]),
+        default: true,
+        default_enabled: true,
+    },
+    PushRule {
         rule_id: Cow::Borrowed("global/underride/.m.rule.call"),
         priority_class: 1,
         conditions: Cow::Borrowed(&[Condition::Known(KnownCondition::EventMatch(

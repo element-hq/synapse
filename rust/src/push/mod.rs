@@ -369,6 +369,10 @@ pub enum KnownCondition {
     RoomVersionSupports {
         feature: Cow<'static, str>,
     },
+    #[serde(rename = "io.element.msc4306.thread_subscription")]
+    Msc4306ThreadSubscription {
+        subscribed: bool,
+    },
 }
 
 impl<'source> IntoPyObject<'source> for Condition {
@@ -547,11 +551,13 @@ pub struct FilteredPushRules {
     msc3664_enabled: bool,
     msc4028_push_encrypted_events: bool,
     msc4210_enabled: bool,
+    msc4306_enabled: bool,
 }
 
 #[pymethods]
 impl FilteredPushRules {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     pub fn py_new(
         push_rules: PushRules,
         enabled_map: BTreeMap<String, bool>,
@@ -560,6 +566,7 @@ impl FilteredPushRules {
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
         msc4210_enabled: bool,
+        msc4306_enabled: bool,
     ) -> Self {
         Self {
             push_rules,
@@ -569,6 +576,7 @@ impl FilteredPushRules {
             msc3664_enabled,
             msc4028_push_encrypted_events,
             msc4210_enabled,
+            msc4306_enabled,
         }
     }
 
@@ -616,6 +624,10 @@ impl FilteredPushRules {
                         || rule.rule_id == "global/content/.m.rule.contains_user_name"
                         || rule.rule_id == "global/override/.m.rule.roomnotif")
                 {
+                    return false;
+                }
+
+                if !self.msc4306_enabled && rule.rule_id.contains("/.io.element.msc4306.rule.") {
                     return false;
                 }
 
