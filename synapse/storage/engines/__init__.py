@@ -80,6 +80,8 @@ __all__ = [
     "create_engine",
     "BaseDatabaseEngine",
     "PostgresEngine",
+    "PsycopgEngine",
+    "Psycopg2Engine",
     "Sqlite3Engine",
     "IncorrectDatabaseSetup",
 ]
