@@ -57,7 +57,7 @@ class MasUpsertDeviceResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -98,7 +98,7 @@ class MasDeleteDeviceResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -139,7 +139,7 @@ class MasUpdateDeviceDisplayNameResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -181,7 +181,7 @@ class MasSyncDevicesResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)

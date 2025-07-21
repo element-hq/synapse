@@ -38,6 +38,10 @@ class MasBaseResource(DirectServeJsonResource):
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.hostname = hs.hostname
 
-    def assert_mas_request(self, request: "SynapseRequest") -> None:
+    def assert_request_is_from_mas(self, request: "SynapseRequest") -> None:
+        """Assert that the request is coming from MAS itself, not a regular user.
+
+        Throws a 403 if the request is not coming from MAS.
+        """
         if not self.msc3861_auth.is_request_using_the_admin_token(request):
             raise SynapseError(403, "This endpoint must only be called by MAS")

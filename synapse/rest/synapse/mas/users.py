@@ -59,7 +59,7 @@ class MasQueryUserResource(MasBaseResource):
     async def _async_render_GET(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         localpart = parse_string(request, "localpart", required=True)
         user_id = UserID(localpart, self.hostname)
@@ -129,7 +129,7 @@ class MasProvisionUserResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
@@ -240,7 +240,7 @@ class MasIsLocalpartAvailableResource(MasBaseResource):
     async def _async_render_GET(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
         localpart = parse_string(request, "localpart")
         if localpart is None:
             raise SynapseError(400, "Missing localpart")
@@ -273,7 +273,7 @@ class MasDeleteUserResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -313,7 +313,7 @@ class MasReactivateUserResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -351,7 +351,7 @@ class MasSetDisplayNameResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -395,7 +395,7 @@ class MasUnsetDisplayNameResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
@@ -441,7 +441,7 @@ class MasAllowCrossSigningResetResource(MasBaseResource):
     async def _async_render_POST(
         self, request: "SynapseRequest"
     ) -> Tuple[int, JsonDict]:
-        self.assert_mas_request(request)
+        self.assert_request_is_from_mas(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
         user_id = UserID(body.localpart, self.hostname)
