@@ -1,1 +1,0 @@
-Fix an issue where "Lock timeout is getting excessive" warnings would be logged even when the lock timeout was <10 minutes.

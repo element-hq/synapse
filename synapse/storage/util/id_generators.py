@@ -184,6 +184,12 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
     Note: Only works with Postgres.
 
+    Warning: Streams using this generator start at ID 2, because ID 1 is always assumed
+        to have been 'seen as persisted'.
+        Unclear if this extant behaviour is desirable for some reason.
+        When creating a new sequence for a new stream,
+        it will be necessary to use `START WITH 2`.
+
     Args:
         db_conn
         db
@@ -269,6 +275,9 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._known_persisted_positions: List[int] = []
 
         # The maximum stream ID that we have seen been allocated across any writer.
+        # Since this defaults to 1, this means that ID 1 is assumed to have already
+        # been 'seen'. In other words, multi-writer streams start at 2.
+        # Unclear if this is desirable behaviour.
         self._max_seen_allocated_stream_id = 1
 
         # The maximum position of the local instance. This can be higher than
@@ -794,20 +803,16 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         # We upsert the value, ensuring on conflict that we always increase the
         # value (or decrease if stream goes backwards).
-        if isinstance(self._db.engine, PostgresEngine):
-            agg = "GREATEST" if self._positive else "LEAST"
-        else:
-            agg = "MAX" if self._positive else "MIN"
+        cmp = "<" if self._positive else ">"
 
-        sql = """
+        sql = f"""
             INSERT INTO stream_positions (stream_name, instance_name, stream_id)
             VALUES (?, ?, ?)
             ON CONFLICT (stream_name, instance_name)
             DO UPDATE SET
-                stream_id = %(agg)s(stream_positions.stream_id, EXCLUDED.stream_id)
-        """ % {
-            "agg": agg,
-        }
+                stream_id = EXCLUDED.stream_id
+                WHERE stream_positions.stream_id {cmp} EXCLUDED.stream_id
+        """
 
         pos = self.get_current_token_for_writer(self._instance_name)
         txn.execute(sql, (self._stream_name, self._instance_name, pos))

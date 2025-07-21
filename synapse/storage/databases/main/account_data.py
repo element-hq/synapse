@@ -37,6 +37,7 @@ from synapse.api.constants import AccountDataTypes
 from synapse.api.errors import Codes, SynapseError
 from synapse.replication.tcp.streams import AccountDataStream
 from synapse.storage._base import db_to_json
+from synapse.storage.admin_client_config import AdminClientConfig
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -89,7 +90,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         account_max = self.get_max_account_data_stream_id()
         self._account_data_stream_cache = StreamChangeCache(
-            "AccountDataAndTagsChangeCache", account_max
+            name="AccountDataAndTagsChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=account_max,
         )
 
         self.db_pool.updates.register_background_index_update(
@@ -577,6 +580,21 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             user_id, AccountDataTypes.MSC4155_INVITE_PERMISSION_CONFIG
         )
         return InviteRulesConfig(data)
+
+    async def get_admin_client_config_for_user(self, user_id: str) -> AdminClientConfig:
+        """
+        Get the admin client configuration for the specified user.
+
+        The admin client config contains Synapse-specific settings that clients running
+        server admin accounts can use. They have no effect on non-admin users.
+
+        Args:
+            user_id: The user ID to get config for.
+        """
+        data = await self.get_global_account_data_by_type_for_user(
+            user_id, AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG
+        )
+        return AdminClientConfig(data)
 
     def process_replication_rows(
         self,

@@ -51,6 +51,7 @@ from synapse.api.constants import (
     HistoryVisibility,
     JoinRules,
     Membership,
+    MTextFields,
     RoomCreationPreset,
     RoomEncryptionAlgorithms,
     RoomTypes,
@@ -118,6 +119,7 @@ class EventContext:
 
 class RoomCreationHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.auth = hs.get_auth()
@@ -174,7 +176,10 @@ class RoomCreationHandler:
         # succession, only process the first attempt and return its result to
         # subsequent requests
         self._upgrade_response_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "room_upgrade", timeout_ms=FIVE_MINUTES_IN_MS
+            clock=hs.get_clock(),
+            name="room_upgrade",
+            server_name=self.server_name,
+            timeout_ms=FIVE_MINUTES_IN_MS,
         )
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 
@@ -1303,7 +1308,13 @@ class RoomCreationHandler:
             topic = room_config["topic"]
             topic_event, topic_context = await create_event(
                 EventTypes.Topic,
-                {"topic": topic},
+                {
+                    EventContentFields.TOPIC: topic,
+                    EventContentFields.M_TOPIC: {
+                        # The mimetype property defaults to `text/plain` if omitted.
+                        EventContentFields.M_TEXT: [{MTextFields.BODY: topic}]
+                    },
+                },
                 True,
             )
             events_to_send.append((topic_event, topic_context))

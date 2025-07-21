@@ -66,6 +66,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> str:
@@ -100,6 +101,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached(num_args=1)
             def fn(self, arg1: int, arg2: int) -> str:
@@ -145,6 +147,7 @@ class DescriptorTestCase(unittest.TestCase):
 
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
         obj = Cls()
         obj.mock.return_value = "fish"
@@ -175,6 +178,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached()
             def fn(self, arg1: int, kwarg1: int = 2) -> str:
@@ -209,6 +213,8 @@ class DescriptorTestCase(unittest.TestCase):
         """If the wrapped function throws synchronously, things should continue to work"""
 
         class Cls:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def fn(self, arg1: int) -> NoReturn:
                 raise SynapseError(100, "mai spoon iz too big!!1")
@@ -232,6 +238,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             result: Optional[Deferred] = None
             call_count = 0
+            server_name = "test_server"  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> Deferred:
@@ -285,6 +292,8 @@ class DescriptorTestCase(unittest.TestCase):
         complete_lookup: Deferred = Deferred()
 
         class Cls:
+            server_name = "test_server"
+
             @descriptors.cached()
             def fn(self, arg1: int) -> "Deferred[int]":
                 @defer.inlineCallbacks
@@ -327,6 +336,8 @@ class DescriptorTestCase(unittest.TestCase):
         the lookup function throws an exception"""
 
         class Cls:
+            server_name = "test_server"
+
             @descriptors.cached()
             def fn(self, arg1: int) -> Deferred:
                 @defer.inlineCallbacks
@@ -369,6 +380,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int = 2, arg3: int = 3) -> str:
@@ -406,6 +418,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached(iterable=True)
             def fn(self, arg1: int, arg2: int) -> Tuple[str, ...]:
@@ -439,6 +452,8 @@ class DescriptorTestCase(unittest.TestCase):
         """If the wrapped function throws synchronously, things should continue to work"""
 
         class Cls:
+            server_name = "test_server"
+
             @descriptors.cached(iterable=True)
             def fn(self, arg1: int) -> NoReturn:
                 raise SynapseError(100, "mai spoon iz too big!!1")
@@ -460,6 +475,8 @@ class DescriptorTestCase(unittest.TestCase):
         """Invalidations should cascade up through cache contexts"""
 
         class Cls:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached(cache_context=True)
             async def func1(self, key: str, cache_context: _CacheContext) -> int:
                 return await self.func2(key, on_invalidate=cache_context.invalidate)
@@ -486,6 +503,8 @@ class DescriptorTestCase(unittest.TestCase):
         complete_lookup: "Deferred[None]" = Deferred()
 
         class Cls:
+            server_name = "test_server"
+
             @cached()
             async def fn(self, arg1: int) -> str:
                 await complete_lookup
@@ -517,6 +536,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             inner_context_was_finished = False
+            server_name = "test_server"  # nb must be called this for @cached
 
             @cached()
             async def fn(self, arg1: int) -> str:
@@ -562,6 +582,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
     @defer.inlineCallbacks
     def test_passthrough(self) -> Generator["Deferred[Any]", object, None]:
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> str:
                 return key
@@ -576,6 +598,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         callcount = [0]
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> str:
                 callcount[0] += 1
@@ -594,6 +618,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         callcount = [0]
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> str:
                 callcount[0] += 1
@@ -612,6 +638,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
     def test_invalidate_missing(self) -> None:
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> str:
                 return key
@@ -623,6 +651,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         callcount = [0]
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached(max_entries=10)
             def func(self, key: int) -> int:
                 callcount[0] += 1
@@ -650,6 +680,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         d = defer.succeed(123)
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> "Deferred[int]":
                 callcount[0] += 1
@@ -668,6 +700,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         callcount2 = [0]
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> str:
                 callcount[0] += 1
@@ -701,6 +735,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         callcount2 = [0]
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached(max_entries=2)
             def func(self, key: str) -> str:
                 callcount[0] += 1
@@ -738,6 +774,8 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
         callcount2 = [0]
 
         class A:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def func(self, key: str) -> str:
                 callcount[0] += 1
@@ -785,6 +823,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> None:
@@ -850,6 +889,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached()
             def fn(self, arg1: int) -> None:
@@ -893,6 +933,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         class Cls:
             def __init__(self) -> None:
                 self.mock = mock.Mock()
+                self.server_name = "test_server"
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> None:
@@ -933,6 +974,8 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         complete_lookup: "Deferred[None]" = Deferred()
 
         class Cls:
+            server_name = "test_server"  # nb must be called this for @cached
+
             @cached()
             def fn(self, arg1: int) -> None:
                 pass
@@ -967,6 +1010,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
 
         class Cls:
             inner_context_was_finished = False
+            server_name = "test_server"  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> None:
@@ -1010,6 +1054,8 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         """
 
         class Cls:
+            server_name = "test_server"
+
             @descriptors.cached(tree=True)
             def fn(self, room_id: str, event_id: str) -> None:
                 pass

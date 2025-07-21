@@ -74,7 +74,7 @@ def _is_dev_dependency(req: Requirement) -> bool:
 def _should_ignore_runtime_requirement(req: Requirement) -> bool:
     # This is a build-time dependency. Irritatingly, `poetry build` ignores the
     # requirements listed in the [build-system] section of pyproject.toml, so in order
-    # to support `poetry install --no-dev` we have to mark it as a runtime dependency.
+    # to support `poetry install --without dev` we have to mark it as a runtime dependency.
     # See discussion on https://github.com/python-poetry/poetry/issues/6154 (it sounds
     # like the poetry authors don't consider this a bug?)
     #

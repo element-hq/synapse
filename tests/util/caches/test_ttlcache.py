@@ -28,7 +28,9 @@ from tests import unittest
 class CacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.mock_timer = Mock(side_effect=lambda: 100.0)
-        self.cache: TTLCache[str, str] = TTLCache("test_cache", self.mock_timer)
+        self.cache: TTLCache[str, str] = TTLCache(
+            cache_name="test_cache", server_name="test_server", timer=self.mock_timer
+        )
 
     def test_get(self) -> None:
         """simple set/get tests"""

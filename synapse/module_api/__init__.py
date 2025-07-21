@@ -66,7 +66,6 @@ from synapse.handlers.auth import (
     ON_LOGGED_OUT_CALLBACK,
     AuthHandler,
 )
-from synapse.handlers.device import DeviceHandler
 from synapse.handlers.push_rules import RuleSpec, check_actions
 from synapse.http.client import SimpleHttpClient
 from synapse.http.server import (
@@ -104,6 +103,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK,
     CHECK_REGISTRATION_FOR_SPAM_CALLBACK,
     CHECK_USERNAME_FOR_SPAM_CALLBACK,
+    FEDERATED_USER_MAY_INVITE_CALLBACK,
     SHOULD_DROP_FEDERATED_EVENT_CALLBACK,
     USER_MAY_CREATE_ROOM_ALIAS_CALLBACK,
     USER_MAY_CREATE_ROOM_CALLBACK,
@@ -283,7 +283,7 @@ class ModuleApi:
         try:
             app_name = self._hs.config.email.email_app_name
 
-            self._from_string = self._hs.config.email.email_notif_from % {
+            self._from_string = self._hs.config.email.email_notif_from % {  # type: ignore[operator]
                 "app": app_name
             }
         except (KeyError, TypeError):
@@ -315,6 +315,7 @@ class ModuleApi:
         ] = None,
         user_may_join_room: Optional[USER_MAY_JOIN_ROOM_CALLBACK] = None,
         user_may_invite: Optional[USER_MAY_INVITE_CALLBACK] = None,
+        federated_user_may_invite: Optional[FEDERATED_USER_MAY_INVITE_CALLBACK] = None,
         user_may_send_3pid_invite: Optional[USER_MAY_SEND_3PID_INVITE_CALLBACK] = None,
         user_may_create_room: Optional[USER_MAY_CREATE_ROOM_CALLBACK] = None,
         user_may_create_room_alias: Optional[
@@ -338,6 +339,7 @@ class ModuleApi:
             should_drop_federated_event=should_drop_federated_event,
             user_may_join_room=user_may_join_room,
             user_may_invite=user_may_invite,
+            federated_user_may_invite=federated_user_may_invite,
             user_may_send_3pid_invite=user_may_send_3pid_invite,
             user_may_create_room=user_may_create_room,
             user_may_create_room_alias=user_may_create_room_alias,
@@ -922,8 +924,6 @@ class ModuleApi:
     ) -> Generator["defer.Deferred[Any]", Any, None]:
         """Invalidate an access token for a user
 
-        Can only be called from the main process.
-
         Added in Synapse v0.25.0.
 
         Args:
@@ -936,10 +936,6 @@ class ModuleApi:
         Raises:
             synapse.api.errors.AuthError: the access token is invalid
         """
-        assert isinstance(self._device_handler, DeviceHandler), (
-            "invalidate_access_token can only be called on the main process"
-        )
-
         # see if the access token corresponds to a device
         user_info = yield defer.ensureDeferred(
             self._auth.get_user_by_access_token(access_token)

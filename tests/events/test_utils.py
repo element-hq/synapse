@@ -34,11 +34,13 @@ from synapse.events.utils import (
     _split_field,
     clone_event,
     copy_and_fixup_power_levels_contents,
+    format_event_raw,
+    make_config_for_admin,
     maybe_upsert_event_field,
     prune_event,
     serialize_event,
 )
-from synapse.types import JsonDict
+from synapse.types import JsonDict, create_requester
 from synapse.util.frozenutils import freeze
 
 
@@ -49,7 +51,13 @@ def MockEvent(**kwargs: Any) -> EventBase:
         kwargs["type"] = "fake_type"
     if "content" not in kwargs:
         kwargs["content"] = {}
-    return make_event_from_dict(kwargs)
+
+    # Move internal metadata out so we can call make_event properly
+    internal_metadata = kwargs.get("internal_metadata")
+    if internal_metadata is not None:
+        kwargs.pop("internal_metadata")
+
+    return make_event_from_dict(kwargs, internal_metadata_dict=internal_metadata)
 
 
 class TestMaybeUpsertEventField(stdlib_unittest.TestCase):
@@ -122,7 +130,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "prev_events": "prev_events",
                 "prev_state": "prev_state",
                 "auth_events": "auth_events",
-                "origin": "domain",
+                "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
                 # Also include a key that should be removed.
@@ -139,7 +147,7 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
                 "prev_events": "prev_events",
                 "prev_state": "prev_state",
                 "auth_events": "auth_events",
-                "origin": "domain",
+                "origin": "domain",  # historical top-level field that still exists on old events
                 "origin_server_ts": 1234,
                 "membership": "join",
                 "content": {},
@@ -148,13 +156,12 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             },
         )
 
-        # As of room versions we now redact the membership, prev_states, and origin keys.
+        # As of room versions we now redact the membership and prev_states keys.
         self.run_test(
             {
                 "type": "A",
                 "prev_state": "prev_state",
                 "membership": "join",
-                "origin": "example.com",
             },
             {"type": "A", "content": {}, "signatures": {}, "unsigned": {}},
             room_version=RoomVersions.V11,
@@ -238,7 +245,6 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             {
                 "type": "m.room.create",
                 "content": {"not_a_real_key": True},
-                "origin": "some_homeserver",
                 "nonsense_field": "some_random_garbage",
             },
             {
@@ -639,9 +645,18 @@ class CloneEventTestCase(stdlib_unittest.TestCase):
 
 
 class SerializeEventTestCase(stdlib_unittest.TestCase):
-    def serialize(self, ev: EventBase, fields: Optional[List[str]]) -> JsonDict:
+    def serialize(
+        self,
+        ev: EventBase,
+        fields: Optional[List[str]],
+        include_admin_metadata: bool = False,
+    ) -> JsonDict:
         return serialize_event(
-            ev, 1479807801915, config=SerializeEventConfig(only_event_fields=fields)
+            ev,
+            1479807801915,
+            config=SerializeEventConfig(
+                only_event_fields=fields, include_admin_metadata=include_admin_metadata
+            ),
         )
 
     def test_event_fields_works_with_keys(self) -> None:
@@ -759,6 +774,78 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
                 MockEvent(room_id="!foo:bar", content={"foo": "bar"}),
                 ["room_id", 4],  # type: ignore[list-item]
             )
+
+    def test_default_serialize_config_excludes_admin_metadata(self) -> None:
+        # We just really don't want this to be set to True accidentally
+        self.assertFalse(SerializeEventConfig().include_admin_metadata)
+
+    def test_event_flagged_for_admins(self) -> None:
+        # Default behaviour should be *not* to include it
+        self.assertEqual(
+            self.serialize(
+                MockEvent(
+                    type="foo",
+                    event_id="test",
+                    room_id="!foo:bar",
+                    content={"foo": "bar"},
+                    internal_metadata={"soft_failed": True},
+                ),
+                [],
+            ),
+            {
+                "type": "foo",
+                "event_id": "test",
+                "room_id": "!foo:bar",
+                "content": {"foo": "bar"},
+                "unsigned": {},
+            },
+        )
+
+        # When asked though, we should set it
+        self.assertEqual(
+            self.serialize(
+                MockEvent(
+                    type="foo",
+                    event_id="test",
+                    room_id="!foo:bar",
+                    content={"foo": "bar"},
+                    internal_metadata={"soft_failed": True},
+                ),
+                [],
+                True,
+            ),
+            {
+                "type": "foo",
+                "event_id": "test",
+                "room_id": "!foo:bar",
+                "content": {"foo": "bar"},
+                "unsigned": {"io.element.synapse.soft_failed": True},
+            },
+        )
+
+    def test_make_serialize_config_for_admin_retains_other_fields(self) -> None:
+        non_default_config = SerializeEventConfig(
+            include_admin_metadata=False,  # should be True in a moment
+            as_client_event=False,  # default True
+            event_format=format_event_raw,  # default format_event_for_client_v1
+            requester=create_requester("@example:example.org"),  # default None
+            only_event_fields=["foo"],  # default None
+            include_stripped_room_state=True,  # default False
+        )
+        admin_config = make_config_for_admin(non_default_config)
+        self.assertEqual(
+            admin_config.as_client_event, non_default_config.as_client_event
+        )
+        self.assertEqual(admin_config.event_format, non_default_config.event_format)
+        self.assertEqual(admin_config.requester, non_default_config.requester)
+        self.assertEqual(
+            admin_config.only_event_fields, non_default_config.only_event_fields
+        )
+        self.assertEqual(
+            admin_config.include_stripped_room_state,
+            admin_config.include_stripped_room_state,
+        )
+        self.assertTrue(admin_config.include_admin_metadata)
 
 
 class CopyPowerLevelsContentTestCase(stdlib_unittest.TestCase):

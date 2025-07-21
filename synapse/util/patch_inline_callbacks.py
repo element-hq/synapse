@@ -20,6 +20,7 @@
 
 import functools
 import sys
+from types import GeneratorType
 from typing import Any, Callable, Generator, List, TypeVar, cast
 
 from typing_extensions import ParamSpec
@@ -150,6 +151,12 @@ def _check_yield_points(
         *args: P.args, **kwargs: P.kwargs
     ) -> Generator["Deferred[object]", object, T]:
         gen = f(*args, **kwargs)
+
+        # We only patch if we have a native generator function, as we rely on
+        # `gen.gi_frame`.
+        if not isinstance(gen, GeneratorType):
+            ret = yield from gen
+            return ret
 
         last_yield_line_no = gen.gi_frame.f_lineno
         result: Any = None
