@@ -61,7 +61,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import LaterGauge, register_threadpool
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
@@ -561,6 +561,7 @@ class DatabasePool:
         engine: BaseDatabaseEngine,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
@@ -568,10 +569,10 @@ class DatabasePool:
 
         self.updates = BackgroundUpdater(hs, self)
         LaterGauge(
-            "synapse_background_update_status",
-            "Background update status",
-            [],
-            self.updates.get_status,
+            name="synapse_background_update_status",
+            desc="Background update status",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): self.updates.get_status()},
         )
 
         self._previous_txn_total_time = 0.0
