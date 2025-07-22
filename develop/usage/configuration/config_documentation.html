@@ -659,6 +659,30 @@ shown.</p>
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 </code></pre>
 <hr />
+<h3 id="http_proxy"><a class="header" href="#http_proxy"><code>http_proxy</code></a></h3>
+<p><em>(string|null)</em> Proxy server to use for HTTP requests.
+For more details, see the <a href="../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+</code></pre>
+<hr />
+<h3 id="https_proxy"><a class="header" href="#https_proxy"><code>https_proxy</code></a></h3>
+<p><em>(string|null)</em> Proxy server to use for HTTPS requests.
+For more details, see the <a href="../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+</code></pre>
+<hr />
+<h3 id="no_proxy_hosts"><a class="header" href="#no_proxy_hosts"><code>no_proxy_hosts</code></a></h3>
+<p><em>(array)</em> List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the <a href="../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+</code></pre>
+<hr />
 <h3 id="dummy_events_threshold"><a class="header" href="#dummy_events_threshold"><code>dummy_events_threshold</code></a></h3>
 <p><em>(integer)</em> Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an <code>org.matrix.dummy_event</code> event, which will reduce the forward extremities in the room.</p>
 <p>This setting defines the threshold (i.e. number of forward extremities in the room) at which dummy events are sent.</p>
