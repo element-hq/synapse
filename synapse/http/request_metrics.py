@@ -141,10 +141,10 @@ def _get_in_flight_counts() -> Mapping[Tuple[str, ...], int]:
 
 
 LaterGauge(
-    "synapse_http_server_in_flight_requests_count",
-    "",
-    ["method", "servlet"],
-    _get_in_flight_counts,
+    name="synapse_http_server_in_flight_requests_count",
+    desc="",
+    labels=["method", "servlet"],
+    caller=_get_in_flight_counts,
 )
 
 

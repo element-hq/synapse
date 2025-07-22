@@ -501,10 +501,10 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
 # The following simply registers metrics for the replication connections
 
 pending_commands = LaterGauge(
-    "synapse_replication_tcp_protocol_pending_commands",
-    "",
-    ["name"],
-    lambda: {(p.name,): len(p.pending_commands) for p in connected_connections},
+    name="synapse_replication_tcp_protocol_pending_commands",
+    desc="",
+    labels=["name"],
+    caller=lambda: {(p.name,): len(p.pending_commands) for p in connected_connections},
 )
 
 
@@ -516,10 +516,10 @@ def transport_buffer_size(protocol: BaseReplicationStreamProtocol) -> int:
 
 
 transport_send_buffer = LaterGauge(
-    "synapse_replication_tcp_protocol_transport_send_buffer",
-    "",
-    ["name"],
-    lambda: {(p.name,): transport_buffer_size(p) for p in connected_connections},
+    name="synapse_replication_tcp_protocol_transport_send_buffer",
+    desc="",
+    labels=["name"],
+    caller=lambda: {(p.name,): transport_buffer_size(p) for p in connected_connections},
 )
 
 
@@ -541,10 +541,10 @@ def transport_kernel_read_buffer_size(
 
 
 tcp_transport_kernel_send_buffer = LaterGauge(
-    "synapse_replication_tcp_protocol_transport_kernel_send_buffer",
-    "",
-    ["name"],
-    lambda: {
+    name="synapse_replication_tcp_protocol_transport_kernel_send_buffer",
+    desc="",
+    labels=["name"],
+    caller=lambda: {
         (p.name,): transport_kernel_read_buffer_size(p, False)
         for p in connected_connections
     },
@@ -552,10 +552,10 @@ tcp_transport_kernel_send_buffer = LaterGauge(
 
 
 tcp_transport_kernel_read_buffer = LaterGauge(
-    "synapse_replication_tcp_protocol_transport_kernel_read_buffer",
-    "",
-    ["name"],
-    lambda: {
+    name="synapse_replication_tcp_protocol_transport_kernel_read_buffer",
+    desc="",
+    labels=["name"],
+    caller=lambda: {
         (p.name,): transport_kernel_read_buffer_size(p, True)
         for p in connected_connections
     },
