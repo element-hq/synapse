@@ -396,13 +396,17 @@ class PersistEventsStore:
 
                     # if there is an existing ban/leave causing redactions for
                     # this user/room combination update the entry with the stream
-                    # ordering when the redactions should stop
+                    # ordering when the redactions should stop - in the case of a backfilled
+                    # event where the stream ordering is negative, use the current max stream
+                    # ordering
+                    stream_ordering = event.internal_metadata.stream_ordering
+                    assert stream_ordering is not None
+                    if stream_ordering < 0:
+                        stream_ordering = self._stream_id_gen.get_current_token()
                     await self.db_pool.simple_update(
                         "room_ban_redactions",
                         {"room_id": event.room_id, "user_id": event.state_key},
-                        {
-                            "redact_end_ordering": event.internal_metadata.stream_ordering
-                        },
+                        {"redact_end_ordering": stream_ordering},
                         desc="room_ban_redactions update redact_end_ordering",
                     )
 
@@ -471,6 +475,7 @@ class PersistEventsStore:
             create_event = await self.store.get_event(create_id, allow_none=True)
             if create_event is None:
                 # not sure how this would happen but if it does then just deny the redaction
+                logger.warning("No create event found for room %s", event.room_id)
                 return False
             if create_event.sender == event.sender:
                 return True
@@ -481,13 +486,13 @@ class PersistEventsStore:
             sender_level = pl_event.content.get("users_default", 0)
 
         redact_level = pl_event.content.get("redact")
-        if not redact_level:
+        if redact_level is None:
             redact_level = pl_event.content.get("events_default", 0)
 
         room_redaction_level = pl_event.content.get("events", {}).get(
             "m.room.redaction"
         )
-        if room_redaction_level:
+        if room_redaction_level is not None:
             if sender_level < room_redaction_level:
                 return False
 
