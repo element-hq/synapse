@@ -762,7 +762,6 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
             for stream_id, user_id, room_id, event_id in updates
         ]
 
-        logger.error("TS %d->%d %r", from_token, to_token, rows)
         if not rows:
             return [], to_token, False
 
