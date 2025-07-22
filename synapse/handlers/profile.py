@@ -124,7 +124,7 @@ class ProfileHandler:
             except RequestSendFailed as e:
                 raise SynapseError(502, "Failed to fetch profile") from e
             except HttpResponseException as e:
-                if e.code < 500 and e.code not in (403,404):
+                if e.code < 500 and e.code not in (403, 404):
                     # Other codes are not allowed in c2s API
                     logger.info(
                         "Server replied with wrong response: %s %s", e.code, e.msg
