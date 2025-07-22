@@ -12,8 +12,6 @@ class ExplicitlyConfiguredLogger(logging.Logger):
     def __init__(self, name: str, level: int = logging.NOTSET) -> None:
         super().__init__(name, level)
 
-        self.addFilter(self._filter)
-
     def isEnabledFor(self, level: int) -> bool:
         # Check if the logger is explicitly configured
         explicitly_configured_logger = self.manager.loggerDict.get(self.name)
@@ -28,9 +26,3 @@ class ExplicitlyConfiguredLogger(logging.Logger):
 
         # Otherwise, follow the normal logging behavior
         return level >= log_level
-
-    def _filter(self, record: logging.LogRecord) -> bool:
-        """
-        Only allow logging if the logger is explicitly configured.
-        """
-        return self.isEnabledFor(record.levelno)
