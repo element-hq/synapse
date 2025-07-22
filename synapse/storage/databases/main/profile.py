@@ -32,7 +32,12 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main.roommember import ProfileInfo
-from synapse.storage.engines import PostgresEngine, Sqlite3Engine
+from synapse.storage.engines import (
+    PostgresEngine,
+    Psycopg2Engine,
+    PsycopgEngine,
+    Sqlite3Engine,
+)
 from synapse.types import JsonDict, JsonValue, UserID
 
 if TYPE_CHECKING:
@@ -457,12 +462,25 @@ class ProfileWorkerStore(SQLBaseStore):
             self._check_profile_size(txn, user_id, field_name, new_value)
 
             if isinstance(self.database_engine, PostgresEngine):
-                from psycopg2.extras import Json
+                if isinstance(self.database_engine, Psycopg2Engine):
+                    from psycopg2.extras import Json
+                elif isinstance(self.database_engine, PsycopgEngine):
+                    # mypy tells me:
+                    #  error: Incompatible import of "Json" (imported name has type
+                    #  "type[psycopg.types.json.Json]", local name has type
+                    #  "type[psycopg2._json.Json]")  [assignment]
+                    # and since both of the psycopg-related modules are optional
+                    # dependencies, just tell mypy to ignore it for now.
+                    from psycopg.types.json import Json  # type: ignore[assignment]
+                else:
+                    msg = "Unknown Database Engine Type"
+                    # I do not know an appropriate Exception to raise here
+                    raise ValueError(msg)
 
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
                 sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?::text, ?::jsonb))
                 ON CONFLICT (user_id)
                 DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
                 """
