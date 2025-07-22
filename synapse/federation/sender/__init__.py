@@ -160,6 +160,7 @@ from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     LaterGauge,
     event_processing_loop_counter,
     event_processing_loop_room_count,
@@ -391,31 +392,37 @@ class FederationSender(AbstractFederationSender):
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_destinations",
-            "",
-            [],
-            lambda: sum(
-                1
-                for d in self._per_destination_queues.values()
-                if d.transmission_loop_running
-            ),
+            name="synapse_federation_transaction_queue_pending_destinations",
+            desc="",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    1
+                    for d in self._per_destination_queues.values()
+                    if d.transmission_loop_running
+                )
+            },
         )
 
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_pdus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_pdu_count() for d in self._per_destination_queues.values()
-            ),
+            name="synapse_federation_transaction_queue_pending_pdus",
+            desc="",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    d.pending_pdu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_edus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_edu_count() for d in self._per_destination_queues.values()
-            ),
+            name="synapse_federation_transaction_queue_pending_edus",
+            desc="",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    d.pending_edu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
 
         self._is_processing = False
