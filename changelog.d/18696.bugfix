@@ -1,0 +1,1 @@
+Allow return code 403 (allowed by C2S Spec since v1.2) when fetching profiles via federation.
