@@ -31,8 +31,12 @@ class ExplicitlyConfiguredLoggerTestCase(TestCase):
         return logger
 
     def test_no_logs_when_not_set(self) -> None:
+        """
+        Test to make sure that nothing is logged when the logger is not explicitly
+        configured.
+        """
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
+        root_logger.setLevel(logging.DEBUG)
 
         logger = self._create_explicitly_configured_logger()
 
@@ -45,9 +49,13 @@ class ExplicitlyConfiguredLoggerTestCase(TestCase):
 
             logger.debug("debug message")
             logger.info("info message")
+            logger.warning("warning message")
             logger.error("error message")
 
     def test_logs_when_explicitly_configured(self) -> None:
+        """
+        Test to make sure that logs are emitted when the logger is explicitly configured.
+        """
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.INFO)
 
@@ -56,14 +64,50 @@ class ExplicitlyConfiguredLoggerTestCase(TestCase):
         with self.assertLogs(logger=logger, level=logging.DEBUG) as cm:
             logger.debug("debug message")
             logger.info("info message")
+            logger.warning("warning message")
             logger.error("error message")
 
             self.assertIncludes(
                 set(cm.output),
                 {
                     "DEBUG:test:debug message",
-                    "ERROR:test:error message",
                     "INFO:test:info message",
+                    "WARNING:test:warning message",
+                    "ERROR:test:error message",
                 },
                 exact=True,
             )
+
+    def test_is_enabled_for_not_set(self) -> None:
+        """
+        Test to make sure `logger.isEnabledFor(...)` returns False when the logger is
+        not explicitly configured.
+        """
+
+        logger = self._create_explicitly_configured_logger()
+
+        # Unset the logger (not configured)
+        logger.setLevel(logging.NOTSET)
+
+        # The logger shouldn't be enabled for any level
+        self.assertFalse(logger.isEnabledFor(logging.DEBUG))
+        self.assertFalse(logger.isEnabledFor(logging.INFO))
+        self.assertFalse(logger.isEnabledFor(logging.WARNING))
+        self.assertFalse(logger.isEnabledFor(logging.ERROR))
+
+    def test_is_enabled_for_info(self) -> None:
+        """
+        Test to make sure `logger.isEnabledFor(...)` returns True any levels above the
+        explicitly configured level.
+        """
+
+        logger = self._create_explicitly_configured_logger()
+
+        # Explicitly configure the logger to `INFO` level
+        logger.setLevel(logging.INFO)
+
+        # The logger should be enabled for INFO and above once explicitly configured
+        self.assertFalse(logger.isEnabledFor(logging.DEBUG))
+        self.assertTrue(logger.isEnabledFor(logging.INFO))
+        self.assertTrue(logger.isEnabledFor(logging.WARNING))
+        self.assertTrue(logger.isEnabledFor(logging.ERROR))
