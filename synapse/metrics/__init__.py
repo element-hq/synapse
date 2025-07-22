@@ -33,6 +33,7 @@ from typing import (
     Iterable,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -53,8 +54,9 @@ from prometheus_client import (
 )
 from prometheus_client.core import (
     REGISTRY,
-    GaugeHistogramMetricFamily,
     GaugeMetricFamily,
+    Timestamp,
+    Sample,
 )
 
 from twisted.python.threadpool import ThreadPool
@@ -342,6 +344,85 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         all_gauges[self.name] = self
 
 
+class GaugeHistogramMetricFamilyWithLabels(Metric):
+    """
+    Custom version of `GaugeHistogramMetricFamily` from `prometheus_client` that allows
+    specifying labels and label values.
+
+    A single gauge histogram and its samples.
+
+    For use by custom collectors.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        documentation: str,
+        buckets: Optional[Sequence[Tuple[str, float]]] = None,
+        gsum_value: Optional[float] = None,
+        labelnames: StrSequence = (),
+        labelvalues: StrSequence = (),
+        unit: str = "",
+    ):
+        Metric.__init__(self, name, documentation, "gaugehistogram", unit)
+
+        # Sanity check the number of label values matches the number of label names.
+        if len(labelvalues) != len(labelnames):
+            raise ValueError("Incorrect label count")
+
+        self._labelnames = tuple(labelnames)
+
+        # Create a gauge for each bucket.
+        if buckets is not None:
+            self.add_metric(
+                labelvalues=labelvalues, buckets=buckets, gsum_value=gsum_value
+            )
+
+    def add_metric(
+        self,
+        labelvalues: StrSequence,
+        buckets: Sequence[Tuple[str, float]],
+        gsum_value: Optional[float],
+        timestamp: Optional[Union[float, Timestamp]] = None,
+    ) -> None:
+        """Add a metric to the metric family.
+
+        Args:
+          labelvalues: A list of label values
+          buckets: A list of pairs of bucket names and values.
+              The buckets must be sorted, and +Inf present.
+          gsum_value: The sum value of the metric.
+        """
+        for bucket, value in buckets:
+            self.samples.append(
+                Sample(
+                    self.name + "_bucket",
+                    dict(list(zip(self._labelnames, labelvalues)) + [("le", bucket)]),
+                    value,
+                    timestamp,
+                )
+            )
+        # +Inf is last and provides the count value.
+        self.samples.extend(
+            [
+                Sample(
+                    self.name + "_gcount",
+                    dict(zip(self._labelnames, labelvalues)),
+                    buckets[-1][1],
+                    timestamp,
+                ),
+                # TODO: Handle None gsum_value correctly. Currently a None will fail exposition but is allowed here.
+                Sample(
+                    self.name + "_gsum",
+                    dict(zip(self._labelnames, labelvalues)),
+                    gsum_value,
+                    timestamp,
+                ),  # type: ignore
+            ]
+        )
+
+
 class GaugeBucketCollector(Collector):
     """Like a Histogram, but the buckets are Gauges which are updated atomically.
 
@@ -354,14 +435,17 @@ class GaugeBucketCollector(Collector):
     __slots__ = (
         "_name",
         "_documentation",
+        "_labelnames",
         "_bucket_bounds",
         "_metric",
     )
 
     def __init__(
         self,
+        *,
         name: str,
         documentation: str,
+        labelnames: Optional[StrSequence],
         buckets: Iterable[float],
         registry: CollectorRegistry = REGISTRY,
     ):
@@ -375,6 +459,7 @@ class GaugeBucketCollector(Collector):
         """
         self._name = name
         self._documentation = documentation
+        self._labelnames = labelnames
 
         # the tops of the buckets
         self._bucket_bounds = [float(b) for b in buckets]
@@ -386,7 +471,7 @@ class GaugeBucketCollector(Collector):
 
         # We initially set this to None. We won't report metrics until
         # this has been initialised after a successful data update
-        self._metric: Optional[GaugeHistogramMetricFamily] = None
+        self._metric: Optional[GaugeHistogramMetricFamilyWithLabels] = None
 
         registry.register(self)
 
@@ -395,15 +480,26 @@ class GaugeBucketCollector(Collector):
         if self._metric is not None:
             yield self._metric
 
-    def update_data(self, values: Iterable[float]) -> None:
+    def update_data(self, values: Iterable[float], labels: StrSequence = ()) -> None:
         """Update the data to be reported by the metric
 
         The existing data is cleared, and each measurement in the input is assigned
         to the relevant bucket.
-        """
-        self._metric = self._values_to_metric(values)
 
-    def _values_to_metric(self, values: Iterable[float]) -> GaugeHistogramMetricFamily:
+        Args:
+            values
+            labels
+        """
+        self._metric = self._values_to_metric(values, labels)
+
+    def _values_to_metric(
+        self, values: Iterable[float], labels: StrSequence = ()
+    ) -> GaugeHistogramMetricFamilyWithLabels:
+        """
+        Args:
+            values
+            labels
+        """
         total = 0.0
         bucket_values = [0 for _ in self._bucket_bounds]
 
@@ -421,9 +517,11 @@ class GaugeBucketCollector(Collector):
         # that bucket or below.
         accumulated_values = itertools.accumulate(bucket_values)
 
-        return GaugeHistogramMetricFamily(
-            self._name,
-            self._documentation,
+        return GaugeHistogramMetricFamilyWithLabels(
+            name=self._name,
+            documentation=self._documentation,
+            labelnames=self._labelnames,
+            labelvalues=labels,
             buckets=list(
                 zip((str(b) for b in self._bucket_bounds), accumulated_values)
             ),
