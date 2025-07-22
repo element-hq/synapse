@@ -259,7 +259,10 @@ class Notifier:
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
         # most when scraping it.
-        def count_listeners() -> Mapping[Tuple[str], int]:
+        #
+        # Ideally, we'd use `Mapping[Tuple[str], int]` here but mypy doesn't like it.
+        # This is close enough and better than a type ignore.
+        def count_listeners() -> Mapping[Tuple[str, ...], int]:
             all_user_streams: Set[_NotifierUserStream] = set()
 
             for streams in list(self.room_to_user_streams.values()):
