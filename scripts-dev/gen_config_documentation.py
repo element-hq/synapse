@@ -489,7 +489,7 @@ def main() -> None:
             exit(usage("Too many arguments."))
         if not (filepath := (sys.argv[1:] or [""])[0]):
             exit(usage("No schema file provided."))
-        with open(filepath, "r", encoding="utf8") as f:
+        with open(filepath, "r", encoding="utf-8") as f:
             # Note: Windows requires that we specify the encoding otherwise it uses
             # things like CP-1251, which can cause explosions.
             # See https://github.com/yaml/pyyaml/issues/123 for more info.
