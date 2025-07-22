@@ -43,7 +43,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -117,10 +117,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 self._count_known_servers,
             )
             LaterGauge(
-                "synapse_federation_known_servers",
-                "",
-                [],
-                lambda: self._known_servers_count,
+                name="synapse_federation_known_servers",
+                desc="",
+                labels=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): self._known_servers_count},
             )
 
     @wrap_as_background_process("_count_known_servers")
