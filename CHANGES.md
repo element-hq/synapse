@@ -17,8 +17,8 @@
 ### Bugfixes
 
 - Fix CPU and database spinning when retrying sending events to servers whilst at the same time purging those events. ([\#18499](https://github.com/element-hq/synapse/issues/18499))
-- Don't allow creation of tags with names longer than 255 bytes, as per the spec. ([\#18660](https://github.com/element-hq/synapse/issues/18660))
-- Fix sliding_sync_connections related errors when porting from SQLite to Postgres. ([\#18677](https://github.com/element-hq/synapse/issues/18677))
+- Don't allow creation of tags with names longer than 255 bytes, [as per the spec](https://spec.matrix.org/v1.15/client-server-api/#events-14). ([\#18660](https://github.com/element-hq/synapse/issues/18660))
+- Fix `sliding_sync_connections`-related errors when porting from SQLite to Postgres. ([\#18677](https://github.com/element-hq/synapse/issues/18677))
 - Fix the MAS integration not working when Synapse is started with `--daemonize` or using `synctl`. ([\#18691](https://github.com/element-hq/synapse/issues/18691))
 
 ### Improved Documentation
@@ -28,7 +28,7 @@
 
 ### Internal Changes
 
-- Dedicated internal API for Matrix Authentication Service to Synapse communication. ([\#18520](https://github.com/element-hq/synapse/issues/18520))
+- Add a dedicated internal API for Matrix Authentication Service to Synapse communication. ([\#18520](https://github.com/element-hq/synapse/issues/18520))
 - Allow user registrations to be done on workers. ([\#18552](https://github.com/element-hq/synapse/issues/18552))
 - Remove unnecessary HTTP replication calls. ([\#18564](https://github.com/element-hq/synapse/issues/18564))
 - Refactor `Measure` block metrics to be homeserver-scoped. ([\#18601](https://github.com/element-hq/synapse/issues/18601))
