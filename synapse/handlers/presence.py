@@ -105,7 +105,7 @@ from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.appservice import ApplicationService
 from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -758,10 +758,10 @@ class PresenceHandler(BasePresenceHandler):
         )
 
         LaterGauge(
-            "synapse_handlers_presence_user_to_current_state_size",
-            "",
-            [],
-            lambda: len(self.user_to_current_state),
+            name="synapse_handlers_presence_user_to_current_state_size",
+            desc="",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -860,10 +860,10 @@ class PresenceHandler(BasePresenceHandler):
             )
 
         LaterGauge(
-            "synapse_handlers_presence_wheel_timer_size",
-            "",
-            [],
-            lambda: len(self.wheel_timer),
+            name="synapse_handlers_presence_wheel_timer_size",
+            desc="",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 
         # Used to handle sending of presence to newly joined users/servers
