@@ -104,6 +104,9 @@ from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.task_scheduler import TaskSchedulerWorkerStore
+from synapse.storage.databases.main.thread_subscriptions import (
+    ThreadSubscriptionsWorkerStore,
+)
 from synapse.storage.databases.main.transactions import TransactionWorkerStore
 from synapse.storage.databases.main.ui_auth import UIAuthWorkerStore
 from synapse.storage.databases.main.user_directory import UserDirectoryStore
@@ -132,6 +135,7 @@ class GenericWorkerStore(
     KeyStore,
     RoomWorkerStore,
     DirectoryWorkerStore,
+    ThreadSubscriptionsWorkerStore,
     PushRulesWorkerStore,
     ApplicationServiceTransactionWorkerStore,
     ApplicationServiceWorkerStore,

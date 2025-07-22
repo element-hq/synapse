@@ -610,6 +610,39 @@ manhole_settings:
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 ```
 ---
+### `http_proxy`
+
+*(string|null)* Proxy server to use for HTTP requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+```
+---
+### `https_proxy`
+
+*(string|null)* Proxy server to use for HTTPS requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+```
+---
+### `no_proxy_hosts`
+
+*(array)* List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+```
+---
 ### `dummy_events_threshold`
 
 *(integer)* Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an `org.matrix.dummy_event` event, which will reduce the forward extremities in the room.
