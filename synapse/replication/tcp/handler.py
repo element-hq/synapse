@@ -40,7 +40,7 @@ from prometheus_client import Counter
 
 from twisted.internet.protocol import ReconnectingClientFactory
 
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
@@ -106,6 +106,7 @@ class ReplicationCommandHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -230,10 +231,10 @@ class ReplicationCommandHandler:
         self._connections: List[IReplicationConnection] = []
 
         LaterGauge(
-            "synapse_replication_tcp_resource_total_connections",
-            "",
-            [],
-            lambda: len(self._connections),
+            name="synapse_replication_tcp_resource_total_connections",
+            desc="",
+            labels=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self._connections)},
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -253,11 +254,11 @@ class ReplicationCommandHandler:
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
         LaterGauge(
-            "synapse_replication_tcp_command_queue",
-            "Number of inbound RDATA/POSITION commands queued for processing",
-            ["stream_name"],
-            lambda: {
-                (stream_name,): len(queue)
+            name="synapse_replication_tcp_command_queue",
+            desc="Number of inbound RDATA/POSITION commands queued for processing",
+            labels=["stream_name", SERVER_NAME_LABEL],
+            caller=lambda: {
+                (stream_name, self.server_name): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
             },
         )
