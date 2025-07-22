@@ -473,6 +473,10 @@ def section(prop: str, values: dict) -> str:
 
 
 def main() -> None:
+    # For Windows: reconfigure the terminal to be UTF-8 for `print()` calls.
+    if sys.platform == "win32":
+        sys.stdout.reconfigure(encoding="utf-8")
+
     def usage(err_msg: str) -> int:
         script_name = (sys.argv[:1] or ["__main__.py"])[0]
         print(err_msg, file=sys.stderr)
@@ -485,7 +489,10 @@ def main() -> None:
             exit(usage("Too many arguments."))
         if not (filepath := (sys.argv[1:] or [""])[0]):
             exit(usage("No schema file provided."))
-        with open(filepath) as f:
+        with open(filepath, "r", encoding="utf-8") as f:
+            # Note: Windows requires that we specify the encoding otherwise it uses
+            # things like CP-1251, which can cause explosions.
+            # See https://github.com/yaml/pyyaml/issues/123 for more info.
             return yaml.safe_load(f)
 
     schema = read_json_file_arg()
