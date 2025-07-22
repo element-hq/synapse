@@ -38,7 +38,6 @@ from twisted.python.failure import Failure
 
 from synapse.logging.context import (
     PreserveLoggingContext,
-    current_context,
     make_deferred_yieldable,
 )
 from synapse.metrics import SERVER_NAME_LABEL
@@ -121,8 +120,6 @@ class RedisSubscriber(SubscriberProtocol):
     def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
 
-        # Capture the current context so we can use it later when `server_name` is set.
-        self._sentinel_context = current_context()
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.
         self._logging_context: Optional[BackgroundProcessLoggingContext] = None
@@ -140,7 +137,7 @@ class RedisSubscriber(SubscriberProtocol):
         if self._logging_context is None:
             # a logcontext which we use for processing incoming commands. We declare it as a
             # background process so that the CPU stats get reported to prometheus.
-            with PreserveLoggingContext(self._sentinel_context):
+            with PreserveLoggingContext():
                 # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
                 # capture the sentinel context as its containing context and won't prevent
                 # GC of / unintentionally reactivate what would be the current context.
