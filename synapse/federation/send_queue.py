@@ -116,7 +116,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
                 name="synapse_federation_send_queue_%s_size" % (queue_name,),
                 desc="",
                 labels=[SERVER_NAME_LABEL],
-                caller={(self.server_name,): lambda: len(queue)},
+                caller=lambda: {(self.server_name,): len(queue)},
             )
 
         for queue_name in [
