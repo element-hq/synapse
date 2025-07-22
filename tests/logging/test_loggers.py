@@ -64,7 +64,7 @@ class ExplicitlyConfiguredLoggerTestCase(TestCase):
             # Stub log message to avoid `assertLogs` failing since it expects at least
             # one log message to be logged.
             logger.setLevel(logging.INFO)
-            logger.info("stub message so assertLogs` doesn't fail")
+            logger.info("stub message so `assertLogs` doesn't fail")
 
     def test_logs_when_explicitly_configured(self) -> None:
         """
