@@ -65,7 +65,7 @@ original_logger_class = logging.getLoggerClass()
 # Because this can log sensitive information, use a custom logger class that only allows
 # logging if the logger is explicitly configured.
 logging.setLoggerClass(ExplicitlyConfiguredLogger)
-user_registration_debug_logger = logging.getLogger(
+user_registration_sensitive_debug_logger = logging.getLogger(
     "synapse.rest.admin.users.registration_debug"
 )
 """
@@ -655,13 +655,34 @@ class UserRegisterServlet(RestServlet):
         want_mac = want_mac_builder.hexdigest()
 
         if not hmac.compare_digest(want_mac.encode("ascii"), got_mac.encode("ascii")):
-            user_registration_debug_logger.debug(
-                "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
-                got_mac,
-                want_mac,
-                self.hs.config.registration.registration_shared_secret,
-                body,
-            )
+            # If the sensitive debug logger is enabled, log the full details.
+            #
+            # For reference, the `user_registration_sensitive_debug_logger.debug(...)`
+            # call is enough to gate the logging of sensitive information unless
+            # explicitly enabled. We only have this if-statement to avoid logging the
+            # suggestion to enable the debug logger if you already have it enabled.
+            if user_registration_sensitive_debug_logger.isEnabledFor(logging.DEBUG):
+                user_registration_sensitive_debug_logger.debug(
+                    "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
+                    got_mac,
+                    want_mac,
+                    self.hs.config.registration.registration_shared_secret,
+                    body,
+                )
+            else:
+                # Otherwise, just log the non-sensitive essentials and advertise the
+                # debug logger for sensitive information.
+                logger.debug(
+                    (
+                        "UserRegisterServlet: HMAC incorrect (username=%s): actual=%s, expected=%s - "
+                        "If you need more information, explicitly enable the `synapse.rest.admin.users.registration_debug` "
+                        "logger at the `DEBUG` level to log things like the full request body and "
+                        "`registration_shared_secret` used to calculate the HMAC."
+                    ),
+                    username,
+                    got_mac,
+                    want_mac,
+                )
             raise SynapseError(HTTPStatus.FORBIDDEN, "HMAC incorrect")
 
         should_issue_refresh_token = body.get("refresh_token", False)
