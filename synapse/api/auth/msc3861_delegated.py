@@ -369,6 +369,12 @@ class MSC3861DelegatedAuth(BaseAuth):
     async def is_server_admin(self, requester: Requester) -> bool:
         return "urn:synapse:admin:*" in requester.scope
 
+    def _is_access_token_the_admin_token(self, token: str) -> bool:
+        admin_token = self._admin_token()
+        if admin_token is None:
+            return False
+        return token == admin_token
+
     async def get_user_by_req(
         self,
         request: SynapseRequest,
@@ -434,7 +440,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             requester = await self.get_user_by_access_token(access_token, allow_expired)
 
         # Do not record requests from MAS using the virtual `__oidc_admin` user.
-        if access_token != self._admin_token():
+        if not self._is_access_token_the_admin_token(access_token):
             await self._record_request(request, requester)
 
         if not allow_guest and requester.is_guest:
@@ -470,13 +476,25 @@ class MSC3861DelegatedAuth(BaseAuth):
 
             raise UnrecognizedRequestError(code=404)
 
+    def is_request_using_the_admin_token(self, request: SynapseRequest) -> bool:
+        """
+        Check if the request is using the admin token.
+
+        Args:
+            request: The request to check.
+
+        Returns:
+            True if the request is using the admin token, False otherwise.
+        """
+        access_token = self.get_access_token_from_request(request)
+        return self._is_access_token_the_admin_token(access_token)
+
     async def get_user_by_access_token(
         self,
         token: str,
         allow_expired: bool = False,
     ) -> Requester:
-        admin_token = self._admin_token()
-        if admin_token is not None and token == admin_token:
+        if self._is_access_token_the_admin_token(token):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.

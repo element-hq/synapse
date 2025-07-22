@@ -1,1 +1,0 @@
-Refactor `Measure` block metrics to be homeserver-scoped.

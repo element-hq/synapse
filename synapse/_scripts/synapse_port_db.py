@@ -136,6 +136,7 @@ BOOLEAN_COLUMNS = {
         "has_known_state",
         "is_encrypted",
     ],
+    "thread_subscriptions": ["subscribed", "automatic"],
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],
     "users_who_share_rooms": ["share_private"],
