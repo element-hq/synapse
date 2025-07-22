@@ -154,7 +154,7 @@ class _RegistryProxy:
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
 
 
-@attr.s(slots=True, hash=True, auto_attribs=True)
+@attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
 class LaterGauge(Collector):
     """A Gauge which periodically calls a user-provided callback to produce metrics."""
 
