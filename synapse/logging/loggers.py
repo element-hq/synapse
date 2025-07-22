@@ -9,9 +9,6 @@ class ExplicitlyConfiguredLogger(logging.Logger):
     configured (does not inherit log level from parent).
     """
 
-    def __init__(self, name: str, level: int = logging.NOTSET) -> None:
-        super().__init__(name, level)
-
     def isEnabledFor(self, level: int) -> bool:
         # Check if the logger is explicitly configured
         explicitly_configured_logger = self.manager.loggerDict.get(self.name)
