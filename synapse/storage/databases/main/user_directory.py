@@ -37,16 +37,8 @@ from typing import (
 
 import attr
 
-try:
-    # Figure out if ICU support is available for searching users.
-    import icu
-
-    USE_ICU = True
-except ModuleNotFoundError:
-    # except ModuleNotFoundError:
-    USE_ICU = False
-
 from synapse.api.errors import StoreError
+from synapse.synapse_rust import segmenter as icu
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:
@@ -253,8 +245,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             return 1
 
         logger.debug(
-            "Processing the next %d rooms of %d remaining"
-            % (len(rooms_to_work_on), progress["remaining"])
+            "Processing the next %d rooms of %d remaining",
+            len(rooms_to_work_on),
+            progress["remaining"],
         )
 
         processed_event_count = 0
@@ -1225,7 +1218,7 @@ def _filter_text_for_index(text: str) -> str:
 
 def _parse_query_sqlite(search_term: str) -> str:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
 
@@ -1241,7 +1234,7 @@ def _parse_query_sqlite(search_term: str) -> str:
 
 def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
     """
@@ -1271,12 +1264,7 @@ def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
 
 
 def _parse_words(search_term: str) -> List[str]:
-    """Split the provided search string into a list of its words.
-
-    If support for ICU (International Components for Unicode) is available, use it.
-    Otherwise, fall back to using a regex to detect word boundaries. This latter
-    solution works well enough for most latin-based languages, but doesn't work as well
-    with other languages.
+    """Split the provided search string into a list of its words using ICU.
 
     Args:
         search_term: The search string.
@@ -1284,18 +1272,7 @@ def _parse_words(search_term: str) -> List[str]:
     Returns:
         A list of the words in the search string.
     """
-    if USE_ICU:
-        return _parse_words_with_icu(search_term)
-
-    return _parse_words_with_regex(search_term)
-
-
-def _parse_words_with_regex(search_term: str) -> List[str]:
-    """
-    Break down search term into words, when we don't have ICU available.
-    See: `_parse_words`
-    """
-    return re.findall(r"([\w-]+)", search_term, re.UNICODE)
+    return _parse_words_with_icu(search_term)
 
 
 def _parse_words_with_icu(search_term: str) -> List[str]:
@@ -1309,22 +1286,13 @@ def _parse_words_with_icu(search_term: str) -> List[str]:
         A list of the words in the search string.
     """
     results = []
-    breaker = icu.BreakIterator.createWordInstance(icu.Locale.getDefault())
-    breaker.setText(search_term)
-    i = 0
-    while True:
-        j = breaker.nextBoundary()
-        if j < 0:
-            break
-
+    for part in icu.parse_words(search_term):
         # We want to make sure that we split on `@` and `:` specifically, as
         # they occur in user IDs.
-        for result in re.split(r"[@:]+", search_term[i:j]):
+        for result in re.split(r"[@:]+", part):
             results.append(result.strip())
 
-        i = j
-
-    # libicu will break up words that have punctuation in them, but to handle
+    # icu will break up words that have punctuation in them, but to handle
     # cases where user IDs have '-', '.' and '_' in them we want to *not* break
     # those into words and instead allow the DB to tokenise them how it wants.
     #

@@ -184,7 +184,7 @@ class Ratelimiter:
             )
 
             if module_override:
-                rate_hz = module_override.messages_per_second
+                rate_hz = module_override.per_second
                 burst_count = module_override.burst_count
 
         # Override default values if set
@@ -338,12 +338,10 @@ class Ratelimiter:
         )
 
         if not allowed:
-            if pause:
-                await self.clock.sleep(pause)
-
             raise LimitExceededError(
                 limiter_name=self._limiter_name,
                 retry_after_ms=int(1000 * (time_allowed - time_now_s)),
+                pause=pause,
             )
 
 

@@ -610,6 +610,39 @@ manhole_settings:
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 ```
 ---
+### `http_proxy`
+
+*(string|null)* Proxy server to use for HTTP requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+```
+---
+### `https_proxy`
+
+*(string|null)* Proxy server to use for HTTPS requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+```
+---
+### `no_proxy_hosts`
+
+*(array)* List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+```
+---
 ### `dummy_events_threshold`
 
 *(integer)* Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an `org.matrix.dummy_event` event, which will reduce the forward extremities in the room.
@@ -764,22 +797,23 @@ max_event_delay_duration: 24h
 ---
 ### `user_types`
 
-Configuration settings related to the user types feature.
+*(object)* Configuration settings related to the user types feature.
 
 This setting has the following sub-options:
-* `default_user_type`: The default user type to use for registering new users when no value has been specified.
-  Defaults to none.
-* `extra_user_types`: Array of additional user types to allow. These are treated as real users. Defaults to [].
+
+* `default_user_type` (string|null): The default user type to use for registering new users when no value has been specified. Defaults to none. Defaults to `null`.
+
+* `extra_user_types` (array): Array of additional user types to allow. These are treated as real users. Defaults to `[]`.
 
 Example configuration:
 ```yaml
 user_types:
-    default_user_type: "custom"
-    extra_user_types:
-      - "custom"
-      - "custom2"
+  default_user_type: custom
+  extra_user_types:
+  - custom
+  - custom2
 ```
-
+---
 ## Homeserver blocking
 
 Useful options for Synapse admins.
@@ -1924,6 +1958,32 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_delayed_event_mgmt:
+  per_second: 1.0
+  burst_count: 5.0
+```
+
+Example configuration:
+```yaml
+rc_delayed_event_mgmt:
+  per_second: 2.0
+  burst_count: 20.0
+```
+---
+### `rc_reports`
+
+*(object)* Ratelimiting settings for reporting content.
+This is a ratelimiting option that ratelimits reports made by users about content they see.
+Setting this to a high value allows users to report content quickly, possibly in duplicate. This can result in higher database usage.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_reports:
   per_user:
     per_second: 1.0
     burst_count: 5.0
@@ -1931,7 +1991,7 @@ rc_delayed_event_mgmt:
 
 Example configuration:
 ```yaml
-rc_delayed_event_mgmt:
+rc_reports:
   per_second: 2.0
   burst_count: 20.0
 ```
@@ -2081,6 +2141,23 @@ Defaults to `"50M"`.
 Example configuration:
 ```yaml
 max_upload_size: 60M
+```
+---
+### `media_upload_limits`
+
+*(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+
+An empty list means no limits are applied.
+
+Defaults to `[]`.
+
+Example configuration:
+```yaml
+media_upload_limits:
+- time_period: 1h
+  max_size: 100M
+- time_period: 1w
+  max_size: 500M
 ```
 ---
 ### `max_image_pixels`
@@ -2337,6 +2414,21 @@ Example configuration:
 recaptcha_public_key: YOUR_PUBLIC_KEY
 ```
 ---
+### `recaptcha_public_key_path`
+
+*(string|null)* An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows the public key to be specified in an external file.
+
+The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
+
+_Added in Synapse 1.135.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_public_key_path: /path/to/key/file
+```
+---
 ### `recaptcha_private_key`
 
 *(string|null)* This homeserver's ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
@@ -2344,6 +2436,21 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 Example configuration:
 ```yaml
 recaptcha_private_key: YOUR_PRIVATE_KEY
+```
+---
+### `recaptcha_private_key_path`
+
+*(string|null)* An alternative to [`recaptcha_private_key`](#recaptcha_private_key): allows the private key to be specified in an external file.
+
+The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
+
+_Added in Synapse 1.135.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+recaptcha_private_key_path: /path/to/key/file
 ```
 ---
 ### `enable_registration_captcha`
@@ -3758,7 +3865,11 @@ encryption_enabled_by_default_for_room_type: invite
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): Defines whether users can search the user directory. If false then empty responses are returned to all queries. Defaults to `true`.
+* `enabled` (boolean): Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.
+
+  *Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.*
+
+  Defaults to `true`.
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 
@@ -4287,6 +4398,8 @@ This setting has the following sub-options:
 * `presence` (string): Name of a worker assigned to the `presence` stream.
 
 * `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
+
+* `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
 
 Example configuration:
 ```yaml

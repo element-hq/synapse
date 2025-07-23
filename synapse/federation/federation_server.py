@@ -85,7 +85,6 @@ from synapse.logging.opentracing import (
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
-    ReplicationGetQueryRestServlet,
 )
 from synapse.storage.databases.main.lock import Lock
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
@@ -160,7 +159,10 @@ class FederationServer(FederationBase):
 
         # We cache results for transaction with the same ID
         self._transaction_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "fed_txn_handler", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="fed_txn_handler",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self.transaction_actions = TransactionActions(self.store)
@@ -170,10 +172,18 @@ class FederationServer(FederationBase):
         # We cache responses to state queries, as they take a while and often
         # come in waves.
         self._state_resp_cache: ResponseCache[Tuple[str, Optional[str]]] = (
-            ResponseCache(hs.get_clock(), "state_resp", timeout_ms=30000)
+            ResponseCache(
+                clock=hs.get_clock(),
+                name="state_resp",
+                server_name=self.server_name,
+                timeout_ms=30000,
+            )
         )
         self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "state_ids_resp", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="state_ids_resp",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self._federation_metrics_domains = (
@@ -928,7 +938,8 @@ class FederationServer(FederationBase):
             # joins) or the full state (for full joins).
             # Return a 404 as we would if we weren't in the room at all.
             logger.info(
-                f"Rejecting /send_{membership_type} to %s because it's a partial state room",
+                "Rejecting /send_%s to %s because it's a partial state room",
+                membership_type,
                 room_id,
             )
             raise SynapseError(
@@ -1379,7 +1390,6 @@ class FederationHandlerRegistry:
         # and use them. However we have guards before we use them to ensure that
         # we don't route to ourselves, and in monolith mode that will always be
         # the case.
-        self._get_query_client = ReplicationGetQueryRestServlet.make_client(hs)
         self._send_edu = ReplicationFederationSendEduRestServlet.make_client(hs)
 
         self.edu_handlers: Dict[str, Callable[[str, dict], Awaitable[None]]] = {}
@@ -1467,10 +1477,6 @@ class FederationHandlerRegistry:
         handler = self.query_handlers.get(query_type)
         if handler:
             return await handler(args)
-
-        # Check if we can route it somewhere else that isn't us
-        if self._instance_name == "master":
-            return await self._get_query_client(query_type=query_type, args=args)
 
         # Uh oh, no handler! Let's raise an exception so the request returns an
         # error.

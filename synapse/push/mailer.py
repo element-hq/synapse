@@ -135,7 +135,7 @@ class Mailer:
         self.app_name = app_name
         self.email_subjects: EmailSubjectConfig = hs.config.email.email_subjects
 
-        logger.info("Created Mailer for app_name %s" % app_name)
+        logger.info("Created Mailer for app_name %s", app_name)
 
     emails_sent_counter.labels("password_reset")
 

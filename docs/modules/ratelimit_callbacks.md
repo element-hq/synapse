@@ -11,8 +11,13 @@ The available ratelimit callbacks are:
 _First introduced in Synapse v1.132.0_
 
 ```python
-async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> Optional[RatelimitOverride]
+async def get_ratelimit_override_for_user(user: str, limiter_name: str) -> Optional[synapse.module_api.RatelimitOverride]
 ```
+
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
 
 Called when constructing a ratelimiter of a particular type for a user. The module can
 return a `messages_per_second` and `burst_count` to be used, or `None` if
@@ -25,6 +30,11 @@ The limiters that are currently supported are:
 - `rc_invites.per_room`
 - `rc_invites.per_user`
 - `rc_invites.per_issuer`
+
+The `RatelimitOverride` return type has the following fields:
+
+- `per_second: float`. The number of actions that can be performed in a second. `0.0` means that ratelimiting is disabled.
+- `burst_count: int`. The number of actions that can be performed before being limited.
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `None`, Synapse falls through to the next one. The value of the first

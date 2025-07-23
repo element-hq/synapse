@@ -237,7 +237,9 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Loop round handling deltas until we're up to date
         while True:
-            with Measure(self.clock, "user_dir_delta"):
+            with Measure(
+                self.clock, name="user_dir_delta", server_name=self.server_name
+            ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
                 if self.pos == room_max_stream_ordering:
                     return
@@ -749,10 +751,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                     )
                     continue
                 except Exception:
-                    logger.error(
+                    logger.exception(
                         "Failed to refresh profile for %r due to unhandled exception",
                         user_id,
-                        exc_info=True,
                     )
                     await self.store.set_remote_user_profile_in_user_dir_stale(
                         user_id,

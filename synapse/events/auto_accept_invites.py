@@ -195,15 +195,18 @@ class InviteAutoAccepter:
             except SynapseError as e:
                 if e.code == HTTPStatus.FORBIDDEN:
                     logger.debug(
-                        f"Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: {e}"
+                        "Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: %s",
+                        e,
                     )
                 else:
-                    logger.warn(
-                        f"Update_room_membership raised the following unexpected (SynapseError) exception: {e}"
+                    logger.warning(
+                        "Update_room_membership raised the following unexpected (SynapseError) exception: %s",
+                        e,
                     )
             except Exception as e:
-                logger.warn(
-                    f"Update_room_membership raised the following unexpected exception: {e}"
+                logger.warning(
+                    "Update_room_membership raised the following unexpected exception: %s",
+                    e,
                 )
 
             sleep = 2**retries

@@ -388,11 +388,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
     async def _local_membership_update(
         self,
+        *,
         requester: Requester,
         target: UserID,
         room_id: str,
         membership: str,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
@@ -414,11 +414,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 desired membership event.
             room_id:
             membership:
-
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids: The event IDs to use as the prev events
             state_event_ids:
                 The full state at a given event. This was previously used particularly
@@ -486,7 +481,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                         "origin_server_ts": origin_server_ts,
                     },
                     txn_id=txn_id,
-                    allow_no_prev_events=allow_no_prev_events,
                     prev_event_ids=prev_event_ids,
                     state_event_ids=state_event_ids,
                     depth=depth,
@@ -583,7 +577,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         new_room: bool = False,
         require_consent: bool = True,
         outlier: bool = False,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
@@ -607,10 +600,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             outlier: Indicates whether the event is an `outlier`, i.e. if
                 it's from an arbitrary point and floating in the DAG as
                 opposed to being inline with the current DAG.
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids: The event IDs to use as the prev events
             state_event_ids:
                 The full state at a given event. This was previously used particularly
@@ -680,7 +669,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                             new_room=new_room,
                             require_consent=require_consent,
                             outlier=outlier,
-                            allow_no_prev_events=allow_no_prev_events,
                             prev_event_ids=prev_event_ids,
                             state_event_ids=state_event_ids,
                             depth=depth,
@@ -703,7 +691,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         new_room: bool = False,
         require_consent: bool = True,
         outlier: bool = False,
-        allow_no_prev_events: bool = False,
         prev_event_ids: Optional[List[str]] = None,
         state_event_ids: Optional[List[str]] = None,
         depth: Optional[int] = None,
@@ -729,10 +716,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             outlier: Indicates whether the event is an `outlier`, i.e. if
                 it's from an arbitrary point and floating in the DAG as
                 opposed to being inline with the current DAG.
-            allow_no_prev_events: Whether to allow this event to be created an empty
-                list of prev_events. Normally this is prohibited just because most
-                events should have a prev_event and we should only use this in special
-                cases (previously useful for MSC2716).
             prev_event_ids: The event IDs to use as the prev events
             state_event_ids:
                 The full state at a given event. This was previously used particularly
@@ -922,7 +905,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 rule = invite_config.get_invite_rule(requester.user.to_string())
                 if rule == InviteRule.BLOCK:
                     logger.info(
-                        f"Automatically rejecting invite from {target_id} due to the the invite filtering rules of {requester.user}"
+                        "Automatically rejecting invite from %s due to the the invite filtering rules of %s",
+                        target_id,
+                        requester.user,
                     )
                     raise SynapseError(
                         403,
@@ -931,7 +916,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     )
                 # InviteRule.IGNORE is handled at the sync layer.
 
-        # An empty prev_events list is allowed as long as the auth_event_ids are present
         if prev_event_ids is not None:
             return await self._local_membership_update(
                 requester=requester,
@@ -940,7 +924,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                 membership=effective_membership_state,
                 txn_id=txn_id,
                 ratelimit=ratelimit,
-                allow_no_prev_events=allow_no_prev_events,
                 prev_event_ids=prev_event_ids,
                 state_event_ids=state_event_ids,
                 depth=depth,
@@ -1570,7 +1553,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     require_consent=False,
                 )
             except Exception as e:
-                logger.exception("Error kicking guest user: %s" % (e,))
+                logger.exception("Error kicking guest user: %s", e)
 
     async def lookup_room_alias(
         self, room_alias: RoomAlias

@@ -286,6 +286,16 @@ def register_start(
 def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
     """
     Start Prometheus metrics server.
+
+    This method runs the metrics server on a different port, in a different thread to
+    Synapse. This can make it more resilient to heavy load in Synapse causing metric
+    requests to be slow or timeout.
+
+    Even though `start_http_server_prometheus(...)` uses `threading.Thread` behind the
+    scenes (where all threads share the GIL and only one thread can execute Python
+    bytecode at a time), this still works because the metrics thread can preempt the
+    Twisted reactor thread between bytecode boundaries and the metrics thread gets
+    scheduled with roughly equal priority to the Twisted reactor thread.
     """
     from prometheus_client import start_http_server as start_http_server_prometheus
 
@@ -293,30 +303,7 @@ def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
 
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
-        _set_prometheus_client_use_created_metrics(False)
         start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
-
-
-def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
-    """
-    Sets whether prometheus_client should expose `_created`-suffixed metrics for
-    all gauges, histograms and summaries.
-    There is no programmatic way to disable this without poking at internals;
-    the proper way is to use an environment variable which prometheus_client
-    loads at import time.
-
-    The motivation for disabling these `_created` metrics is that they're
-    a waste of space as they're not useful but they take up space in Prometheus.
-    """
-
-    import prometheus_client.metrics
-
-    if hasattr(prometheus_client.metrics, "_use_created"):
-        prometheus_client.metrics._use_created = new_value
-    else:
-        logger.error(
-            "Can't disable `_created` metrics in prometheus_client (brittle hack broken?)"
-        )
 
 
 def listen_manhole(
@@ -445,8 +432,8 @@ def listen_http(
         # getHost() returns a UNIXAddress which contains an instance variable of 'name'
         # encoded as a byte string. Decode as utf-8 so pretty.
         logger.info(
-            "Synapse now listening on Unix Socket at: "
-            f"{ports[0].getHost().name.decode('utf-8')}"
+            "Synapse now listening on Unix Socket at: %s",
+            ports[0].getHost().name.decode("utf-8"),
         )
 
     return ports

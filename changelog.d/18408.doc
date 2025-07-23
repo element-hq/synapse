@@ -1,1 +1,0 @@
-Mention `CAP_NET_BIND_SERVICE` as an alternative to running Synapse as root in order to bind to a privileged port.

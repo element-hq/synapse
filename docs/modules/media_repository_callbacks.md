@@ -14,6 +14,11 @@ _First introduced in Synapse v1.132.0_
 async def get_media_config_for_user(user_id: str) -> Optional[JsonDict]
 ```
 
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
+
 Called when processing a request from a client for the
 [media config endpoint](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv1mediaconfig).
 
@@ -38,6 +43,11 @@ _First introduced in Synapse v1.132.0_
 ```python
 async def is_user_allowed_to_upload_media_of_size(user_id: str, size: int) -> bool
 ```
+
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
 
 Called before media is accepted for upload from a user, in case the module needs to
 enforce a different limit for the particular user.

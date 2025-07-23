@@ -197,7 +197,7 @@ class SendEmailHandler:
             additional_headers: A map of additional headers to include.
         """
         try:
-            from_string = self._from % {"app": app_name}
+            from_string = self._from % {"app": app_name}  # type: ignore[operator]
         except (KeyError, TypeError):
             from_string = self._from
 
@@ -238,7 +238,7 @@ class SendEmailHandler:
         multipart_msg.attach(text_part)
         multipart_msg.attach(html_part)
 
-        logger.info("Sending email to %s" % email_address)
+        logger.info("Sending email to %s", email_address)
 
         await self._sendmail(
             self._reactor,

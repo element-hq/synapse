@@ -417,11 +417,13 @@ class MatrixFederationHttpClient:
         if hs.get_instance_name() in outbound_federation_restricted_to:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
-                self.reactor,
-                tls_client_options_factory,
-                user_agent.encode("ascii"),
-                hs.config.server.federation_ip_range_allowlist,
-                hs.config.server.federation_ip_range_blocklist,
+                server_name=self.server_name,
+                reactor=self.reactor,
+                tls_client_options_factory=tls_client_options_factory,
+                user_agent=user_agent.encode("ascii"),
+                ip_allowlist=hs.config.server.federation_ip_range_allowlist,
+                ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+                proxy_config=hs.config.server.proxy_config,
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret
@@ -436,9 +438,9 @@ class MatrixFederationHttpClient:
             # locations
             federation_proxy_locations = outbound_federation_restricted_to.locations
             federation_agent = ProxyAgent(
-                self.reactor,
-                self.reactor,
-                tls_client_options_factory,
+                reactor=self.reactor,
+                proxy_reactor=self.reactor,
+                contextFactory=tls_client_options_factory,
                 federation_proxy_locations=federation_proxy_locations,
                 federation_proxy_credentials=federation_proxy_credentials,
             )
@@ -602,7 +604,7 @@ class MatrixFederationHttpClient:
         try:
             parse_and_validate_server_name(request.destination)
         except ValueError:
-            logger.exception(f"Invalid destination: {request.destination}.")
+            logger.exception("Invalid destination: %s.", request.destination)
             raise FederationDeniedError(request.destination)
 
         if timeout is not None:
@@ -697,7 +699,11 @@ class MatrixFederationHttpClient:
                     outgoing_requests_counter.labels(request.method).inc()
 
                     try:
-                        with Measure(self.clock, "outbound_request"):
+                        with Measure(
+                            self.clock,
+                            name="outbound_request",
+                            server_name=self.server_name,
+                        ):
                             # we don't want all the fancy cookie and redirect handling
                             # that treq.request gives: just use the raw Agent.
 

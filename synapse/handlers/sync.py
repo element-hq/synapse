@@ -329,6 +329,7 @@ class E2eeSyncResult:
 
 class SyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.hs_config = hs.config
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
@@ -352,8 +353,9 @@ class SyncHandler:
         #    cached result any more, and we could flush the entry from the cache to save
         #    memory.
         self.response_cache: ResponseCache[SyncRequestKey] = ResponseCache(
-            hs.get_clock(),
-            "sync",
+            clock=hs.get_clock(),
+            name="sync",
+            server_name=self.server_name,
             timeout_ms=hs.config.caches.sync_response_cache_duration,
         )
 
@@ -361,8 +363,9 @@ class SyncHandler:
         self.lazy_loaded_members_cache: ExpiringCache[
             Tuple[str, Optional[str]], LruCache[str, str]
         ] = ExpiringCache(
-            "lazy_loaded_members_cache",
-            self.clock,
+            cache_name="lazy_loaded_members_cache",
+            server_name=self.server_name,
+            clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
@@ -710,7 +713,9 @@ class SyncHandler:
 
         sync_config = sync_result_builder.sync_config
 
-        with Measure(self.clock, "ephemeral_by_room"):
+        with Measure(
+            self.clock, name="ephemeral_by_room", server_name=self.server_name
+        ):
             typing_key = since_token.typing_key if since_token else 0
 
             room_ids = sync_result_builder.joined_room_ids
@@ -783,7 +788,9 @@ class SyncHandler:
                 and current token to send down to clients.
             newly_joined_room
         """
-        with Measure(self.clock, "load_filtered_recents"):
+        with Measure(
+            self.clock, name="load_filtered_recents", server_name=self.server_name
+        ):
             timeline_limit = sync_config.filter_collection.timeline_limit()
             block_all_timeline = (
                 sync_config.filter_collection.blocks_all_room_timeline()
@@ -1129,7 +1136,7 @@ class SyncHandler:
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
-            cache = LruCache(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
+            cache = LruCache(max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
             self.lazy_loaded_members_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)
@@ -1174,7 +1181,9 @@ class SyncHandler:
         # updates even if they occurred logically before the previous event.
         # TODO(mjark) Check for new redactions in the state events.
 
-        with Measure(self.clock, "compute_state_delta"):
+        with Measure(
+            self.clock, name="compute_state_delta", server_name=self.server_name
+        ):
             # The memberships needed for events in the timeline.
             # Only calculated when `lazy_load_members` is on.
             members_to_fetch: Optional[Set[str]] = None
@@ -1791,7 +1800,9 @@ class SyncHandler:
             # the DB.
             return RoomNotifCounts.empty()
 
-        with Measure(self.clock, "unread_notifs_for_room_id"):
+        with Measure(
+            self.clock, name="unread_notifs_for_room_id", server_name=self.server_name
+        ):
             return await self.store.get_unread_event_push_actions_by_room_for_user(
                 room_id,
                 sync_config.user.to_string(),
@@ -3074,8 +3085,10 @@ class SyncHandler:
                 if batch.limited and since_token:
                     user_id = sync_result_builder.sync_config.user.to_string()
                     logger.debug(
-                        "Incremental gappy sync of %s for user %s with %d state events"
-                        % (room_id, user_id, len(state))
+                        "Incremental gappy sync of %s for user %s with %d state events",
+                        room_id,
+                        user_id,
+                        len(state),
                     )
             elif room_builder.rtype == "archived":
                 archived_room_sync = ArchivedSyncResult(
