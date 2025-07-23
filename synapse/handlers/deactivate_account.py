@@ -44,6 +44,7 @@ class DeactivateAccountHandler:
         self._room_member_handler = hs.get_room_member_handler()
         self._identity_handler = hs.get_identity_handler()
         self._profile_handler = hs.get_profile_handler()
+        self._pusher_pool = hs.get_pusherpool()
         self.user_directory_handler = hs.get_user_directory_handler()
         self._server_name = hs.hostname
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
@@ -145,7 +146,7 @@ class DeactivateAccountHandler:
         # Most of the pushers will have been deleted when we logged out the
         # associated devices above, but we still need to delete pushers not
         # associated with devices, e.g. email pushers.
-        await self.store.delete_all_pushers_for_user(user_id)
+        await self._pusher_pool.delete_all_pushers_for_user(user_id)
 
         # Add the user to a table of users pending deactivation (ie.
         # removal from all the rooms they're a member of)

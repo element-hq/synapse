@@ -31,7 +31,10 @@ from synapse.metrics.background_process_metrics import (
 )
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.push.pusher import PusherFactory
-from synapse.replication.http.push import ReplicationRemovePusherRestServlet
+from synapse.replication.http.push import (
+    ReplicationDeleteAllPushersForUserRestServlet,
+    ReplicationRemovePusherRestServlet,
+)
 from synapse.types import JsonDict, RoomStreamToken, StrCollection
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.threepids import canonicalise_email
@@ -78,9 +81,13 @@ class PusherPool:
 
         # We can only delete pushers on master.
         self._remove_pusher_client = None
+        self._delete_all_pushers_for_user_client = None
         if hs.config.worker.worker_app:
             self._remove_pusher_client = ReplicationRemovePusherRestServlet.make_client(
                 hs
+            )
+            self._delete_all_pushers_for_user_client = (
+                ReplicationDeleteAllPushersForUserRestServlet.make_client(hs)
             )
 
         # Record the last stream ID that we were poked about so we can get
@@ -453,6 +460,13 @@ class PusherPool:
             await self.store.delete_pusher_by_app_id_pushkey_user_id(
                 app_id, pushkey, user_id
             )
+
+    async def delete_all_pushers_for_user(self, user_id: str) -> None:
+        """Deletes all pushers for a user."""
+        if self._delete_all_pushers_for_user_client is not None:
+            await self._delete_all_pushers_for_user_client(user_id=user_id)
+        else:
+            await self.store.delete_all_pushers_for_user(user_id)
 
     def maybe_stop_pusher(self, app_id: str, pushkey: str, user_id: str) -> None:
         """Stops a pusher with the given app ID and push key if one is running.
