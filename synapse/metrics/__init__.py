@@ -359,8 +359,8 @@ class GaugeHistogramMetricFamilyWithLabels(Metric):
         *,
         name: str,
         documentation: str,
+        gsum_value: float,
         buckets: Optional[Sequence[Tuple[str, float]]] = None,
-        gsum_value: Optional[float] = None,
         labelnames: StrSequence = (),
         labelvalues: StrSequence = (),
         unit: str = "",
@@ -383,7 +383,7 @@ class GaugeHistogramMetricFamilyWithLabels(Metric):
         self,
         labelvalues: StrSequence,
         buckets: Sequence[Tuple[str, float]],
-        gsum_value: Optional[float],
+        gsum_value: float,
         timestamp: Optional[Union[float, Timestamp]] = None,
     ) -> None:
         """Add a metric to the metric family.
@@ -412,13 +412,12 @@ class GaugeHistogramMetricFamilyWithLabels(Metric):
                     buckets[-1][1],
                     timestamp,
                 ),
-                # TODO: Handle None gsum_value correctly. Currently a None will fail exposition but is allowed here.
                 Sample(
                     self.name + "_gsum",
                     dict(zip(self._labelnames, labelvalues)),
                     gsum_value,
                     timestamp,
-                ),  # type: ignore
+                ),
             ]
         )
 
@@ -459,7 +458,7 @@ class GaugeBucketCollector(Collector):
         """
         self._name = name
         self._documentation = documentation
-        self._labelnames = labelnames
+        self._labelnames = labelnames if labelnames else ()
 
         # the tops of the buckets
         self._bucket_bounds = [float(b) for b in buckets]
