@@ -42,6 +42,7 @@ from synapse.events import EventBase
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     event_processing_loop_counter,
     event_processing_loop_room_count,
 )
@@ -184,7 +185,8 @@ class ApplicationServicesHandler:
                         assert ts is not None
 
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                     async def handle_room_events(events: Iterable[EventBase]) -> None:
