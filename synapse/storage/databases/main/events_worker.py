@@ -364,6 +364,10 @@ class EventsWorkerStore(SQLBaseStore):
             replaces_index="event_txn_id_device_id_txn_id",
         )
 
+        # Flag to track when the sliding sync background jobs have
+        # finished (so we don't have to keep querying it every time)
+        self._has_finished_sliding_sync_background_jobs = False
+
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
             self._un_partial_stated_events_stream_id_gen.get_current_token_for_writer(
@@ -2608,13 +2612,19 @@ class EventsWorkerStore(SQLBaseStore):
     async def have_finished_sliding_sync_background_jobs(self) -> bool:
         """Return if it's safe to use the sliding sync membership tables."""
 
-        return await self.db_pool.updates.have_completed_background_updates(
+        if self._has_finished_sliding_sync_background_jobs:
+            # as an optimisation, once the job finishes, don't issue another
+            # database transaction to check it, since it won't 'un-finish'
+            return True
+
+        self._has_finished_sliding_sync_background_jobs = await self.db_pool.updates.have_completed_background_updates(
             (
                 _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             )
         )
+        return self._has_finished_sliding_sync_background_jobs
 
     async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
         """
