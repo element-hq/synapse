@@ -55,7 +55,8 @@ running_on_pypy = platform.python_implementation() == "PyPy"
 #
 
 gc_unreachable = Gauge("python_gc_unreachable_total", "Unreachable GC objects", ["gen"])
-gc_time = Histogram(
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+gc_time = Histogram(  # type: ignore[missing-server-name-label]
     "python_gc_time",
     "Time taken to GC (sec)",
     ["gen"],
