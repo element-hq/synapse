@@ -28,7 +28,7 @@ from typing import Callable, Optional, Tuple, Type, Union
 import mypy.types
 from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
-from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, Var
+from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, TupleExpr, Var
 from mypy.plugin import (
     FunctionLike,
     FunctionSigContext,
@@ -137,7 +137,7 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     # ]
     # ```
     labelnames_arg_expression = ctx.args[2][0] if len(ctx.args[2]) > 0 else None
-    if isinstance(labelnames_arg_expression, ListExpr):
+    if isinstance(labelnames_arg_expression, (ListExpr, TupleExpr)):
         # Check if the `labelnames` argument includes the `server_name` label (`SERVER_NAME_LABEL`).
         for labelname_expression in labelnames_arg_expression.items:
             if (
