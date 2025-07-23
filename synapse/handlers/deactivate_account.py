@@ -25,6 +25,9 @@ from typing import TYPE_CHECKING, Optional
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.replication.http.deactivate_account import (
+    ReplicationNotifyAccountDeactivatedServlet,
+)
 from synapse.types import Codes, Requester, UserID, create_requester
 
 if TYPE_CHECKING:
@@ -53,10 +56,16 @@ class DeactivateAccountHandler:
         self._user_parter_running = False
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
+        self._notify_account_deactivated_client = None
+
         # Start the user parter loop so it can resume parting users from rooms where
         # it left off (if it has work left to do).
-        if hs.config.worker.run_background_tasks:
+        if hs.config.worker.worker_app is None:
             hs.get_reactor().callWhenRunning(self._start_user_parting)
+        else:
+            self._notify_account_deactivated_client = (
+                ReplicationNotifyAccountDeactivatedServlet.make_client(hs)
+            )
 
         self._account_validity_enabled = (
             hs.config.account_validity.account_validity_enabled
@@ -170,10 +179,6 @@ class DeactivateAccountHandler:
             logger.info("Marking %s as erased", user_id)
             await self.store.mark_user_erased(user_id)
 
-        # Now start the process that goes through that list and
-        # parts users from rooms (if it isn't already running)
-        self._start_user_parting()
-
         # Reject all pending invites and knocks for the user, so that the
         # user doesn't show up in the "invited" section of rooms' members list.
         await self._reject_pending_invites_and_knocks_for_user(user_id)
@@ -194,14 +199,36 @@ class DeactivateAccountHandler:
         # Delete any server-side backup keys
         await self.store.bulk_delete_backup_keys_and_versions_for_user(user_id)
 
+        # Notify modules and start the room parting process.
+        await self.notify_account_deactivated(user_id, by_admin=by_admin)
+
+        return identity_server_supports_unbinding
+
+    async def notify_account_deactivated(
+        self,
+        user_id: str,
+        by_admin: bool = False,
+    ) -> None:
+        """Notify modules and start the room parting process.
+        Goes through replication if this is not the main process.
+        """
+        if self._notify_account_deactivated_client is not None:
+            await self._notify_account_deactivated_client(
+                user_id=user_id,
+                by_admin=by_admin,
+            )
+            return
+
+        # Now start the process that goes through that list and
+        # parts users from rooms (if it isn't already running)
+        self._start_user_parting()
+
         # Let modules know the user has been deactivated.
         await self._third_party_rules.on_user_deactivation_status_changed(
             user_id,
             True,
-            by_admin,
+            by_admin=by_admin,
         )
-
-        return identity_server_supports_unbinding
 
     async def _reject_pending_invites_and_knocks_for_user(self, user_id: str) -> None:
         """Reject pending invites and knocks addressed to a given user ID.
