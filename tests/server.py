@@ -702,6 +702,7 @@ def make_fake_db_pool(
     reactor: ISynapseReactor,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
+    server_name: str,
 ) -> adbapi.ConnectionPool:
     """Wrapper for `make_pool` which builds a pool which runs db queries synchronously.
 
@@ -711,7 +712,7 @@ def make_fake_db_pool(
     pool.
     """
     pool = make_pool(
-        reactor=reactor, db_config=db_config, engine=engine, server_name="test_server"
+        reactor=reactor, db_config=db_config, engine=engine, server_name=server_name
     )
 
     def runWithConnection(
