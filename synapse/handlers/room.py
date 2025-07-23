@@ -765,6 +765,13 @@ class RoomCreationHandler:
 
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
+        if ratelimit:
+            # Rate limit once in advance, but don't rate limit the individual
+            # events in the room — room creation isn't atomic and it's very
+            # janky if half the events in the initial state don't make it because
+            # of rate limiting.
+            await self.request_ratelimiter.ratelimit(requester)
+
         if (
             self._server_notices_mxid is not None
             and user_id == self._server_notices_mxid
@@ -795,25 +802,6 @@ class RoomCreationHandler:
                     "are required when making a 3pid invite",
                     Codes.MISSING_PARAM,
                 )
-
-        if not is_requester_admin:
-            spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
-                user_id, config
-            )
-            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-                raise SynapseError(
-                    403,
-                    "You are not permitted to create rooms",
-                    errcode=spam_check[0],
-                    additional_fields=spam_check[1],
-                )
-
-        if ratelimit:
-            # Rate limit once in advance, but don't rate limit the individual
-            # events in the room — room creation isn't atomic and it's very
-            # janky if half the events in the initial state don't make it because
-            # of rate limiting.
-            await self.request_ratelimiter.ratelimit(requester)
 
         room_version_id = config.get(
             "room_version", self.config.server.default_room_version.identifier
@@ -905,6 +893,19 @@ class RoomCreationHandler:
         is_public = visibility == "public"
 
         self._validate_room_config(config, visibility)
+
+        # Run the spam checker after other validation
+        if not is_requester_admin:
+            spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
+                user_id, config
+            )
+            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                raise SynapseError(
+                    403,
+                    "You are not permitted to create rooms",
+                    errcode=spam_check[0],
+                    additional_fields=spam_check[1],
+                )
 
         room_id = await self._generate_and_create_room_id(
             creator_id=user_id,
