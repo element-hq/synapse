@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import attr
 
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 
 if TYPE_CHECKING:
@@ -33,6 +34,7 @@ from prometheus_client import Gauge
 current_dau_gauge = Gauge(
     "synapse_admin_daily_active_users",
     "Current daily active users count",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -89,4 +91,6 @@ class CommonUsageMetricsManager:
         """Update the Prometheus gauges."""
         metrics = await self._collect()
 
-        current_dau_gauge.set(float(metrics.daily_active_users))
+        current_dau_gauge.labels(
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).set(float(metrics.daily_active_users))
