@@ -364,9 +364,11 @@ class EventsWorkerStore(SQLBaseStore):
             replaces_index="event_txn_id_device_id_txn_id",
         )
 
-        # Flag to track when the sliding sync background jobs have
-        # finished (so we don't have to keep querying it every time)
         self._has_finished_sliding_sync_background_jobs = False
+        """
+        Flag to track when the sliding sync background jobs have
+        finished (so we don't have to keep querying it every time)
+        """
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
