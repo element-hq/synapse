@@ -40,6 +40,8 @@ from synapse.storage.roommember import RoomsForUser
 from synapse.types import PersistedEventPosition
 from synapse.util import Clock
 
+from tests.unittest import override_config
+
 from ._base import BaseWorkerStoreTestCase
 
 USER_ID = "@feeling:test"
@@ -207,6 +209,72 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             body="world",
             push_actions=[
                 (USER_ID_2, ["notify", {"set_tweak": "highlight", "value": True}])
+            ],
+        )
+        self.replicate()
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=1, unread_count=0, notify_count=2), {}
+            ),
+        )
+
+    @parameterized.expand([(True,), (False,)])
+    @override_config({"experimental_features": {"msc3768_enabled": True}})
+    def test_push_actions_for_user_with_in_app_notifications(
+        self, send_receipt: bool
+    ) -> None:
+        self.persist(type="m.room.create", key="", creator=USER_ID)
+        self.persist(type="m.room.member", key=USER_ID, membership="join")
+        self.persist(
+            type="m.room.member", sender=USER_ID, key=USER_ID_2, membership="join"
+        )
+        event1 = self.persist(type="m.room.message", msgtype="m.text", body="hello")
+        self.replicate()
+
+        if send_receipt:
+            self.get_success(
+                self.master_store.insert_receipt(
+                    ROOM_ID, ReceiptTypes.READ, USER_ID_2, [event1.event_id], None, {}
+                )
+            )
+
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=0), {}
+            ),
+        )
+
+        self.persist(
+            type="m.room.message",
+            msgtype="m.text",
+            body="world",
+            push_actions=[(USER_ID_2, ["notify"])],
+        )
+        self.replicate()
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=1), {}
+            ),
+        )
+
+        self.persist(
+            type="m.room.message",
+            msgtype="m.text",
+            body="world",
+            push_actions=[
+                (
+                    USER_ID_2,
+                    [
+                        "org.matrix.msc3768.notify_in_app",
+                        {"set_tweak": "highlight", "value": True},
+                    ],
+                )
             ],
         )
         self.replicate()

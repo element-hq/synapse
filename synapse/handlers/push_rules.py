@@ -154,6 +154,9 @@ def check_actions(actions: List[Union[str, JsonDict]]) -> None:
         # ignored (resulting in no action from the pusher).
         if a in ["notify", "dont_notify", "coalesce"]:
             pass
+        # In-app only notification as per MSC3768
+        elif a == "org.matrix.msc3768.notify_in_app":
+            pass
         elif isinstance(a, dict) and "set_tweak" in a:
             pass
         else:

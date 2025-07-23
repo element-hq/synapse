@@ -336,6 +336,8 @@ class HttpPusher(Pusher):
                     break
 
     async def _process_one(self, push_action: HttpPushAction) -> bool:
+        # We don't include org.matrix.msc3768.notify_in_app here because in-app
+        # notifications should not trigger pushes.
         if "notify" not in push_action.actions:
             return True
 

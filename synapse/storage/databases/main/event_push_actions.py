@@ -1181,7 +1181,13 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             user_id: str, actions: Collection[Union[Mapping, str]]
         ) -> Tuple[str, str, str, int, int, int, str, int]:
             is_highlight = 1 if _action_has_highlight(actions) else 0
-            notif = 1 if "notify" in actions else 0
+            notif = (
+                1
+                if "notify" in actions
+                or self.hs.config.experimental.msc3768_enabled
+                and "org.matrix.msc3768.notify_in_app" in actions
+                else 0
+            )
             return (
                 event_id,  # event_id column
                 user_id,  # user_id column

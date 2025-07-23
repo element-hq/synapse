@@ -829,6 +829,45 @@ class HTTPPusherTests(HomeserverTestCase):
         self.helper.send(room, body="Hello", tok=access_token)
         self.assertEqual(len(self.push_attempts), 1)
 
+    @override_config({"experimental_features": {"msc3768_enabled": True}})
+    def test_notify_in_app_rule_overrides_message(self) -> None:
+        """
+        The override push rule will suppress remote notification
+        """
+
+        user_id, access_token = self._make_user_with_pusher("user")
+        other_user_id, other_access_token = self._make_user_with_pusher("otheruser")
+
+        # Create a room
+        room = self.helper.create_room_as(user_id, tok=access_token)
+
+        # Disable user notifications for this room -> user
+        body = {
+            "conditions": [{"kind": "event_match", "key": "room_id", "pattern": room}],
+            "actions": ["org.matrix.msc3768.notify_in_app"],
+        }
+        channel = self.make_request(
+            "PUT",
+            "/pushrules/global/override/best.friend",
+            body,
+            access_token=access_token,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # Check we start with no pushes
+        self.assertEqual(len(self.push_attempts), 0)
+
+        # The other user joins
+        self.helper.join(room=room, user=other_user_id, tok=other_access_token)
+
+        # The other user sends a message (ignored by dont_notify push rule set above)
+        self.helper.send(room, body="Hi!", tok=other_access_token)
+        self.assertEqual(len(self.push_attempts), 0)
+
+        # The user sends a message back (sends a notification)
+        self.helper.send(room, body="Hello", tok=access_token)
+        self.assertEqual(len(self.push_attempts), 1)
+
     @override_config({"experimental_features": {"msc3881_enabled": True}})
     def test_disable(self) -> None:
         """Tests that disabling a pusher means it's not pushed to anymore."""

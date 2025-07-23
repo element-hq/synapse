@@ -497,7 +497,11 @@ class BulkPushRuleEvaluator:
                 actions_by_user[uid] = []
 
             actions = evaluator.run(rules, uid, display_name)
-            if "notify" in actions:
+            if (
+                "notify" in actions
+                or self.hs.config.experimental.msc3768_enabled
+                and "org.matrix.msc3768.notify_in_app" in actions
+            ):
                 # Push rules say we should notify the user of this event
                 actions_by_user[uid] = actions
 

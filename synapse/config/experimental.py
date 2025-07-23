@@ -460,6 +460,9 @@ class ExperimentalConfig(Config):
         # MSC3664: Pushrules to match on related events
         self.msc3664_enabled: bool = experimental.get("msc3664_enabled", False)
 
+        # MSC3768: Push rule action for in-app notifications
+        self.msc3768_enabled: bool = experimental.get("msc3768_enabled", False)
+
         # MSC3848: Introduce errcodes for specific event sending failures
         self.msc3848_enabled: bool = experimental.get("msc3848_enabled", False)
 
