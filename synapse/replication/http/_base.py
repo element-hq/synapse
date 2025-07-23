@@ -38,6 +38,7 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging import opentracing
 from synapse.logging.opentracing import trace_with_opname
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable
@@ -51,7 +52,7 @@ logger = logging.getLogger(__name__)
 _pending_outgoing_requests = Gauge(
     "synapse_pending_outgoing_replication_requests",
     "Number of active outgoing replication requests, by replication method name",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 _outgoing_request_counter = Counter(
@@ -205,13 +206,17 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
         parameter to specify which instance to hit (the instance must be in
         the `instance_map` config).
         """
+        server_name = hs.hostname
         clock = hs.get_clock()
         client = hs.get_replication_client()
         local_instance_name = hs.get_instance_name()
 
         instance_map = hs.config.worker.instance_map
 
-        outgoing_gauge = _pending_outgoing_requests.labels(cls.NAME)
+        outgoing_gauge = _pending_outgoing_requests.labels(
+            name=cls.NAME,
+            **{SERVER_NAME_LABEL: server_name},
+        )
 
         replication_secret = None
         if hs.config.worker.worker_replication_secret:
