@@ -28,8 +28,13 @@ from typing import Callable, Optional, Tuple, Type, Union
 import mypy.types
 from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
-from mypy.nodes import ARG_NAMED_OPT, TempNode, Var
-from mypy.plugin import FunctionSigContext, MethodSigContext, Plugin
+from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, Var
+from mypy.plugin import (
+    FunctionLike,
+    FunctionSigContext,
+    MethodSigContext,
+    Plugin,
+)
 from mypy.typeops import bind_self
 from mypy.types import (
     AnyType,
@@ -43,11 +48,30 @@ from mypy.types import (
     UnionType,
 )
 
+PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
+    "missing-server-name-label",
+    "`SERVER_NAME_LABEL` required in metric",
+    category="per-homeserver-tenant-metrics",
+)
+
 
 class SynapsePlugin(Plugin):
+    def get_function_signature_hook(
+        self, fullname: str
+    ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
+        if fullname in (
+            "prometheus_client.metrics.Histogram",
+            # TODO: Add other prometheus_client metrics that need checking as we
+            # refactor, see https://github.com/element-hq/synapse/issues/18592
+        ):
+            return check_prometheus_metric_instantiation
+
+        return None
+
     def get_method_signature_hook(
         self, fullname: str
     ) -> Optional[Callable[[MethodSigContext], CallableType]]:
+        # print(f"m fullname={fullname}")
         if fullname.startswith(
             (
                 "synapse.util.caches.descriptors.CachedFunction.__call__",
@@ -63,6 +87,85 @@ class SynapsePlugin(Plugin):
             return check_is_cacheable_wrapper
 
         return None
+
+
+def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the `prometheus_client` metrics include the `SERVER_NAME_LABEL` label
+    when instantiated.
+
+    This is important because we support multiple Synapse instances running in the same
+    process, where all metrics share a single global `REGISTRY`. The `server_name` label
+    ensures metrics are correctly separated by homeserver.
+
+    There are also some metrics that apply at the process level, such as CPU usage,
+    Python garbage collection, Twisted reactor tick time which shouldn't have the
+    `SERVER_NAME_LABEL`. In those cases, use use a type ignore comment to disable the
+    check, e.g. `# type: ignore[missing-server-name-label]`.
+    """
+    # The true signature, this isn't being modified so this is what will be returned.
+    signature: CallableType = ctx.default_signature
+
+    # Sanity check the arguments are still as expected in this version of
+    # `prometheus_client`. ex. `Counter(name, documentation, labelnames, ...)`
+    #
+    # `signature.arg_names` should be: ["name", "documentation", "labelnames", ...]
+    if len(signature.arg_names) < 3 or signature.arg_names[2] != "labelnames":
+        ctx.api.fail(
+            f"Expected the 3rd argument of {signature.name} to be 'labelnames', but got "
+            f"{signature.arg_names[2]}",
+            ctx.context,
+        )
+        return signature
+
+    # Ensure mypy is passing the correct number of arguments because we are doing some
+    # dirty indexing into `ctx.args` later on.
+    assert len(ctx.args) == len(signature.arg_names), (
+        f"Expected the list of arguments in the {signature.name} signature ({len(signature.arg_names)})"
+        f"to match the number of arguments from the function signature context ({len(ctx.args)})"
+    )
+
+    # Check if the `labelnames` argument includes `SERVER_NAME_LABEL`
+    #
+    # `ctx.args` should look like this:
+    # ```
+    # [
+    #     [StrExpr("name")],
+    #     [StrExpr("documentation")],
+    #     [ListExpr([StrExpr("label1"), StrExpr("label2")])]
+    #     ...
+    # ]
+    # ```
+    labelnames_arg_expression = ctx.args[2][0] if len(ctx.args[2]) > 0 else None
+    if isinstance(labelnames_arg_expression, ListExpr):
+        # Check if the `labelnames` argument includes the `server_name` label (`SERVER_NAME_LABEL`).
+        for labelname_expression in labelnames_arg_expression.items:
+            if (
+                isinstance(labelname_expression, NameExpr)
+                and labelname_expression.fullname == "synapse.metrics.SERVER_NAME_LABEL"
+            ):
+                # Found the `SERVER_NAME_LABEL`, all good!
+                break
+        else:
+            ctx.api.fail(
+                f"Expected {signature.name} to include `SERVER_NAME_LABEL` in the list of labels. "
+                "If this is a process-level metric (vs homeserver-level), use a type ignore comment "
+                "to disable this check.",
+                ctx.context,
+                code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
+            )
+    else:
+        ctx.api.fail(
+            f"Expected the `labelnames` argument of {signature.name} to be a list of label names "
+            f"(including `SERVER_NAME_LABEL`), but got {labelnames_arg_expression}. "
+            "If this is a process-level metric (vs homeserver-level), use a type ignore comment "
+            "to disable this check.",
+            ctx.context,
+            code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
+        )
+        return signature
+
+    return signature
 
 
 def _get_true_return_type(signature: CallableType) -> mypy.types.Type:
