@@ -2615,6 +2615,17 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             "user_set_password_hash", user_set_password_hash_txn
         )
 
+    async def add_user_pending_deactivation(self, user_id: str) -> None:
+        """
+        Adds a user to the table of users who need to be parted from all the rooms they're
+        in
+        """
+        await self.db_pool.simple_insert(
+            "users_pending_deactivation",
+            values={"user_id": user_id},
+            desc="add_user_pending_deactivation",
+        )
+
 
 class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
     def __init__(
@@ -2890,17 +2901,6 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
             self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
 
         await self.db_pool.runInteraction("user_set_consent_server_notice_sent", f)
-
-    async def add_user_pending_deactivation(self, user_id: str) -> None:
-        """
-        Adds a user to the table of users who need to be parted from all the rooms they're
-        in
-        """
-        await self.db_pool.simple_insert(
-            "users_pending_deactivation",
-            values={"user_id": user_id},
-            desc="add_user_pending_deactivation",
-        )
 
     async def validate_threepid_session(
         self, session_id: str, client_secret: str, token: str, current_ts: int
