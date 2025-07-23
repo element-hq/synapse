@@ -55,8 +55,8 @@ from prometheus_client import (
 from prometheus_client.core import (
     REGISTRY,
     GaugeMetricFamily,
-    Timestamp,
     Sample,
+    Timestamp,
 )
 
 from twisted.python.threadpool import ThreadPool
