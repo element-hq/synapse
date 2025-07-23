@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
+import json
 import logging
 import threading
 import weakref
@@ -976,6 +976,13 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.clear()
         self._current_event_fetches.clear()
 
+    def _invalidate_async_get_event_cache_room_id(self, room_id: str) -> None:
+        """
+        Clears the async get_event cache for a room. Currently a no-op until
+        an async get_event cache is implemented - see https://github.com/matrix-org/synapse/pull/13242
+        for preliminary work.
+        """
+
     async def _get_events_from_cache(
         self, events: Iterable[str], update_metrics: bool = True
     ) -> Dict[str, EventCacheEntry]:
@@ -1575,6 +1582,44 @@ class EventsWorkerStore(SQLBaseStore):
                 if d:
                     d.redactions.append(redacter)
 
+            # check for MSC4932 redactions
+            to_check = []
+            events: List[_EventRow] = []
+            for e in evs:
+                event = event_dict.get(e)
+                if not event:
+                    continue
+                events.append(event)
+                event_json = json.loads(event.json)
+                room_id = event_json.get("room_id")
+                user_id = event_json.get("sender")
+                to_check.append((room_id, user_id))
+
+            # likely that some of these events may be for the same room/user combo, in
+            # which case we don't need to do redundant queries
+            to_check_set = set(to_check)
+            for room_and_user in to_check_set:
+                room_redactions_sql = "SELECT redacting_event_id, redact_end_ordering FROM room_ban_redactions WHERE room_id = ? and user_id = ?"
+                txn.execute(room_redactions_sql, room_and_user)
+
+                res = txn.fetchone()
+                # we have a redaction for a room, user_id combo - apply it to matching events
+                if not res:
+                    continue
+                for e_row in events:
+                    e_json = json.loads(e_row.json)
+                    room_id = e_json.get("room_id")
+                    user_id = e_json.get("sender")
+                    if room_and_user != (room_id, user_id):
+                        continue
+                    redacting_event_id, redact_end_ordering = res
+                    if redact_end_ordering:
+                        # Avoid redacting any events arriving *after* the membership event which
+                        # ends an active redaction - note that this will always redact
+                        # backfilled events, as they have a negative stream ordering
+                        if e_row.stream_ordering >= redact_end_ordering:
+                            continue
+                    e_row.redactions.append(redacting_event_id)
         return event_dict
 
     def _maybe_redact_event_row(
