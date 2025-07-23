@@ -896,23 +896,26 @@ class AccountStatusRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    ThreepidRestServlet(hs).register(http_server)
+    WhoamiRestServlet(hs).register(http_server)
+
+    if not hs.config.experimental.msc3861.enabled:
+        DeactivateAccountRestServlet(hs).register(http_server)
+
+    # These servlets are only registered on the main process
     if hs.config.worker.worker_app is None:
+        ThreepidBindRestServlet(hs).register(http_server)
+        ThreepidUnbindRestServlet(hs).register(http_server)
+
         if not hs.config.experimental.msc3861.enabled:
             EmailPasswordRequestTokenRestServlet(hs).register(http_server)
-            DeactivateAccountRestServlet(hs).register(http_server)
             PasswordRestServlet(hs).register(http_server)
             EmailThreepidRequestTokenRestServlet(hs).register(http_server)
             MsisdnThreepidRequestTokenRestServlet(hs).register(http_server)
             AddThreepidEmailSubmitTokenServlet(hs).register(http_server)
             AddThreepidMsisdnSubmitTokenServlet(hs).register(http_server)
-    ThreepidRestServlet(hs).register(http_server)
-    if hs.config.worker.worker_app is None:
-        ThreepidBindRestServlet(hs).register(http_server)
-        ThreepidUnbindRestServlet(hs).register(http_server)
-        if not hs.config.experimental.msc3861.enabled:
             ThreepidAddRestServlet(hs).register(http_server)
             ThreepidDeleteRestServlet(hs).register(http_server)
-    WhoamiRestServlet(hs).register(http_server)
 
-    if hs.config.worker.worker_app is None and hs.config.experimental.msc3720_enabled:
-        AccountStatusRestServlet(hs).register(http_server)
+        if hs.config.experimental.msc3720_enabled:
+            AccountStatusRestServlet(hs).register(http_server)
