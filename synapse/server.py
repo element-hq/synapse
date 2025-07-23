@@ -980,7 +980,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         # Register the threadpool with our metrics.
-        register_threadpool("media", media_threadpool)
+        server_name = self.hostname
+        register_threadpool(
+            name="media", server_name=server_name, threadpool=media_threadpool
+        )
 
         return media_threadpool
 
