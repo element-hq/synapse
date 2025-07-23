@@ -61,7 +61,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import LaterGauge, register_threadpool
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
@@ -82,9 +82,13 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
-sql_scheduling_timer = Histogram("synapse_storage_schedule_time", "sec")
+sql_scheduling_timer = Histogram(
+    "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
+)
 
-sql_query_timer = Histogram("synapse_storage_query_time", "sec", ["verb"])
+sql_query_timer = Histogram(
+    "synapse_storage_query_time", "sec", labelnames=["verb", SERVER_NAME_LABEL]
+)
 sql_txn_count = Counter("synapse_storage_transaction_time_count", "sec", ["desc"])
 sql_txn_duration = Counter("synapse_storage_transaction_time_sum", "sec", ["desc"])
 
@@ -493,7 +497,9 @@ class LoggingTransaction:
         finally:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
-            sql_query_timer.labels(sql.split()[0]).observe(secs)
+            sql_query_timer.labels(
+                verb=sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(secs)
 
     def close(self) -> None:
         self.txn.close()
@@ -1006,7 +1012,9 @@ class DatabasePool:
                     operation_name="db.connection",
                 ):
                     sched_duration_sec = monotonic_time() - start_time
-                    sql_scheduling_timer.observe(sched_duration_sec)
+                    sql_scheduling_timer.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).observe(sched_duration_sec)
                     context.add_database_scheduled(sched_duration_sec)
 
                     if self._txn_limit > 0:
