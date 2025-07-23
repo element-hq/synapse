@@ -65,6 +65,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
@@ -120,7 +121,7 @@ messsages_response_timer = Histogram(
     # picture of /messages response time for bigger rooms. We don't want the
     # tiny rooms that can always respond fast skewing our results when we're trying
     # to optimize the bigger cases.
-    ["room_size"],
+    labelnames=["room_size", SERVER_NAME_LABEL],
     buckets=(
         0.005,
         0.01,
@@ -801,6 +802,7 @@ class RoomMessageListRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self._hs = hs
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.pagination_handler = hs.get_pagination_handler()
         self.auth = hs.get_auth()
@@ -849,7 +851,8 @@ class RoomMessageListRestServlet(RestServlet):
         processing_end_time = self.clock.time_msec()
         room_member_count = await make_deferred_yieldable(room_member_count_deferred)
         messsages_response_timer.labels(
-            room_size=_RoomSize.from_member_count(room_member_count)
+            room_size=_RoomSize.from_member_count(room_member_count),
+            **{SERVER_NAME_LABEL: self.server_name},
         ).observe((processing_end_time - processing_start_time) / 1000)
 
         return 200, msgs
