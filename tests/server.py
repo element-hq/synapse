@@ -432,7 +432,7 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site)
+    req = request(channel, site, our_server_name="test_server")
     channel.request = req
 
     req.content = BytesIO(content)
