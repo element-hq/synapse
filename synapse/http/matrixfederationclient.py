@@ -428,6 +428,7 @@ class MatrixFederationHttpClient:
                 user_agent=user_agent.encode("ascii"),
                 ip_allowlist=hs.config.server.federation_ip_range_allowlist,
                 ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+                proxy_config=hs.config.server.proxy_config,
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret
@@ -442,9 +443,9 @@ class MatrixFederationHttpClient:
             # locations
             federation_proxy_locations = outbound_federation_restricted_to.locations
             federation_agent = ProxyAgent(
-                self.reactor,
-                self.reactor,
-                tls_client_options_factory,
+                reactor=self.reactor,
+                proxy_reactor=self.reactor,
+                contextFactory=tls_client_options_factory,
                 federation_proxy_locations=federation_proxy_locations,
                 federation_proxy_credentials=federation_proxy_credentials,
             )
@@ -624,9 +625,10 @@ class MatrixFederationHttpClient:
             raise FederationDeniedError(request.destination)
 
         limiter = await synapse.util.retryutils.get_retry_limiter(
-            request.destination,
-            self.clock,
-            self._store,
+            destination=request.destination,
+            our_server_name=self.server_name,
+            clock=self.clock,
+            store=self._store,
             backoff_on_404=backoff_on_404,
             ignore_backoff=ignore_backoff,
             notifier=self.hs.get_notifier(),

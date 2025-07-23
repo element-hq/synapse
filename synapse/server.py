@@ -117,6 +117,7 @@ from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
+from synapse.handlers.thread_subscriptions import ThreadSubscriptionsHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
 from synapse.handlers.user_directory import UserDirectoryHandler
 from synapse.handlers.worker_lock import WorkerLocksHandler
@@ -788,6 +789,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_timestamp_lookup_handler(self) -> TimestampLookupHandler:
         return TimestampLookupHandler(self)
+
+    @cache_in_self
+    def get_thread_subscriptions_handler(self) -> ThreadSubscriptionsHandler:
+        return ThreadSubscriptionsHandler(self)
 
     @cache_in_self
     def get_registration_handler(self) -> RegistrationHandler:

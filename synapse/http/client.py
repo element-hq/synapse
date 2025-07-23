@@ -837,12 +837,12 @@ class SimpleHttpClient(BaseHttpClient):
         pool.cachedConnectionTimeout = 2 * 60
 
         self.agent: IAgent = ProxyAgent(
-            self.reactor,
-            hs.get_reactor(),
+            reactor=self.reactor,
+            proxy_reactor=hs.get_reactor(),
             connectTimeout=15,
             contextFactory=self.hs.get_http_client_context_factory(),
             pool=pool,
-            use_proxy=use_proxy,
+            proxy_config=hs.config.server.proxy_config,
         )
 
         if self._ip_blocklist:

@@ -119,13 +119,29 @@ class RedisSubscriber(SubscriberProtocol):
 
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.
-        with PreserveLoggingContext():
-            # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
-            # capture the sentinel context as its containing context and won't prevent
-            # GC of / unintentionally reactivate what would be the current context.
-            self._logging_context = BackgroundProcessLoggingContext(
-                name="replication_command_handler", server_name=self.server_name
-            )
+        self._logging_context: Optional[BackgroundProcessLoggingContext] = None
+
+    def _get_logging_context(self) -> BackgroundProcessLoggingContext:
+        """
+        We lazily create the logging context so that `self.server_name` is set and
+        available. See `RedisDirectTcpReplicationClientFactory.buildProtocol` for more
+        details on why we set `self.server_name` after the fact instead of in the
+        constructor.
+        """
+        assert self.server_name is not None, (
+            "self.server_name must be set before using _get_logging_context()"
+        )
+        if self._logging_context is None:
+            # a logcontext which we use for processing incoming commands. We declare it as a
+            # background process so that the CPU stats get reported to prometheus.
+            with PreserveLoggingContext():
+                # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
+                # capture the sentinel context as its containing context and won't prevent
+                # GC of / unintentionally reactivate what would be the current context.
+                self._logging_context = BackgroundProcessLoggingContext(
+                    name="replication_command_handler", server_name=self.server_name
+                )
+        return self._logging_context
 
     def connectionMade(self) -> None:
         logger.info("Connected to redis")
@@ -159,7 +175,7 @@ class RedisSubscriber(SubscriberProtocol):
 
     def messageReceived(self, pattern: str, channel: str, message: str) -> None:
         """Received a message from redis."""
-        with PreserveLoggingContext(self._logging_context):
+        with PreserveLoggingContext(self._get_logging_context()):
             self._parse_and_dispatch_message(message)
 
     def _parse_and_dispatch_message(self, message: str) -> None:
@@ -218,7 +234,7 @@ class RedisSubscriber(SubscriberProtocol):
 
         # mark the logging context as finished by triggering `__exit__()`
         with PreserveLoggingContext():
-            with self._logging_context:
+            with self._get_logging_context():
                 pass
             # the sentinel context is now active, which may not be correct.
             # PreserveLoggingContext() will restore the correct logging context.
@@ -293,6 +309,10 @@ class SynapseRedisFactory(RedisFactory):
             replyTimeout=replyTimeout,
             convertNumbers=convertNumbers,
         )
+
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
 
         hs.get_clock().looping_call(self._send_ping, 30 * 1000)
 

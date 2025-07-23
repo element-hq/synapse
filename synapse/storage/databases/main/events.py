@@ -388,10 +388,129 @@ class PersistEventsStore:
                     **{SERVER_NAME_LABEL: self.server_name},
                 ).inc()
 
+                if (
+                    not self.hs.config.experimental.msc4293_enabled
+                    or event.type != EventTypes.Member
+                    or event.state_key is None
+                ):
+                    continue
+
+                # check if this is an unban/join that will undo a ban/kick redaction for
+                # a user in the room
+                if event.membership in [Membership.LEAVE, Membership.JOIN]:
+                    if (
+                        event.membership == Membership.LEAVE
+                        and event.sender == event.state_key
+                    ):
+                        # self-leave, ignore
+                        continue
+
+                    # if there is an existing ban/leave causing redactions for
+                    # this user/room combination update the entry with the stream
+                    # ordering when the redactions should stop - in the case of a backfilled
+                    # event where the stream ordering is negative, use the current max stream
+                    # ordering
+                    stream_ordering = event.internal_metadata.stream_ordering
+                    assert stream_ordering is not None
+                    if stream_ordering < 0:
+                        stream_ordering = self._stream_id_gen.get_current_token()
+                    await self.db_pool.simple_update(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        {"redact_end_ordering": stream_ordering},
+                        desc="room_ban_redactions update redact_end_ordering",
+                    )
+
+                # check for msc4293 redact_events flag and apply if found
+                if event.membership not in [Membership.LEAVE, Membership.BAN]:
+                    continue
+                redact = event.content.get("org.matrix.msc4293.redact_events", False)
+                if not redact or not isinstance(redact, bool):
+                    continue
+                # self-bans currently are not authorized so we don't check for that
+                # case
+                if (
+                    event.membership == Membership.BAN
+                    and event.sender == event.state_key
+                ):
+                    continue
+
+                # check that sender can redact
+                redact_allowed = await self._can_sender_redact(event)
+
+                # Signal that this user's past events in this room
+                # should be redacted by adding an entry to
+                # `room_ban_redactions`.
+                if redact_allowed:
+                    await self.db_pool.simple_upsert(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        {
+                            "redacting_event_id": event.event_id,
+                            "redact_end_ordering": None,
+                        },
+                        {
+                            "room_id": event.room_id,
+                            "user_id": event.state_key,
+                            "redacting_event_id": event.event_id,
+                            "redact_end_ordering": None,
+                        },
+                    )
+
+                    # normally the cache entry for a redacted event would be invalidated
+                    # by an arriving redaction event, but since we are not creating redaction
+                    # events we invalidate manually
+                    self.store._invalidate_local_get_event_cache_room_id(event.room_id)
+
+                    self.store._invalidate_async_get_event_cache_room_id(event.room_id)
+
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
                     (room_id,), frozenset(new_forward_extremities)
                 )
+
+    async def _can_sender_redact(self, event: EventBase) -> bool:
+        state_filter = StateFilter.from_types(
+            [(EventTypes.PowerLevels, ""), (EventTypes.Create, "")]
+        )
+        state = await self.store.get_partial_filtered_current_state_ids(
+            event.room_id, state_filter
+        )
+        pl_id = state[(EventTypes.PowerLevels, "")]
+        pl_event = await self.store.get_event(pl_id, allow_none=True)
+
+        if pl_event is None:
+            # per the spec, if a power level event isn't in the room, grant the creator
+            # level 100 and all other users 0
+            create_id = state[(EventTypes.Create, "")]
+            create_event = await self.store.get_event(create_id, allow_none=True)
+            if create_event is None:
+                # not sure how this would happen but if it does then just deny the redaction
+                logger.warning("No create event found for room %s", event.room_id)
+                return False
+            if create_event.sender == event.sender:
+                return True
+
+        assert pl_event is not None
+        sender_level = pl_event.content.get("users", {}).get(event.sender)
+        if sender_level is None:
+            sender_level = pl_event.content.get("users_default", 0)
+
+        redact_level = pl_event.content.get("redact")
+        if redact_level is None:
+            redact_level = pl_event.content.get("events_default", 0)
+
+        room_redaction_level = pl_event.content.get("events", {}).get(
+            "m.room.redaction"
+        )
+        if room_redaction_level is not None:
+            if sender_level < room_redaction_level:
+                return False
+
+        if sender_level >= redact_level:
+            return True
+
+        return False
 
     async def _calculate_sliding_sync_table_changes(
         self,
@@ -2997,6 +3116,10 @@ class PersistEventsStore:
             # Upsert into the threads table, but only overwrite the value if the
             # new event is of a later topological order OR if the topological
             # ordering is equal, but the stream ordering is later.
+            # (Note by definition that the stream ordering will always be later
+            # unless this is a backfilled event [= negative stream ordering]
+            # because we are only persisting this event now and stream_orderings
+            # are strictly monotonically increasing)
             sql = """
             INSERT INTO threads (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
             VALUES (?, ?, ?, ?, ?)
