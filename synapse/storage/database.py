@@ -122,9 +122,11 @@ class _PoolConnection(Connection):
 
 
 def make_pool(
+    *,
     reactor: IReactorCore,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
+    server_name: str,
 ) -> adbapi.ConnectionPool:
     """Get the connection pool for the database."""
 
@@ -138,7 +140,12 @@ def make_pool(
         # etc.
         with LoggingContext("db.on_new_connection"):
             engine.on_new_connection(
-                LoggingDatabaseConnection(conn, engine, "on_new_connection")
+                LoggingDatabaseConnection(
+                    conn=conn,
+                    engine=engine,
+                    default_txn_name="on_new_connection",
+                    server_name=server_name,
+                )
             )
 
     connection_pool = adbapi.ConnectionPool(
@@ -154,9 +161,11 @@ def make_pool(
 
 
 def make_conn(
+    *,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
     default_txn_name: str,
+    server_name: str,
 ) -> "LoggingDatabaseConnection":
     """Make a new connection to the database and return it.
 
@@ -170,13 +179,18 @@ def make_conn(
         if not k.startswith("cp_")
     }
     native_db_conn = engine.module.connect(**db_params)
-    db_conn = LoggingDatabaseConnection(native_db_conn, engine, default_txn_name)
+    db_conn = LoggingDatabaseConnection(
+        conn=native_db_conn,
+        engine=engine,
+        default_txn_name=default_txn_name,
+        server_name=server_name,
+    )
 
     engine.on_new_connection(db_conn)
     return db_conn
 
 
-@attr.s(slots=True, auto_attribs=True)
+@attr.s(slots=True, auto_attribs=True, kw_only=True)
 class LoggingDatabaseConnection:
     """A wrapper around a database connection that returns `LoggingTransaction`
     as its cursor class.
@@ -187,6 +201,7 @@ class LoggingDatabaseConnection:
     conn: Connection
     engine: BaseDatabaseEngine
     default_txn_name: str
+    server_name: str
 
     def cursor(
         self,
@@ -200,8 +215,9 @@ class LoggingDatabaseConnection:
             txn_name = self.default_txn_name
 
         return LoggingTransaction(
-            self.conn.cursor(),
+            txn=self.conn.cursor(),
             name=txn_name,
+            server_name=self.server_name,
             database_engine=self.engine,
             after_callbacks=after_callbacks,
             async_after_callbacks=async_after_callbacks,
@@ -270,6 +286,7 @@ class LoggingTransaction:
     __slots__ = [
         "txn",
         "name",
+        "server_name",
         "database_engine",
         "after_callbacks",
         "async_after_callbacks",
@@ -278,8 +295,10 @@ class LoggingTransaction:
 
     def __init__(
         self,
+        *,
         txn: Cursor,
         name: str,
+        server_name: str,
         database_engine: BaseDatabaseEngine,
         after_callbacks: Optional[List[_CallbackListEntry]] = None,
         async_after_callbacks: Optional[List[_AsyncCallbackListEntry]] = None,
@@ -287,6 +306,7 @@ class LoggingTransaction:
     ):
         self.txn = txn
         self.name = name
+        self.server_name = server_name
         self.database_engine = database_engine
         self.after_callbacks = after_callbacks
         self.async_after_callbacks = async_after_callbacks
@@ -571,7 +591,12 @@ class DatabasePool:
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
-        self._db_pool = make_pool(hs.get_reactor(), database_config, engine)
+        self._db_pool = make_pool(
+            reactor=hs.get_reactor(),
+            db_config=database_config,
+            engine=engine,
+            server_name=self.server_name,
+        )
 
         self.updates = BackgroundUpdater(hs, self)
         LaterGauge(
@@ -1047,7 +1072,10 @@ class DatabasePool:
                             )
 
                         db_conn = LoggingDatabaseConnection(
-                            conn, self.engine, "runWithConnection"
+                            conn=conn,
+                            engine=self.engine,
+                            default_txn_name="runWithConnection",
+                            server_name=self.server_name,
                         )
                         return func(db_conn, *args, **kwargs)
                     finally:
