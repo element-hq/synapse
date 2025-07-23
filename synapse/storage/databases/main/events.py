@@ -62,6 +62,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_in_list_sql_clause,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_federation import EventFederationStore
 from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.storage.databases.main.search import SearchEntry
@@ -237,6 +238,7 @@ class PersistEventsStore:
         db_conn: LoggingDatabaseConnection,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self.db_pool = db
         self.store = main_data_store
         self.database_engine = db.engine
@@ -362,7 +364,9 @@ class PersistEventsStore:
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
-                synapse.metrics.event_persisted_position.set(stream)
+                synapse.metrics.event_persisted_position.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).set(stream)
 
             for event, context in events_and_contexts:
                 if context.app_service:
