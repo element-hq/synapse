@@ -55,6 +55,7 @@ from synapse.events import EventBase, StrippedStateEvent, relation_from_event
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -62,7 +63,6 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_in_list_sql_clause,
 )
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_federation import EventFederationStore
 from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.storage.databases.main.search import SearchEntry
