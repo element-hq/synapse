@@ -69,6 +69,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 db=database,
                 notifier=hs.get_replication_notifier(),
                 stream_name="thread_subscriptions",
+                server_name=self.server_name,
                 instance_name=self._instance_name,
                 tables=[
                     ("thread_subscriptions", "instance_name", "stream_id"),

@@ -92,6 +92,7 @@ class MessageHandler:
     """Contains some read only APIs to get state about a room"""
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.state = hs.get_state_handler()
@@ -107,7 +108,7 @@ class MessageHandler:
 
         if not hs.config.worker.worker_app:
             run_as_background_process(
-                "_schedule_next_expiry", self._schedule_next_expiry
+                "_schedule_next_expiry", self.server_name, self._schedule_next_expiry
             )
 
     async def get_room_data(
@@ -439,6 +440,7 @@ class MessageHandler:
             delay,
             run_as_background_process,
             "_expire_event",
+            self.server_name,
             self._expire_event,
             event_id,
         )
@@ -541,6 +543,7 @@ class EventCreationHandler:
             self.clock.looping_call(
                 lambda: run_as_background_process(
                     "send_dummy_events_to_fill_extremities",
+                    self.server_name,
                     self._send_dummy_events_to_fill_extremities,
                 ),
                 5 * 60 * 1000,
@@ -1942,6 +1945,7 @@ class EventCreationHandler:
                 # matters as sometimes presence code can take a while.
                 run_as_background_process(
                     "bump_presence_active_time",
+                    self.server_name,
                     self._bump_active_time,
                     requester.user,
                     requester.device_id,

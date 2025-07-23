@@ -235,6 +235,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="events",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[
                 ("events", "instance_name", "stream_ordering"),
@@ -249,6 +250,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="backfill",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[
                 ("events", "instance_name", "stream_ordering"),
@@ -334,6 +336,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="un_partial_stated_event_stream",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[("un_partial_stated_event_stream", "instance_name", "stream_id")],
             sequence_name="un_partial_stated_event_stream_sequence",
@@ -1138,7 +1141,9 @@ class EventsWorkerStore(SQLBaseStore):
                 should_start = False
 
         if should_start:
-            run_as_background_process("fetch_events", self._fetch_thread)
+            run_as_background_process(
+                "fetch_events", self.server_name, self._fetch_thread
+            )
 
     async def _fetch_thread(self) -> None:
         """Services requests for events from `_event_fetch_list`."""

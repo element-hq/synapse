@@ -50,7 +50,10 @@ class BatchingQueueTestCase(TestCase):
 
         self._pending_calls: List[Tuple[List[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(
-            "test_queue", hs_clock, self._process_queue
+            name="test_queue",
+            server_name="test_server",
+            clock=hs_clock,
+            process_batch_callback=self._process_queue,
         )
 
     async def _process_queue(self, values: List[str]) -> str:

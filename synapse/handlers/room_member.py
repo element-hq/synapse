@@ -2164,6 +2164,7 @@ class RoomForgetterHandler(StateDeltasHandler):
         super().__init__(hs)
 
         self._hs = hs
+        self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._clock = hs.get_clock()
@@ -2195,7 +2196,9 @@ class RoomForgetterHandler(StateDeltasHandler):
             finally:
                 self._is_processing = False
 
-        run_as_background_process("room_forgetter.notify_new_event", process)
+        run_as_background_process(
+            "room_forgetter.notify_new_event", self.server_name, process
+        )
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB

@@ -109,6 +109,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="to_device",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("device_inbox", "instance_name", "stream_id"),
@@ -156,6 +157,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 run_as_background_process,
                 DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
+                self.server_name,
                 self._delete_old_federation_inbox_rows,
             )
 

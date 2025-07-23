@@ -36,7 +36,11 @@ from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.interfaces import IAddress, IConnector
 from twisted.python.failure import Failure
 
-from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.logging.context import (
+    PreserveLoggingContext,
+    make_deferred_yieldable,
+)
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
     run_as_background_process,
@@ -97,6 +101,9 @@ class RedisSubscriber(SubscriberProtocol):
     immediately after initialisation.
 
     Attributes:
+        server_name: The homeserver name of the Synapse instance that this connection
+            is associated with. This is used to label metrics and should be set to
+            `hs.hostname`.
         synapse_handler: The command handler to handle incoming commands.
         synapse_stream_prefix: The *redis* stream name to subscribe to and publish
             from (not anything to do with Synapse replication streams).
@@ -104,6 +111,7 @@ class RedisSubscriber(SubscriberProtocol):
             commands.
     """
 
+    server_name: str
     synapse_handler: "ReplicationCommandHandler"
     synapse_stream_prefix: str
     synapse_channel_names: List[str]
@@ -114,18 +122,36 @@ class RedisSubscriber(SubscriberProtocol):
 
         # a logcontext which we use for processing incoming commands. We declare it as a
         # background process so that the CPU stats get reported to prometheus.
-        with PreserveLoggingContext():
-            # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
-            # capture the sentinel context as its containing context and won't prevent
-            # GC of / unintentionally reactivate what would be the current context.
-            self._logging_context = BackgroundProcessLoggingContext(
-                "replication_command_handler"
-            )
+        self._logging_context: Optional[BackgroundProcessLoggingContext] = None
+
+    def _get_logging_context(self) -> BackgroundProcessLoggingContext:
+        """
+        We lazily create the logging context so that `self.server_name` is set and
+        available. See `RedisDirectTcpReplicationClientFactory.buildProtocol` for more
+        details on why we set `self.server_name` after the fact instead of in the
+        constructor.
+        """
+        assert self.server_name is not None, (
+            "self.server_name must be set before using _get_logging_context()"
+        )
+        if self._logging_context is None:
+            # a logcontext which we use for processing incoming commands. We declare it as a
+            # background process so that the CPU stats get reported to prometheus.
+            with PreserveLoggingContext():
+                # thanks to `PreserveLoggingContext()`, the new logcontext is guaranteed to
+                # capture the sentinel context as its containing context and won't prevent
+                # GC of / unintentionally reactivate what would be the current context.
+                self._logging_context = BackgroundProcessLoggingContext(
+                    name="replication_command_handler", server_name=self.server_name
+                )
+        return self._logging_context
 
     def connectionMade(self) -> None:
         logger.info("Connected to redis")
         super().connectionMade()
-        run_as_background_process("subscribe-replication", self._send_subscribe)
+        run_as_background_process(
+            "subscribe-replication", self.server_name, self._send_subscribe
+        )
 
     async def _send_subscribe(self) -> None:
         # it's important to make sure that we only send the REPLICATE command once we
@@ -152,7 +178,7 @@ class RedisSubscriber(SubscriberProtocol):
 
     def messageReceived(self, pattern: str, channel: str, message: str) -> None:
         """Received a message from redis."""
-        with PreserveLoggingContext(self._logging_context):
+        with PreserveLoggingContext(self._get_logging_context()):
             self._parse_and_dispatch_message(message)
 
     def _parse_and_dispatch_message(self, message: str) -> None:
@@ -171,7 +197,11 @@ class RedisSubscriber(SubscriberProtocol):
 
         # We use "redis" as the name here as we don't have 1:1 connections to
         # remote instances.
-        tcp_inbound_commands_counter.labels(cmd.NAME, "redis").inc()
+        tcp_inbound_commands_counter.labels(
+            command=cmd.NAME,
+            name="redis",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         self.handle_command(cmd)
 
@@ -197,7 +227,7 @@ class RedisSubscriber(SubscriberProtocol):
 
         if isawaitable(res):
             run_as_background_process(
-                "replication-" + cmd.get_logcontext_id(), lambda: res
+                "replication-" + cmd.get_logcontext_id(), self.server_name, lambda: res
             )
 
     def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
@@ -207,7 +237,7 @@ class RedisSubscriber(SubscriberProtocol):
 
         # mark the logging context as finished by triggering `__exit__()`
         with PreserveLoggingContext():
-            with self._logging_context:
+            with self._get_logging_context():
                 pass
             # the sentinel context is now active, which may not be correct.
             # PreserveLoggingContext() will restore the correct logging context.
@@ -219,7 +249,11 @@ class RedisSubscriber(SubscriberProtocol):
             cmd: The command to send
         """
         run_as_background_process(
-            "send-cmd", self._async_send_command, cmd, bg_start_span=False
+            "send-cmd",
+            self.server_name,
+            self._async_send_command,
+            cmd,
+            bg_start_span=False,
         )
 
     async def _async_send_command(self, cmd: Command) -> None:
@@ -232,7 +266,11 @@ class RedisSubscriber(SubscriberProtocol):
 
         # We use "redis" as the name here as we don't have 1:1 connections to
         # remote instances.
-        tcp_outbound_commands_counter.labels(cmd.NAME, "redis").inc()
+        tcp_outbound_commands_counter.labels(
+            command=cmd.NAME,
+            name="redis",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         channel_name = cmd.redis_channel_name(self.synapse_stream_prefix)
 
@@ -274,6 +312,10 @@ class SynapseRedisFactory(RedisFactory):
             replyTimeout=replyTimeout,
             convertNumbers=convertNumbers,
         )
+
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
 
         hs.get_clock().looping_call(self._send_ping, 30 * 1000)
 
@@ -350,6 +392,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
             password=hs.config.redis.redis_password,
         )
 
+        self.server_name = hs.hostname
         self.synapse_handler = hs.get_replication_command_handler()
         self.synapse_stream_prefix = hs.hostname
         self.synapse_channel_names = channel_names
@@ -364,6 +407,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         # as to do so would involve overriding `buildProtocol` entirely, however
         # the base method does some other things than just instantiating the
         # protocol.
+        p.server_name = self.server_name
         p.synapse_handler = self.synapse_handler
         p.synapse_outbound_redis_connection = self.synapse_outbound_redis_connection
         p.synapse_stream_prefix = self.synapse_stream_prefix

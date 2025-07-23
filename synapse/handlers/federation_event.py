@@ -146,6 +146,7 @@ class FederationEventHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
@@ -170,7 +171,6 @@ class FederationEventHandler:
 
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
-        self._server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         self._config = hs.config
@@ -249,7 +249,7 @@ class FederationEventHandler:
         # Note that if we were never in the room then we would have already
         # dropped the event, since we wouldn't know the room version.
         is_in_room = await self._event_auth_handler.is_host_in_room(
-            room_id, self._server_name
+            room_id, self.server_name
         )
         if not is_in_room:
             logger.info(
@@ -930,6 +930,7 @@ class FederationEventHandler:
         if len(events_with_failed_pull_attempts) > 0:
             run_as_background_process(
                 "_process_new_pulled_events_with_failed_pull_attempts",
+                self.server_name,
                 _process_new_pulled_events,
                 events_with_failed_pull_attempts,
             )
@@ -1523,6 +1524,7 @@ class FederationEventHandler:
             if resync:
                 run_as_background_process(
                     "resync_device_due_to_pdu",
+                    self.server_name,
                     self._resync_device,
                     event.sender,
                 )
