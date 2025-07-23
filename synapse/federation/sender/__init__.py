@@ -296,6 +296,7 @@ class _DestinationWakeupQueue:
 
     Staggers waking up of per destination queues to ensure that we don't attempt
     to start TLS connections with many hosts all at once, leading to pinned CPU.
+
     """
 
     # The maximum duration in seconds between queuing up a destination and it
@@ -303,6 +304,10 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    server_name: str = attr.ib()
+    """
+    Our homeserver name (used to label metrics) (`hs.hostname`).
+    """
     clock: Clock = attr.ib()
     max_delay_s: int = attr.ib()
 
@@ -427,7 +432,7 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
@@ -435,6 +440,7 @@ class FederationSender(AbstractFederationSender):
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
+            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
@@ -477,7 +483,9 @@ class FederationSender(AbstractFederationSender):
 
         # fire off a processing loop in the background
         run_as_background_process(
-            "process_event_queue_for_federation", self._process_event_queue_loop
+            "process_event_queue_for_federation",
+            self.server_name,
+            self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:

@@ -106,6 +106,7 @@ class ReplicationCommandHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -340,7 +341,10 @@ class ReplicationCommandHandler:
 
         # fire off a background process to start processing the queue.
         run_as_background_process(
-            "process-replication-data", self._unsafe_process_queue, stream_name
+            "process-replication-data",
+            self.server_name,
+            self._unsafe_process_queue,
+            stream_name,
         )
 
     async def _unsafe_process_queue(self, stream_name: str) -> None:

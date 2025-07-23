@@ -484,6 +484,7 @@ class _NullContextManager(ContextManager[None]):
 class WorkerPresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self._presence_writer_instance = hs.config.worker.writers.presence[0]
 
         # Route presence EDUs to the right worker
@@ -517,6 +518,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             "shutdown",
             run_as_background_process,
             "generic_presence.on_shutdown",
+            self.server_name,
             self._on_shutdown,
         )
 
@@ -747,7 +749,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
 class PresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
-        self.server_name = hs.hostname
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self.wheel_timer: WheelTimer[str] = WheelTimer()
         self.notifier = hs.get_notifier()
 
@@ -815,6 +819,7 @@ class PresenceHandler(BasePresenceHandler):
             "shutdown",
             run_as_background_process,
             "presence.on_shutdown",
+            self.server_name,
             self._on_shutdown,
         )
 
@@ -1495,7 +1500,9 @@ class PresenceHandler(BasePresenceHandler):
             finally:
                 self._event_processing = False
 
-        run_as_background_process("presence.notify_new_event", _process_presence)
+        run_as_background_process(
+            "presence.notify_new_event", self.server_name, _process_presence
+        )
 
     async def _unsafe_process(self) -> None:
         # Loop round handling deltas until we're up to date

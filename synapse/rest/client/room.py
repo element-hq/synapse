@@ -1221,6 +1221,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self.event_creation_handler = hs.get_event_creation_handler()
         self.auth = hs.get_auth()
         self._store = hs.get_datastores().main
@@ -1305,6 +1306,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                 if with_relations:
                     run_as_background_process(
                         "redact_related_events",
+                        self.server_name,
                         self._relation_handler.redact_events_related_to,
                         requester=requester,
                         event_id=event_id,

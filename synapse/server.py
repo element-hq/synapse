@@ -423,7 +423,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor()
+        return Distributor(server_name=self.hostname)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
