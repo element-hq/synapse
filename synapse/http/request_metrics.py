@@ -27,7 +27,7 @@ from typing import Dict, Mapping, Set, Tuple
 from prometheus_client.core import Counter, Histogram
 
 from synapse.logging.context import current_context
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ outgoing_responses_counter = Counter(
 response_timer = Histogram(
     "synapse_http_server_response_time_seconds",
     "sec",
-    ["method", "servlet", "tag", "code"],
+    labelnames=["method", "servlet", "tag", "code", SERVER_NAME_LABEL],
 )
 
 response_ru_utime = Counter(
@@ -198,9 +198,13 @@ class RequestMetrics:
 
         response_count.labels(self.method, self.name, tag).inc()
 
-        response_timer.labels(self.method, self.name, tag, response_code_str).observe(
-            time_sec - self.start_ts
-        )
+        response_timer.labels(
+            method=self.method,
+            servlet=self.name,
+            tag=tag,
+            code=response_code_str,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(time_sec - self.start_ts)
 
         resource_usage = context.get_resource_usage()
 
