@@ -1,0 +1,1 @@
+Fix structure of initial_state when calling user_may_create_room module API callback.
