@@ -586,7 +586,10 @@ class RoomCreationHandler:
             user_id,
             {
                 "creation_content": creation_content,
-                "initial_state": list(initial_state.items()),
+                "initial_state": [
+                    {"type": state[0][0], "state_key": state[0][1], "content": state[1]}
+                    for state in initial_state.items()
+                ],
             },
         )
         if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:

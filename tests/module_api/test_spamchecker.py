@@ -72,6 +72,41 @@ class SpamCheckerTestCase(HomeserverTestCase):
         self.assertEqual(self.last_user_id, self.user_id)
         self.assertEqual(self.last_room_config["foo"], "baa")
 
+    def test_may_user_create_room_with_initial_state(self) -> None:
+        """Test that the may_user_create_room callback is called when a user
+        creates a room with some initial state events, and that it receives the correct parameters.
+        """
+
+        async def user_may_create_room(
+            user_id: str, room_config: JsonDict
+        ) -> Union[Literal["NOT_SPAM"], Codes]:
+            self.last_room_config = room_config
+            self.last_user_id = user_id
+            return "NOT_SPAM"
+
+        self._module_api.register_spam_checker_callbacks(
+            user_may_create_room=user_may_create_room
+        )
+
+        channel = self.create_room(
+            {
+                "foo": "baa",
+                "initial_state": [
+                    {"type": "m.room.topic", "content": {"topic": "foo"}}
+                ],
+            }
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(self.last_user_id, self.user_id)
+        self.assertEqual(self.last_room_config["foo"], "baa")
+        self.assertTrue(
+            any(
+                event.get("type") == "m.room.topic"
+                and event.get("content").get("topic") == "foo"
+                for event in self.last_room_config["initial_state"]
+            )
+        )
+
     def test_may_user_create_room_on_upgrade(self) -> None:
         """Test that the may_user_create_room callback is called when a room is upgraded."""
 
@@ -107,7 +142,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         # Check that the initial state received by callback contains the topic event.
         self.assertTrue(
             any(
-                event[0][0] == "m.room.topic" and event[1].get("topic") == "foo"
+                event.get("type") == "m.room.topic"
+                and event.get("content").get("topic") == "foo"
                 for event in self.last_room_config["initial_state"]
             )
         )
