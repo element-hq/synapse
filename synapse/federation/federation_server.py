@@ -82,6 +82,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -120,7 +121,7 @@ pdu_process_time = Histogram(
 last_pdu_ts_metric = Gauge(
     "synapse_federation_last_received_pdu_time",
     "The timestamp of the last PDU which was successfully received from the given domain",
-    labelnames=("server_name",),
+    labelnames=("origin_server_name", SERVER_NAME_LABEL),
 )
 
 
@@ -545,7 +546,9 @@ class FederationServer(FederationBase):
         )
 
         if newest_pdu_ts and origin in self._federation_metrics_domains:
-            last_pdu_ts_metric.labels(server_name=origin).set(newest_pdu_ts / 1000)
+            last_pdu_ts_metric.labels(
+                origin_server_name=origin, **{SERVER_NAME_LABEL: self.server_name}
+            ).set(newest_pdu_ts / 1000)
 
         return pdu_results
 

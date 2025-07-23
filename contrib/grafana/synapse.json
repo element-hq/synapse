@@ -4396,7 +4396,7 @@
               "exemplar": false,
               "expr": "(time() - max without (job, index, host) (avg_over_time(synapse_federation_last_received_pdu_time[10m]))) / 60",
               "instant": false,
-              "legendFormat": "{{server_name}} ",
+              "legendFormat": "{{origin_server_name}} ",
               "range": true,
               "refId": "A"
             }
