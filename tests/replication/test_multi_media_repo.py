@@ -40,7 +40,6 @@ from tests.http import (
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeChannel, FakeTransport, make_request
 from tests.test_utils import SMALL_PNG
-from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 

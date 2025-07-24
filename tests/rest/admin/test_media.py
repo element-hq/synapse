@@ -36,7 +36,6 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
-from tests.unittest import override_config
 
 VALID_TIMESTAMP = 1609459200000  # 2021-01-01 in milliseconds
 INVALID_TIMESTAMP_IN_S = 1893456000  # 2030-01-01 in seconds

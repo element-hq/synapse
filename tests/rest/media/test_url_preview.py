@@ -42,7 +42,6 @@ from synapse.util.stringutils import parse_and_validate_mxc_uri
 from tests import unittest
 from tests.server import FakeTransport
 from tests.test_utils import SMALL_PNG
-from tests.unittest import override_config
 
 try:
     import lxml
