@@ -24,13 +24,13 @@ import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from io import BytesIO
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from twisted.internet.defer import Deferred
 from twisted.internet.endpoints import HostnameEndpoint
-from twisted.internet.interfaces import IOpenSSLContextFactory, IProtocolFactory
+from twisted.internet.interfaces import IProtocolFactory
 from twisted.internet.ssl import optionsForClientTLS
-from twisted.mail.smtp import ESMTPSender, ESMTPSenderFactory
+from twisted.mail.smtp import ESMTPSenderFactory
 from twisted.protocols.tls import TLSMemoryBIOFactory
 
 from synapse.logging.context import make_deferred_yieldable
@@ -40,29 +40,6 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-
-class _BackportESMTPSender(ESMTPSender):
-    """Extend old versions of ESMTPSender to configure TLS.
-
-    Unfortunately, before Twisted 21.2, ESMTPSender doesn't give an easy way to
-    disable TLS, or to configure the hostname used for TLS certificate validation.
-    This backports the `hostname` parameter for that functionality.
-    """
-
-    __hostname: Optional[str]
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """"""
-        self.__hostname = kwargs.pop("hostname", None)
-        super().__init__(*args, **kwargs)
-
-    def _getContextFactory(self) -> Optional[IOpenSSLContextFactory]:
-        if self.context is not None:
-            return self.context
-        elif self.__hostname is None:
-            return None  # disable TLS if hostname is None
-        return optionsForClientTLS(self.__hostname)
 
 
 async def _sendmail(
