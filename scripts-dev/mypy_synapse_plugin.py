@@ -71,7 +71,9 @@ class ArgLocation:
 
 # FIXME: Ideally, we'd be able to cross-check this list to make sure it includes
 # everything as part of the lints by checking for anything that inherits from
-# `MetricWrapperBase` or `Metric` but I don't know of a good mypy hook to inspect this.
+# `prometheus_client.metrics.MetricWrapperBase` or
+# `prometheus_client.metrics_core.Metric` but I don't know of a good mypy hook to
+# inspect this.
 prometheus_metric_fullname_to_label_arg_map = {
     "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Counter": ArgLocation("labelnames", 2),
