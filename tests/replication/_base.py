@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
-from twisted.python.failure import Failure
 from twisted.internet.testing import MemoryReactor
+from twisted.python.failure import Failure
 from twisted.web.resource import Resource
 
 from synapse.app.generic_worker import GenericWorkerServer

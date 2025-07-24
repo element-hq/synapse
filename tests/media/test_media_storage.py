@@ -33,8 +33,8 @@ from PIL import Image as Image
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
-from twisted.python.failure import Failure
 from twisted.internet.testing import MemoryReactor
+from twisted.python.failure import Failure
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
