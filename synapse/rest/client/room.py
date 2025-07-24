@@ -44,7 +44,11 @@ from synapse.api.errors import (
     UnredactedContentDeletedError,
 )
 from synapse.api.filtering import Filter
-from synapse.events.utils import SerializeEventConfig, format_event_for_client_v2
+from synapse.events.utils import (
+    SerializeEventConfig,
+    format_event_for_client_v2,
+    serialize_event,
+)
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     ResolveRoomIdMixin,
@@ -198,6 +202,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.message_handler = hs.get_message_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
 
@@ -268,7 +273,14 @@ class RoomStateEventRestServlet(RestServlet):
             raise SynapseError(404, "Event not found.", errcode=Codes.NOT_FOUND)
 
         if format == "event":
-            event = format_event_for_client_v2(data.get_dict())
+            event = serialize_event(
+                data,
+                self.clock.time_msec(),
+                config=SerializeEventConfig(
+                    event_format=format_event_for_client_v2,
+                    requester=requester,
+                ),
+            )
             return 200, event
         elif format == "content":
             return 200, data.get_dict()["content"]
@@ -1088,6 +1100,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         super().__init__(hs)
         self.room_member_handler = hs.get_room_member_handler()
         self.auth = hs.get_auth()
+        self.config = hs.config
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/[join|invite|leave|ban|unban|kick]
@@ -1111,12 +1124,12 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         }:
             raise AuthError(403, "Guest access not allowed")
 
-        content = parse_json_object_from_request(request, allow_empty_body=True)
+        request_body = parse_json_object_from_request(request, allow_empty_body=True)
 
         if membership_action == "invite" and all(
-            key in content for key in ("medium", "address")
+            key in request_body for key in ("medium", "address")
         ):
-            if not all(key in content for key in ("id_server", "id_access_token")):
+            if not all(key in request_body for key in ("id_server", "id_access_token")):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
                     "`id_server` and `id_access_token` are required when doing 3pid invite",
@@ -1127,12 +1140,12 @@ class RoomMembershipRestServlet(TransactionRestServlet):
                 await self.room_member_handler.do_3pid_invite(
                     room_id,
                     requester.user,
-                    content["medium"],
-                    content["address"],
-                    content["id_server"],
+                    request_body["medium"],
+                    request_body["address"],
+                    request_body["id_server"],
                     requester,
                     txn_id,
-                    content["id_access_token"],
+                    request_body["id_access_token"],
                 )
             except ShadowBanError:
                 # Pretend the request succeeded.
@@ -1141,12 +1154,19 @@ class RoomMembershipRestServlet(TransactionRestServlet):
 
         target = requester.user
         if membership_action in ["invite", "ban", "unban", "kick"]:
-            assert_params_in_dict(content, ["user_id"])
-            target = UserID.from_string(content["user_id"])
+            assert_params_in_dict(request_body, ["user_id"])
+            target = UserID.from_string(request_body["user_id"])
 
         event_content = None
-        if "reason" in content:
-            event_content = {"reason": content["reason"]}
+        if "reason" in request_body:
+            event_content = {"reason": request_body["reason"]}
+        if self.config.experimental.msc4293_enabled:
+            if "org.matrix.msc4293.redact_events" in request_body:
+                if event_content is None:
+                    event_content = {}
+                event_content["org.matrix.msc4293.redact_events"] = request_body[
+                    "org.matrix.msc4293.redact_events"
+                ]
 
         try:
             await self.room_member_handler.update_membership(
@@ -1155,7 +1175,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
                 room_id=room_id,
                 action=membership_action,
                 txn_id=txn_id,
-                third_party_signed=content.get("third_party_signed", None),
+                third_party_signed=request_body.get("third_party_signed", None),
                 content=event_content,
             )
         except ShadowBanError:
@@ -1201,6 +1221,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self.event_creation_handler = hs.get_event_creation_handler()
         self.auth = hs.get_auth()
         self._store = hs.get_datastores().main
@@ -1285,6 +1306,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                 if with_relations:
                     run_as_background_process(
                         "redact_related_events",
+                        self.server_name,
                         self._relation_handler.redact_events_related_to,
                         requester=requester,
                         event_id=event_id,

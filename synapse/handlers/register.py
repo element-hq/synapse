@@ -44,7 +44,6 @@ from synapse.api.errors import (
 )
 from synapse.appservice import ApplicationService
 from synapse.config.server import is_threepid_reserved
-from synapse.handlers.device import DeviceHandler
 from synapse.http.servlet import assert_params_in_dict
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
@@ -557,7 +556,7 @@ class RegistrationHandler:
                         if join_rules_event:
                             join_rule = join_rules_event.content.get("join_rule", None)
                             requires_invite = (
-                                join_rule and join_rule != JoinRules.PUBLIC
+                                join_rule is not None and join_rule != JoinRules.PUBLIC
                             )
 
                 # Send the invite, if necessary.
@@ -839,9 +838,6 @@ class RegistrationHandler:
 
         refresh_token = None
         refresh_token_id = None
-
-        # This can only run on the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
 
         registered_device_id = await self.device_handler.check_device_registered(
             user_id,

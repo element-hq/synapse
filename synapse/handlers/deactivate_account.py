@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
-from synapse.handlers.device import DeviceHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import Codes, Requester, UserID, create_requester
 
@@ -40,6 +39,7 @@ class DeactivateAccountHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.hs = hs
+        self.server_name = hs.hostname
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
         self._room_member_handler = hs.get_room_member_handler()
@@ -84,10 +84,6 @@ class DeactivateAccountHandler:
         Returns:
             True if identity server supports removing threepids, otherwise False.
         """
-
-        # This can only be called on the main process.
-        assert isinstance(self._device_handler, DeviceHandler)
-
         # Check if this user can be deactivated
         if not await self._third_party_rules.check_can_deactivate_user(
             user_id, by_admin
@@ -192,6 +188,9 @@ class DeactivateAccountHandler:
         # Remove account data (including ignored users and push rules).
         await self.store.purge_account_data_for_user(user_id)
 
+        # Remove thread subscriptions for the user
+        await self.store.purge_thread_subscription_settings_for_user(user_id)
+
         # Delete any server-side backup keys
         await self.store.bulk_delete_backup_keys_and_versions_for_user(user_id)
 
@@ -245,7 +244,9 @@ class DeactivateAccountHandler:
         pending deactivation, if it isn't already running.
         """
         if not self._user_parter_running:
-            run_as_background_process("user_parter_loop", self._user_parter_loop)
+            run_as_background_process(
+                "user_parter_loop", self.server_name, self._user_parter_loop
+            )
 
     async def _user_parter_loop(self) -> None:
         """Loop that parts deactivated users from rooms"""

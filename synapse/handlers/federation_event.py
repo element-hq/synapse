@@ -77,9 +77,6 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.replication.http.devices import (
-    ReplicationMultiUserDevicesResyncRestServlet,
-)
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -149,6 +146,7 @@ class FederationEventHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
@@ -173,19 +171,13 @@ class FederationEventHandler:
 
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
-        self._server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         self._config = hs.config
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
 
         self._send_events = ReplicationFederationSendEventsRestServlet.make_client(hs)
-        if hs.config.worker.worker_app:
-            self._multi_user_device_resync = (
-                ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
-            )
-        else:
-            self._device_list_updater = hs.get_device_handler().device_list_updater
+        self._device_list_updater = hs.get_device_handler().device_list_updater
 
         # When joining a room we need to queue any events for that room up.
         # For each room, a list of (pdu, origin) tuples.
@@ -257,7 +249,7 @@ class FederationEventHandler:
         # Note that if we were never in the room then we would have already
         # dropped the event, since we wouldn't know the room version.
         is_in_room = await self._event_auth_handler.is_host_in_room(
-            room_id, self._server_name
+            room_id, self.server_name
         )
         if not is_in_room:
             logger.info(
@@ -938,6 +930,7 @@ class FederationEventHandler:
         if len(events_with_failed_pull_attempts) > 0:
             run_as_background_process(
                 "_process_new_pulled_events_with_failed_pull_attempts",
+                self.server_name,
                 _process_new_pulled_events,
                 events_with_failed_pull_attempts,
             )
@@ -1531,6 +1524,7 @@ class FederationEventHandler:
             if resync:
                 run_as_background_process(
                     "resync_device_due_to_pdu",
+                    self.server_name,
                     self._resync_device,
                     event.sender,
                 )
@@ -1544,12 +1538,7 @@ class FederationEventHandler:
             await self._store.mark_remote_users_device_caches_as_stale((sender,))
 
             # Immediately attempt a resync in the background
-            if self._config.worker.worker_app:
-                await self._multi_user_device_resync(user_ids=[sender])
-            else:
-                await self._device_list_updater.multi_user_device_resync(
-                    user_ids=[sender]
-                )
+            await self._device_list_updater.multi_user_device_resync(user_ids=[sender])
         except Exception:
             logger.exception("Failed to resync device for %s", sender)
 

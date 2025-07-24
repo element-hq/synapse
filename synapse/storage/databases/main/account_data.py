@@ -78,6 +78,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="account_data",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("room_account_data", "instance_name", "stream_id"),
@@ -90,7 +91,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         account_max = self.get_max_account_data_stream_id()
         self._account_data_stream_cache = StreamChangeCache(
-            "AccountDataAndTagsChangeCache", account_max
+            name="AccountDataAndTagsChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=account_max,
         )
 
         self.db_pool.updates.register_background_index_update(

@@ -72,6 +72,10 @@ from synapse.replication.tcp.streams import (
     ToDeviceStream,
     TypingStream,
 )
+from synapse.replication.tcp.streams._base import (
+    DeviceListsStream,
+    ThreadSubscriptionsStream,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -102,6 +106,7 @@ class ReplicationCommandHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -181,6 +186,21 @@ class ReplicationCommandHandler:
 
             if isinstance(stream, PushRulesStream):
                 if hs.get_instance_name() in hs.config.worker.writers.push_rules:
+                    self._streams_to_replicate.append(stream)
+
+                continue
+
+            if isinstance(stream, ThreadSubscriptionsStream):
+                if (
+                    hs.get_instance_name()
+                    in hs.config.worker.writers.thread_subscriptions
+                ):
+                    self._streams_to_replicate.append(stream)
+
+                continue
+
+            if isinstance(stream, DeviceListsStream):
+                if hs.get_instance_name() in hs.config.worker.writers.device_lists:
                     self._streams_to_replicate.append(stream)
 
                 continue
@@ -321,7 +341,10 @@ class ReplicationCommandHandler:
 
         # fire off a background process to start processing the queue.
         run_as_background_process(
-            "process-replication-data", self._unsafe_process_queue, stream_name
+            "process-replication-data",
+            self.server_name,
+            self._unsafe_process_queue,
+            stream_name,
         )
 
     async def _unsafe_process_queue(self, stream_name: str) -> None:

@@ -59,7 +59,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, MultiWriterStreamToken
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.cancellation import cancellable
@@ -120,6 +120,21 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             self.hs.config.federation.allow_device_name_lookup_over_federation
         )
 
+        self._cross_signing_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="e2e_cross_signing_keys",
+            server_name=self.server_name,
+            instance_name=self._instance_name,
+            tables=[
+                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
+            ],
+            sequence_name="e2e_cross_signing_keys_sequence",
+            # No one reads the stream positions, so we're allowed to have an empty list of writers
+            writers=[],
+        )
+
     def process_replication_rows(
         self,
         stream_name: str,
@@ -145,7 +160,12 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         Returns:
             (stream_id, devices)
         """
-        now_stream_id = self.get_device_stream_token()
+        # Here, we don't use the individual instances positions, as we *need* to
+        # give out the stream_id as an integer in the federation API.
+        # This means that we'll potentially return the same data twice with a
+        # different stream_id, and invalidate cache more often than necessary,
+        # which is fine overall.
+        now_stream_id = self.get_device_stream_token().stream
 
         # We need to be careful with the caching here, as we need to always
         # return *all* persisted devices, however there may be a lag between a
@@ -164,8 +184,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             # have to check for potential invalidations after the
             # `now_stream_id`.
             sql = """
-                SELECT user_id FROM device_lists_stream
+                SELECT 1
+                FROM device_lists_stream
                 WHERE stream_id >= ? AND user_id = ?
+                LIMIT 1
             """
             rows = await self.db_pool.execute(
                 "get_e2e_device_keys_for_federation_query_check",
@@ -1117,7 +1139,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     @abc.abstractmethod
-    def get_device_stream_token(self) -> int:
+    def get_device_stream_token(self) -> MultiWriterStreamToken:
         """Get the current stream id from the _device_list_id_gen"""
         ...
 
@@ -1540,27 +1562,44 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             impl,
         )
 
+    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
+        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
+            log_kv(
+                {
+                    "message": "Deleting keys for device",
+                    "device_id": device_id,
+                    "user_id": user_id,
+                }
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_device_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_one_time_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.count_e2e_one_time_keys, (user_id, device_id)
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="dehydrated_devices",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_fallback_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
+            )
 
-class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-
-        self._cross_signing_id_gen = MultiWriterIdGenerator(
-            db_conn=db_conn,
-            db=database,
-            notifier=hs.get_replication_notifier(),
-            stream_name="e2e_cross_signing_keys",
-            instance_name=self._instance_name,
-            tables=[
-                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
-            ],
-            sequence_name="e2e_cross_signing_keys_sequence",
-            writers=["master"],
+        await self.db_pool.runInteraction(
+            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
         )
 
     async def set_e2e_device_keys(
@@ -1754,3 +1793,13 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
             ],
             desc="add_e2e_signing_key",
         )
+
+
+class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)

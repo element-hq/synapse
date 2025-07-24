@@ -187,7 +187,9 @@ class FederationHandler:
         # were shut down.
         if not hs.config.worker.worker_app:
             run_as_background_process(
-                "resume_sync_partial_state_room", self._resume_partial_state_room_sync
+                "resume_sync_partial_state_room",
+                self.server_name,
+                self._resume_partial_state_room_sync,
             )
 
     @trace
@@ -316,6 +318,7 @@ class FederationHandler:
             )
             run_as_background_process(
                 "_maybe_backfill_inner_anyway_with_max_depth",
+                self.server_name,
                 self.maybe_backfill,
                 room_id=room_id,
                 # We use `MAX_DEPTH` so that we find all backfill points next
@@ -698,10 +701,19 @@ class FederationHandler:
                     #     We may want to reset the partial state info if it's from an
                     #     old, failed partial state join.
                     #     https://github.com/matrix-org/synapse/issues/13000
+
+                    # FIXME: Ideally, we would store the full stream token here
+                    # not just the minimum stream ID, so that we can compute an
+                    # accurate list of device changes when un-partial-ing the
+                    # room. The only side effect of this is that we may send
+                    # extra unecessary device list outbound pokes through
+                    # federation, which is harmless.
+                    device_lists_stream_id = self.store.get_device_stream_token().stream
+
                     await self.store.store_partial_state_room(
                         room_id=room_id,
                         servers=ret.servers_in_room,
-                        device_lists_stream_id=self.store.get_device_stream_token(),
+                        device_lists_stream_id=device_lists_stream_id,
                         joined_via=origin,
                     )
 
@@ -789,7 +801,10 @@ class FederationHandler:
             # have. Hence we fire off the background task, but don't wait for it.
 
             run_as_background_process(
-                "handle_queued_pdus", self._handle_queued_pdus, room_queue
+                "handle_queued_pdus",
+                self.server_name,
+                self._handle_queued_pdus,
+                room_queue,
             )
 
     async def do_knock(
@@ -1861,7 +1876,9 @@ class FederationHandler:
                         )
 
         run_as_background_process(
-            desc="sync_partial_state_room", func=_sync_partial_state_room_wrapper
+            desc="sync_partial_state_room",
+            server_name=self.server_name,
+            func=_sync_partial_state_room_wrapper,
         )
 
     async def _sync_partial_state_room(

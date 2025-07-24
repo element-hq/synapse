@@ -610,6 +610,39 @@ manhole_settings:
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 ```
 ---
+### `http_proxy`
+
+*(string|null)* Proxy server to use for HTTP requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+```
+---
+### `https_proxy`
+
+*(string|null)* Proxy server to use for HTTPS requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+```
+---
+### `no_proxy_hosts`
+
+*(array)* List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+```
+---
 ### `dummy_events_threshold`
 
 *(integer)* Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an `org.matrix.dummy_event` event, which will reduce the forward extremities in the room.
@@ -1925,9 +1958,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_delayed_event_mgmt:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -1962,6 +1994,31 @@ Example configuration:
 rc_reports:
   per_second: 2.0
   burst_count: 20.0
+```
+---
+### `rc_room_creation`
+
+*(object)* Sets rate limits for how often users are able to create rooms.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_room_creation:
+  per_user:
+    per_second: 0.016
+    burst_count: 10.0
+```
+
+Example configuration:
+```yaml
+rc_room_creation:
+  per_second: 1.0
+  burst_count: 5.0
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
@@ -2363,7 +2420,7 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 
 The file should be a plain text file, containing only the public key. Synapse reads the public key from the given file once at startup.
 
-_Added in Synapse 1.134.0._
+_Added in Synapse 1.135.0._
 
 Defaults to `null`.
 
@@ -2387,7 +2444,7 @@ recaptcha_private_key: YOUR_PRIVATE_KEY
 
 The file should be a plain text file, containing only the private key. Synapse reads the private key from the given file once at startup.
 
-_Added in Synapse 1.134.0._
+_Added in Synapse 1.135.0._
 
 Defaults to `null`.
 
@@ -3808,7 +3865,11 @@ encryption_enabled_by_default_for_room_type: invite
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): Defines whether users can search the user directory. If false then empty responses are returned to all queries. Defaults to `true`.
+* `enabled` (boolean): Defines whether users can search the user directory. If `false` then empty responses are returned to all queries.
+
+  *Warning: While the homeserver may determine which subset of users are searched, the Matrix specification requires homeservers to include (at minimum) users visible in public rooms and users sharing a room with the requester. Using `false` improves performance but violates this requirement.*
+
+  Defaults to `true`.
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 
@@ -4337,6 +4398,8 @@ This setting has the following sub-options:
 * `presence` (string): Name of a worker assigned to the `presence` stream.
 
 * `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
+
+* `device_lists` (string): Name of a worker assigned to the `device_lists` stream.
 
 Example configuration:
 ```yaml

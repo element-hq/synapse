@@ -148,7 +148,10 @@ class EventFederationWorkerStore(
 
         # Cache of event ID to list of auth event IDs and their depths.
         self._event_auth_cache: LruCache[str, List[Tuple[str, int]]] = LruCache(
-            500000, "_event_auth_cache", size_callback=len
+            max_size=500000,
+            server_name=self.server_name,
+            cache_name="_event_auth_cache",
+            size_callback=len,
         )
 
         # Flag used by unit tests to disable fallback when there is no chain cover

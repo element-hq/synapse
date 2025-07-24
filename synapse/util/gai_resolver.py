@@ -97,7 +97,7 @@ _GETADDRINFO_RESULT = List[
         SocketKind,
         int,
         str,
-        Union[Tuple[str, int], Tuple[str, int, int, int]],
+        Union[Tuple[str, int], Tuple[str, int, int, int], Tuple[int, bytes]],
     ]
 ]
 

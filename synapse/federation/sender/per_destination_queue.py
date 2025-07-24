@@ -91,7 +91,7 @@ class PerDestinationQueue:
         transaction_manager: "synapse.federation.sender.TransactionManager",
         destination: str,
     ):
-        self._server_name = hs.hostname
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
         self._store = hs.get_datastores().main
@@ -129,6 +129,8 @@ class PerDestinationQueue:
 
         # The stream_ordering of the most recent PDU that was discarded due to
         # being in catch-up mode.
+        # Can be set to zero if no PDU has been discarded since the last time
+        # we queried for new PDUs during catch-up.
         self._catchup_last_skipped: int = 0
 
         # Cache of the last successfully-transmitted stream ordering for this
@@ -309,6 +311,7 @@ class PerDestinationQueue:
 
         run_as_background_process(
             "federation_transaction_transmission_loop",
+            self.server_name,
             self._transaction_transmission_loop,
         )
 
@@ -320,7 +323,12 @@ class PerDestinationQueue:
             # This will throw if we wouldn't retry. We do this here so we fail
             # quickly, but we will later check this again in the http client,
             # hence why we throw the result away.
-            await get_retry_limiter(self._destination, self._clock, self._store)
+            await get_retry_limiter(
+                destination=self._destination,
+                our_server_name=self.server_name,
+                clock=self._clock,
+                store=self._store,
+            )
 
             if self._catching_up:
                 # we potentially need to catch-up first
@@ -462,8 +470,18 @@ class PerDestinationQueue:
                 # of a race condition, so we check that no new events have been
                 # skipped due to us being in catch-up mode
 
-                if self._catchup_last_skipped > last_successful_stream_ordering:
+                if (
+                    self._catchup_last_skipped != 0
+                    and self._catchup_last_skipped > last_successful_stream_ordering
+                ):
                     # another event has been skipped because we were in catch-up mode
+                    # As an exception to this case: we can hit this branch if the
+                    # room has been purged whilst we have been looping.
+                    # In that case we avoid hot-looping by resetting the 'catch-up skipped
+                    # PDU' flag.
+                    # Then if there is still no progress to be made at the next iteration,
+                    # we can exit catch-up mode.
+                    self._catchup_last_skipped = 0
                     continue
 
                 # we are done catching up!
@@ -554,7 +572,7 @@ class PerDestinationQueue:
                     new_pdus = await filter_events_for_server(
                         self._storage_controllers,
                         self._destination,
-                        self._server_name,
+                        self.server_name,
                         new_pdus,
                         redact=False,
                         filter_out_erased_senders=True,
@@ -601,7 +619,7 @@ class PerDestinationQueue:
         # Send at most limit EDUs for receipts.
         for content in self._pending_receipt_edus[:limit]:
             yield Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=EduTypes.RECEIPT,
                 content=content,
@@ -627,7 +645,7 @@ class PerDestinationQueue:
         )
         edus = [
             Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=edu_type,
                 content=content,
@@ -654,7 +672,7 @@ class PerDestinationQueue:
 
         edus = [
             Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=EduTypes.DIRECT_TO_DEVICE,
                 content=content,
@@ -727,7 +745,7 @@ class _TransactionQueueManager:
 
             pending_edus.append(
                 Edu(
-                    origin=self.queue._server_name,
+                    origin=self.queue.server_name,
                     destination=self.queue._destination,
                     edu_type=EduTypes.PRESENCE,
                     content={"push": presence_to_add},

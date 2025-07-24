@@ -174,6 +174,7 @@ def login_id_phone_to_thirdparty(identifier: JsonDict) -> Dict[str, str]:
 
     # Accept both "phone" and "number" as valid keys in m.id.phone
     phone_number = identifier.get("phone", identifier["number"])
+    assert isinstance(phone_number, str)
 
     # Convert user-provided phone number to a consistent representation
     msisdn = phone_number_to_msisdn(identifier["country"], phone_number)
@@ -198,6 +199,7 @@ class AuthHandler:
     SESSION_EXPIRE_MS = 48 * 60 * 60 * 1000
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
@@ -246,6 +248,7 @@ class AuthHandler:
                 run_as_background_process,
                 5 * 60 * 1000,
                 "expire_old_sessions",
+                self.server_name,
                 self._expire_old_sessions,
             )
 
@@ -269,8 +272,6 @@ class AuthHandler:
         self._sso_account_deactivated_template = (
             hs.config.sso.sso_account_deactivated_template
         )
-
-        self._server_name = hs.config.server.server_name
 
         # cast to tuple for use with str.startswith
         self._whitelisted_sso_clients = tuple(hs.config.sso.sso_client_whitelist)
@@ -1856,7 +1857,7 @@ class AuthHandler:
         html = self._sso_redirect_confirm_template.render(
             display_url=display_url,
             redirect_url=redirect_url,
-            server_name=self._server_name,
+            server_name=self.server_name,
             new_user=new_user,
             user_id=registered_user_id,
             user_profile=user_profile_data,
