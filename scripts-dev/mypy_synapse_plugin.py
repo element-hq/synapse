@@ -59,13 +59,19 @@ PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
 
 @attr.s(auto_attribs=True)
 class ArgLocation:
-    arg_name: str
-    arg_position: int
+    keyword_name: str
+    """
+    The keyword argument name for this argument
+    """
+    position: int
+    """
+    The positional index of this argument
+    """
 
 
-# Ideally, we'd be able to cross-check this list in the lint itself by checking for
-# anything that inherits from `MetricWrapperBase` or `Metric` but I don't know of a good
-# mypy hook to inspect this.
+# FIXME: Ideally, we'd be able to cross-check this list to make sure it includes
+# everything as part of the lints by checking for anything that inherits from
+# `MetricWrapperBase` or `Metric` but I don't know of a good mypy hook to inspect this.
 prometheus_metric_fullname_to_label_arg_map = {
     "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Counter": ArgLocation("labelnames", 2),
@@ -89,6 +95,9 @@ prometheus_metric_fullname_to_label_arg_map = {
 """
 Map from the fullname of the Prometheus `Metric`/`Collector` classes to the keyword
 argument name and positional index of the label names.
+
+This is useful because different metrics have different signatures for passing in label
+names and we just need to know where to look.
 """
 
 
@@ -100,7 +109,8 @@ class SynapsePlugin(Plugin):
         # updated all of the metrics, see
         # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
-            "prometheus_client.metrics.Gauge",
+            # "prometheus_client.metrics.Gauge",
+            "prometheus_client.metrics_core.GaugeMetricFamily",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592
         ):
@@ -152,7 +162,8 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     arg_location = prometheus_metric_fullname_to_label_arg_map.get(fullname)
     assert arg_location is not None, (
         f"Expected to find {fullname} in `prometheus_metric_fullname_to_label_arg_map`, "
-        "but it was not found. This is a problem with our custom mypy plugin. Please add it to the map."
+        f"but it was not found. This is a problem with our custom mypy plugin. "
+        f"Please add it to the map. Context: {ctx.context}"
     )
 
     # Sanity check the arguments are still as expected in this version of
@@ -160,12 +171,12 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     #
     # `signature.arg_names` should be: ["name", "documentation", "labelnames", ...]
     if (
-        len(signature.arg_names) < (arg_location.arg_position + 1)
-        or signature.arg_names[arg_location.arg_position] != arg_location.arg_name
+        len(signature.arg_names) < (arg_location.position + 1)
+        or signature.arg_names[arg_location.position] != arg_location.keyword_name
     ):
         ctx.api.fail(
             f"Expected the 3rd argument of {signature.name} to be 'labelnames', but got "
-            f"{signature.arg_names[arg_location.arg_position]}",
+            f"{signature.arg_names[arg_location.position]}",
             ctx.context,
         )
         return signature
@@ -189,8 +200,8 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     # ]
     # ```
     labelnames_arg_expression = (
-        ctx.args[arg_location.arg_position][0]
-        if len(ctx.args[arg_location.arg_position]) > 0
+        ctx.args[arg_location.position][0]
+        if len(ctx.args[arg_location.position]) > 0
         else None
     )
     if isinstance(labelnames_arg_expression, (ListExpr, TupleExpr)):
