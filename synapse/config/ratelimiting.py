@@ -241,6 +241,12 @@ class RatelimitConfig(Config):
             defaults={"per_second": 1, "burst_count": 5},
         )
 
+        self.rc_room_creation = RatelimitSettings.parse(
+            config,
+            "rc_room_creation",
+            defaults={"per_second": 0.016, "burst_count": 10},
+        )
+
         self.rc_reports = RatelimitSettings.parse(
             config,
             "rc_reports",

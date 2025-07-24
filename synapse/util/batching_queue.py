@@ -85,6 +85,8 @@ class BatchingQueue(Generic[V, R]):
     Args:
         name: A name for the queue, used for logging contexts and metrics.
             This must be unique, otherwise the metrics will be wrong.
+        server_name: The homeserver name of the server (used to label metrics)
+            (this should be `hs.hostname`).
         clock: The clock to use to schedule work.
         process_batch_callback: The callback to to be run to process a batch of
             work.
@@ -92,11 +94,14 @@ class BatchingQueue(Generic[V, R]):
 
     def __init__(
         self,
+        *,
         name: str,
+        server_name: str,
         clock: Clock,
         process_batch_callback: Callable[[List[V]], Awaitable[R]],
     ):
         self._name = name
+        self.server_name = server_name
         self._clock = clock
 
         # The set of keys currently being processed.
@@ -135,7 +140,9 @@ class BatchingQueue(Generic[V, R]):
         # If we're not currently processing the key fire off a background
         # process to start processing.
         if key not in self._processing_keys:
-            run_as_background_process(self._name, self._process_queue, key)
+            run_as_background_process(
+                self._name, self.server_name, self._process_queue, key
+            )
 
         with self._number_in_flight_metric.track_inprogress():
             return await make_deferred_yieldable(d)

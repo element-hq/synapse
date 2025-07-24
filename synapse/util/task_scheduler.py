@@ -101,7 +101,9 @@ class TaskScheduler:
 
     def __init__(self, hs: "HomeServer"):
         self._hs = hs
-        self.server_name = hs.hostname
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._running_tasks: Set[str] = set()
@@ -355,7 +357,7 @@ class TaskScheduler:
             finally:
                 self._launching_new_tasks = False
 
-        run_as_background_process("launch_scheduled_tasks", inner)
+        run_as_background_process("launch_scheduled_tasks", self.server_name, inner)
 
     @wrap_as_background_process("clean_scheduled_tasks")
     async def _clean_scheduled_tasks(self) -> None:
@@ -486,4 +488,4 @@ class TaskScheduler:
 
         self._running_tasks.add(task.id)
         await self.update_task(task.id, status=TaskStatus.ACTIVE)
-        run_as_background_process(f"task-{task.action}", wrapper)
+        run_as_background_process(f"task-{task.action}", self.server_name, wrapper)
