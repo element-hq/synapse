@@ -41,7 +41,7 @@ from unittest.mock import Mock
 from twisted.internet.defer import Deferred
 from twisted.internet.error import ConnectionDone
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import MemoryReactorClock
+from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
 from synapse.http.server import (

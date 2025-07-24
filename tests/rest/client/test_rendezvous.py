@@ -22,7 +22,7 @@
 from typing import Dict
 from urllib.parse import urlparse
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.rest.client import rendezvous

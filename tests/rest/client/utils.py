@@ -42,7 +42,7 @@ from urllib.parse import urlencode
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactorClock
+from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
 from synapse.api.constants import Membership, ReceiptTypes

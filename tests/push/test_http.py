@@ -23,7 +23,7 @@ from unittest.mock import Mock
 from parameterized import parameterized
 
 from twisted.internet.defer import Deferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.logging.context import make_deferred_yieldable

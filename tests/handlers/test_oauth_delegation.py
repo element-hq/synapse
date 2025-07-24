@@ -33,7 +33,7 @@ from signedjson.key import (
 )
 from signedjson.sign import sign_json
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import (
     AuthError,

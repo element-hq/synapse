@@ -19,7 +19,7 @@
 #
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import ApplicationService
 from synapse.rest import admin

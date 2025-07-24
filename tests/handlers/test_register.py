@@ -22,7 +22,7 @@
 from typing import Any, Collection, List, Optional, Tuple
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.constants import UserTypes

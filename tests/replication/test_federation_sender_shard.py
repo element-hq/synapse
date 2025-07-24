@@ -28,7 +28,7 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersion

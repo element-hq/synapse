@@ -21,7 +21,7 @@
 from typing import List
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.server import HomeServer

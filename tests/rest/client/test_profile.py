@@ -27,7 +27,7 @@ from typing import Any, Dict, Optional
 
 from canonicaljson import encode_canonical_json
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
