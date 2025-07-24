@@ -466,7 +466,7 @@ class PusherPool:
         if self._delete_all_pushers_for_user_client is not None:
             await self._delete_all_pushers_for_user_client(user_id=user_id)
         else:
-            await self.store.delete_all_pushers_for_user(user_id)
+            await self.store.delete_all_pushers_for_user(user_id=user_id)
 
     def maybe_stop_pusher(self, app_id: str, pushkey: str, user_id: str) -> None:
         """Stops a pusher with the given app ID and push key if one is running.
