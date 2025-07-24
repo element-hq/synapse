@@ -184,7 +184,7 @@ service-identity = ">=18.1.0"
 # lives hard (as of 2025-07, distro support is Ubuntu LTS: 22.1, Debian stable: 22.4,
 # RHEL 9: 22.10)
 Twisted = {extras = ["tls"], version = ">=21.2.0"}
-treq = ">=15.1"
+treq = ">=21.5.0"
 # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
 pyOpenSSL = ">=16.0.0"
 PyYAML = ">=5.3"
