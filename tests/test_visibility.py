@@ -401,14 +401,19 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
             self.hs.get_account_data_handler().add_account_data_for_user(
                 "@admin:test",
                 AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
-                {"return_soft_failed_events": False, "return_policy_server_spammy_events": True},
+                {
+                    "return_soft_failed_events": False,
+                    "return_policy_server_spammy_events": True,
+                },
             )
         )
 
         # Sanity checks
         self.assertEqual(True, events_to_filter[1].internal_metadata.soft_failed)
         self.assertEqual(True, events_to_filter[2].internal_metadata.soft_failed)
-        self.assertEqual(True, events_to_filter[2].internal_metadata.policy_server_spammy)
+        self.assertEqual(
+            True, events_to_filter[2].internal_metadata.policy_server_spammy
+        )
 
         # Do filter & assert
         filtered_events = self.get_success(
@@ -443,14 +448,19 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
             self.hs.get_account_data_handler().add_account_data_for_user(
                 "@admin:test",
                 AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
-                {"return_soft_failed_events": True, "return_policy_server_spammy_events": True},
+                {
+                    "return_soft_failed_events": True,
+                    "return_policy_server_spammy_events": True,
+                },
             )
         )
 
         # Sanity checks
         self.assertEqual(True, events_to_filter[1].internal_metadata.soft_failed)
         self.assertEqual(True, events_to_filter[2].internal_metadata.soft_failed)
-        self.assertEqual(True, events_to_filter[2].internal_metadata.policy_server_spammy)
+        self.assertEqual(
+            True, events_to_filter[2].internal_metadata.policy_server_spammy
+        )
 
         # Do filter & assert
         filtered_events = self.get_success(
@@ -461,7 +471,10 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
             )
         )
         self.assertEqual(
-            [e.event_id for e in [self.regular_event, self.soft_failed_event, self.spammy_event]],
+            [
+                e.event_id
+                for e in [self.regular_event, self.soft_failed_event, self.spammy_event]
+            ],
             [e.event_id for e in filtered_events],
         )
 
@@ -690,5 +703,8 @@ async def inject_message_event(
         sender=sender,
         room_id=room_id,
         content={"body": body, "msgtype": "m.text"},
-        internal_metadata={"soft_failed": soft_failed, "policy_server_spammy": policy_server_spammy},
+        internal_metadata={
+            "soft_failed": soft_failed,
+            "policy_server_spammy": policy_server_spammy,
+        },
     )
