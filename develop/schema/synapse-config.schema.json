@@ -1928,6 +1928,22 @@
         }
       ]
     },
+    "rc_room_creation": {
+      "$ref": "#/$defs/rc",
+      "description": "Sets rate limits for how often users are able to create rooms.",
+      "default": {
+        "per_user": {
+          "per_second": 0.016,
+          "burst_count": 10.0
+        }
+      },
+      "examples": [
+        {
+          "per_second": 1.0,
+          "burst_count": 5.0
+        }
+      ]
+    },
     "federation_rr_transactions_per_room_per_second": {
       "type": "integer",
       "description": "Sets outgoing federation transaction frequency for sending read-receipts, per-room.\n\nIf we end up trying to send out more read-receipts, they will get buffered up into fewer transactions.",

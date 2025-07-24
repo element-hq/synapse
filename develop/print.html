@@ -5627,6 +5627,29 @@ Setting this to a high value allows users to report content quickly, possibly in
   burst_count: 20.0
 </code></pre>
 <hr />
+<h3 id="rc_room_creation"><a class="header" href="#rc_room_creation"><code>rc_room_creation</code></a></h3>
+<p><em>(object)</em> Sets rate limits for how often users are able to create rooms.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>per_second</code> (number): Maximum number of requests a client can send per second.</p>
+</li>
+<li>
+<p><code>burst_count</code> (number): Maximum number of requests a client can send before being throttled.</p>
+</li>
+</ul>
+<p>Default configuration:</p>
+<pre><code class="language-yaml">rc_room_creation:
+  per_user:
+    per_second: 0.016
+    burst_count: 10.0
+</code></pre>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_room_creation:
+  per_second: 1.0
+  burst_count: 5.0
+</code></pre>
+<hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
 <p><em>(integer)</em> Sets outgoing federation transaction frequency for sending read-receipts, per-room.</p>
 <p>If we end up trying to send out more read-receipts, they will get buffered up into fewer transactions.</p>
