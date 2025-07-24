@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 from synapse.http.server import JsonResource
 from synapse.replication.http import (
     account_data,
+    deactivate_account,
     delayed_events,
     devices,
     federation,
@@ -66,3 +67,4 @@ class ReplicationRestResource(JsonResource):
             login.register_servlets(hs, self)
             register.register_servlets(hs, self)
             delayed_events.register_servlets(hs, self)
+            deactivate_account.register_servlets(hs, self)

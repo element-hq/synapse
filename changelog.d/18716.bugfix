@@ -1,0 +1,1 @@
+Fix user failing to deactivate with MAS when `/_synapse/mas` is handled by a worker.

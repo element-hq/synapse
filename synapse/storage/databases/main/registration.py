@@ -2596,6 +2596,36 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         await self.db_pool.runInteraction("delete_access_token", f)
 
+    async def user_set_password_hash(
+        self, user_id: str, password_hash: Optional[str]
+    ) -> None:
+        """
+        NB. This does *not* evict any cache because the one use for this
+            removes most of the entries subsequently anyway so it would be
+            pointless. Use flush_user separately.
+        """
+
+        def user_set_password_hash_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn, "users", {"name": user_id}, {"password_hash": password_hash}
+            )
+            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+
+        await self.db_pool.runInteraction(
+            "user_set_password_hash", user_set_password_hash_txn
+        )
+
+    async def add_user_pending_deactivation(self, user_id: str) -> None:
+        """
+        Adds a user to the table of users who need to be parted from all the rooms they're
+        in
+        """
+        await self.db_pool.simple_insert(
+            "users_pending_deactivation",
+            values={"user_id": user_id},
+            desc="add_user_pending_deactivation",
+        )
+
 
 class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
     def __init__(
@@ -2820,25 +2850,6 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         return next_id
 
-    async def user_set_password_hash(
-        self, user_id: str, password_hash: Optional[str]
-    ) -> None:
-        """
-        NB. This does *not* evict any cache because the one use for this
-            removes most of the entries subsequently anyway so it would be
-            pointless. Use flush_user separately.
-        """
-
-        def user_set_password_hash_txn(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_update_one_txn(
-                txn, "users", {"name": user_id}, {"password_hash": password_hash}
-            )
-            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-        await self.db_pool.runInteraction(
-            "user_set_password_hash", user_set_password_hash_txn
-        )
-
     async def user_set_consent_version(
         self, user_id: str, consent_version: str
     ) -> None:
@@ -2890,17 +2901,6 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
             self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
 
         await self.db_pool.runInteraction("user_set_consent_server_notice_sent", f)
-
-    async def add_user_pending_deactivation(self, user_id: str) -> None:
-        """
-        Adds a user to the table of users who need to be parted from all the rooms they're
-        in
-        """
-        await self.db_pool.simple_insert(
-            "users_pending_deactivation",
-            values={"user_id": user_id},
-            desc="add_user_pending_deactivation",
-        )
 
     async def validate_threepid_session(
         self, session_id: str, client_secret: str, token: str, current_ts: int
