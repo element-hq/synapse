@@ -160,6 +160,7 @@ from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     LaterGauge,
     event_processing_loop_counter,
     event_processing_loop_room_count,
@@ -702,10 +703,12 @@ class FederationSender(AbstractFederationSender):
                     assert ts is not None
 
                     synapse.metrics.event_processing_lag.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(now - ts)
                     synapse.metrics.event_processing_last_ts.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(ts)
 
                     events_processed_counter.inc(len(event_entries))
@@ -717,7 +720,7 @@ class FederationSender(AbstractFederationSender):
                 event_processing_loop_counter.labels("federation_sender").inc()
 
                 synapse.metrics.event_processing_positions.labels(
-                    "federation_sender"
+                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
                 ).set(next_token)
 
         finally:

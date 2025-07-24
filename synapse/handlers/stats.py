@@ -32,7 +32,7 @@ from typing import (
 )
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.metrics import event_processing_positions
+from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import JsonDict
@@ -147,7 +147,9 @@ class StatsHandler:
 
             logger.debug("Handled room stats to %s -> %s", self.pos, max_pos)
 
-            event_processing_positions.labels("stats").set(max_pos)
+            event_processing_positions.labels(
+                name="stats", **{SERVER_NAME_LABEL: self.server_name}
+            ).set(max_pos)
 
             self.pos = max_pos
 
