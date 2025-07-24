@@ -30,7 +30,7 @@ from twisted.web.resource import Resource
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.media.filepath import MediaFilePaths
-from synapse.rest.client import login, profile, room
+from synapse.rest.client import login, profile, room, media
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -207,6 +207,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         login.register_servlets,
         profile.register_servlets,
         room.register_servlets,
+        media.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
