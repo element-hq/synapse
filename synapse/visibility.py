@@ -117,29 +117,33 @@ async def filter_events_for_client(
     # We copy the events list to guarantee any modifications we make will only
     # happen within the function.
     events_before_filtering = events.copy()
+    # Default case is to *exclude* soft-failed events
+    events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
-    if not (
+    if (
         filter_send_to_client
-        and (
-            client_config.return_soft_failed_events
-            or client_config.return_policy_server_spammy_events
-        )
         and await storage.main.is_server_admin(UserID.from_string(user_id))
     ):
-        # `return_soft_failed_events` implies `return_policy_server_spammy_events`, so
-        # we want to check when they've asked for *just* `return_policy_server_spammy_events`
-        if not client_config.return_soft_failed_events:
+        if client_config.return_soft_failed_events:
+            # The user has requested that all events be included, so do that.
+            # We copy the list for mutation safety.
+            events = events.copy()
+        elif (
+            not client_config.return_soft_failed_events
+            and client_config.return_policy_server_spammy_events
+        ):
+            # Include events that were soft failed by a policy server (marked spammy),
+            # but exclude all other soft failed events. We also want to include all
+            # not-soft-failed events, per usual operation.
             events = [
                 e
                 for e in events
-                # Return non-soft-failed events as well as those explicitly marked
-                # as spam by a policy server. This excludes events that were soft
-                # failed by other means.
                 if not e.internal_metadata.is_soft_failed()
                 or e.internal_metadata.policy_server_spammy
             ]
-        else:
-            events = [e for e in events if not e.internal_metadata.is_soft_failed()]
+        # else - no change in behaviour; use default case
+    # else - no change in behaviour; use default case
+
     if len(events_before_filtering) != len(events):
         if filtered_event_logger.isEnabledFor(logging.DEBUG):
             filtered_event_logger.debug(

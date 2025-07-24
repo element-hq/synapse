@@ -22,5 +22,5 @@ class AdminClientConfig:
                 "return_soft_failed_events", False
             )
             self.return_policy_server_spammy_events = account_data.get(
-                "return_policy_server_spammy_events", False
+                "return_policy_server_spammy_events", self.return_soft_failed_events
             )
