@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventUnsignedContentFields, AccountDataTypes
+from synapse.api.constants import AccountDataTypes, EventUnsignedContentFields
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
