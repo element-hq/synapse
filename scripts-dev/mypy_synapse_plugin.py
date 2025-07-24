@@ -129,7 +129,6 @@ class SynapsePlugin(Plugin):
     def get_method_signature_hook(
         self, fullname: str
     ) -> Optional[Callable[[MethodSigContext], CallableType]]:
-        # print(f"m fullname={fullname}")
         if fullname.startswith(
             (
                 "synapse.util.caches.descriptors.CachedFunction.__call__",
