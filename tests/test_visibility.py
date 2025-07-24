@@ -303,6 +303,16 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
                 soft_failed=True,
             )
         )
+        self.spammy_event = self.get_success(
+            inject_message_event(
+                self.hs,
+                self.room_id,
+                "@admin:test",
+                body="spammy",
+                soft_failed=True,
+                policy_server_spammy=True,
+            )
+        )
 
     def test_normal_operation_as_admin(self) -> None:
         # `filter_events_for_client` shouldn't include soft failed events by default
@@ -348,12 +358,15 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
 
         # Inject client config
         self.get_success(
-            self.hs.get_storage_controllers().main.add_account_data_for_user(
+            self.hs.get_account_data_handler().add_account_data_for_user(
                 "@admin:test",
                 AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
                 {"return_soft_failed_events": True},
             )
         )
+
+        # Sanity check
+        self.assertEqual(True, events_to_filter[1].internal_metadata.soft_failed)
 
         # Do filter & assert
         filtered_events = self.get_success(
@@ -364,7 +377,91 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
             )
         )
         self.assertEqual(
-            [e.event_id for e in [self.soft_failed_event, self.regular_event]],
+            [e.event_id for e in [self.regular_event, self.soft_failed_event]],
+            [e.event_id for e in filtered_events],
+        )
+
+    def test_see_policy_server_spammy_events(self) -> None:
+        # `filter_events_for_client` should include policy server-flagged events, but
+        # not other soft-failed events, when asked.
+
+        # Reload events from DB
+        events_to_filter = [
+            self.get_success(
+                self.hs.get_storage_controllers().main.get_event(
+                    e.event_id,
+                    get_prev_content=True,
+                )
+            )
+            for e in [self.regular_event, self.soft_failed_event, self.spammy_event]
+        ]
+
+        # Inject client config
+        self.get_success(
+            self.hs.get_account_data_handler().add_account_data_for_user(
+                "@admin:test",
+                AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
+                {"return_soft_failed_events": False, "return_policy_server_spammy_events": True},
+            )
+        )
+
+        # Sanity checks
+        self.assertEqual(True, events_to_filter[1].internal_metadata.soft_failed)
+        self.assertEqual(True, events_to_filter[2].internal_metadata.soft_failed)
+        self.assertEqual(True, events_to_filter[2].internal_metadata.policy_server_spammy)
+
+        # Do filter & assert
+        filtered_events = self.get_success(
+            filter_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@admin:test",
+                events_to_filter,
+            )
+        )
+        self.assertEqual(
+            [e.event_id for e in [self.regular_event, self.spammy_event]],
+            [e.event_id for e in filtered_events],
+        )
+
+    def test_see_soft_failed_and_policy_server_spammy_events(self) -> None:
+        # `filter_events_for_client` should include both types of soft failed events
+        # when configured.
+
+        # Reload events from DB
+        events_to_filter = [
+            self.get_success(
+                self.hs.get_storage_controllers().main.get_event(
+                    e.event_id,
+                    get_prev_content=True,
+                )
+            )
+            for e in [self.regular_event, self.soft_failed_event, self.spammy_event]
+        ]
+
+        # Inject client config
+        self.get_success(
+            self.hs.get_account_data_handler().add_account_data_for_user(
+                "@admin:test",
+                AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
+                {"return_soft_failed_events": True, "return_policy_server_spammy_events": True},
+            )
+        )
+
+        # Sanity checks
+        self.assertEqual(True, events_to_filter[1].internal_metadata.soft_failed)
+        self.assertEqual(True, events_to_filter[2].internal_metadata.soft_failed)
+        self.assertEqual(True, events_to_filter[2].internal_metadata.policy_server_spammy)
+
+        # Do filter & assert
+        filtered_events = self.get_success(
+            filter_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@admin:test",
+                events_to_filter,
+            )
+        )
+        self.assertEqual(
+            [e.event_id for e in [self.regular_event, self.soft_failed_event, self.spammy_event]],
             [e.event_id for e in filtered_events],
         )
 
@@ -585,6 +682,7 @@ async def inject_message_event(
     sender: str,
     body: Optional[str] = "testytest",
     soft_failed: Optional[bool] = False,
+    policy_server_spammy: Optional[bool] = False,
 ) -> EventBase:
     return await inject_event(
         hs,
@@ -592,5 +690,5 @@ async def inject_message_event(
         sender=sender,
         room_id=room_id,
         content={"body": body, "msgtype": "m.text"},
-        internal_metadata={"soft_failed": soft_failed},
+        internal_metadata={"soft_failed": soft_failed, "policy_server_spammy": policy_server_spammy},
     )
