@@ -25,11 +25,13 @@ can crop up, e.g the cache descriptors.
 
 from typing import Callable, Optional, Tuple, Type, Union
 
+import attr
 import mypy.types
 from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
 from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, TupleExpr, Var
 from mypy.plugin import (
+    ClassDefContext,
     FunctionLike,
     FunctionSigContext,
     MethodSigContext,
@@ -55,10 +57,48 @@ PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
 )
 
 
+@attr.s(auto_attribs=True)
+class ArgLocation:
+    arg_name: str
+    arg_position: int
+
+
+# Ideally, we'd be able to cross-check this list in the lint itself by checking for
+# anything that inherits from `MetricWrapperBase` or `Metric` but I don't know of a good
+# mypy hook to inspect this.
+prometheus_metric_fullname_to_label_arg_map = {
+    "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics.Counter": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics.Histogram": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics.Gauge": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics.Summary": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics.Info": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics.Enum": ArgLocation("labelnames", 2),
+    "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.GaugeMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.SummaryMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.InfoMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.HistogramMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.GaugeHistogramMetricFamily": ArgLocation(
+        "labels", 3
+    ),
+    "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
+    # TODO: "synapse.metrics.GaugeHistogramMetricFamilyWithLabels": ArgLocation("labelnames", 4),
+}
+"""
+Map from the fullname of the Prometheus `Metric`/`Collector` classes to the keyword
+argument name and positional index of the label names.
+"""
+
+
 class SynapsePlugin(Plugin):
     def get_function_signature_hook(
         self, fullname: str
     ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
+        # TODO: Use `prometheus_metric_fullname_to_label_arg_map.keys()` once we've
+        # updated all of the metrics, see
+        # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
             "prometheus_client.metrics.Gauge",
             # TODO: Add other prometheus_client metrics that need checking as we
@@ -104,16 +144,28 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     check, e.g. `# type: ignore[missing-server-name-label]`.
     """
     # The true signature, this isn't being modified so this is what will be returned.
-    signature: CallableType = ctx.default_signature
+    signature = ctx.default_signature
+
+    # For whatever reason, the `fullname` here is different from the `fullname` we see
+    # in `get_function_signature_hook(...)` so let's get our familiar version.
+    fullname = signature.definition.fullname.removesuffix(".__init__")
+    arg_location = prometheus_metric_fullname_to_label_arg_map.get(fullname)
+    assert arg_location is not None, (
+        f"Expected to find {fullname} in `prometheus_metric_fullname_to_label_arg_map`, "
+        "but it was not found. This is a problem with our custom mypy plugin. Please add it to the map."
+    )
 
     # Sanity check the arguments are still as expected in this version of
     # `prometheus_client`. ex. `Counter(name, documentation, labelnames, ...)`
     #
     # `signature.arg_names` should be: ["name", "documentation", "labelnames", ...]
-    if len(signature.arg_names) < 3 or signature.arg_names[2] != "labelnames":
+    if (
+        len(signature.arg_names) < (arg_location.arg_position + 1)
+        or signature.arg_names[arg_location.arg_position] != arg_location.arg_name
+    ):
         ctx.api.fail(
             f"Expected the 3rd argument of {signature.name} to be 'labelnames', but got "
-            f"{signature.arg_names[2]}",
+            f"{signature.arg_names[arg_location.arg_position]}",
             ctx.context,
         )
         return signature
@@ -136,7 +188,11 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     #     ...
     # ]
     # ```
-    labelnames_arg_expression = ctx.args[2][0] if len(ctx.args[2]) > 0 else None
+    labelnames_arg_expression = (
+        ctx.args[arg_location.arg_position][0]
+        if len(ctx.args[arg_location.arg_position]) > 0
+        else None
+    )
     if isinstance(labelnames_arg_expression, (ListExpr, TupleExpr)):
         # Check if the `labelnames` argument includes the `server_name` label (`SERVER_NAME_LABEL`).
         for labelname_expression in labelnames_arg_expression.items:
