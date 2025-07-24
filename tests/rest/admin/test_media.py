@@ -30,7 +30,7 @@ from twisted.web.resource import Resource
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.media.filepath import MediaFilePaths
-from synapse.rest.client import login, profile, room, media
+from synapse.rest.client import login, media, profile, room
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -705,8 +705,8 @@ class QuarantineMediaByIDTestCase(_AdminMediaTests):
         self.assertFalse(channel.json_body)
 
         # Test that ALL similar media was quarantined.
-        for media in [self.media_id, self.media_id_2, self.media_id_3]:
-            media_info = self.get_success(self.store.get_local_media(media))
+        for media_ref in [self.media_id, self.media_id_2, self.media_id_3]:
+            media_info = self.get_success(self.store.get_local_media(media_ref))
             assert media_info is not None
             self.assertTrue(media_info.quarantined_by)
 
