@@ -2552,7 +2552,6 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         os.mkdir(self.storage_path)
         os.mkdir(self.media_store_path)
         config["media_store_path"] = self.media_store_path
-        config["enable_authenticated_media"] = True
 
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",

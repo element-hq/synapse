@@ -1260,10 +1260,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertIsNone(_port)
         return host, media_id
 
-    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_files(self) -> None:
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
+
+        self.register_user("user", "password")
+        access_token = self.login("user", "password")
 
         rel_file_path = self.media_repo.filepaths.url_cache_filepath_rel(media_id)
         media_store_path = os.path.join(self.media_store_path, rel_file_path)
@@ -1279,9 +1281,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # Check fetching
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{host}/{media_id}",
+            f"/_matrix/client/v1/media/download/{host}/{media_id}",
             shorthand=False,
             await_result=False,
+            access_token=access_token,
         )
         self.pump()
         self.assertEqual(channel.code, 200)
@@ -1292,9 +1295,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{host}/{media_id}",
+            f"/_matrix/client/v1/media/download/{host}/{media_id}",
             shorthand=False,
             await_result=False,
+            access_token=access_token,
         )
         self.pump()
         self.assertEqual(
@@ -1303,10 +1307,12 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "URL cache file was unexpectedly retrieved from a storage provider",
         )
 
-    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_thumbnails(self) -> None:
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
+
+        self.register_user("user", "password")
+        access_token = self.login("user", "password")
 
         rel_thumbnail_path = (
             self.media_repo.filepaths.url_cache_thumbnail_directory_rel(media_id)
@@ -1328,9 +1334,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # Check fetching
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
+            f"/_matrix/client/v1/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
             shorthand=False,
             await_result=False,
+            access_token=access_token,
         )
         self.pump()
         self.assertEqual(channel.code, 200)
@@ -1346,9 +1353,10 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
+            f"/_matrix/client/v1/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
             shorthand=False,
             await_result=False,
+            access_token=access_token,
         )
         self.pump()
         self.assertEqual(

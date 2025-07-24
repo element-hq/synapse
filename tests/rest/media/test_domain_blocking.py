@@ -93,7 +93,6 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
             # Disable downloads from a domain we won't be requesting downloads from.
             # This proves we haven't broken anything.
             "prevent_media_downloads_from": ["not-listed.com"],
-            "enable_authenticated_media": False,
         }
     )
     def test_remote_media_normally_unblocked(self) -> None:
@@ -101,10 +100,14 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         Tests to ensure that remote media is normally able to be downloaded
         when no domain block is in place.
         """
+        self.register_user("user", "password")
+        access_token = self.login("user", "password")
+
         response = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/evil.com/{self.remote_media_id}",
+            f"/_matrix/client/v1/media/download/evil.com/{self.remote_media_id}",
             shorthand=False,
+            access_token=access_token,
         )
         self.assertEqual(response.code, 200)
 
@@ -134,16 +137,19 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
             # This proves we haven't broken anything.
             "prevent_media_downloads_from": ["not-listed.com"],
             "dynamic_thumbnails": True,
-            "enable_authenticated_media": False,
         }
     )
     def test_remote_media_thumbnail_normally_unblocked(self) -> None:
         """
         Same test as test_remote_media_normally_unblocked but for thumbnails.
         """
+        self.register_user("user", "password")
+        access_token = self.login("user", "password")
+
         response = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/evil.com/{self.remote_media_id}?width=100&height=100",
+            f"/_matrix/client/v1/media/thumbnail/evil.com/{self.remote_media_id}?width=100&height=100",
             shorthand=False,
+            access_token=access_token,
         )
         self.assertEqual(response.code, 200)

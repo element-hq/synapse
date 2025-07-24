@@ -452,10 +452,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         time_now_ms: int,
         user_id: UserID,
     ) -> None:
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
+        # Media used to be optionally authenticated, but now we force-authenticate it
+        authenticated = True
 
         await self.db_pool.simple_insert(
             "local_media_repository",
@@ -481,10 +479,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         sha256: Optional[str] = None,
         quarantined_by: Optional[str] = None,
     ) -> None:
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
+        # Media used to be optionally authenticated, but now we force-authenticate it
+        authenticated = True
 
         await self.db_pool.simple_insert(
             "local_media_repository",
@@ -730,10 +726,8 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         filesystem_id: str,
         sha256: Optional[str],
     ) -> None:
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
+        # Media used to be optionally authenticated, but now we force-authenticate it
+        authenticated = True
 
         await self.db_pool.simple_insert(
             "remote_media_cache",

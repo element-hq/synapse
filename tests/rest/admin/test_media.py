@@ -127,7 +127,6 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual("Can only delete local media", channel.json_body["error"])
 
-    @override_config({"enable_authenticated_media": False})
     def test_delete_media(self) -> None:
         """
         Tests that delete a media is successfully
@@ -148,7 +147,7 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
         # Attempt to access media
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=self.admin_user_tok,
         )
@@ -185,7 +184,7 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
         # Attempt to access media
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=self.admin_user_tok,
         )
@@ -373,7 +372,6 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
-    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_date(self) -> None:
         """
         Tests that media is not deleted if it is newer than `before_ts`
@@ -411,7 +409,6 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
-    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_size(self) -> None:
         """
         Tests that media is not deleted if its size is smaller than or equal
@@ -447,7 +444,6 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
-    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_user_avatar(self) -> None:
         """
         Tests that we do not delete media if is used as a user avatar
@@ -492,7 +488,6 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
-    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_room_avatar(self) -> None:
         """
         Tests that we do not delete media if it is used as a room avatar
@@ -568,7 +563,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=self.admin_user_tok,
         )
