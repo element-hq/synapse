@@ -80,6 +80,11 @@ prometheus_metric_fullname_to_label_arg_map = {
     "prometheus_client.metrics.Summary": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Info": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Enum": ArgLocation("labelnames", 2),
+    # We don't include `prometheus_client.metrics_core.Metric` here because it "is
+    # intended only for internal use by the [Prometheus] instrumentation client" and
+    # custom collectors should use the metric families listed below instead.
+    # Additionally, it doesn't have a `labelnames` argument.
+    # "prometheus_client.metrics_core.Metric"
     "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
     "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
     "prometheus_client.metrics_core.GaugeMetricFamily": ArgLocation("labels", 3),
@@ -90,6 +95,7 @@ prometheus_metric_fullname_to_label_arg_map = {
         "labels", 3
     ),
     "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
+    # Our custom metrics:
     # TODO: "synapse.metrics.GaugeHistogramMetricFamilyWithLabels": ArgLocation("labelnames", 4),
 }
 """
