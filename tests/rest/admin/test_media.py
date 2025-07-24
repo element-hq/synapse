@@ -726,8 +726,8 @@ class QuarantineMediaByIDTestCase(_AdminMediaTests):
         self.assertFalse(channel.json_body)
 
         # Test that ALL similar media is now reset.
-        for media in [self.media_id, self.media_id_2, self.media_id_3]:
-            media_info = self.get_success(self.store.get_local_media(media))
+        for media_ref in [self.media_id, self.media_id_2, self.media_id_3]:
+            media_info = self.get_success(self.store.get_local_media(media_ref))
             assert media_info is not None
             self.assertFalse(media_info.quarantined_by)
 
