@@ -328,7 +328,7 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
             )
         )
         self.assertEqual(
-            [e.event_id for e in self.regular_event],
+            [e.event_id for e in [self.regular_event]],
             [e.event_id for e in filtered_events],
         )
 
@@ -347,10 +347,12 @@ class FilterEventsForServerAdminsTestCase(HomeserverTestCase):
         ]
 
         # Inject client config
-        self.hs.get_storage_controllers().main.add_account_data_for_user(
-            "@admin:test",
-            AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
-            {"return_soft_failed_events": True},
+        self.get_success(
+            self.hs.get_storage_controllers().main.add_account_data_for_user(
+                "@admin:test",
+                AccountDataTypes.SYNAPSE_ADMIN_CLIENT_CONFIG,
+                {"return_soft_failed_events": True},
+            )
         )
 
         # Do filter & assert
