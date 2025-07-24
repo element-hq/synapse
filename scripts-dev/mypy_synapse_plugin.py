@@ -162,10 +162,15 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     """
     # The true signature, this isn't being modified so this is what will be returned.
     signature = ctx.default_signature
+    definition = signature.definition
+    assert definition is not None, (
+        f"Expected the signature definition to be set for anything passed to "
+        f"`check_prometheus_metric_instantiation`, but it was None. Context: {ctx.context}"
+    )
 
     # For whatever reason, the `fullname` here is different from the `fullname` we see
     # in `get_function_signature_hook(...)` so let's get our familiar version.
-    fullname = signature.definition.fullname.removesuffix(".__init__")
+    fullname = definition.fullname.removesuffix(".__init__")
     arg_location = prometheus_metric_fullname_to_label_arg_map.get(fullname)
     assert arg_location is not None, (
         f"Expected to find {fullname} in `prometheus_metric_fullname_to_label_arg_map`, "
