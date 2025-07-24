@@ -178,8 +178,13 @@ signedjson = "^1.1.0"
 service-identity = ">=18.1.0"
 # Twisted 18.9 introduces some logger improvements that the structured
 # logger utilises
-Twisted = {extras = ["tls"], version = ">=18.9.0"}
-treq = ">=15.1"
+# Twisted 19.7.0 moves test helpers to a new module and deprecates the old location.
+# Twisted 21.2.0 introduces contextvar support.
+# We could likely bump this to 22.1 without making distro packagers'
+# lives hard (as of 2025-07, distro support is Ubuntu LTS: 22.1, Debian stable: 22.4,
+# RHEL 9: 22.10)
+Twisted = {extras = ["tls"], version = ">=21.2.0"}
+treq = ">=21.5.0"
 # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
 pyOpenSSL = ">=16.0.0"
 PyYAML = ">=5.3"
