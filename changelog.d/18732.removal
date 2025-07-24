@@ -1,0 +1,1 @@
+Remove the `enable_authenticated_media` config flag, causing new media to always require authentication to access. Previously, the flag defaulted to `true`.
