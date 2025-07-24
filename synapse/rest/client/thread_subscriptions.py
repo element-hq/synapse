@@ -1,5 +1,5 @@
 from http import HTTPStatus
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 from synapse._pydantic_compat import StrictBool
 from synapse.api.errors import Codes, NotFoundError, SynapseError
@@ -10,9 +10,11 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomID
 from synapse.types.rest import RequestBodyModel
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 
 class ThreadSubscriptionsRestServlet(RestServlet):
