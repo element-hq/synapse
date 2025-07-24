@@ -126,17 +126,14 @@ async def filter_events_for_client(
         if client_config.return_soft_failed_events:
             # The user has requested that all events be included, so do that.
             # We copy the list for mutation safety.
-            events = events.copy()
-        elif (
-            not client_config.return_soft_failed_events
-            and client_config.return_policy_server_spammy_events
-        ):
+            events = events_before_filtering.copy()
+        elif client_config.return_policy_server_spammy_events:
             # Include events that were soft failed by a policy server (marked spammy),
             # but exclude all other soft failed events. We also want to include all
             # not-soft-failed events, per usual operation.
             events = [
                 e
-                for e in events
+                for e in events_before_filtering
                 if not e.internal_metadata.is_soft_failed()
                 or e.internal_metadata.policy_server_spammy
             ]
