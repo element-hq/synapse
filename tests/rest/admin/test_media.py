@@ -46,6 +46,7 @@ class _AdminMediaTests(unittest.HomeserverTestCase):
         synapse.rest.admin.register_servlets,
         synapse.rest.admin.register_servlets_for_media_repo,
         login.register_servlets,
+        media.register_servlets,
     ]
 
     def create_resource_dict(self) -> Dict[str, Resource]:
