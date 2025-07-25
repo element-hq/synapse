@@ -209,7 +209,7 @@ IDs (3PIDs) to Matrix user IDs, as well as verifying the ownership of 3PIDs
 before creating that mapping.
 
 **Identity servers do not store accounts or credentials - these are stored and managed on homeservers.
-Identity Servers are just for mapping 3rd party IDs to matrix IDs.**
+Identity Servers are just for mapping 3rd Party IDs to Matrix IDs.**
 
 This process is highly security-sensitive, as there is an obvious risk of spam if it
 is too easy to sign up for Matrix accounts or harvest 3PID data. In the longer
