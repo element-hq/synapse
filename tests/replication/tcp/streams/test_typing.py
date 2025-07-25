@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 from unittest.mock import Mock
 
 from synapse.handlers.typing import RoomMember, TypingWriterHandler
@@ -99,75 +100,83 @@ class TypingStreamTestCase(BaseStreamTestCase):
         This is emulated by jumping the stream ahead, then reconnecting (which
         sends the proper position and RDATA).
         """
-        typing = self.hs.get_typing_handler()
-        assert isinstance(typing, TypingWriterHandler)
+        # A huge RDATA log line is triggered in this test, which breaks trial
+        # ref: https://github.com/twisted/twisted/issues/12482
+        server_logger = logging.getLogger("tests.server")
+        server_logger_was_disabled = server_logger.disabled
+        server_logger.disabled = True
+        try:
+            typing = self.hs.get_typing_handler()
+            assert isinstance(typing, TypingWriterHandler)
 
-        # Create a typing update before we reconnect so that there is a missing
-        # update to fetch.
-        typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=True)
+            # Create a typing update before we reconnect so that there is a missing
+            # update to fetch.
+            typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=True)
 
-        self.reconnect()
+            self.reconnect()
 
-        typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=True)
+            typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=True)
 
-        self.reactor.advance(0)
+            self.reactor.advance(0)
 
-        # We should now see an attempt to connect to the master
-        request = self.handle_http_replication_attempt()
-        self.assert_request_is_get_repl_stream_updates(request, "typing")
+            # We should now see an attempt to connect to the master
+            request = self.handle_http_replication_attempt()
+            self.assert_request_is_get_repl_stream_updates(request, "typing")
 
-        self.mock_handler.on_rdata.assert_called_once()
-        stream_name, _, token, rdata_rows = self.mock_handler.on_rdata.call_args[0]
-        self.assertEqual(stream_name, "typing")
-        self.assertEqual(1, len(rdata_rows))
-        row: TypingStream.TypingStreamRow = rdata_rows[0]
-        self.assertEqual(ROOM_ID, row.room_id)
-        self.assertEqual([USER_ID], row.user_ids)
+            self.mock_handler.on_rdata.assert_called_once()
+            stream_name, _, token, rdata_rows = self.mock_handler.on_rdata.call_args[0]
+            self.assertEqual(stream_name, "typing")
+            self.assertEqual(1, len(rdata_rows))
+            row: TypingStream.TypingStreamRow = rdata_rows[0]
+            self.assertEqual(ROOM_ID, row.room_id)
+            self.assertEqual([USER_ID], row.user_ids)
 
-        # Push the stream forward a bunch so it can be reset.
-        for i in range(100):
-            typing._push_update(
-                member=RoomMember(ROOM_ID, "@test%s:blue" % i), typing=True
+            # Push the stream forward a bunch so it can be reset.
+            for i in range(100):
+                typing._push_update(
+                    member=RoomMember(ROOM_ID, "@test%s:blue" % i), typing=True
+                )
+            self.reactor.advance(0)
+
+            # Disconnect.
+            self.disconnect()
+
+            # Reset the typing handler
+            self.hs.get_replication_streams()["typing"].last_token = 0
+            self.hs.get_replication_command_handler()._streams["typing"].last_token = 0
+            typing._latest_room_serial = 0
+            typing._typing_stream_change_cache = StreamChangeCache(
+                name="TypingStreamChangeCache",
+                server_name=self.hs.hostname,
+                current_stream_pos=typing._latest_room_serial,
             )
-        self.reactor.advance(0)
+            typing._reset()
 
-        # Disconnect.
-        self.disconnect()
+            # Reconnect.
+            self.reconnect()
+            self.pump(0.1)
 
-        # Reset the typing handler
-        self.hs.get_replication_streams()["typing"].last_token = 0
-        self.hs.get_replication_command_handler()._streams["typing"].last_token = 0
-        typing._latest_room_serial = 0
-        typing._typing_stream_change_cache = StreamChangeCache(
-            name="TypingStreamChangeCache",
-            server_name=self.hs.hostname,
-            current_stream_pos=typing._latest_room_serial,
-        )
-        typing._reset()
+            # We should now see an attempt to connect to the master
+            request = self.handle_http_replication_attempt()
+            self.assert_request_is_get_repl_stream_updates(request, "typing")
 
-        # Reconnect.
-        self.reconnect()
-        self.pump(0.1)
+            # Reset the test code.
+            self.mock_handler.on_rdata.reset_mock()
+            self.mock_handler.on_rdata.assert_not_called()
 
-        # We should now see an attempt to connect to the master
-        request = self.handle_http_replication_attempt()
-        self.assert_request_is_get_repl_stream_updates(request, "typing")
+            # Push additional data.
+            typing._push_update(member=RoomMember(ROOM_ID_2, USER_ID_2), typing=False)
+            self.reactor.advance(0)
 
-        # Reset the test code.
-        self.mock_handler.on_rdata.reset_mock()
-        self.mock_handler.on_rdata.assert_not_called()
+            self.mock_handler.on_rdata.assert_called_once()
+            stream_name, _, token, rdata_rows = self.mock_handler.on_rdata.call_args[0]
+            self.assertEqual(stream_name, "typing")
+            self.assertEqual(1, len(rdata_rows))
+            row = rdata_rows[0]
+            self.assertEqual(ROOM_ID_2, row.room_id)
+            self.assertEqual([], row.user_ids)
 
-        # Push additional data.
-        typing._push_update(member=RoomMember(ROOM_ID_2, USER_ID_2), typing=False)
-        self.reactor.advance(0)
-
-        self.mock_handler.on_rdata.assert_called_once()
-        stream_name, _, token, rdata_rows = self.mock_handler.on_rdata.call_args[0]
-        self.assertEqual(stream_name, "typing")
-        self.assertEqual(1, len(rdata_rows))
-        row = rdata_rows[0]
-        self.assertEqual(ROOM_ID_2, row.room_id)
-        self.assertEqual([], row.user_ids)
-
-        # The token should have been reset.
-        self.assertEqual(token, 1)
+            # The token should have been reset.
+            self.assertEqual(token, 1)
+        finally:
+            server_logger.disabled = server_logger_was_disabled
