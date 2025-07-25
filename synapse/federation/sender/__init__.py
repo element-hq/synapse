@@ -160,6 +160,7 @@ from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     LaterGauge,
     event_processing_loop_counter,
     event_processing_loop_room_count,
@@ -189,11 +190,13 @@ logger = logging.getLogger(__name__)
 sent_pdus_destination_dist_count = Counter(
     "synapse_federation_client_sent_pdu_destinations_count",
     "Number of PDUs queued for sending to one or more destinations",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 sent_pdus_destination_dist_total = Counter(
     "synapse_federation_client_sent_pdu_destinations",
     "Total number of PDUs queued for sending across all destinations",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # Time (in s) to wait before trying to wake up destinations that have
@@ -296,6 +299,7 @@ class _DestinationWakeupQueue:
 
     Staggers waking up of per destination queues to ensure that we don't attempt
     to start TLS connections with many hosts all at once, leading to pinned CPU.
+
     """
 
     # The maximum duration in seconds between queuing up a destination and it
@@ -303,6 +307,10 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    server_name: str = attr.ib()
+    """
+    Our homeserver name (used to label metrics) (`hs.hostname`).
+    """
     clock: Clock = attr.ib()
     max_delay_s: int = attr.ib()
 
@@ -427,7 +435,7 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
@@ -435,6 +443,7 @@ class FederationSender(AbstractFederationSender):
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
+            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
@@ -477,7 +486,9 @@ class FederationSender(AbstractFederationSender):
 
         # fire off a processing loop in the background
         run_as_background_process(
-            "process_event_queue_for_federation", self._process_event_queue_loop
+            "process_event_queue_for_federation",
+            self.server_name,
+            self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:
@@ -700,13 +711,19 @@ class FederationSender(AbstractFederationSender):
                         "federation_sender"
                     ).set(ts)
 
-                    events_processed_counter.inc(len(event_entries))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(event_entries))
 
-                    event_processing_loop_room_count.labels("federation_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                event_processing_loop_counter.labels("federation_sender").inc()
+                event_processing_loop_counter.labels(
+                    name="federation_sender",
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
 
                 synapse.metrics.event_processing_positions.labels(
                     "federation_sender"
@@ -727,8 +744,12 @@ class FederationSender(AbstractFederationSender):
         if not destinations:
             return
 
-        sent_pdus_destination_dist_total.inc(len(destinations))
-        sent_pdus_destination_dist_count.inc()
+        sent_pdus_destination_dist_total.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(len(destinations))
+        sent_pdus_destination_dist_count.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         assert pdu.internal_metadata.stream_ordering
 

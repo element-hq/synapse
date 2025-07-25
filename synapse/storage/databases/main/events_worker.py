@@ -235,6 +235,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="events",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[
                 ("events", "instance_name", "stream_ordering"),
@@ -249,6 +250,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="backfill",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[
                 ("events", "instance_name", "stream_ordering"),
@@ -334,6 +336,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="un_partial_stated_event_stream",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[("un_partial_stated_event_stream", "instance_name", "stream_id")],
             sequence_name="un_partial_stated_event_stream_sequence",
@@ -363,6 +366,12 @@ class EventsWorkerStore(SQLBaseStore):
             unique=True,
             replaces_index="event_txn_id_device_id_txn_id",
         )
+
+        self._has_finished_sliding_sync_background_jobs = False
+        """
+        Flag to track when the sliding sync background jobs have
+        finished (so we don't have to keep querying it every time)
+        """
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
@@ -1138,7 +1147,9 @@ class EventsWorkerStore(SQLBaseStore):
                 should_start = False
 
         if should_start:
-            run_as_background_process("fetch_events", self._fetch_thread)
+            run_as_background_process(
+                "fetch_events", self.server_name, self._fetch_thread
+            )
 
     async def _fetch_thread(self) -> None:
         """Services requests for events from `_event_fetch_list`."""
@@ -2653,13 +2664,19 @@ class EventsWorkerStore(SQLBaseStore):
     async def have_finished_sliding_sync_background_jobs(self) -> bool:
         """Return if it's safe to use the sliding sync membership tables."""
 
-        return await self.db_pool.updates.have_completed_background_updates(
+        if self._has_finished_sliding_sync_background_jobs:
+            # as an optimisation, once the job finishes, don't issue another
+            # database transaction to check it, since it won't 'un-finish'
+            return True
+
+        self._has_finished_sliding_sync_background_jobs = await self.db_pool.updates.have_completed_background_updates(
             (
                 _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             )
         )
+        return self._has_finished_sliding_sync_background_jobs
 
     async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
         """

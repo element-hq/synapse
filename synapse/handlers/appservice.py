@@ -42,6 +42,7 @@ from synapse.events import EventBase
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     event_processing_loop_counter,
     event_processing_loop_room_count,
 )
@@ -68,12 +69,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter("synapse_handlers_appservice_events_processed", "")
+events_processed_counter = Counter(
+    "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 
 class ApplicationServicesHandler:
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
         self.is_mine_id = hs.is_mine_id
         self.appservice_api = hs.get_application_service_api()
@@ -166,7 +171,9 @@ class ApplicationServicesHandler:
                                 except Exception:
                                     logger.error("Application Services Failure")
 
-                            run_as_background_process("as_scheduler", start_scheduler)
+                            run_as_background_process(
+                                "as_scheduler", self.server_name, start_scheduler
+                            )
                             self.started_scheduler = True
 
                         # Fork off pushes to these services
@@ -203,13 +210,19 @@ class ApplicationServicesHandler:
                         "appservice_sender"
                     ).set(upper_bound)
 
-                    events_processed_counter.inc(len(events))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(events))
 
-                    event_processing_loop_room_count.labels("appservice_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                    event_processing_loop_counter.labels("appservice_sender").inc()
+                    event_processing_loop_counter.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     if events:
                         now = self.clock.time_msec()

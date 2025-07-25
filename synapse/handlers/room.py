@@ -66,6 +66,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.api.filtering import Filter
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase
@@ -131,7 +132,12 @@ class RoomCreationHandler:
         self.room_member_handler = hs.get_room_member_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
         self.config = hs.config
-        self.request_ratelimiter = hs.get_request_ratelimiter()
+        self.common_request_ratelimiter = hs.get_request_ratelimiter()
+        self.creation_ratelimiter = Ratelimiter(
+            store=self.store,
+            clock=self.clock,
+            cfg=self.config.ratelimiting.rc_room_creation,
+        )
 
         # Room state based off defined presets
         self._presets_dict: Dict[str, Dict[str, Any]] = {
@@ -203,7 +209,11 @@ class RoomCreationHandler:
         Raises:
             ShadowBanError if the requester is shadow-banned.
         """
-        await self.request_ratelimiter.ratelimit(requester)
+        await self.creation_ratelimiter.ratelimit(requester, update=False)
+
+        # then apply the ratelimits
+        await self.common_request_ratelimiter.ratelimit(requester)
+        await self.creation_ratelimiter.ratelimit(requester)
 
         user_id = requester.user.to_string()
 
@@ -766,11 +776,23 @@ class RoomCreationHandler:
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
         if ratelimit:
-            # Rate limit once in advance, but don't rate limit the individual
-            # events in the room — room creation isn't atomic and it's very
-            # janky if half the events in the initial state don't make it because
-            # of rate limiting.
-            await self.request_ratelimiter.ratelimit(requester)
+            # Limit the rate of room creations,
+            # using both the limiter specific to room creations as well
+            # as the general request ratelimiter.
+            #
+            # Note that we don't rate limit the individual
+            # events in the room — room creation isn't atomic and
+            # historically it was very janky if half the events in the
+            # initial state don't make it because of rate limiting.
+
+            # First check the room creation ratelimiter without updating it
+            # (this is so we don't consume a token if the other ratelimiter doesn't
+            # allow us to proceed)
+            await self.creation_ratelimiter.ratelimit(requester, update=False)
+
+            # then apply the ratelimits
+            await self.common_request_ratelimiter.ratelimit(requester)
+            await self.creation_ratelimiter.ratelimit(requester)
 
         if (
             self._server_notices_mxid is not None
