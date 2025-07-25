@@ -860,7 +860,8 @@ class HTTPPusherTests(HomeserverTestCase):
         # The other user joins
         self.helper.join(room=room, user=other_user_id, tok=other_access_token)
 
-        # The other user sends a message (ignored by dont_notify push rule set above)
+        # The other user sends a message (the recipient doesn't get a push because
+        # of the `org.matrix.msc3768.notify_in_app` push rule set above)
         self.helper.send(room, body="Hi!", tok=other_access_token)
         self.assertEqual(len(self.push_attempts), 0)
 
