@@ -76,6 +76,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
@@ -105,6 +106,7 @@ logger = logging.getLogger(__name__)
 soft_failed_event_counter = Counter(
     "synapse_federation_soft_failed_events_total",
     "Events received over federation that we marked as soft_failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # Added to debug performance and track progress on optimizations
@@ -2051,7 +2053,9 @@ class FederationEventHandler:
                     "hs": origin,
                 },
             )
-            soft_failed_event_counter.inc()
+            soft_failed_event_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
