@@ -38,6 +38,7 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging import opentracing
 from synapse.logging.opentracing import trace_with_opname
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.caches.response_cache import ResponseCache
 from synapse.util.cancellation import is_function_cancellable
@@ -57,7 +58,7 @@ _pending_outgoing_requests = Gauge(
 _outgoing_request_counter = Counter(
     "synapse_outgoing_replication_requests",
     "Number of outgoing replication requests, by replication method name and result",
-    ["name", "code"],
+    labelnames=["name", "code", SERVER_NAME_LABEL],
 )
 
 
@@ -205,6 +206,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
         parameter to specify which instance to hit (the instance must be in
         the `instance_map` config).
         """
+        server_name = hs.hostname
         clock = hs.get_clock()
         client = hs.get_replication_client()
         local_instance_name = hs.get_instance_name()
@@ -333,15 +335,27 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                     # We convert to SynapseError as we know that it was a SynapseError
                     # on the main process that we should send to the client. (And
                     # importantly, not stack traces everywhere)
-                    _outgoing_request_counter.labels(cls.NAME, e.code).inc()
+                    _outgoing_request_counter.labels(
+                        name=cls.NAME,
+                        code=e.code,
+                        **{SERVER_NAME_LABEL: server_name},
+                    ).inc()
                     raise e.to_synapse_error()
                 except Exception as e:
-                    _outgoing_request_counter.labels(cls.NAME, "ERR").inc()
+                    _outgoing_request_counter.labels(
+                        name=cls.NAME,
+                        code="ERR",
+                        **{SERVER_NAME_LABEL: server_name},
+                    ).inc()
                     raise SynapseError(
                         502, f"Failed to talk to {instance_name} process"
                     ) from e
 
-                _outgoing_request_counter.labels(cls.NAME, 200).inc()
+                _outgoing_request_counter.labels(
+                    name=cls.NAME,
+                    code=200,
+                    **{SERVER_NAME_LABEL: server_name},
+                ).inc()
 
                 # Wait on any streams that the remote may have written to.
                 for stream_name, position in result.pop(
