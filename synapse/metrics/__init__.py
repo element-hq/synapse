@@ -161,7 +161,7 @@ class LaterGauge(Collector):
 
     name: str
     desc: str
-    labels: Optional[StrSequence] = attr.ib(hash=False)
+    labelnames: Optional[StrSequence] = attr.ib(hash=False)
     # callback: should either return a value (if there are no labels for this metric),
     # or dict mapping from a label tuple to a value
     caller: Callable[
@@ -169,7 +169,7 @@ class LaterGauge(Collector):
     ]
 
     def collect(self) -> Iterable[Metric]:
-        g = GaugeMetricFamily(self.name, self.desc, labels=self.labels)
+        g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)
 
         try:
             calls = self.caller()
