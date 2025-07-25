@@ -355,3 +355,7 @@ class Direction(enum.Enum):
 class ProfileFields:
     DISPLAYNAME: Final = "displayname"
     AVATAR_URL: Final = "avatar_url"
+
+
+class PushRuleActions:
+    MSC_3768_NOTIFY_IN_APP: Final = "org.matrix.msc3768.notify_in_app"

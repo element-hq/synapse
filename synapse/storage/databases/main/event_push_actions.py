@@ -95,7 +95,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
+from synapse.api.constants import MAIN_TIMELINE, PushRuleActions, ReceiptTypes
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -1185,7 +1185,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 1
                 if "notify" in actions
                 or self.hs.config.experimental.msc3768_enabled
-                and "org.matrix.msc3768.notify_in_app" in actions
+                and PushRuleActions.MSC_3768_NOTIFY_IN_APP in actions
                 else 0
             )
             return (

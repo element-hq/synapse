@@ -26,7 +26,7 @@ from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, ReceiptTypes
+from synapse.api.constants import EventTypes, PushRuleActions, ReceiptTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -271,7 +271,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             type=EventTypes.Message,
             msgtype="m.text",
             body="world",
-            push_actions=[(USER_ID_2, ["org.matrix.msc3768.notify_in_app"])],
+            push_actions=[(USER_ID_2, [PushRuleActions.MSC_3768_NOTIFY_IN_APP])],
         )
         self.replicate()
         self.check(

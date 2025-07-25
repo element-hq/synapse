@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import attr
 
+from synapse.api.constants import PushRuleActions
 from synapse.api.errors import SynapseError, UnrecognizedRequestError
 from synapse.push.clientformat import format_push_rules_for_user
 from synapse.storage.push_rule import RuleNotFoundException
@@ -155,7 +156,7 @@ def check_actions(actions: List[Union[str, JsonDict]]) -> None:
         if a in ["notify", "dont_notify", "coalesce"]:
             pass
         # In-app only notification as per MSC3768
-        elif a == "org.matrix.msc3768.notify_in_app":
+        elif a == PushRuleActions.MSC_3768_NOTIFY_IN_APP:
             pass
         elif isinstance(a, dict) and "set_tweak" in a:
             pass

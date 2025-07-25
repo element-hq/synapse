@@ -26,6 +26,7 @@ from twisted.internet.defer import Deferred
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
+from synapse.api.constants import PushRuleActions
 from synapse.logging.context import make_deferred_yieldable
 from synapse.push import PusherConfig, PusherConfigException
 from synapse.rest.admin.experimental_features import ExperimentalFeature
@@ -844,7 +845,7 @@ class HTTPPusherTests(HomeserverTestCase):
         # Disable push notifications for this room -> user
         body = {
             "conditions": [{"kind": "event_match", "key": "room_id", "pattern": room}],
-            "actions": ["org.matrix.msc3768.notify_in_app"],
+            "actions": [PushRuleActions.MSC_3768_NOTIFY_IN_APP],
         }
         channel = self.make_request(
             "PUT",

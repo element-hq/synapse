@@ -43,6 +43,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    PushRuleActions,
     RelationTypes,
 )
 from synapse.api.room_versions import PushRuleRoomFlag
@@ -500,7 +501,7 @@ class BulkPushRuleEvaluator:
             if (
                 "notify" in actions
                 or self.hs.config.experimental.msc3768_enabled
-                and "org.matrix.msc3768.notify_in_app" in actions
+                and PushRuleActions.MSC_3768_NOTIFY_IN_APP in actions
             ):
                 # Push rules say we should notify the user of this event
                 actions_by_user[uid] = actions
