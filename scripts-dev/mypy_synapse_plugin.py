@@ -100,7 +100,7 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
 
     There are also some metrics that apply at the process level, such as CPU usage,
     Python garbage collection, and Twisted reactor tick time, which shouldn't have the
-    `SERVER_NAME_LABEL`. In those cases, use use a type ignore comment to disable the
+    `SERVER_NAME_LABEL`. In those cases, use a type ignore comment to disable the
     check, e.g. `# type: ignore[missing-server-name-label]`.
     """
     # The true signature, this isn't being modified so this is what will be returned.
