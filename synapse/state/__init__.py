@@ -609,11 +609,13 @@ _biggest_room_by_cpu_counter = Counter(
     "synapse_state_res_cpu_for_biggest_room_seconds",
     "CPU time spent performing state resolution for the single most expensive "
     "room for state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 _biggest_room_by_db_counter = Counter(
     "synapse_state_res_db_for_biggest_room_seconds",
     "Database time spent performing state resolution for the single most "
     "expensive room for state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 _cpu_times = Histogram(
@@ -890,7 +892,9 @@ class StateResolutionHandler:
 
         # report info on the single biggest to prometheus
         _, biggest_metrics = biggest[0]
-        prometheus_counter_metric.inc(extract_key(biggest_metrics))
+        prometheus_counter_metric.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            extract_key(biggest_metrics)
+        )
 
 
 def _make_state_cache_entry(

@@ -83,19 +83,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The number of times we are recalculating the current state
-state_delta_counter = Counter("synapse_storage_events_state_delta", "")
+state_delta_counter = Counter(
+    "synapse_storage_events_state_delta", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 # The number of times we are recalculating state when there is only a
 # single forward extremity
 state_delta_single_event_counter = Counter(
-    "synapse_storage_events_state_delta_single_event", ""
+    "synapse_storage_events_state_delta_single_event",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # The number of times we are reculating state when we could have resonably
 # calculated the delta when we calculated the state for an event we were
 # persisting.
 state_delta_reuse_delta_counter = Counter(
-    "synapse_storage_events_state_delta_reuse_delta", ""
+    "synapse_storage_events_state_delta_reuse_delta", "", labelnames=[SERVER_NAME_LABEL]
 )
 
 # The number of forward extremities for each new event.
@@ -118,16 +122,19 @@ stale_forward_extremities_counter = Histogram(
 state_resolutions_during_persistence = Counter(
     "synapse_storage_events_state_resolutions_during_persistence",
     "Number of times we had to do state res to calculate new current state",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 potential_times_prune_extremities = Counter(
     "synapse_storage_events_potential_times_prune_extremities",
     "Number of times we might be able to prune extremities",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 times_pruned_extremities = Counter(
     "synapse_storage_events_times_pruned_extremities",
     "Number of times we were actually be able to prune extremities",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -712,9 +719,11 @@ class EventsPersistenceStorageController:
             if all_single_prev_not_state:
                 return (new_forward_extremities, None)
 
-        state_delta_counter.inc()
+        state_delta_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
         if len(new_latest_event_ids) == 1:
-            state_delta_single_event_counter.inc()
+            state_delta_single_event_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
 
             # This is a fairly handwavey check to see if we could
             # have guessed what the delta would have been when
@@ -729,7 +738,9 @@ class EventsPersistenceStorageController:
             for ev, _ in ev_ctx_rm:
                 prev_event_ids = set(ev.prev_event_ids())
                 if latest_event_ids == prev_event_ids:
-                    state_delta_reuse_delta_counter.inc()
+                    state_delta_reuse_delta_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc()
                     break
 
         logger.debug("Calculating state delta for room %s", room_id)
@@ -1003,7 +1014,9 @@ class EventsPersistenceStorageController:
             ),
         )
 
-        state_resolutions_during_persistence.inc()
+        state_resolutions_during_persistence.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # If the returned state matches the state group of one of the new
         # forward extremities then we check if we are able to prune some state
@@ -1031,7 +1044,9 @@ class EventsPersistenceStorageController:
         """See if we can prune any of the extremities after calculating the
         resolved state.
         """
-        potential_times_prune_extremities.inc()
+        potential_times_prune_extremities.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # We keep all the extremities that have the same state group, and
         # see if we can drop the others.
@@ -1129,7 +1144,7 @@ class EventsPersistenceStorageController:
 
             return new_latest_event_ids
 
-        times_pruned_extremities.inc()
+        times_pruned_extremities.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         logger.info(
             "Pruning forward extremities in room %s: from %s -> %s",

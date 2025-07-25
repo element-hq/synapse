@@ -34,15 +34,21 @@ logger = logging.getLogger(__name__)
 
 # total number of responses served, split by method/servlet/tag
 response_count = Counter(
-    "synapse_http_server_response_count", "", ["method", "servlet", "tag"]
+    "synapse_http_server_response_count",
+    "",
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 requests_counter = Counter(
-    "synapse_http_server_requests_received", "", ["method", "servlet"]
+    "synapse_http_server_requests_received",
+    "",
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 outgoing_responses_counter = Counter(
-    "synapse_http_server_responses", "", ["method", "code"]
+    "synapse_http_server_responses",
+    "",
+    labelnames=["method", "code", SERVER_NAME_LABEL],
 )
 
 response_timer = Histogram(
@@ -52,15 +58,21 @@ response_timer = Histogram(
 )
 
 response_ru_utime = Counter(
-    "synapse_http_server_response_ru_utime_seconds", "sec", ["method", "servlet", "tag"]
+    "synapse_http_server_response_ru_utime_seconds",
+    "sec",
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 response_ru_stime = Counter(
-    "synapse_http_server_response_ru_stime_seconds", "sec", ["method", "servlet", "tag"]
+    "synapse_http_server_response_ru_stime_seconds",
+    "sec",
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 response_db_txn_count = Counter(
-    "synapse_http_server_response_db_txn_count", "", ["method", "servlet", "tag"]
+    "synapse_http_server_response_db_txn_count",
+    "",
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for db txns, excluding scheduling time, when processing
@@ -68,34 +80,42 @@ response_db_txn_count = Counter(
 response_db_txn_duration = Counter(
     "synapse_http_server_response_db_txn_duration_seconds",
     "",
-    ["method", "servlet", "tag"],
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for a db connection, when processing this request
 response_db_sched_duration = Counter(
     "synapse_http_server_response_db_sched_duration_seconds",
     "",
-    ["method", "servlet", "tag"],
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # size in bytes of the response written
 response_size = Counter(
-    "synapse_http_server_response_size", "", ["method", "servlet", "tag"]
+    "synapse_http_server_response_size",
+    "",
+    labelnames=["method", "servlet", "tag", SERVER_NAME_LABEL],
 )
 
 # In flight metrics are incremented while the requests are in flight, rather
 # than when the response was written.
 
 in_flight_requests_ru_utime = Counter(
-    "synapse_http_server_in_flight_requests_ru_utime_seconds", "", ["method", "servlet"]
+    "synapse_http_server_in_flight_requests_ru_utime_seconds",
+    "",
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 in_flight_requests_ru_stime = Counter(
-    "synapse_http_server_in_flight_requests_ru_stime_seconds", "", ["method", "servlet"]
+    "synapse_http_server_in_flight_requests_ru_stime_seconds",
+    "",
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 in_flight_requests_db_txn_count = Counter(
-    "synapse_http_server_in_flight_requests_db_txn_count", "", ["method", "servlet"]
+    "synapse_http_server_in_flight_requests_db_txn_count",
+    "",
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for db txns, excluding scheduling time, when processing
@@ -103,14 +123,14 @@ in_flight_requests_db_txn_count = Counter(
 in_flight_requests_db_txn_duration = Counter(
     "synapse_http_server_in_flight_requests_db_txn_duration_seconds",
     "",
-    ["method", "servlet"],
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 # seconds spent waiting for a db connection, when processing this request
 in_flight_requests_db_sched_duration = Counter(
     "synapse_http_server_in_flight_requests_db_sched_duration_seconds",
     "",
-    ["method", "servlet"],
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
 
 _in_flight_requests: Set["RequestMetrics"] = set()
@@ -149,6 +169,13 @@ LaterGauge(
 
 
 class RequestMetrics:
+    def __init__(self, our_server_name: str) -> None:
+        """
+        Args:
+            our_server_name: Our homeserver name (used to label metrics) (`hs.hostname`)
+        """
+        self.our_server_name = our_server_name
+
     def start(self, time_sec: float, name: str, method: str) -> None:
         self.start_ts = time_sec
         self.start_context = current_context()
@@ -194,37 +221,41 @@ class RequestMetrics:
 
         response_code_str = str(response_code)
 
-        outgoing_responses_counter.labels(self.method, response_code_str).inc()
+        outgoing_responses_counter.labels(
+            method=self.method,
+            code=response_code_str,
+            **{SERVER_NAME_LABEL: self.our_server_name},
+        ).inc()
 
-        response_count.labels(self.method, self.name, tag).inc()
+        response_base_labels = {
+            "method": self.method,
+            "servlet": self.name,
+            "tag": tag,
+            SERVER_NAME_LABEL: self.our_server_name,
+        }
+
+        response_count.labels(**response_base_labels).inc()
 
         response_timer.labels(
-            method=self.method,
-            servlet=self.name,
-            tag=tag,
             code=response_code_str,
+            **response_base_labels,
             **{SERVER_NAME_LABEL: self.server_name},
         ).observe(time_sec - self.start_ts)
 
         resource_usage = context.get_resource_usage()
 
-        response_ru_utime.labels(self.method, self.name, tag).inc(
-            resource_usage.ru_utime
-        )
-        response_ru_stime.labels(self.method, self.name, tag).inc(
-            resource_usage.ru_stime
-        )
-        response_db_txn_count.labels(self.method, self.name, tag).inc(
+        response_ru_utime.labels(**response_base_labels).inc(resource_usage.ru_utime)
+        response_ru_stime.labels(**response_base_labels).inc(resource_usage.ru_stime)
+        response_db_txn_count.labels(**response_base_labels).inc(
             resource_usage.db_txn_count
         )
-        response_db_txn_duration.labels(self.method, self.name, tag).inc(
+        response_db_txn_duration.labels(**response_base_labels).inc(
             resource_usage.db_txn_duration_sec
         )
-        response_db_sched_duration.labels(self.method, self.name, tag).inc(
+        response_db_sched_duration.labels(**response_base_labels).inc(
             resource_usage.db_sched_duration_sec
         )
-
-        response_size.labels(self.method, self.name, tag).inc(sent_bytes)
+        response_size.labels(**response_base_labels).inc(sent_bytes)
 
         # We always call this at the end to ensure that we update the metrics
         # regardless of whether a call to /metrics while the request was in
@@ -244,24 +275,30 @@ class RequestMetrics:
         diff = new_stats - self._request_stats
         self._request_stats = new_stats
 
+        in_flight_labels = {
+            "method": self.method,
+            "servlet": self.name,
+            SERVER_NAME_LABEL: self.our_server_name,
+        }
+
         # max() is used since rapid use of ru_stime/ru_utime can end up with the
         # count going backwards due to NTP, time smearing, fine-grained
         # correction, or floating points. Who knows, really?
-        in_flight_requests_ru_utime.labels(self.method, self.name).inc(
+        in_flight_requests_ru_utime.labels(**in_flight_labels).inc(
             max(diff.ru_utime, 0)
         )
-        in_flight_requests_ru_stime.labels(self.method, self.name).inc(
+        in_flight_requests_ru_stime.labels(**in_flight_labels).inc(
             max(diff.ru_stime, 0)
         )
 
-        in_flight_requests_db_txn_count.labels(self.method, self.name).inc(
+        in_flight_requests_db_txn_count.labels(**in_flight_labels).inc(
             diff.db_txn_count
         )
 
-        in_flight_requests_db_txn_duration.labels(self.method, self.name).inc(
+        in_flight_requests_db_txn_duration.labels(**in_flight_labels).inc(
             diff.db_txn_duration_sec
         )
 
-        in_flight_requests_db_sched_duration.labels(self.method, self.name).inc(
+        in_flight_requests_db_sched_duration.labels(**in_flight_labels).inc(
             diff.db_sched_duration_sec
         )

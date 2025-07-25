@@ -105,12 +105,18 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter("synapse_federation_server_received_pdus", "")
+received_pdus_counter = Counter(
+    "synapse_federation_server_received_pdus", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-received_edus_counter = Counter("synapse_federation_server_received_edus", "")
+received_edus_counter = Counter(
+    "synapse_federation_server_received_edus", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 received_queries_counter = Counter(
-    "synapse_federation_server_received_queries", "", ["type"]
+    "synapse_federation_server_received_queries",
+    "",
+    labelnames=["type", SERVER_NAME_LABEL],
 )
 
 pdu_process_time = Histogram(
@@ -436,7 +442,9 @@ class FederationServer(FederationBase):
             report back to the sending server.
         """
 
-        received_pdus_counter.inc(len(transaction.pdus))
+        received_pdus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            len(transaction.pdus)
+        )
 
         origin_host, _ = parse_server_name(origin)
 
@@ -555,7 +563,7 @@ class FederationServer(FederationBase):
         """Process the EDUs in a received transaction."""
 
         async def _process_edu(edu_dict: JsonDict) -> None:
-            received_edus_counter.inc()
+            received_edus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
             edu = Edu(
                 origin=origin,
@@ -670,7 +678,10 @@ class FederationServer(FederationBase):
     async def on_query_request(
         self, query_type: str, args: Dict[str, str]
     ) -> Tuple[int, Dict[str, Any]]:
-        received_queries_counter.labels(query_type).inc()
+        received_queries_counter.labels(
+            type=query_type,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
 

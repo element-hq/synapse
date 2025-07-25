@@ -329,10 +329,12 @@ class UsernameAvailabilityRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.registration_handler = hs.get_registration_handler()
         self.ratelimiter = FederationRateLimiter(
-            hs.get_clock(),
-            FederationRatelimitSettings(
+            our_server_name=self.server_name,
+            clock=hs.get_clock(),
+            config=FederationRatelimitSettings(
                 # Time window of 2s
                 window_size=2000,
                 # Artificially delay requests if rate > sleep_limit/window_size

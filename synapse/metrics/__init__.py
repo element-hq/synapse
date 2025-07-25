@@ -91,6 +91,7 @@ terms, an endpoint you can scrape is called an *instance*, usually corresponding
 single process." (source: https://prometheus.io/docs/concepts/jobs_instances/)
 """
 
+
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 """
 Content type of the latest text format for Prometheus metrics.
@@ -471,18 +472,24 @@ REGISTRY.register(CPUMetrics())
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter("synapse_federation_client_sent_transactions", "")
+sent_transactions_counter = Counter(
+    "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-events_processed_counter = Counter("synapse_federation_client_events_processed", "")
+events_processed_counter = Counter(
+    "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 event_processing_loop_counter = Counter(
-    "synapse_event_processing_loop_count", "Event processing loop iterations", ["name"]
+    "synapse_event_processing_loop_count",
+    "Event processing loop iterations",
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 event_processing_loop_room_count = Counter(
     "synapse_event_processing_loop_room_count",
     "Rooms seen per event processing loop iteration",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 

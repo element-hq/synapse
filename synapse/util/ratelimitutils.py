@@ -65,12 +65,12 @@ logger = logging.getLogger(__name__)
 rate_limit_sleep_counter = Counter(
     "synapse_rate_limit_sleep",
     "Number of requests slept by the rate limiter",
-    ["rate_limiter_name"],
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
 rate_limit_reject_counter = Counter(
     "synapse_rate_limit_reject",
     "Number of requests rejected by the rate limiter",
-    ["rate_limiter_name"],
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
 queue_wait_timer = Histogram(
     "synapse_rate_limit_queue_wait_time_seconds",
@@ -157,6 +157,7 @@ class FederationRateLimiter:
 
     def __init__(
         self,
+        our_server_name: str,
         clock: Clock,
         config: FederationRatelimitSettings,
         metrics_name: Optional[str] = None,
@@ -174,7 +175,10 @@ class FederationRateLimiter:
 
         def new_limiter() -> "_PerHostRatelimiter":
             return _PerHostRatelimiter(
-                clock=clock, config=config, metrics_name=metrics_name
+                our_server_name=our_server_name,
+                clock=clock,
+                config=config,
+                metrics_name=metrics_name,
             )
 
         self.ratelimiters: DefaultDict[str, "_PerHostRatelimiter"] = (
@@ -205,6 +209,7 @@ class FederationRateLimiter:
 class _PerHostRatelimiter:
     def __init__(
         self,
+        our_server_name: str,
         clock: Clock,
         config: FederationRatelimitSettings,
         metrics_name: Optional[str] = None,
@@ -218,6 +223,7 @@ class _PerHostRatelimiter:
                 for this rate limiter.
                 from the rest in the metrics
         """
+        self.our_server_name = our_server_name
         self.clock = clock
         self.metrics_name = metrics_name
 
@@ -299,7 +305,10 @@ class _PerHostRatelimiter:
         if self.should_reject():
             logger.debug("Ratelimiter(%s): rejecting request", self.host)
             if self.metrics_name:
-                rate_limit_reject_counter.labels(self.metrics_name).inc()
+                rate_limit_reject_counter.labels(
+                    rate_limiter_name=self.metrics_name,
+                    **{SERVER_NAME_LABEL: self.our_server_name},
+                ).inc()
             raise LimitExceededError(
                 limiter_name="rc_federation",
                 retry_after_ms=int(self.window_size / self.sleep_limit),
@@ -336,7 +345,10 @@ class _PerHostRatelimiter:
                 self.sleep_sec,
             )
             if self.metrics_name:
-                rate_limit_sleep_counter.labels(self.metrics_name).inc()
+                rate_limit_sleep_counter.labels(
+                    rate_limiter_name=self.metrics_name,
+                    **{SERVER_NAME_LABEL: self.our_server_name},
+                ).inc()
             ret_defer = run_in_background(self.clock.sleep, self.sleep_sec)
 
             self.sleeping_requests.add(request_id)

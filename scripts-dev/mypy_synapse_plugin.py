@@ -60,6 +60,7 @@ class SynapsePlugin(Plugin):
         self, fullname: str
     ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
         if fullname in (
+            "prometheus_client.metrics.Counter",
             "prometheus_client.metrics.Histogram",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592

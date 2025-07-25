@@ -37,13 +37,13 @@ if TYPE_CHECKING:
 set_counter = Counter(
     "synapse_external_cache_set",
     "Number of times we set a cache",
-    labelnames=["cache_name"],
+    labelnames=["cache_name", SERVER_NAME_LABEL],
 )
 
 get_counter = Counter(
     "synapse_external_cache_get",
     "Number of times we get a cache",
-    labelnames=["cache_name", "hit"],
+    labelnames=["cache_name", "hit", SERVER_NAME_LABEL],
 )
 
 response_timer = Histogram(
@@ -71,6 +71,7 @@ class ExternalCache:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+
         if hs.config.redis.redis_enabled:
             self._redis_connection: Optional["ConnectionHandler"] = (
                 hs.get_outbound_redis_connection()
@@ -95,7 +96,9 @@ class ExternalCache:
         if self._redis_connection is None:
             return
 
-        set_counter.labels(cache_name).inc()
+        set_counter.labels(
+            cache_name=cache_name, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # txredisapi requires the value to be string, bytes or numbers, so we
         # encode stuff in JSON.
@@ -137,7 +140,11 @@ class ExternalCache:
 
         logger.debug("Got cache result %s %s: %r", cache_name, key, result)
 
-        get_counter.labels(cache_name, result is not None).inc()
+        get_counter.labels(
+            cache_name=cache_name,
+            hit=result is not None,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         if not result:
             return None
