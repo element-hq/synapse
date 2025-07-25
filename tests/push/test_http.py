@@ -865,7 +865,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.helper.send(room, body="Hi!", tok=other_access_token)
         self.assertEqual(len(self.push_attempts), 0)
 
-        # The user sends a message back (sends a notification)
+        # The user sends a message back (sends a push notification to the other user)
         self.helper.send(room, body="Hello", tok=access_token)
         self.assertEqual(len(self.push_attempts), 1)
 
