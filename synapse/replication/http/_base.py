@@ -58,7 +58,7 @@ _pending_outgoing_requests = Gauge(
 _outgoing_request_counter = Counter(
     "synapse_outgoing_replication_requests",
     "Number of outgoing replication requests, by replication method name and result",
-    ["name", "code"],
+    labelnames=["name", "code", SERVER_NAME_LABEL],
 )
 
 
@@ -338,15 +338,27 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
                     # We convert to SynapseError as we know that it was a SynapseError
                     # on the main process that we should send to the client. (And
                     # importantly, not stack traces everywhere)
-                    _outgoing_request_counter.labels(cls.NAME, e.code).inc()
+                    _outgoing_request_counter.labels(
+                        name=cls.NAME,
+                        code=e.code,
+                        **{SERVER_NAME_LABEL: server_name},
+                    ).inc()
                     raise e.to_synapse_error()
                 except Exception as e:
-                    _outgoing_request_counter.labels(cls.NAME, "ERR").inc()
+                    _outgoing_request_counter.labels(
+                        name=cls.NAME,
+                        code="ERR",
+                        **{SERVER_NAME_LABEL: server_name},
+                    ).inc()
                     raise SynapseError(
                         502, f"Failed to talk to {instance_name} process"
                     ) from e
 
-                _outgoing_request_counter.labels(cls.NAME, 200).inc()
+                _outgoing_request_counter.labels(
+                    name=cls.NAME,
+                    code=200,
+                    **{SERVER_NAME_LABEL: server_name},
+                ).inc()
 
                 # Wait on any streams that the remote may have written to.
                 for stream_name, position in result.pop(

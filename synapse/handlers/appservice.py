@@ -69,7 +69,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter("synapse_handlers_appservice_events_processed", "")
+events_processed_counter = Counter(
+    "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 
 class ApplicationServicesHandler:
@@ -209,13 +211,19 @@ class ApplicationServicesHandler:
                         **{SERVER_NAME_LABEL: self.server_name},
                     ).set(upper_bound)
 
-                    events_processed_counter.inc(len(events))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(events))
 
-                    event_processing_loop_room_count.labels("appservice_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                    event_processing_loop_counter.labels("appservice_sender").inc()
+                    event_processing_loop_counter.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     if events:
                         now = self.clock.time_msec()
