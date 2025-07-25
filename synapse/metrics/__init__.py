@@ -54,9 +54,8 @@ from prometheus_client import (
 )
 from prometheus_client.core import (
     REGISTRY,
+    GaugeHistogramMetricFamily,
     GaugeMetricFamily,
-    Sample,
-    Timestamp,
 )
 
 from twisted.python.threadpool import ThreadPool
@@ -345,7 +344,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         all_gauges[self.name] = self
 
 
-class GaugeHistogramMetricFamilyWithLabels(Metric):
+class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
     """
     Custom version of `GaugeHistogramMetricFamily` from `prometheus_client` that allows
     specifying labels and label values.
@@ -376,51 +375,7 @@ class GaugeHistogramMetricFamilyWithLabels(Metric):
 
         # Create a gauge for each bucket.
         if buckets is not None:
-            self.add_metric(
-                labelvalues=labelvalues, buckets=buckets, gsum_value=gsum_value
-            )
-
-    def add_metric(
-        self,
-        labelvalues: StrSequence,
-        buckets: Sequence[Tuple[str, float]],
-        gsum_value: float,
-        timestamp: Optional[Union[float, Timestamp]] = None,
-    ) -> None:
-        """Add a metric to the metric family.
-
-        Args:
-          labelvalues: A list of label values
-          buckets: A list of pairs of bucket names and values.
-              The buckets must be sorted, and +Inf present.
-          gsum_value: The sum value of the metric.
-        """
-        for bucket, value in buckets:
-            self.samples.append(
-                Sample(
-                    self.name + "_bucket",
-                    dict(list(zip(self._labelnames, labelvalues)) + [("le", bucket)]),
-                    value,
-                    timestamp,
-                )
-            )
-        # +Inf is last and provides the count value.
-        self.samples.extend(
-            [
-                Sample(
-                    self.name + "_gcount",
-                    dict(zip(self._labelnames, labelvalues)),
-                    buckets[-1][1],
-                    timestamp,
-                ),
-                Sample(
-                    self.name + "_gsum",
-                    dict(zip(self._labelnames, labelvalues)),
-                    gsum_value,
-                    timestamp,
-                ),
-            ]
-        )
+            self.add_metric(labels=labelvalues, buckets=buckets, gsum_value=gsum_value)
 
 
 class GaugeBucketCollector(Collector):
