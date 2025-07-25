@@ -1,0 +1,1 @@
+Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`. See the relevant section in the upgrade notes for more information.
