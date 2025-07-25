@@ -167,7 +167,7 @@ def _get_in_flight_counts() -> Mapping[Tuple[str, ...], int]:
 LaterGauge(
     name="synapse_http_server_in_flight_requests_count",
     desc="",
-    labels=["method", "servlet", SERVER_NAME_LABEL],
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
     caller=_get_in_flight_counts,
 )
 

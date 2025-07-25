@@ -782,7 +782,7 @@ class PresenceHandler(BasePresenceHandler):
         LaterGauge(
             name="synapse_handlers_presence_user_to_current_state_size",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
@@ -885,7 +885,7 @@ class PresenceHandler(BasePresenceHandler):
         LaterGauge(
             name="synapse_handlers_presence_wheel_timer_size",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 

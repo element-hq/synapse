@@ -131,7 +131,7 @@ def _get_counts_from_rate_limiter_instance(
 LaterGauge(
     name="synapse_rate_limit_sleep_affected_hosts",
     desc="Number of hosts that had requests put to sleep",
-    labels=["rate_limiter_name"],
+    labelnames=["rate_limiter_name"],
     caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_sleep()
@@ -142,7 +142,7 @@ LaterGauge(
 LaterGauge(
     name="synapse_rate_limit_reject_affected_hosts",
     desc="Number of hosts that had requests rejected",
-    labels=["rate_limiter_name"],
+    labelnames=["rate_limiter_name"],
     caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_reject()

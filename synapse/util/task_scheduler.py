@@ -133,7 +133,7 @@ class TaskScheduler:
         LaterGauge(
             name="synapse_scheduler_running_tasks",
             desc="The number of concurrent running tasks handled by the TaskScheduler",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 

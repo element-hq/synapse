@@ -119,7 +119,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             LaterGauge(
                 name="synapse_federation_known_servers",
                 desc="",
-                labels=[SERVER_NAME_LABEL],
+                labelnames=[SERVER_NAME_LABEL],
                 caller=lambda: {(self.server_name,): self._known_servers_count},
             )
 

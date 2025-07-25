@@ -579,7 +579,7 @@ class DatabasePool:
         LaterGauge(
             name="synapse_background_update_status",
             desc="Background update status",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): self.updates.get_status()},
         )
 

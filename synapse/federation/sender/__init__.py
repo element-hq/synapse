@@ -401,7 +401,7 @@ class FederationSender(AbstractFederationSender):
         LaterGauge(
             name="synapse_federation_transaction_queue_pending_destinations",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {
                 (self.server_name,): sum(
                     1
@@ -414,7 +414,7 @@ class FederationSender(AbstractFederationSender):
         LaterGauge(
             name="synapse_federation_transaction_queue_pending_pdus",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {
                 (self.server_name,): sum(
                     d.pending_pdu_count() for d in self._per_destination_queues.values()
@@ -424,7 +424,7 @@ class FederationSender(AbstractFederationSender):
         LaterGauge(
             name="synapse_federation_transaction_queue_pending_edus",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {
                 (self.server_name,): sum(
                     d.pending_edu_count() for d in self._per_destination_queues.values()

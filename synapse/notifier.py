@@ -284,14 +284,14 @@ class Notifier:
         LaterGauge(
             name="synapse_notifier_listeners",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=count_listeners,
         )
 
         LaterGauge(
             name="synapse_notifier_rooms",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {
                 (self.server_name,): count(
                     bool, list(self.room_to_user_streams.values())
@@ -301,7 +301,7 @@ class Notifier:
         LaterGauge(
             name="synapse_notifier_users",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 

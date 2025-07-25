@@ -246,7 +246,7 @@ class ReplicationCommandHandler:
         LaterGauge(
             name="synapse_replication_tcp_resource_total_connections",
             desc="",
-            labels=[SERVER_NAME_LABEL],
+            labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): len(self._connections)},
         )
 
@@ -269,7 +269,7 @@ class ReplicationCommandHandler:
         LaterGauge(
             name="synapse_replication_tcp_command_queue",
             desc="Number of inbound RDATA/POSITION commands queued for processing",
-            labels=["stream_name", SERVER_NAME_LABEL],
+            labelnames=["stream_name", SERVER_NAME_LABEL],
             caller=lambda: {
                 (stream_name, self.server_name): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()

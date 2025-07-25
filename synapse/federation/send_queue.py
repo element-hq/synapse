@@ -115,7 +115,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
             LaterGauge(
                 name="synapse_federation_send_queue_%s_size" % (queue_name,),
                 desc="",
-                labels=[SERVER_NAME_LABEL],
+                labelnames=[SERVER_NAME_LABEL],
                 caller=lambda: {(self.server_name,): len(queue)},
             )
 
