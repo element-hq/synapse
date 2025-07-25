@@ -287,7 +287,7 @@ class _PerHostRatelimiter:
         if self.metrics_name:
             maybe_metrics_cm = queue_wait_timer.labels(
                 rate_limiter_name=self.metrics_name,
-                **{SERVER_NAME_LABEL: self.server_name},
+                **{SERVER_NAME_LABEL: self.our_server_name},
             ).time()
         with start_active_span("ratelimit wait"), maybe_metrics_cm:
             await self._on_enter(request_id)
