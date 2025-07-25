@@ -23,6 +23,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
     Collection,
     Dict,
@@ -80,7 +81,9 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process as _run_as_background_process,
+)
 from synapse.module_api.callbacks.account_validity_callbacks import (
     IS_USER_EXPIRED_CALLBACK,
     ON_LEGACY_ADMIN_REQUEST,
@@ -158,6 +161,9 @@ from synapse.util.caches.descriptors import CachedFunction, cached as _cached
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
+    # Old versions don't have `LiteralString`
+    from typing_extensions import LiteralString
+
     from synapse.app.generic_worker import GenericWorkerStore
     from synapse.server import HomeServer
 
@@ -214,6 +220,60 @@ class UserIpAndAgent:
     user_agent: str
     # The time at which this user agent/ip was last seen.
     last_seen: int
+
+
+def run_as_background_process(
+    desc: "LiteralString",
+    func: Callable[..., Awaitable[Optional[T]]],
+    *args: Any,
+    bg_start_span: bool = True,
+    **kwargs: Any,
+) -> "defer.Deferred[Optional[T]]":
+    """
+    XXX: Deprecated: use `ModuleApi.run_as_background_process` instead.
+
+    Run the given function in its own logcontext, with resource metrics
+
+    This should be used to wrap processes which are fired off to run in the
+    background, instead of being associated with a particular request.
+
+    It returns a Deferred which completes when the function completes, but it doesn't
+    follow the synapse logcontext rules, which makes it appropriate for passing to
+    clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+    normal synapse async function).
+
+    Args:
+        desc: a description for this background process type
+        server_name: The homeserver name that this background process is being run for
+            (this should be `hs.hostname`).
+        func: a function, which may return a Deferred or a coroutine
+        bg_start_span: Whether to start an opentracing span. Defaults to True.
+            Should only be disabled for processes that will not log to or tag
+            a span.
+        args: positional args for func
+        kwargs: keyword args for func
+
+    Returns:
+        Deferred which returns the result of func, or `None` if func raises.
+        Note that the returned Deferred does not follow the synapse logcontext
+        rules.
+    """
+
+    logger.warning(
+        "Using deprecated `run_as_background_process` that's exported from the Module API. "
+        "Prefer `ModuleApi.run_as_background_process` instead.",
+    )
+
+    stub_server_name = "synapse_module"
+
+    return _run_as_background_process(
+        desc,
+        stub_server_name,
+        func,
+        *args,
+        bg_start_span=bg_start_span,
+        **kwargs,
+    )
 
 
 def cached(
@@ -1323,10 +1383,9 @@ class ModuleApi:
 
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
-                run_as_background_process,
+                self.run_as_background_process,
                 msec,
                 desc,
-                self.server_name,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
             )
         else:
@@ -1382,9 +1441,8 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            run_as_background_process,
+            self.run_as_background_process,
             desc,
-            self.server_name,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
 
@@ -1589,6 +1647,44 @@ class ModuleApi:
         state_events = await self._store.get_events(state_ids.values())
 
         return {key: state_events[event_id] for key, event_id in state_ids.items()}
+
+    def run_as_background_process(
+        self,
+        desc: "LiteralString",
+        func: Callable[..., Awaitable[Optional[T]]],
+        *args: Any,
+        bg_start_span: bool = True,
+        **kwargs: Any,
+    ) -> "defer.Deferred[Optional[T]]":
+        """Run the given function in its own logcontext, with resource metrics
+
+        This should be used to wrap processes which are fired off to run in the
+        background, instead of being associated with a particular request.
+
+        It returns a Deferred which completes when the function completes, but it doesn't
+        follow the synapse logcontext rules, which makes it appropriate for passing to
+        clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+        normal synapse async function).
+
+        Args:
+            desc: a description for this background process type
+            server_name: The homeserver name that this background process is being run for
+                (this should be `hs.hostname`).
+            func: a function, which may return a Deferred or a coroutine
+            bg_start_span: Whether to start an opentracing span. Defaults to True.
+                Should only be disabled for processes that will not log to or tag
+                a span.
+            args: positional args for func
+            kwargs: keyword args for func
+
+        Returns:
+            Deferred which returns the result of func, or `None` if func raises.
+            Note that the returned Deferred does not follow the synapse logcontext
+            rules.
+        """
+        return _run_as_background_process(
+            desc, self.server_name, func, *args, bg_start_span=bg_start_span, **kwargs
+        )
 
     async def defer_to_thread(
         self,
