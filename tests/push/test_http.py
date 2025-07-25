@@ -841,7 +841,7 @@ class HTTPPusherTests(HomeserverTestCase):
         # Create a room
         room = self.helper.create_room_as(user_id, tok=access_token)
 
-        # Disable user notifications for this room -> user
+        # Disable push notifications for this room -> user
         body = {
             "conditions": [{"kind": "event_match", "key": "room_id", "pattern": room}],
             "actions": ["org.matrix.msc3768.notify_in_app"],
