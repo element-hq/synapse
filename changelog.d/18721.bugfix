@@ -1,1 +1,1 @@
-Fix structure of initial_state when calling user_may_create_room module API callback.
+Fix `room_config` `initial_state` being mangled when the `user_may_create_room` spam-checker callback was called for room upgrades.

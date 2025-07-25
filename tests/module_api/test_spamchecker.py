@@ -72,8 +72,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         self.assertEqual(self.last_user_id, self.user_id)
         self.assertEqual(self.last_room_config["foo"], "baa")
 
-    def test_may_user_create_room_with_initial_state(self) -> None:
-        """Test that the may_user_create_room callback is called when a user
+    def test_user_may_create_room_with_initial_state(self) -> None:
+        """Test that the user_may_create_room callback is called when a user
         creates a room with some initial state events, and that it receives the correct parameters.
         """
 
@@ -142,8 +142,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         # Check that the initial state received by callback contains the topic event.
         self.assertTrue(
             any(
-                event.get("type") == "m.room.topic"
-                and event.get("content").get("topic") == "foo"
+                event.get("type") == EventTypes.Topic
+                and event.get("content").get(EventContentFields.TOPIC) == "foo"
                 for event in self.last_room_config["initial_state"]
             )
         )
