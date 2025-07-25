@@ -68,10 +68,12 @@ class SpamCheckerTestCase(HomeserverTestCase):
             user_may_create_room=user_may_create_room
         )
 
-        channel = self.create_room({"foo": "baa"})
+        expected_room_config = {"foo": "baa"}
+
+        channel = self.create_room(expected_room_config)
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
-        self.assertEqual(self.last_room_config["foo"], "baa")
+        self.assertEqual(self.last_room_config, expected_room_config)
 
     def test_user_may_create_room_with_initial_state(self) -> None:
         """Test that the user_may_create_room callback is called when a user
@@ -89,27 +91,20 @@ class SpamCheckerTestCase(HomeserverTestCase):
             user_may_create_room=user_may_create_room
         )
 
-        channel = self.create_room(
-            {
-                "foo": "baa",
-                "initial_state": [
-                    {
-                        "type": EventTypes.Topic,
-                        "content": {EventContentFields.TOPIC: "foo"},
-                    }
-                ],
-            }
-        )
+        expected_room_config = {
+            "foo": "baa",
+            "initial_state": [
+                {
+                    "type": EventTypes.Topic,
+                    "content": {EventContentFields.TOPIC: "foo"},
+                }
+            ],
+        }
+
+        channel = self.create_room(expected_room_config)
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
-        self.assertEqual(self.last_room_config["foo"], "baa")
-        self.assertTrue(
-            any(
-                event.get("type") == EventTypes.Topic
-                and event.get("content").get(EventContentFields.TOPIC) == "foo"
-                for event in self.last_room_config["initial_state"]
-            )
-        )
+        self.assertEqual(self.last_room_config, expected_room_config)
 
     def test_user_may_create_room_on_upgrade(self) -> None:
         """Test that the user_may_create_room callback is called when a room is upgraded."""
@@ -147,6 +142,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         self.assertTrue(
             any(
                 event.get("type") == EventTypes.Topic
+                and event.get("state_key") == ""
                 and event.get("content").get(EventContentFields.TOPIC) == "foo"
                 for event in self.last_room_config["initial_state"]
             )
@@ -168,11 +164,13 @@ class SpamCheckerTestCase(HomeserverTestCase):
             user_may_create_room=user_may_create_room
         )
 
-        channel = self.create_room({"foo": "baa"})
+        expected_room_config = {"foo": "baa"}
+
+        channel = self.create_room(expected_room_config)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], Codes.UNAUTHORIZED)
         self.assertEqual(self.last_user_id, self.user_id)
-        self.assertEqual(self.last_room_config["foo"], "baa")
+        self.assertEqual(self.last_room_config, expected_room_config)
 
     def test_user_may_create_room_compatibility(self) -> None:
         """Test that the user_may_create_room callback is called when a user
