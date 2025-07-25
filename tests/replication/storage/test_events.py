@@ -240,6 +240,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
                 )
             )
 
+        # We start out with zero highlight, unread and notify counts
         self.check(
             "get_unread_event_push_actions_by_room_for_user",
             [ROOM_ID, USER_ID_2],
@@ -248,6 +249,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             ),
         )
 
+        # The notify count should increment when we persist a message with notify
         self.persist(
             type=EventTypes.Message,
             msgtype="m.text",
@@ -263,26 +265,20 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             ),
         )
 
+        # The notify count should also increment when we persist a message
+        # with org.matrix.msc3768.notify_in_app
         self.persist(
             type=EventTypes.Message,
             msgtype="m.text",
             body="world",
-            push_actions=[
-                (
-                    USER_ID_2,
-                    [
-                        "org.matrix.msc3768.notify_in_app",
-                        {"set_tweak": "highlight", "value": True},
-                    ],
-                )
-            ],
+            push_actions=[(USER_ID_2, ["org.matrix.msc3768.notify_in_app"])],
         )
         self.replicate()
         self.check(
             "get_unread_event_push_actions_by_room_for_user",
             [ROOM_ID, USER_ID_2],
             RoomNotifCounts(
-                NotifCounts(highlight_count=1, unread_count=0, notify_count=2), {}
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=2), {}
             ),
         )
 
