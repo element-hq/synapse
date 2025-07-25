@@ -488,7 +488,7 @@ class RoomCreationHandler:
             # If so, mark the new room as non-federatable as well
             creation_content[EventContentFields.FEDERATE] = False
 
-        initial_state = {}
+        initial_state: MutableStateMap = {}
 
         # Replicate relevant room events
         types_to_copy: List[Tuple[str, Optional[str]]] = [
@@ -587,8 +587,12 @@ class RoomCreationHandler:
             {
                 "creation_content": creation_content,
                 "initial_state": [
-                    {"type": state[0][0], "state_key": state[0][1], "content": state[1]}
-                    for state in initial_state.items()
+                    {
+                        "type": state_key[0],
+                        "state_key": state_key[1],
+                        "content": event_content,
+                    }
+                    for state_key, event_content in initial_state.items()
                 ],
             },
         )
