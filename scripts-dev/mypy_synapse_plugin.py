@@ -31,7 +31,6 @@ from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
 from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, TupleExpr, Var
 from mypy.plugin import (
-    ClassDefContext,
     FunctionLike,
     FunctionSigContext,
     MethodSigContext,
@@ -117,7 +116,7 @@ class SynapsePlugin(Plugin):
         # updated all of the metrics, see
         # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
-            # "prometheus_client.metrics.Gauge",
+            "prometheus_client.metrics.Counter",
             "prometheus_client.metrics_core.GaugeMetricFamily",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592

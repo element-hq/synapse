@@ -1444,6 +1444,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     def __init__(self, hs: "HomeServer", device_handler: DeviceWriterHandler):
         super().__init__(hs)
 
+        self.server_name = hs.hostname
         self.federation = hs.get_federation_client()
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
