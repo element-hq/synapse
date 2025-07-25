@@ -264,7 +264,7 @@ def run_as_background_process(
         "Prefer `ModuleApi.run_as_background_process` instead.",
     )
 
-    stub_server_name = "synapse_module"
+    stub_server_name = "synapse_module_running_from_unknown_server"
 
     return _run_as_background_process(
         desc,
