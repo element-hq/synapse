@@ -734,6 +734,19 @@ threadpool_total_max_threads = Gauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 
+# Gauges for room counts
+known_rooms_gauge = Gauge(
+    "synapse_known_rooms_total",
+    "Total number of rooms",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+locally_joined_rooms_gauge = Gauge(
+    "synapse_locally_joined_rooms_total",
+    "Total number of locally joined rooms",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
 
 def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) -> None:
     """

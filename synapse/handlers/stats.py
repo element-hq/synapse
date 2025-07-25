@@ -29,7 +29,12 @@ from typing import (
 )
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
+from synapse.metrics import (
+    SERVER_NAME_LABEL,
+    event_processing_positions,
+    known_rooms_gauge,
+    locally_joined_rooms_gauge,
+)
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import JsonDict
 from synapse.util.duration import Duration
@@ -152,6 +157,19 @@ class StatsHandler:
             ).set(max_pos)
 
             self.pos = max_pos
+
+            (
+                known_room_count,
+                locally_joined_room_count,
+            ) = await self.store.get_room_stats()
+
+            # Update room count metrics
+            known_rooms_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
+                known_room_count
+            )
+            locally_joined_rooms_gauge.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).set(locally_joined_room_count)
 
     async def _handle_deltas(
         self, deltas: Iterable[StateDelta]

@@ -20,6 +20,8 @@
 
 from typing import Any, cast
 
+from prometheus_client import REGISTRY, Gauge
+
 from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
@@ -46,6 +48,21 @@ class StatsRoomTests(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.handler = self.hs.get_stats_handler()
+        self._set_metrics_to_zero()
+
+    def _set_metrics_to_zero(self) -> None:
+        """
+        There is an issue when the tests are run in parallel where the metrics
+        are not reset between tests, leading to incorrect values.
+        This method resets the metrics to zero before each test to ensure
+        that each test starts with a clean slate.
+        """
+        metrics = ["synapse_known_rooms_total", "synapse_locally_joined_rooms_total"]
+        for metric_name in metrics:
+            gauge = REGISTRY._names_to_collectors.get(metric_name)
+            if gauge is not None and isinstance(gauge, Gauge):
+                for labels in gauge._metrics:
+                    gauge.labels(*labels).set(0)
 
     def _add_background_updates(self) -> None:
         """
@@ -164,7 +181,19 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         """
 
         self._perform_background_initial_update()
-
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            0.0,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            0.0,
+        )
         u1 = self.register_user("u1", "pass")
         u1token = self.login("u1", "pass")
         r1 = self.helper.create_room_as(u1, tok=u1token)
@@ -189,6 +218,21 @@ class StatsRoomTests(unittest.HomeserverTestCase):
         self.assertEqual(r2stats["joined_members"], 1)
         self.assertEqual(r2stats["invited_members"], 0)
         self.assertEqual(r2stats["banned_members"], 0)
+
+        # There are 2 rooms created. Check the room metrics were udpated.
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            2,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            2,
+        )
 
     def test_updating_profile_information_does_not_increase_joined_members_count(
         self,
@@ -592,3 +636,57 @@ class StatsRoomTests(unittest.HomeserverTestCase):
 
         self.assertEqual(u1stats_complete["joined_rooms"], 1)
         self.assertEqual(u2stats_complete["joined_rooms"], 1)
+
+    def test_room_metrics(self) -> None:
+        """
+        Test that the `synapse_locally_joined_rooms_total` and
+        `synapse_known_rooms_total` metrics are updated correctly.
+        """
+
+        self._perform_background_initial_update()
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            0.0,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            0.0,
+        )
+
+        u1 = self.register_user("u1", "pass")
+        u1token = self.login("u1", "pass")
+
+        # create 2 rooms, one with a local user and one without it.
+        r1 = self.helper.create_room_as(u1, tok=u1token)
+        r2 = self.helper.create_room_as(u1, tok=u1token)
+        self.helper.leave(r2, u1, tok=u1token)
+
+        # Check the locally joined rooms metric after creating rooms
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_locally_joined_rooms_total",
+                labels={"server_name": self.hs.hostname},
+            ),
+            1,
+        )
+        self.assertEqual(
+            REGISTRY.get_sample_value(
+                "synapse_known_rooms_total", labels={"server_name": self.hs.hostname}
+            ),
+            2,
+        )
+
+        # Check the stats for both rooms
+        r1stats = self._get_current_stats("room", r1)
+        r2stats = self._get_current_stats("room", r2)
+
+        assert r1stats is not None
+        assert r2stats is not None
+
+        self.assertEqual(r1stats["joined_members"], 1)
+        self.assertEqual(r2stats["joined_members"], 0)
