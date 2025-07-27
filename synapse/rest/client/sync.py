@@ -1067,9 +1067,18 @@ class SlidingSyncRestServlet(RestServlet):
         serialized_rooms: Dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
-                "notification_count": room_result.notification_count,
-                "highlight_count": room_result.highlight_count,
+                "notification_count": room_result.notif_counts.main_timeline.notify_count,
+                "highlight_count": room_result.notif_counts.main_timeline.highlight_count,
             }
+
+            if len(room_result.notif_counts.threads) > 0:
+                serialized_rooms[room_id]["unread_thread_notifications"] = {
+                    thread_id: {
+                        "notification_count": counts.notify_count,
+                        "highlight_count": counts.highlight_count,
+                    }
+                    for thread_id, counts in room_result.notif_counts.threads.items()
+                }
 
             if room_result.bump_stamp is not None:
                 serialized_rooms[room_id]["bump_stamp"] = room_result.bump_stamp

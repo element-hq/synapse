@@ -648,7 +648,11 @@ class ReceiptsWorkerStore(SQLBaseStore):
         return results
 
     async def get_linearized_receipts_for_user_in_rooms(
-        self, user_id: str, room_ids: StrCollection, to_key: MultiWriterStreamToken
+        self,
+        user_id: str,
+        room_ids: StrCollection,
+        from_key: Optional[MultiWriterStreamToken] = None,
+        to_key: Optional[MultiWriterStreamToken] = None,
     ) -> Mapping[str, Sequence[ReceiptInRoom]]:
         """Fetch all receipts for the user in the given room.
 
@@ -667,11 +671,18 @@ class ReceiptsWorkerStore(SQLBaseStore):
             sql = f"""
                 SELECT instance_name, stream_id, room_id, receipt_type, user_id, event_id, thread_id, data
                 FROM receipts_linearized
-                WHERE {clause} AND user_id = ? AND stream_id <= ?
+                WHERE {clause} AND user_id = ?
             """
 
             args.append(user_id)
-            args.append(to_key.get_max_stream_pos())
+
+            if from_key is not None:
+                sql += " AND stream_id >= ?"
+                args.append(from_key.get_max_stream_pos())
+
+            if to_key is not None:
+                sql += " AND stream_id <= ?"
+                args.append(to_key.get_max_stream_pos())
 
             txn.execute(sql, args)
 
