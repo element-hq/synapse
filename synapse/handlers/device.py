@@ -870,7 +870,7 @@ class DeviceHandler:
         # do not set the master_key field if it is None,
         # since then we send a null in the JSON response
         if master_key is not None:
-           json_body["master_key"] = master_key
+            json_body["master_key"] = master_key
 
         # do not set the self_signing_key field if it is None,
         # since then we send a null in the JSON response
