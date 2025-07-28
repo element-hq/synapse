@@ -116,7 +116,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
     "prometheus_client.metrics_core.InfoMetricFamily": ArgLocation("labels", 3),
     "prometheus_client.metrics_core.HistogramMetricFamily": ArgLocation("labels", 3),
     "prometheus_client.metrics_core.GaugeHistogramMetricFamily": ArgLocation(
-        "labels", 3
+        "labels", 4
     ),
     "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
     "synapse.metrics.GaugeHistogramMetricFamilyWithLabels": ArgLocation(
@@ -201,6 +201,8 @@ class SynapsePlugin(Plugin):
             "prometheus_client.metrics_core.StateSetMetricFamily",
             "synapse.metrics.GaugeHistogramMetricFamilyWithLabels",
         ):
+            # Because it's difficult to determine the `fullname` of the function in the
+            # callback, let's just pass it in while we have it.
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
         return None

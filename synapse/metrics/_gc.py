@@ -82,7 +82,8 @@ gc_time = Histogram(
 
 class GCCounts(Collector):
     def collect(self) -> Iterable[Metric]:
-        cm = GaugeMetricFamily("python_gc_counts", "GC object counts", labels=["gen"])
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        cm = GaugeMetricFamily("python_gc_counts", "GC object counts", labels=["gen"])  # type: ignore[missing-server-name-label]
         for n, m in enumerate(gc.get_count()):
             cm.add_metric([str(n)], m)
 
@@ -177,7 +178,8 @@ class PyPyGCStats(Collector):
         #
         #     Total time spent in GC:  0.073                  # s.total_gc_time
 
-        pypy_gc_time = CounterMetricFamily(
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        pypy_gc_time = CounterMetricFamily(  # type: ignore[missing-server-name-label]
             "pypy_gc_time_seconds_total",
             "Total time spent in PyPy GC",
             labels=[],
@@ -185,7 +187,8 @@ class PyPyGCStats(Collector):
         pypy_gc_time.add_metric([], s.total_gc_time / 1000)
         yield pypy_gc_time
 
-        pypy_mem = GaugeMetricFamily(
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        pypy_mem = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
             "pypy_memory_bytes",
             "Memory tracked by PyPy allocator",
             labels=["state", "class", "kind"],
