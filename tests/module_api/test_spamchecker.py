@@ -69,7 +69,6 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         expected_room_config = {"foo": "baa"}
-
         channel = self.create_room(expected_room_config)
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
@@ -100,7 +99,6 @@ class SpamCheckerTestCase(HomeserverTestCase):
                 }
             ],
         }
-
         channel = self.create_room(expected_room_config)
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
@@ -134,7 +132,6 @@ class SpamCheckerTestCase(HomeserverTestCase):
             content={"new_version": DEFAULT_ROOM_VERSION},
             access_token=self.token,
         )
-
         # Check that the callback was called and the room was upgraded.
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
@@ -158,7 +155,6 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         expected_room_config = {"foo": "baa"}
-
         channel = self.create_room(expected_room_config)
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], Codes.UNAUTHORIZED)
@@ -226,7 +222,6 @@ class SpamCheckerTestCase(HomeserverTestCase):
             content={"foo": "bar"},
             access_token=self.token,
         )
-
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
         self.assertEqual(self.last_room_id, room_id)
@@ -270,6 +265,5 @@ class SpamCheckerTestCase(HomeserverTestCase):
             content={"foo": "bar"},
             access_token=self.token,
         )
-
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
