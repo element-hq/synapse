@@ -861,13 +861,23 @@ class DeviceHandler:
 
             # TODO Handle cross-signing keys.
 
-        return {
+        json_body = {
             "user_id": user_id,
             "stream_id": stream_id,
             "devices": devices,
-            "master_key": master_key,
-            "self_signing_key": self_signing_key,
         }
+
+        # do not set the master_key field if it is None,
+        # since then we send a null in the JSON response
+        if master_key is not None:
+           json_body["master_key"] = master_key
+
+        # do not set the self_signing_key field if it is None,
+        # since then we send a null in the JSON response
+        if self_signing_key is not None:
+            json_body["self_signing_key"] = self_signing_key
+
+        return json_body
 
     async def handle_room_un_partial_stated(self, room_id: str) -> None:
         """Handles sending appropriate device list updates in a room that has
