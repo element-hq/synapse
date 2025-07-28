@@ -70,6 +70,7 @@ from synapse.http import get_request_user_agent
 from synapse.http.server import finish_request, respond_with_html
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.registration import (
     LoginTokenExpired,
@@ -95,7 +96,7 @@ INVALID_USERNAME_OR_PASSWORD = "Invalid username or password"
 invalid_login_token_counter = Counter(
     "synapse_user_login_invalid_login_tokens",
     "Counts the number of rejected m.login.token on /login",
-    ["reason"],
+    labelnames=["reason", SERVER_NAME_LABEL],
 )
 
 
@@ -1478,11 +1479,20 @@ class AuthHandler:
         try:
             return await self.store.consume_login_token(login_token)
         except LoginTokenExpired:
-            invalid_login_token_counter.labels("expired").inc()
+            invalid_login_token_counter.labels(
+                reason="expired",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
         except LoginTokenReused:
-            invalid_login_token_counter.labels("reused").inc()
+            invalid_login_token_counter.labels(
+                reason="reused",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
         except NotFoundError:
-            invalid_login_token_counter.labels("not found").inc()
+            invalid_login_token_counter.labels(
+                reason="not found",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
 
         raise AuthError(403, "Invalid login token", errcode=Codes.FORBIDDEN)
 
