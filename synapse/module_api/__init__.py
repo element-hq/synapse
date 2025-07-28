@@ -279,6 +279,7 @@ class ModuleApi:
         self._callbacks = hs.get_module_api_callbacks()
         self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
         self._event_serializer = hs.get_event_client_serializer()
+        self._config = hs.config
 
         try:
             app_name = self._hs.config.email.email_app_name
@@ -1667,7 +1668,7 @@ class ModuleApi:
         Raises:
             synapse.module_api.errors.InvalidRuleException if the actions are invalid.
         """
-        check_actions(actions)
+        check_actions(actions, self._config)
 
     async def set_push_rule_action(
         self,

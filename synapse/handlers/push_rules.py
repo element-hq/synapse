@@ -24,6 +24,7 @@ import attr
 
 from synapse.api.constants import PushRuleActions
 from synapse.api.errors import SynapseError, UnrecognizedRequestError
+from synapse.config.homeserver import HomeServerConfig
 from synapse.push.clientformat import format_push_rules_for_user
 from synapse.storage.push_rule import RuleNotFoundException
 from synapse.synapse_rust.push import get_base_rule_ids
@@ -50,6 +51,7 @@ class PushRulesHandler:
     def __init__(self, hs: "HomeServer"):
         self._notifier = hs.get_notifier()
         self._main_store = hs.get_datastores().main
+        self._config = hs.config
 
     async def set_rule_attr(
         self, user_id: str, spec: RuleSpec, val: Union[bool, JsonDict]
@@ -99,7 +101,7 @@ class PushRulesHandler:
             actions = val.get("actions")
             if not isinstance(actions, list):
                 raise SynapseError(400, "Value for 'actions' must be dict")
-            check_actions(actions)
+            check_actions(actions, self._config)
             rule_id = spec.rule_id
             is_default_rule = rule_id.startswith(".")
             if is_default_rule:
@@ -138,7 +140,9 @@ class PushRulesHandler:
         return rules
 
 
-def check_actions(actions: List[Union[str, JsonDict]]) -> None:
+def check_actions(
+    actions: List[Union[str, JsonDict]], config: HomeServerConfig
+) -> None:
     """Check if the given actions are spec compliant.
 
     Args:
@@ -155,11 +159,13 @@ def check_actions(actions: List[Union[str, JsonDict]]) -> None:
         # ignored (resulting in no action from the pusher).
         if a in ["notify", "dont_notify", "coalesce"]:
             pass
-        # In-app only notification as per MSC3768
-        elif a == PushRuleActions.MSC_3768_NOTIFY_IN_APP:
-            pass
         elif isinstance(a, dict) and "set_tweak" in a:
             pass
+        elif config.experimental.msc3768_enabled:
+            if a == PushRuleActions.MSC_3768_NOTIFY_IN_APP:
+                pass  # In-app only notification as per MSC3768
+            else:
+                pass  # The spec doesn't forbid introducing custom actions
         else:
             raise InvalidRuleException("Unrecognised action %s" % a)
 
