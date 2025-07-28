@@ -23,7 +23,8 @@
 can crop up, e.g the cache descriptors.
 """
 
-from typing import Callable, Optional, Tuple, Type, Union
+import enum
+from typing import Callable, Optional, Tuple, Type, Union, Mapping
 
 import attr
 import mypy.types
@@ -31,6 +32,7 @@ from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
 from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, TupleExpr, Var
 from mypy.plugin import (
+    ClassDefContext,
     FunctionLike,
     FunctionSigContext,
     MethodSigContext,
@@ -56,6 +58,12 @@ PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
 )
 
 
+class Sentinel(enum.Enum):
+    # defining a sentinel in this way allows mypy to correctly handle the
+    # type of a dictionary lookup and subsequent type narrowing.
+    UNSET_SENTINEL = object()
+
+
 @attr.s(auto_attribs=True)
 class ArgLocation:
     keyword_name: str
@@ -68,12 +76,11 @@ class ArgLocation:
     """
 
 
-# FIXME: Ideally, we'd be able to cross-check this list to make sure it includes
-# everything as part of the lints by checking for anything that inherits from
-# `prometheus_client.metrics.MetricWrapperBase` or
-# `prometheus_client.metrics_core.Metric` but I don't know of a good mypy hook to
-# inspect this.
-prometheus_metric_fullname_to_label_arg_map = {
+# This should include anything that inherits from `prometheus_client.registry.Collector`
+# (`synapse.metrics._types.Collector`) or `prometheus_client.metrics_core.Metric`. This
+# is enforced by `analyze_prometheus_metric_classes`.
+prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]] = {
+    # `Collector` subclasses:
     "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Counter": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Histogram": ArgLocation("labelnames", 2),
@@ -81,21 +88,39 @@ prometheus_metric_fullname_to_label_arg_map = {
     "prometheus_client.metrics.Summary": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Info": ArgLocation("labelnames", 2),
     "prometheus_client.metrics.Enum": ArgLocation("labelnames", 2),
+    "synapse.metrics.LaterGauge": ArgLocation("labelnames", 2),
+    "synapse.metrics.InFlightGauge": ArgLocation("labels", 2),
+    "synapse.metrics.GaugeBucketCollector": ArgLocation("labelnames", 2),
+    # `Collector` subclasses (that we ignore): These should always fail because they
+    # don't have a `labelnames` argument, but we include them here so that they fail the
+    # lint and people need to manually allow via a type ignore comment.
+    "prometheus_client.registry.Collector": None,
+    "prometheus_client.registry._EmptyCollector": None,
+    "prometheus_client.registry.CollectorRegistry": None,
+    "prometheus_client.process_collector.ProcessCollector": None,
+    "prometheus_client.platform_collector.PlatformCollector": None,
+    "prometheus_client.gc_collector.GCCollector": None,
+    "synapse.metrics._gc.GCCounts": None,
+    "synapse.metrics._gc.PyPyGCStats": None,
+    "synapse.metrics._reactor_metrics.ReactorLastSeenMetric": None,
+    "synapse.metrics.CPUMetrics": None,
+    "synapse.util.metrics.DynamicCollectorRegistry": None,
+    "synapse.metrics.background_process_metrics._Collector": None,
     # We don't include `prometheus_client.metrics_core.Metric` here because it "is
     # intended only for internal use by the [Prometheus] instrumentation client" and
     # custom collectors should use the metric families listed below instead.
     # Additionally, it doesn't have a `labelnames` argument.
     # "prometheus_client.metrics_core.Metric"
-    "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
-    "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
-    "prometheus_client.metrics_core.GaugeMetricFamily": ArgLocation("labels", 3),
-    "prometheus_client.metrics_core.SummaryMetricFamily": ArgLocation("labels", 3),
-    "prometheus_client.metrics_core.InfoMetricFamily": ArgLocation("labels", 3),
-    "prometheus_client.metrics_core.HistogramMetricFamily": ArgLocation("labels", 3),
-    "prometheus_client.metrics_core.GaugeHistogramMetricFamily": ArgLocation(
-        "labels", 3
-    ),
-    "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.GaugeMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.SummaryMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.InfoMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.HistogramMetricFamily": ArgLocation("labels", 3),
+    # "prometheus_client.metrics_core.GaugeHistogramMetricFamily": ArgLocation(
+    #     "labels", 3
+    # ),
+    # "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
     # Our custom metrics:
     # TODO: "synapse.metrics.GaugeHistogramMetricFamilyWithLabels": ArgLocation("labelnames", 4),
 }
@@ -109,6 +134,11 @@ names and we just need to know where to look.
 
 
 class SynapsePlugin(Plugin):
+    def get_base_class_hook(
+        self, fullname: str
+    ) -> Optional[Callable[[ClassDefContext], None]]:
+        return analyze_prometheus_metric_classes
+
     def get_function_signature_hook(
         self, fullname: str
     ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
@@ -117,7 +147,7 @@ class SynapsePlugin(Plugin):
         # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
             "prometheus_client.metrics.Counter",
-            "prometheus_client.metrics_core.GaugeMetricFamily",
+            # "prometheus_client.metrics_core.GaugeMetricFamily",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592
         ):
@@ -145,6 +175,31 @@ class SynapsePlugin(Plugin):
         return None
 
 
+def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
+    """
+    Cross-check the list of Prometheus metric classes against the
+    `prometheus_metric_fullname_to_label_arg_map` to ensure the list is exhaustive and
+    up-to-date.
+    """
+
+    # TODO: Consider `prometheus_client.metrics_core.Metric`
+
+    if any(
+        ancestor_type.fullname
+        in (
+            # All of the Prometheus metric classes inherit from the `Collector`.
+            "prometheus_client.registry.Collector",
+            "synapse.metrics._types.Collector",
+        )
+        for ancestor_type in ctx.cls.info.mro
+    ):
+        assert ctx.cls.fullname in prometheus_metric_fullname_to_label_arg_map, (
+            f"Expected {ctx.cls.fullname} to be in `prometheus_metric_fullname_to_label_arg_map`, "
+            f"but it was not found. This is a problem with our custom mypy plugin. "
+            f"Please add it to the map."
+        )
+
+
 def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableType:
     """
     Ensure that the `prometheus_client` metrics include the `SERVER_NAME_LABEL` label
@@ -170,12 +225,17 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     # For whatever reason, the `fullname` here is different from the `fullname` we see
     # in `get_function_signature_hook(...)` so let's get our familiar version.
     fullname = definition.fullname.removesuffix(".__init__")
-    arg_location = prometheus_metric_fullname_to_label_arg_map.get(fullname)
-    assert arg_location is not None, (
+    arg_location = prometheus_metric_fullname_to_label_arg_map.get(
+        fullname, Sentinel.UNSET_SENTINEL
+    )
+    assert arg_location is not Sentinel.UNSET_SENTINEL, (
         f"Expected to find {fullname} in `prometheus_metric_fullname_to_label_arg_map`, "
         f"but it was not found. This is a problem with our custom mypy plugin. "
         f"Please add it to the map. Context: {ctx.context}"
     )
+    if arg_location is None:
+        # Ignore this metric as it doesn't have a `labelnames` argument.
+        return signature
 
     # Sanity check the arguments are still as expected in this version of
     # `prometheus_client`. ex. `Counter(name, documentation, labelnames, ...)`
@@ -186,7 +246,7 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
         or signature.arg_names[arg_location.position] != arg_location.keyword_name
     ):
         ctx.api.fail(
-            f"Expected the 3rd argument of {signature.name} to be 'labelnames', but got "
+            f"Expected the 3rd argument of {signature.name} to be `labelnames`/`labels`, but got "
             f"{signature.arg_names[arg_location.position]}",
             ctx.context,
         )
