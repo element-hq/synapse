@@ -579,22 +579,10 @@ class RoomCreationHandler:
         if current_power_level_int < needed_power_level:
             user_power_levels[user_id] = needed_power_level
 
-        # We construct what the body of a call to /createRoom would look like for passing
-        # to the spam checker. We don't include a preset here, as we expect the
-        # initial state to contain everything we need.
+        # Note that we don't attempt to pass the room config as this is an upgrade
         spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
             user_id,
-            {
-                "creation_content": creation_content,
-                "initial_state": [
-                    {
-                        "type": state_key[0],
-                        "state_key": state_key[1],
-                        "content": event_content,
-                    }
-                    for state_key, event_content in initial_state.items()
-                ],
-            },
+            None,
         )
         if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
             raise SynapseError(

@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -58,7 +58,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         """
 
         async def user_may_create_room(
-            user_id: str, room_config: JsonDict
+            user_id: str, room_config: Optional[JsonDict]
         ) -> Union[Literal["NOT_SPAM"], Codes]:
             self.last_room_config = room_config
             self.last_user_id = user_id
@@ -81,7 +81,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         """
 
         async def user_may_create_room(
-            user_id: str, room_config: JsonDict
+            user_id: str, room_config: Optional[JsonDict]
         ) -> Union[Literal["NOT_SPAM"], Codes]:
             self.last_room_config = room_config
             self.last_user_id = user_id
@@ -115,7 +115,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         room_id = channel.json_body["room_id"]
 
         async def user_may_create_room(
-            user_id: str, room_config: JsonDict
+            user_id: str, room_config: Optional[JsonDict]
         ) -> Union[Literal["NOT_SPAM"], Codes]:
             self.last_room_config = room_config
             self.last_user_id = user_id
@@ -138,15 +138,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         # Check that the callback was called and the room was upgraded.
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
-        # Check that the initial state received by callback contains the topic event.
-        self.assertTrue(
-            any(
-                event.get("type") == EventTypes.Topic
-                and event.get("state_key") == ""
-                and event.get("content").get(EventContentFields.TOPIC) == "foo"
-                for event in self.last_room_config["initial_state"]
-            )
-        )
+        # Check that the room config is None.
+        self.assertIsNone(self.last_room_config)
 
     def test_user_may_create_room_disallowed(self) -> None:
         """Test that the codes response from user_may_create_room callback is respected
@@ -154,7 +147,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         """
 
         async def user_may_create_room(
-            user_id: str, room_config: JsonDict
+            user_id: str, room_config: Optional[JsonDict]
         ) -> Union[Literal["NOT_SPAM"], Codes]:
             self.last_room_config = room_config
             self.last_user_id = user_id
