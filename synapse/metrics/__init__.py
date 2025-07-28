@@ -465,7 +465,8 @@ class CPUMetrics(Collector):
             yield sys
 
 
-REGISTRY.register(CPUMetrics())
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 
 
 #

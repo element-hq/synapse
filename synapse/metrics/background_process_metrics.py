@@ -167,7 +167,9 @@ class _Collector(Collector):
             yield from m.collect()
 
 
-REGISTRY.register(_Collector())
+# The `SERVER_NAME_LABEL` is included in the individual metrics added to this registry,
+# so we don't need to worry about it on the collector itself.
+REGISTRY.register(_Collector())  # type: ignore[missing-server-name-label]
 
 
 class _BackgroundProcess:

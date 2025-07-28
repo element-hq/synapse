@@ -42,7 +42,10 @@ TRACK_MEMORY_USAGE = False
 
 # We track cache metrics in a special registry that lets us update the metrics
 # just before they are returned from the scrape endpoint.
-CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()
+#
+# The `SERVER_NAME_LABEL` is included in the individual metrics added to this registry,
+# so we don't need to worry about it on the collector itself.
+CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()  # type: ignore[missing-server-name-label]
 
 caches_by_name: Dict[str, Sized] = {}
 

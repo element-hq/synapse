@@ -165,4 +165,5 @@ except Exception as e:
 
 
 if wrapper:
-    REGISTRY.register(ReactorLastSeenMetric(wrapper))
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(ReactorLastSeenMetric(wrapper))  # type: ignore[missing-server-name-label]

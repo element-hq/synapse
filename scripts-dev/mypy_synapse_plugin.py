@@ -76,9 +76,6 @@ class ArgLocation:
     """
 
 
-# This should include anything that inherits from `prometheus_client.registry.Collector`
-# (`synapse.metrics._types.Collector`) or `prometheus_client.metrics_core.Metric`. This
-# is enforced by `analyze_prometheus_metric_classes`.
 prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]] = {
     # `Collector` subclasses:
     "prometheus_client.metrics.MetricWrapperBase": ArgLocation("labelnames", 2),
@@ -129,6 +126,10 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
 Map from the fullname of the Prometheus `Metric`/`Collector` classes to the keyword
 argument name and positional index of the label names.
 
+This should include anything that inherits from `prometheus_client.registry.Collector`
+(`synapse.metrics._types.Collector`) or `prometheus_client.metrics_core.Metric`. This is
+enforced by `analyze_prometheus_metric_classes`.
+
 This is useful because different metrics have different signatures for passing in label
 names and we just need to know where to look.
 """
@@ -151,7 +152,19 @@ class SynapsePlugin(Plugin):
         # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
             "prometheus_client.metrics.Counter",
+            "prometheus_client.registry.Collector",
+            "prometheus_client.registry._EmptyCollector",
+            "prometheus_client.registry.CollectorRegistry",
+            "prometheus_client.process_collector.ProcessCollector",
+            "prometheus_client.platform_collector.PlatformCollector",
+            "prometheus_client.gc_collector.GCCollector",
+            "synapse.metrics._gc.GCCounts",
             "synapse.metrics._gc.PyPyGCStats",
+            "synapse.metrics._reactor_metrics.ReactorLastSeenMetric",
+            "synapse.metrics.CPUMetrics",
+            "synapse.metrics.jemalloc.JemallocCollector",
+            "synapse.util.metrics.DynamicCollectorRegistry",
+            "synapse.metrics.background_process_metrics._Collector",
             # "prometheus_client.metrics_core.GaugeMetricFamily",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592

@@ -101,7 +101,8 @@ def install_gc_manager() -> None:
     if running_on_pypy:
         return
 
-    REGISTRY.register(GCCounts())
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(GCCounts())  # type: ignore[missing-server-name-label]
 
     gc.disable()
 
