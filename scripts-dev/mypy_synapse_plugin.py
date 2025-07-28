@@ -157,7 +157,16 @@ class SynapsePlugin(Plugin):
         # updated all of the metrics, see
         # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
+            "prometheus_client.metrics.MetricWrapperBase",
             "prometheus_client.metrics.Counter",
+            # "prometheus_client.metrics.Histogram",
+            # "prometheus_client.metrics.Gauge",
+            "prometheus_client.metrics.Summary",
+            "prometheus_client.metrics.Info",
+            "prometheus_client.metrics.Enum",
+            # "synapse.metrics.LaterGauge",
+            "synapse.metrics.InFlightGauge",
+            # "synapse.metrics.GaugeBucketCollector",
             "prometheus_client.registry.Collector",
             "prometheus_client.registry._EmptyCollector",
             "prometheus_client.registry.CollectorRegistry",

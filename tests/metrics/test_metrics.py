@@ -59,7 +59,8 @@ class TestMauLimit(unittest.TestCase):
             foo: int
             bar: int
 
-        gauge: InFlightGauge[MetricEntry] = InFlightGauge(
+        # This is a test and does not matter if it uses `SERVER_NAME_LABEL`.
+        gauge: InFlightGauge[MetricEntry] = InFlightGauge(  # type: ignore[missing-server-name-label]
             "test1", "", labels=["test_label"], sub_metrics=["foo", "bar"]
         )
 
