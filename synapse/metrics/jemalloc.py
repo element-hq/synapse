@@ -230,7 +230,8 @@ def _setup_jemalloc_stats() -> None:
 
             yield g
 
-    REGISTRY.register(JemallocCollector())
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(JemallocCollector())  # type: ignore[missing-server-name-label]
 
     logger.debug("Added jemalloc stats")
 

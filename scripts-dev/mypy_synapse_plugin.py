@@ -147,6 +147,12 @@ class SynapsePlugin(Plugin):
     def get_function_signature_hook(
         self, fullname: str
     ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
+        # Strip off the unique identifier for classes that are dynamically created inside
+        # functions. ex. `synapse.metrics.jemalloc.JemallocCollector@185` (this is the line
+        # number)
+        if "@" in fullname:
+            fullname = fullname.split("@", 1)[0]
+
         # TODO: Use `prometheus_metric_fullname_to_label_arg_map.keys()` once we've
         # updated all of the metrics, see
         # https://github.com/element-hq/synapse/issues/18592
