@@ -159,13 +159,17 @@ class SynapsePlugin(Plugin):
         if fullname in (
             "prometheus_client.metrics.MetricWrapperBase",
             "prometheus_client.metrics.Counter",
+            # Tracked by https://github.com/element-hq/synapse/pull/18724
             # "prometheus_client.metrics.Histogram",
+            # Tracked by https://github.com/element-hq/synapse/pull/18725
             # "prometheus_client.metrics.Gauge",
             "prometheus_client.metrics.Summary",
             "prometheus_client.metrics.Info",
             "prometheus_client.metrics.Enum",
+            # Tracked by https://github.com/element-hq/synapse/pull/18714
             # "synapse.metrics.LaterGauge",
             "synapse.metrics.InFlightGauge",
+            # Tracked by https://github.com/element-hq/synapse/pull/18715
             # "synapse.metrics.GaugeBucketCollector",
             "prometheus_client.registry.Collector",
             "prometheus_client.registry._EmptyCollector",
