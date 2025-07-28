@@ -208,4 +208,5 @@ class PyPyGCStats(Collector):
 
 
 if running_on_pypy:
-    REGISTRY.register(PyPyGCStats())
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(PyPyGCStats())  # type: ignore[missing-server-name-label]

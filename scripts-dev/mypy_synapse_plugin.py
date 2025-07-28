@@ -24,7 +24,7 @@ can crop up, e.g the cache descriptors.
 """
 
 import enum
-from typing import Callable, Optional, Tuple, Type, Union, Mapping
+from typing import Callable, Mapping, Optional, Tuple, Type, Union
 
 import attr
 import mypy.types
@@ -72,7 +72,7 @@ class ArgLocation:
     """
     position: int
     """
-    The positional index of this argument
+    The 0-based positional index of this argument
     """
 
 
@@ -91,9 +91,9 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
     "synapse.metrics.LaterGauge": ArgLocation("labelnames", 2),
     "synapse.metrics.InFlightGauge": ArgLocation("labels", 2),
     "synapse.metrics.GaugeBucketCollector": ArgLocation("labelnames", 2),
-    # `Collector` subclasses (that we ignore): These should always fail because they
-    # don't have a `labelnames` argument, but we include them here so that they fail the
-    # lint and people need to manually allow via a type ignore comment.
+    # These should always fail because they don't have a `labelnames` argument, but we
+    # include them here so that they fail the lint and people need to manually allow via
+    # a type ignore comment as the source of truth should be in the source code.
     "prometheus_client.registry.Collector": None,
     "prometheus_client.registry._EmptyCollector": None,
     "prometheus_client.registry.CollectorRegistry": None,
@@ -104,6 +104,7 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
     "synapse.metrics._gc.PyPyGCStats": None,
     "synapse.metrics._reactor_metrics.ReactorLastSeenMetric": None,
     "synapse.metrics.CPUMetrics": None,
+    "synapse.metrics.jemalloc.JemallocCollector": None,
     "synapse.util.metrics.DynamicCollectorRegistry": None,
     "synapse.metrics.background_process_metrics._Collector": None,
     # We don't include `prometheus_client.metrics_core.Metric` here because it "is
@@ -134,6 +135,9 @@ names and we just need to know where to look.
 
 
 class SynapsePlugin(Plugin):
+    # Unfortunately, because mypy only chooses the first plugin that returns a non-None
+    # value, this check doesn't get run during our normal mypy lint process because
+    # `mypy_zope` also uses the `get_base_class_hook` method.
     def get_base_class_hook(
         self, fullname: str
     ) -> Optional[Callable[[ClassDefContext], None]]:
@@ -147,11 +151,12 @@ class SynapsePlugin(Plugin):
         # https://github.com/element-hq/synapse/issues/18592
         if fullname in (
             "prometheus_client.metrics.Counter",
+            "synapse.metrics._gc.PyPyGCStats",
             # "prometheus_client.metrics_core.GaugeMetricFamily",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592
         ):
-            return check_prometheus_metric_instantiation
+            return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
         return None
 
@@ -182,6 +187,13 @@ def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
     up-to-date.
     """
 
+    fullname = ctx.cls.fullname
+    # Strip off the unique identifier for classes that are dynamically created inside
+    # functions. ex. `synapse.metrics.jemalloc.JemallocCollector@185` (this is the line
+    # number)
+    if "@" in fullname:
+        fullname = fullname.split("@", 1)[0]
+
     # TODO: Consider `prometheus_client.metrics_core.Metric`
 
     if any(
@@ -193,14 +205,16 @@ def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
         )
         for ancestor_type in ctx.cls.info.mro
     ):
-        assert ctx.cls.fullname in prometheus_metric_fullname_to_label_arg_map, (
-            f"Expected {ctx.cls.fullname} to be in `prometheus_metric_fullname_to_label_arg_map`, "
+        assert fullname in prometheus_metric_fullname_to_label_arg_map, (
+            f"Expected {fullname} to be in `prometheus_metric_fullname_to_label_arg_map`, "
             f"but it was not found. This is a problem with our custom mypy plugin. "
             f"Please add it to the map."
         )
 
 
-def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableType:
+def check_prometheus_metric_instantiation(
+    ctx: FunctionSigContext, fullname: str
+) -> CallableType:
     """
     Ensure that the `prometheus_client` metrics include the `SERVER_NAME_LABEL` label
     when instantiated.
@@ -213,18 +227,16 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     Python garbage collection, Twisted reactor tick time which shouldn't have the
     `SERVER_NAME_LABEL`. In those cases, use use a type ignore comment to disable the
     check, e.g. `# type: ignore[missing-server-name-label]`.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+        fullname: The fully qualified name of the function being called,
+            e.g. `"prometheus_client.metrics.Counter"`
     """
     # The true signature, this isn't being modified so this is what will be returned.
     signature = ctx.default_signature
-    definition = signature.definition
-    assert definition is not None, (
-        f"Expected the signature definition to be set for anything passed to "
-        f"`check_prometheus_metric_instantiation`, but it was None. Context: {ctx.context}"
-    )
 
-    # For whatever reason, the `fullname` here is different from the `fullname` we see
-    # in `get_function_signature_hook(...)` so let's get our familiar version.
-    fullname = definition.fullname.removesuffix(".__init__")
+    # Find where the label names argument is in the function signature.
     arg_location = prometheus_metric_fullname_to_label_arg_map.get(
         fullname, Sentinel.UNSET_SENTINEL
     )
@@ -233,8 +245,18 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
         f"but it was not found. This is a problem with our custom mypy plugin. "
         f"Please add it to the map. Context: {ctx.context}"
     )
+    # People should be using `# type: ignore[missing-server-name-label]` for
+    # process-level metrics that should not have the `SERVER_NAME_LABEL`.
     if arg_location is None:
-        # Ignore this metric as it doesn't have a `labelnames` argument.
+        ctx.api.fail(
+            f"{signature.name} does not have a `labelnames`/`labels` argument "
+            "(if this is untrue, update `prometheus_metric_fullname_to_label_arg_map` "
+            "in our custom mypy plugin) and should probably have a type ignore comment, "
+            "e.g. `# type: ignore[missing-server-name-label]`. The reason we don't "
+            "automatically ignore this is the source of truth should be in the source code.",
+            ctx.context,
+            code=PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL,
+        )
         return signature
 
     # Sanity check the arguments are still as expected in this version of
@@ -246,8 +268,8 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
         or signature.arg_names[arg_location.position] != arg_location.keyword_name
     ):
         ctx.api.fail(
-            f"Expected the 3rd argument of {signature.name} to be `labelnames`/`labels`, but got "
-            f"{signature.arg_names[arg_location.position]}",
+            f"Expected argument number {arg_location.position + 1} of {signature.name} to be `labelnames`/`labels`, "
+            f"but got {signature.arg_names[arg_location.position]}",
             ctx.context,
         )
         return signature
