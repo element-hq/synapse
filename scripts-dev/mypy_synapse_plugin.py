@@ -88,9 +88,6 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
     "synapse.metrics.LaterGauge": ArgLocation("labelnames", 2),
     "synapse.metrics.InFlightGauge": ArgLocation("labels", 2),
     "synapse.metrics.GaugeBucketCollector": ArgLocation("labelnames", 2),
-    # These should always fail because they don't have a `labelnames` argument, but we
-    # include them here so that they fail the lint and people need to manually allow via
-    # a type ignore comment as the source of truth should be in the source code.
     "prometheus_client.registry.Collector": None,
     "prometheus_client.registry._EmptyCollector": None,
     "prometheus_client.registry.CollectorRegistry": None,
@@ -104,34 +101,43 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
     "synapse.metrics.jemalloc.JemallocCollector": None,
     "synapse.util.metrics.DynamicCollectorRegistry": None,
     "synapse.metrics.background_process_metrics._Collector": None,
-    # We don't include `prometheus_client.metrics_core.Metric` here because it "is
-    # intended only for internal use by the [Prometheus] instrumentation client" and
+    #
+    # `Metric` subclasses:
+    #
+    # Note: `prometheus_client.metrics_core.Metric` itself should not be used because it
+    # "is intended only for internal use by the [Prometheus] instrumentation client" and
     # custom collectors should use the metric families listed below instead.
     # Additionally, it doesn't have a `labelnames` argument.
-    # "prometheus_client.metrics_core.Metric"
-    # "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
-    # "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
-    # "prometheus_client.metrics_core.GaugeMetricFamily": ArgLocation("labels", 3),
-    # "prometheus_client.metrics_core.SummaryMetricFamily": ArgLocation("labels", 3),
-    # "prometheus_client.metrics_core.InfoMetricFamily": ArgLocation("labels", 3),
-    # "prometheus_client.metrics_core.HistogramMetricFamily": ArgLocation("labels", 3),
-    # "prometheus_client.metrics_core.GaugeHistogramMetricFamily": ArgLocation(
-    #     "labels", 3
-    # ),
-    # "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
-    # Our custom metrics:
-    # TODO: "synapse.metrics.GaugeHistogramMetricFamilyWithLabels": ArgLocation("labelnames", 4),
+    "prometheus_client.metrics_core.Metric": None,
+    "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.GaugeMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.SummaryMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.InfoMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.HistogramMetricFamily": ArgLocation("labels", 3),
+    "prometheus_client.metrics_core.GaugeHistogramMetricFamily": ArgLocation(
+        "labels", 3
+    ),
+    "prometheus_client.metrics_core.StateSetMetricFamily": ArgLocation("labels", 3),
+    "synapse.metrics.GaugeHistogramMetricFamilyWithLabels": ArgLocation(
+        "labelnames", 4
+    ),
 }
 """
 Map from the fullname of the Prometheus `Metric`/`Collector` classes to the keyword
-argument name and positional index of the label names.
+argument name and positional index of the label names. This map is useful because
+different metrics have different signatures for passing in label names and we just need
+to know where to look.
 
-This should include anything that inherits from `prometheus_client.registry.Collector`
-(`synapse.metrics._types.Collector`) or `prometheus_client.metrics_core.Metric`. This is
-enforced by `analyze_prometheus_metric_classes`.
+This map should include any metrics that we collect with Prometheus. Which corresponds
+to anything that inherits from `prometheus_client.registry.Collector`
+(`synapse.metrics._types.Collector`) or `prometheus_client.metrics_core.Metric`. The
+exhaustiveness of this list is enforced by `analyze_prometheus_metric_classes`.
 
-This is useful because different metrics have different signatures for passing in label
-names and we just need to know where to look.
+The entries with `None` always fail the lint because they don't have a `labelnames`
+argument (therefore, no `SERVER_NAME_LABEL`), but we include them here so that people
+can notice and manually allow via a type ignore comment as the source of truth
+should be in the source code.
 """
 
 
@@ -184,9 +190,16 @@ class SynapsePlugin(Plugin):
             "synapse.metrics.jemalloc.JemallocCollector",
             "synapse.util.metrics.DynamicCollectorRegistry",
             "synapse.metrics.background_process_metrics._Collector",
-            # "prometheus_client.metrics_core.GaugeMetricFamily",
-            # TODO: Add other prometheus_client metrics that need checking as we
-            # refactor, see https://github.com/element-hq/synapse/issues/18592
+            "prometheus_client.metrics_core.Metric",
+            "prometheus_client.metrics_core.UnknownMetricFamily",
+            "prometheus_client.metrics_core.CounterMetricFamily",
+            "prometheus_client.metrics_core.GaugeMetricFamily",
+            "prometheus_client.metrics_core.SummaryMetricFamily",
+            "prometheus_client.metrics_core.InfoMetricFamily",
+            "prometheus_client.metrics_core.HistogramMetricFamily",
+            "prometheus_client.metrics_core.GaugeHistogramMetricFamily",
+            "prometheus_client.metrics_core.StateSetMetricFamily",
+            "synapse.metrics.GaugeHistogramMetricFamilyWithLabels",
         ):
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
@@ -234,6 +247,8 @@ def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
             # All of the Prometheus metric classes inherit from the `Collector`.
             "prometheus_client.registry.Collector",
             "synapse.metrics._types.Collector",
+            # TODO
+            "prometheus_client.metrics_core.Metric",
         )
         for ancestor_type in ctx.cls.info.mro
     ):
