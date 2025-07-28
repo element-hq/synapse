@@ -105,7 +105,7 @@ from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.appservice import ApplicationService
 from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -137,24 +137,40 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-notified_presence_counter = Counter("synapse_handler_presence_notified_presence", "")
+notified_presence_counter = Counter(
+    "synapse_handler_presence_notified_presence", "", labelnames=[SERVER_NAME_LABEL]
+)
 federation_presence_out_counter = Counter(
-    "synapse_handler_presence_federation_presence_out", ""
+    "synapse_handler_presence_federation_presence_out",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
-presence_updates_counter = Counter("synapse_handler_presence_presence_updates", "")
-timers_fired_counter = Counter("synapse_handler_presence_timers_fired", "")
+presence_updates_counter = Counter(
+    "synapse_handler_presence_presence_updates", "", labelnames=[SERVER_NAME_LABEL]
+)
+timers_fired_counter = Counter(
+    "synapse_handler_presence_timers_fired", "", labelnames=[SERVER_NAME_LABEL]
+)
 federation_presence_counter = Counter(
-    "synapse_handler_presence_federation_presence", ""
+    "synapse_handler_presence_federation_presence", "", labelnames=[SERVER_NAME_LABEL]
 )
-bump_active_time_counter = Counter("synapse_handler_presence_bump_active_time", "")
+bump_active_time_counter = Counter(
+    "synapse_handler_presence_bump_active_time", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-get_updates_counter = Counter("synapse_handler_presence_get_updates", "", ["type"])
+get_updates_counter = Counter(
+    "synapse_handler_presence_get_updates", "", labelnames=["type", SERVER_NAME_LABEL]
+)
 
 notify_reason_counter = Counter(
-    "synapse_handler_presence_notify_reason", "", ["locality", "reason"]
+    "synapse_handler_presence_notify_reason",
+    "",
+    labelnames=["locality", "reason", SERVER_NAME_LABEL],
 )
 state_transition_counter = Counter(
-    "synapse_handler_presence_state_transition", "", ["locality", "from", "to"]
+    "synapse_handler_presence_state_transition",
+    "",
+    labelnames=["locality", "from", "to", SERVER_NAME_LABEL],
 )
 
 # If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
@@ -668,7 +684,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
             old_state = self.user_to_current_state.get(new_state.user_id)
             self.user_to_current_state[new_state.user_id] = new_state
             is_mine = self.is_mine_id(new_state.user_id)
-            if not old_state or should_notify(old_state, new_state, is_mine):
+            if not old_state or should_notify(
+                old_state, new_state, is_mine, self.server_name
+            ):
                 state_to_notify.append(new_state)
 
         stream_id = token
@@ -977,6 +995,7 @@ class PresenceHandler(BasePresenceHandler):
                     prev_state,
                     new_state,
                     is_mine=self.is_mine_id(user_id),
+                    our_server_name=self.server_name,
                     wheel_timer=self.wheel_timer,
                     now=now,
                     # When overriding disabled presence, don't kick off all the
@@ -996,10 +1015,14 @@ class PresenceHandler(BasePresenceHandler):
 
             # TODO: We should probably ensure there are no races hereafter
 
-            presence_updates_counter.inc(len(new_states))
+            presence_updates_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc(len(new_states))
 
             if to_notify:
-                notified_presence_counter.inc(len(to_notify))
+                notified_presence_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc(len(to_notify))
                 await self._persist_and_notify(list(to_notify.values()))
 
             self.unpersisted_users_changes |= {s.user_id for s in new_states}
@@ -1018,7 +1041,9 @@ class PresenceHandler(BasePresenceHandler):
                 if user_id not in to_notify
             }
             if to_federation_ping:
-                federation_presence_out_counter.inc(len(to_federation_ping))
+                federation_presence_out_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc(len(to_federation_ping))
 
                 hosts_to_states = await get_interested_remotes(
                     self.store,
@@ -1068,7 +1093,9 @@ class PresenceHandler(BasePresenceHandler):
             for user_id in users_to_check
         ]
 
-        timers_fired_counter.inc(len(states))
+        timers_fired_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            len(states)
+        )
 
         # Set of user ID & device IDs which are currently syncing.
         syncing_user_devices = {
@@ -1102,7 +1129,7 @@ class PresenceHandler(BasePresenceHandler):
 
         user_id = user.to_string()
 
-        bump_active_time_counter.inc()
+        bump_active_time_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         now = self.clock.time_msec()
 
@@ -1354,7 +1381,9 @@ class PresenceHandler(BasePresenceHandler):
             updates.append(prev_state.copy_and_replace(**new_fields))
 
         if updates:
-            federation_presence_counter.inc(len(updates))
+            federation_presence_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc(len(updates))
             await self._update_states(updates)
 
     async def set_state(
@@ -1667,7 +1696,10 @@ class PresenceHandler(BasePresenceHandler):
 
 
 def should_notify(
-    old_state: UserPresenceState, new_state: UserPresenceState, is_mine: bool
+    old_state: UserPresenceState,
+    new_state: UserPresenceState,
+    is_mine: bool,
+    our_server_name: str,
 ) -> bool:
     """Decides if a presence state change should be sent to interested parties."""
     user_location = "remote"
@@ -1678,19 +1710,38 @@ def should_notify(
         return False
 
     if old_state.status_msg != new_state.status_msg:
-        notify_reason_counter.labels(user_location, "status_msg_change").inc()
+        notify_reason_counter.labels(
+            locality=user_location,
+            reason="status_msg_change",
+            **{SERVER_NAME_LABEL: our_server_name},
+        ).inc()
         return True
 
     if old_state.state != new_state.state:
-        notify_reason_counter.labels(user_location, "state_change").inc()
+        notify_reason_counter.labels(
+            locality=user_location,
+            reason="state_change",
+            **{SERVER_NAME_LABEL: our_server_name},
+        ).inc()
         state_transition_counter.labels(
-            user_location, old_state.state, new_state.state
+            **{
+                "locality": user_location,
+                # `from` is a reserved word in Python so we have to label it this way if
+                # we want to use keyword args.
+                "from": old_state.state,
+                "to": new_state.state,
+                SERVER_NAME_LABEL: our_server_name,
+            },
         ).inc()
         return True
 
     if old_state.state == PresenceState.ONLINE:
         if new_state.currently_active != old_state.currently_active:
-            notify_reason_counter.labels(user_location, "current_active_change").inc()
+            notify_reason_counter.labels(
+                locality=user_location,
+                reason="current_active_change",
+                **{SERVER_NAME_LABEL: our_server_name},
+            ).inc()
             return True
 
         if (
@@ -1700,14 +1751,18 @@ def should_notify(
             # Only notify about last active bumps if we're not currently active
             if not new_state.currently_active:
                 notify_reason_counter.labels(
-                    user_location, "last_active_change_online"
+                    locality=user_location,
+                    reason="last_active_change_online",
+                    **{SERVER_NAME_LABEL: our_server_name},
                 ).inc()
                 return True
 
     elif new_state.last_active_ts - old_state.last_active_ts > LAST_ACTIVE_GRANULARITY:
         # Always notify for a transition where last active gets bumped.
         notify_reason_counter.labels(
-            user_location, "last_active_change_not_online"
+            locality=user_location,
+            reason="last_active_change_not_online",
+            **{SERVER_NAME_LABEL: our_server_name},
         ).inc()
         return True
 
@@ -1774,6 +1829,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         self.server_name = hs.hostname
         self.get_presence_handler = hs.get_presence_handler
         self.get_presence_router = hs.get_presence_router
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
 
@@ -1885,7 +1941,10 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
                     # If we have the full list of changes for presence we can
                     # simply check which ones share a room with the user.
-                    get_updates_counter.labels("stream").inc()
+                    get_updates_counter.labels(
+                        type="stream",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     sharing_users = await self.store.do_users_share_a_room(
                         user_id, updated_users
@@ -1898,7 +1957,10 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 else:
                     # Too many possible updates. Find all users we can see and check
                     # if any of them have changed.
-                    get_updates_counter.labels("full").inc()
+                    get_updates_counter.labels(
+                        type="full",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     users_interested_in = (
                         await self.store.get_users_who_share_room_with_user(user_id)
@@ -2148,6 +2210,7 @@ def handle_update(
     prev_state: UserPresenceState,
     new_state: UserPresenceState,
     is_mine: bool,
+    our_server_name: str,
     wheel_timer: WheelTimer,
     now: int,
     persist: bool,
@@ -2160,6 +2223,7 @@ def handle_update(
         prev_state
         new_state
         is_mine: Whether the user is ours
+        our_server_name: The homeserver name of the our server (`hs.hostname`)
         wheel_timer
         now: Time now in ms
         persist: True if this state should persist until another update occurs.
@@ -2228,7 +2292,7 @@ def handle_update(
             )
 
     # Check whether the change was something worth notifying about
-    if should_notify(prev_state, new_state, is_mine):
+    if should_notify(prev_state, new_state, is_mine, our_server_name):
         new_state = new_state.copy_and_replace(last_federation_update_ts=now)
         persist_and_notify = True
 
