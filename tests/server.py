@@ -97,6 +97,7 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
 from synapse.server import HomeServer
+from synapse.server_notices.consent_server_notices import ConfigError
 from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
@@ -1087,12 +1088,19 @@ def setup_test_homeserver(
             "args": {"database": test_db_location, "cp_min": 1, "cp_max": 1},
         }
 
+        server_name = config.server.server_name
+        if not isinstance(server_name, str):
+            raise ConfigError("Must be a string", ("server_name",))
+
         # Check if we have set up a DB that we can use as a template.
         global PREPPED_SQLITE_DB_CONN
         if PREPPED_SQLITE_DB_CONN is None:
             temp_engine = create_engine(database_config)
             PREPPED_SQLITE_DB_CONN = LoggingDatabaseConnection(
-                sqlite3.connect(":memory:"), temp_engine, "PREPPED_CONN"
+                conn=sqlite3.connect(":memory:"),
+                engine=temp_engine,
+                default_txn_name="PREPPED_CONN",
+                server_name=server_name,
             )
 
             database = DatabaseConnectionConfig("master", database_config)

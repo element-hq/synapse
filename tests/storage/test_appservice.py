@@ -63,9 +63,15 @@ class ApplicationServiceStoreTestCase(unittest.HomeserverTestCase):
         self._add_appservice("token3", "as3", "some_url", "some_hs_token", "bob")
         # must be done after inserts
         database = self.hs.get_datastores().databases[0]
+        self.server_name = self.hs.hostname
         self.store = ApplicationServiceStore(
             database,
-            make_conn(database._database_config, database.engine, "test"),
+            make_conn(
+                db_config=database._database_config,
+                engine=database.engine,
+                default_txn_name="test",
+                server_name=self.server_name,
+            ),
             self.hs,
         )
 
@@ -138,9 +144,17 @@ class ApplicationServiceTransactionStoreTestCase(unittest.HomeserverTestCase):
         self.db_pool = database._db_pool
         self.engine = database.engine
 
+        server_name = self.hs.hostname
         db_config = self.hs.config.database.get_single_database()
         self.store = TestTransactionStore(
-            database, make_conn(db_config, self.engine, "test"), self.hs
+            database,
+            make_conn(
+                db_config=db_config,
+                engine=self.engine,
+                default_txn_name="test",
+                server_name=server_name,
+            ),
+            self.hs,
         )
 
     def _add_service(self, url: str, as_token: str, id: str) -> None:
@@ -488,10 +502,16 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.hs.config.appservice.app_service_config_files = [f1, f2]
         self.hs.config.caches.event_cache_size = 1
 
+        server_name = self.hs.hostname
         database = self.hs.get_datastores().databases[0]
         ApplicationServiceStore(
             database,
-            make_conn(database._database_config, database.engine, "test"),
+            make_conn(
+                db_config=database._database_config,
+                engine=database.engine,
+                default_txn_name="test",
+                server_name=server_name,
+            ),
             self.hs,
         )
 
@@ -503,10 +523,16 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.hs.config.caches.event_cache_size = 1
 
         with self.assertRaises(ConfigError) as cm:
+            server_name = self.hs.hostname
             database = self.hs.get_datastores().databases[0]
             ApplicationServiceStore(
                 database,
-                make_conn(database._database_config, database.engine, "test"),
+                make_conn(
+                    db_config=database._database_config,
+                    engine=database.engine,
+                    default_txn_name="test",
+                    server_name=server_name,
+                ),
                 self.hs,
             )
 
@@ -523,10 +549,16 @@ class ApplicationServiceStoreConfigTestCase(unittest.HomeserverTestCase):
         self.hs.config.caches.event_cache_size = 1
 
         with self.assertRaises(ConfigError) as cm:
+            server_name = self.hs.hostname
             database = self.hs.get_datastores().databases[0]
             ApplicationServiceStore(
                 database,
-                make_conn(database._database_config, database.engine, "test"),
+                make_conn(
+                    db_config=database._database_config,
+                    engine=database.engine,
+                    default_txn_name="test",
+                    server_name=server_name,
+                ),
                 self.hs,
             )
 

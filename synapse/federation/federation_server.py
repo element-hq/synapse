@@ -122,6 +122,7 @@ received_queries_counter = Counter(
 pdu_process_time = Histogram(
     "synapse_federation_server_pdu_process_time",
     "Time taken to process an event",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 last_pdu_ts_metric = Gauge(
@@ -1324,9 +1325,9 @@ class FederationServer(FederationBase):
                     origin, event.event_id
                 )
                 if received_ts is not None:
-                    pdu_process_time.observe(
-                        (self._clock.time_msec() - received_ts) / 1000
-                    )
+                    pdu_process_time.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).observe((self._clock.time_msec() - received_ts) / 1000)
 
             next = await self._get_next_nonspam_staged_event_for_room(
                 room_id, room_version

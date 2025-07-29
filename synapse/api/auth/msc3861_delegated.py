@@ -47,6 +47,7 @@ from synapse.logging.opentracing import (
     inject_request_headers,
     start_active_span,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
@@ -62,7 +63,7 @@ logger = logging.getLogger(__name__)
 introspection_response_timer = Histogram(
     "synapse_api_auth_delegated_introspection_response",
     "Time taken to get a response for an introspection request",
-    ["code"],
+    labelnames=["code", SERVER_NAME_LABEL],
 )
 
 
@@ -341,17 +342,23 @@ class MSC3861DelegatedAuth(BaseAuth):
                     )
         except HttpResponseException as e:
             end_time = self._clock.time()
-            introspection_response_timer.labels(e.code).observe(end_time - start_time)
+            introspection_response_timer.labels(
+                code=e.code, **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(end_time - start_time)
             raise
         except Exception:
             end_time = self._clock.time()
-            introspection_response_timer.labels("ERR").observe(end_time - start_time)
+            introspection_response_timer.labels(
+                code="ERR", **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(end_time - start_time)
             raise
 
         logger.debug("Fetched token from MAS")
 
         end_time = self._clock.time()
-        introspection_response_timer.labels(200).observe(end_time - start_time)
+        introspection_response_timer.labels(
+            code=200, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time - start_time)
 
         resp = json_decoder.decode(resp_body.decode("utf-8"))
 

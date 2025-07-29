@@ -75,7 +75,7 @@ rate_limit_reject_counter = Counter(
 queue_wait_timer = Histogram(
     "synapse_rate_limit_queue_wait_time_seconds",
     "Amount of time spent waiting for the rate limiter to let our request through.",
-    ["rate_limiter_name"],
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
     buckets=(
         0.005,
         0.01,
@@ -289,7 +289,10 @@ class _PerHostRatelimiter:
     async def _on_enter_with_tracing(self, request_id: object) -> None:
         maybe_metrics_cm: ContextManager = contextlib.nullcontext()
         if self.metrics_name:
-            maybe_metrics_cm = queue_wait_timer.labels(self.metrics_name).time()
+            maybe_metrics_cm = queue_wait_timer.labels(
+                rate_limiter_name=self.metrics_name,
+                **{SERVER_NAME_LABEL: self.our_server_name},
+            ).time()
         with start_active_span("ratelimit wait"), maybe_metrics_cm:
             await self._on_enter(request_id)
 

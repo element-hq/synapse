@@ -49,7 +49,7 @@ get_counter = Counter(
 response_timer = Histogram(
     "synapse_external_cache_response_time_seconds",
     "Time taken to get a response from Redis for a cache get/set request",
-    labelnames=["method"],
+    labelnames=["method", SERVER_NAME_LABEL],
     buckets=(
         0.001,
         0.002,
@@ -110,7 +110,9 @@ class ExternalCache:
             "ExternalCache.set",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels("set").time():
+            with response_timer.labels(
+                method="set", **{SERVER_NAME_LABEL: self.server_name}
+            ).time():
                 return await make_deferred_yieldable(
                     self._redis_connection.set(
                         self._get_redis_key(cache_name, key),
@@ -129,7 +131,9 @@ class ExternalCache:
             "ExternalCache.get",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels("get").time():
+            with response_timer.labels(
+                method="get", **{SERVER_NAME_LABEL: self.server_name}
+            ).time():
                 result = await make_deferred_yieldable(
                     self._redis_connection.get(self._get_redis_key(cache_name, key))
                 )

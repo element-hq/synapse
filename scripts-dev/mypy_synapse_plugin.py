@@ -163,8 +163,7 @@ class SynapsePlugin(Plugin):
         if fullname in (
             "prometheus_client.metrics.MetricWrapperBase",
             "prometheus_client.metrics.Counter",
-            # Tracked by https://github.com/element-hq/synapse/pull/18724
-            # "prometheus_client.metrics.Histogram",
+            "prometheus_client.metrics.Histogram",
             "prometheus_client.metrics.Gauge",
             "prometheus_client.metrics.Summary",
             "prometheus_client.metrics.Info",
