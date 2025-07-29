@@ -239,15 +239,13 @@ def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
     if "@" in fullname:
         fullname = fullname.split("@", 1)[0]
 
-    # TODO: Consider `prometheus_client.metrics_core.Metric`
-
     if any(
         ancestor_type.fullname
         in (
             # All of the Prometheus metric classes inherit from the `Collector`.
             "prometheus_client.registry.Collector",
             "synapse.metrics._types.Collector",
-            # TODO
+            # And custom metrics that inherit from `Metric`.
             "prometheus_client.metrics_core.Metric",
         )
         for ancestor_type in ctx.cls.info.mro
