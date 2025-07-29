@@ -1726,6 +1726,9 @@ class FederationEventHandler:
                             event,
                             auth_event_id,
                         )
+                        # Drop the event from the auth_map too, else we may incorrectly persist
+                        # events which depend on this dropped event.
+                        auth_map.pop(event.event_id, None)
                         return
                     auth.append(ae)
 
