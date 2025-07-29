@@ -23,7 +23,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Dict, List, Tuple, cast
 
-from synapse.metrics import GaugeBucketCollector
+from synapse.metrics import SERVER_NAME_LABEL, GaugeBucketCollector
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -42,9 +42,10 @@ logger = logging.getLogger(__name__)
 
 # Collect metrics on the number of forward extremities that exist.
 _extremities_collecter = GaugeBucketCollector(
-    "synapse_forward_extremities",
-    "Number of rooms on the server with the given number of forward extremities"
+    name="synapse_forward_extremities",
+    documentation="Number of rooms on the server with the given number of forward extremities"
     " or fewer",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=[1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500],
 )
 
@@ -54,9 +55,10 @@ _extremities_collecter = GaugeBucketCollector(
 # we could remove from state resolution by reducing the graph to a single
 # forward extremity.
 _excess_state_events_collecter = GaugeBucketCollector(
-    "synapse_excess_extremity_events",
-    "Number of rooms on the server with the given number of excess extremity "
+    name="synapse_excess_extremity_events",
+    documentation="Number of rooms on the server with the given number of excess extremity "
     "events, or fewer",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=[0] + [1 << n for n in range(12)],
 )
 
@@ -100,10 +102,12 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         res = await self.db_pool.runInteraction("read_forward_extremities", fetch)
 
-        _extremities_collecter.update_data(x[0] for x in res)
+        _extremities_collecter.update_data(
+            values=(x[0] for x in res), labels=(self.server_name,)
+        )
 
         _excess_state_events_collecter.update_data(
-            (x[0] - 1) * x[1] for x in res if x[1]
+            values=((x[0] - 1) * x[1] for x in res if x[1]), labels=(self.server_name,)
         )
 
     async def count_daily_e2ee_messages(self) -> int:
