@@ -371,7 +371,18 @@ class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
         if len(labelvalues) != len(labelnames):
             raise ValueError("Incorrect label count")
 
-        self._labelnames = tuple(labelnames)
+        # Call the super to set the labelnames. We use this stable API instead of
+        # setting the internal `_labelnames` field directly.
+        super().__init__(
+            name=name,
+            documentation=documentation,
+            labels=labelnames,
+            # Since `GaugeHistogramMetricFamily` doesn't support supplying `labels` and
+            # `buckets` at the same time (artificial limitation), we will just set these
+            # as `None` and set up the buckets ourselves just below.
+            buckets=None,
+            gsum_value=None,
+        )
 
         # Create a gauge for each bucket.
         if buckets is not None:
