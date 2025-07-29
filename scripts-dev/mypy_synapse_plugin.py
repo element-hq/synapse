@@ -103,11 +103,6 @@ prometheus_metric_fullname_to_label_arg_map: Mapping[str, Optional[ArgLocation]]
     "synapse.metrics.background_process_metrics._Collector": None,
     #
     # `Metric` subclasses:
-    #
-    # Note: `prometheus_client.metrics_core.Metric` itself should not be used because it
-    # "is intended only for internal use by the [Prometheus] instrumentation client" and
-    # custom collectors should use the metric families listed below instead.
-    # Additionally, it doesn't have a `labelnames` argument.
     "prometheus_client.metrics_core.Metric": None,
     "prometheus_client.metrics_core.UnknownMetricFamily": ArgLocation("labels", 3),
     "prometheus_client.metrics_core.CounterMetricFamily": ArgLocation("labels", 3),
