@@ -673,6 +673,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="delete_account_validity_for_user",
         )
 
+    @cached(max_entries=100000)
     async def is_server_admin(self, user: UserID) -> bool:
         """Determines if a user is an admin of this homeserver.
 
@@ -706,6 +707,9 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             )
             self._invalidate_cache_and_stream(
                 txn, self.get_user_by_id, (user.to_string(),)
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.is_server_admin, (user.to_string(),)
             )
 
         await self.db_pool.runInteraction("set_server_admin", set_server_admin_txn)
