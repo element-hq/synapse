@@ -508,7 +508,7 @@ class BulkPushRuleEvaluator:
             if (
                 "notify" in actions
                 or self.hs.config.experimental.msc3768_enabled
-                and PushRuleActions.MSC_3768_NOTIFY_IN_APP in actions
+                and PushRuleActions.MSC3768_NOTIFY_IN_APP in actions
             ):
                 # Push rules say we should notify the user of this event
                 actions_by_user[uid] = actions

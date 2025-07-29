@@ -358,4 +358,4 @@ class ProfileFields:
 
 
 class PushRuleActions:
-    MSC_3768_NOTIFY_IN_APP: Final = "org.matrix.msc3768.notify_in_app"
+    MSC3768_NOTIFY_IN_APP: Final = "org.matrix.msc3768.notify_in_app"

@@ -162,7 +162,7 @@ def check_actions(
         elif isinstance(a, dict) and "set_tweak" in a:
             pass
         elif config.experimental.msc3768_enabled:
-            if a == PushRuleActions.MSC_3768_NOTIFY_IN_APP:
+            if a == PushRuleActions.MSC3768_NOTIFY_IN_APP:
                 pass  # In-app only notification as per MSC3768
             else:
                 pass  # The spec doesn't forbid introducing custom actions

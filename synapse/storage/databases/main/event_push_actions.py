@@ -1185,7 +1185,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 1
                 if "notify" in actions
                 or self.hs.config.experimental.msc3768_enabled
-                and PushRuleActions.MSC_3768_NOTIFY_IN_APP in actions
+                and PushRuleActions.MSC3768_NOTIFY_IN_APP in actions
                 else 0
             )
             return (

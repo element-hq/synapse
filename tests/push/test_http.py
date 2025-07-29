@@ -845,7 +845,7 @@ class HTTPPusherTests(HomeserverTestCase):
         # Disable push notifications for this room -> user
         body = {
             "conditions": [{"kind": "event_match", "key": "room_id", "pattern": room}],
-            "actions": [PushRuleActions.MSC_3768_NOTIFY_IN_APP],
+            "actions": [PushRuleActions.MSC3768_NOTIFY_IN_APP],
         }
         channel = self.make_request(
             "PUT",
