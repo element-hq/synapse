@@ -44,8 +44,6 @@ TRACK_MEMORY_USAGE = False
 # just before they are returned from the scrape endpoint.
 CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()
 
-caches_by_name: Dict[str, Sized] = {}
-
 cache_size = Gauge(
     "synapse_util_caches_cache_size",
     "",
@@ -242,8 +240,7 @@ def register_cache(
         server_name=server_name,
         collect_callback=collect_callback,
     )
-    metric_name = "cache_%s_%s" % (cache_type, cache_name)
-    caches_by_name[cache_name] = cache
+    metric_name = "cache_%s_%s_%s" % (cache_type, cache_name, server_name)
     CACHE_METRIC_REGISTRY.register_hook(metric_name, metric.collect)
     return metric
 
