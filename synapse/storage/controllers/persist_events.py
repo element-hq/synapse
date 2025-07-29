@@ -106,6 +106,7 @@ state_delta_reuse_delta_counter = Counter(
 forward_extremities_counter = Histogram(
     "synapse_storage_events_forward_extremities_persisted",
     "Number of forward extremities for each new event",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
@@ -114,6 +115,7 @@ forward_extremities_counter = Histogram(
 stale_forward_extremities_counter = Histogram(
     "synapse_storage_events_stale_forward_extremities_persisted",
     "Number of unchanged forward extremities for each new event",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(0, 1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
@@ -847,9 +849,13 @@ class EventsPersistenceStorageController:
         # We only update metrics for events that change forward extremities
         # (e.g. we ignore backfill/outliers/etc)
         if result != latest_event_ids:
-            forward_extremities_counter.observe(len(result))
+            forward_extremities_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(len(result))
             stale = latest_event_ids & result
-            stale_forward_extremities_counter.observe(len(stale))
+            stale_forward_extremities_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(len(stale))
 
         return result
 

@@ -667,7 +667,8 @@ class FederationSender(AbstractFederationSender):
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "federation_sender"
+                            name="federation_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                 async def handle_room_events(events: List[EventBase]) -> None:

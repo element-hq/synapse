@@ -62,7 +62,8 @@ logger = logging.getLogger(__name__)
 # Twisted reactor metrics
 #
 
-tick_time = Histogram(
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+tick_time = Histogram(  # type: ignore[missing-server-name-label]
     "python_twisted_reactor_tick_time",
     "Tick time of the Twisted reactor (sec)",
     buckets=[0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.5, 1, 2, 5],

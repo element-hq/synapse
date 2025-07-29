@@ -113,7 +113,7 @@ soft_failed_event_counter = Counter(
 backfill_processing_after_timer = Histogram(
     "synapse_federation_backfill_processing_after_time_seconds",
     "sec",
-    [],
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(
         0.1,
         0.25,
@@ -692,7 +692,9 @@ class FederationEventHandler:
         if not events:
             return
 
-        with backfill_processing_after_timer.time():
+        with backfill_processing_after_timer.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).time():
             # if there are any events in the wrong room, the remote server is buggy and
             # should not be trusted.
             for ev in events:

@@ -583,7 +583,7 @@ event_processing_lag = Gauge(
 event_processing_lag_by_event = Histogram(
     "synapse_event_processing_lag_by_event",
     "Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 # Build info of the running server.
@@ -607,7 +607,7 @@ threepid_send_requests = Histogram(
     " there is a request with try count of 4, then there would have been one"
     " each for 1, 2 and 3",
     buckets=(1, 2, 3, 4, 5, 10),
-    labelnames=("type", "reason"),
+    labelnames=("type", "reason", SERVER_NAME_LABEL),
 )
 
 threadpool_total_threads = Gauge(
