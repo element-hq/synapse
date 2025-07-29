@@ -156,13 +156,13 @@ class _RegistryProxy:
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
 
 
-@attr.s(slots=True, hash=True, auto_attribs=True)
+@attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
 class LaterGauge(Collector):
     """A Gauge which periodically calls a user-provided callback to produce metrics."""
 
     name: str
     desc: str
-    labels: Optional[StrSequence] = attr.ib(hash=False)
+    labelnames: Optional[StrSequence] = attr.ib(hash=False)
     # callback: should either return a value (if there are no labels for this metric),
     # or dict mapping from a label tuple to a value
     caller: Callable[
@@ -172,7 +172,7 @@ class LaterGauge(Collector):
     def collect(self) -> Iterable[Metric]:
         # The decision to add `SERVER_NAME_LABEL` is from the `LaterGauge` usage itself
         # (we don't enforce it here, one level up).
-        g = GaugeMetricFamily(self.name, self.desc, labels=self.labels)  # type: ignore[missing-server-name-label]
+        g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
         try:
             calls = self.caller()

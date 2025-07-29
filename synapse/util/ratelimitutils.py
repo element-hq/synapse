@@ -119,7 +119,10 @@ def _get_counts_from_rate_limiter_instance(
         # Only track metrics if they provided a `metrics_name` to
         # differentiate this instance of the rate limiter.
         if rate_limiter_instance.metrics_name:
-            key = (rate_limiter_instance.metrics_name,)
+            key = (
+                rate_limiter_instance.metrics_name,
+                rate_limiter_instance.our_server_name,
+            )
             counts[key] = count_func(rate_limiter_instance)
 
     return counts
@@ -129,10 +132,10 @@ def _get_counts_from_rate_limiter_instance(
 # differentiate one really noisy homeserver from a general
 # ratelimit tuning problem across the federation.
 LaterGauge(
-    "synapse_rate_limit_sleep_affected_hosts",
-    "Number of hosts that had requests put to sleep",
-    ["rate_limiter_name"],
-    lambda: _get_counts_from_rate_limiter_instance(
+    name="synapse_rate_limit_sleep_affected_hosts",
+    desc="Number of hosts that had requests put to sleep",
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
+    caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_sleep()
             for ratelimiter in rate_limiter_instance.ratelimiters.values()
@@ -140,10 +143,10 @@ LaterGauge(
     ),
 )
 LaterGauge(
-    "synapse_rate_limit_reject_affected_hosts",
-    "Number of hosts that had requests rejected",
-    ["rate_limiter_name"],
-    lambda: _get_counts_from_rate_limiter_instance(
+    name="synapse_rate_limit_reject_affected_hosts",
+    desc="Number of hosts that had requests rejected",
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
+    caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_reject()
             for ratelimiter in rate_limiter_instance.ratelimiters.values()
@@ -171,6 +174,7 @@ class FederationRateLimiter:
                 for this rate limiter.
 
         """
+        self.our_server_name = our_server_name
         self.metrics_name = metrics_name
 
         def new_limiter() -> "_PerHostRatelimiter":
