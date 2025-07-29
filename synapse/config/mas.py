@@ -33,7 +33,7 @@ from ._base import Config, ConfigError
 
 class MasConfigModel(ParseModel):
     enabled: StrictBool = False
-    endpoint: AnyHttpUrl = Field(default="http://localhost:8090")
+    endpoint: AnyHttpUrl = Field(default="http://localhost:8080")
     secret: Optional[StrictStr] = Field(default=None)
     secret_path: Optional[FilePath] = Field(default=None)
 
