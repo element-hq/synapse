@@ -71,11 +71,13 @@ if TYPE_CHECKING:
 oldest_pdu_in_federation_staging = Gauge(
     "synapse_federation_server_oldest_inbound_pdu_in_staging",
     "The age in seconds since we received the oldest pdu in the federation staging area",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 number_pdus_in_federation_queue = Gauge(
     "synapse_federation_server_number_inbound_pdu_in_staging",
     "The total number of events in the inbound federation staging",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 pdus_pruned_from_federation_queue = Counter(
@@ -2060,8 +2062,12 @@ class EventFederationWorkerStore(
             "_get_stats_for_federation_staging", _get_stats_for_federation_staging_txn
         )
 
-        number_pdus_in_federation_queue.set(count)
-        oldest_pdu_in_federation_staging.set(age)
+        number_pdus_in_federation_queue.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(count)
+        oldest_pdu_in_federation_staging.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(age)
 
     async def clean_room_for_join(self, room_id: str) -> None:
         await self.db_pool.runInteraction(

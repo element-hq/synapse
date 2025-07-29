@@ -148,6 +148,22 @@ class MyModule:
 
 </details>
 
+## Metric labels have changed on `synapse_federation_last_received_pdu_time` and `synapse_federation_last_sent_pdu_time`
+
+Previously, the `synapse_federation_last_received_pdu_time` and
+`synapse_federation_last_sent_pdu_time` metrics both used the `server_name` label to
+differentiate between different servers that we send and receive events from.
+
+Since we're now using the `server_name` label to differentiate between different Synapse
+homeserver instances running in the same process, these metrics have been changed as follows:
+
+ - `synapse_federation_last_received_pdu_time` now uses the `origin_server_name` label
+ - `synapse_federation_last_sent_pdu_time` now uses the `destination_server_name` label
+
+The Grafana dashboard JSON in `contrib/grafana/synapse.json` has been updated to reflect
+this change but you will need to manually update your own existing Grafana dashboards
+using these metrics.
+
 
 
 # Upgrading to v1.135.0

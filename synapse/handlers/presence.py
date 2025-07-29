@@ -1568,9 +1568,9 @@ class PresenceHandler(BasePresenceHandler):
                 self._event_pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels("presence").set(
-                    max_pos
-                )
+                synapse.metrics.event_processing_positions.labels(
+                    name="presence", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
     async def _handle_state_delta(self, room_id: str, deltas: List[StateDelta]) -> None:
         """Process current state deltas for the room to find new joins that need

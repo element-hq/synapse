@@ -33,6 +33,7 @@ from typing import (
     Iterable,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -343,6 +344,51 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         all_gauges[self.name] = self
 
 
+class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
+    """
+    Custom version of `GaugeHistogramMetricFamily` from `prometheus_client` that allows
+    specifying labels and label values.
+
+    A single gauge histogram and its samples.
+
+    For use by custom collectors.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        documentation: str,
+        gsum_value: float,
+        buckets: Optional[Sequence[Tuple[str, float]]] = None,
+        labelnames: StrSequence = (),
+        labelvalues: StrSequence = (),
+        unit: str = "",
+    ):
+        # Sanity check the number of label values matches the number of label names.
+        if len(labelvalues) != len(labelnames):
+            raise ValueError(
+                "The number of label values must match the number of label names"
+            )
+
+        # Call the super to validate and set the labelnames. We use this stable API
+        # instead of setting the internal `_labelnames` field directly.
+        super().__init__(
+            name=name,
+            documentation=documentation,
+            labels=labelnames,
+            # Since `GaugeHistogramMetricFamily` doesn't support supplying `labels` and
+            # `buckets` at the same time (artificial limitation), we will just set these
+            # as `None` and set up the buckets ourselves just below.
+            buckets=None,
+            gsum_value=None,
+        )
+
+        # Create a gauge for each bucket.
+        if buckets is not None:
+            self.add_metric(labels=labelvalues, buckets=buckets, gsum_value=gsum_value)
+
+
 class GaugeBucketCollector(Collector):
     """Like a Histogram, but the buckets are Gauges which are updated atomically.
 
@@ -355,14 +401,17 @@ class GaugeBucketCollector(Collector):
     __slots__ = (
         "_name",
         "_documentation",
+        "_labelnames",
         "_bucket_bounds",
         "_metric",
     )
 
     def __init__(
         self,
+        *,
         name: str,
         documentation: str,
+        labelnames: Optional[StrSequence],
         buckets: Iterable[float],
         registry: CollectorRegistry = REGISTRY,
     ):
@@ -376,6 +425,7 @@ class GaugeBucketCollector(Collector):
         """
         self._name = name
         self._documentation = documentation
+        self._labelnames = labelnames if labelnames else ()
 
         # the tops of the buckets
         self._bucket_bounds = [float(b) for b in buckets]
@@ -387,7 +437,7 @@ class GaugeBucketCollector(Collector):
 
         # We initially set this to None. We won't report metrics until
         # this has been initialised after a successful data update
-        self._metric: Optional[GaugeHistogramMetricFamily] = None
+        self._metric: Optional[GaugeHistogramMetricFamilyWithLabels] = None
 
         registry.register(self)
 
@@ -396,15 +446,26 @@ class GaugeBucketCollector(Collector):
         if self._metric is not None:
             yield self._metric
 
-    def update_data(self, values: Iterable[float]) -> None:
+    def update_data(self, values: Iterable[float], labels: StrSequence = ()) -> None:
         """Update the data to be reported by the metric
 
         The existing data is cleared, and each measurement in the input is assigned
         to the relevant bucket.
-        """
-        self._metric = self._values_to_metric(values)
 
-    def _values_to_metric(self, values: Iterable[float]) -> GaugeHistogramMetricFamily:
+        Args:
+            values
+            labels
+        """
+        self._metric = self._values_to_metric(values, labels)
+
+    def _values_to_metric(
+        self, values: Iterable[float], labels: StrSequence = ()
+    ) -> GaugeHistogramMetricFamilyWithLabels:
+        """
+        Args:
+            values
+            labels
+        """
         total = 0.0
         bucket_values = [0 for _ in self._bucket_bounds]
 
@@ -422,9 +483,11 @@ class GaugeBucketCollector(Collector):
         # that bucket or below.
         accumulated_values = itertools.accumulate(bucket_values)
 
-        return GaugeHistogramMetricFamily(
-            self._name,
-            self._documentation,
+        return GaugeHistogramMetricFamilyWithLabels(
+            name=self._name,
+            documentation=self._documentation,
+            labelnames=self._labelnames,
+            labelvalues=labels,
             buckets=list(
                 zip((str(b) for b in self._bucket_bounds), accumulated_values)
             ),
@@ -495,19 +558,27 @@ event_processing_loop_room_count = Counter(
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge("synapse_event_processing_positions", "", ["name"])
+event_processing_positions = Gauge(
+    "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
+)
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge("synapse_event_persisted_position", "")
+event_persisted_position = Gauge(
+    "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge("synapse_event_processing_last_ts", "", ["name"])
+event_processing_last_ts = Gauge(
+    "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
+)
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge("synapse_event_processing_lag", "", ["name"])
+event_processing_lag = Gauge(
+    "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
+)
 
 event_processing_lag_by_event = Histogram(
     "synapse_event_processing_lag_by_event",
@@ -516,7 +587,11 @@ event_processing_lag_by_event = Histogram(
 )
 
 # Build info of the running server.
-build_info = Gauge(
+#
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
+# consider this process-level because all Synapse homeservers running in the process
+# will use the same Synapse version.
+build_info = Gauge(  # type: ignore[missing-server-name-label]
     "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
 )
 build_info.labels(
@@ -538,38 +613,51 @@ threepid_send_requests = Histogram(
 threadpool_total_threads = Gauge(
     "synapse_threadpool_total_threads",
     "Total number of threads currently in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 threadpool_total_working_threads = Gauge(
     "synapse_threadpool_working_threads",
     "Number of threads currently working in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 threadpool_total_min_threads = Gauge(
     "synapse_threadpool_min_threads",
     "Minimum number of threads configured in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 threadpool_total_max_threads = Gauge(
     "synapse_threadpool_max_threads",
     "Maximum number of threads configured in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 
-def register_threadpool(name: str, threadpool: ThreadPool) -> None:
-    """Add metrics for the threadpool."""
+def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) -> None:
+    """
+    Add metrics for the threadpool.
 
-    threadpool_total_min_threads.labels(name).set(threadpool.min)
-    threadpool_total_max_threads.labels(name).set(threadpool.max)
+    Args:
+        name: The name of the threadpool, used to identify it in the metrics.
+        server_name: The homeserver name (used to label metrics) (this should be `hs.hostname`).
+        threadpool: The threadpool to register metrics for.
+    """
 
-    threadpool_total_threads.labels(name).set_function(lambda: len(threadpool.threads))
-    threadpool_total_working_threads.labels(name).set_function(
-        lambda: len(threadpool.working)
-    )
+    threadpool_total_min_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set(threadpool.min)
+    threadpool_total_max_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set(threadpool.max)
+
+    threadpool_total_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set_function(lambda: len(threadpool.threads))
+    threadpool_total_working_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set_function(lambda: len(threadpool.working))
 
 
 class MetricsResource(Resource):
