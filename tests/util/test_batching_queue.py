@@ -42,9 +42,9 @@ class BatchingQueueTestCase(TestCase):
 
         # We ensure that we remove any existing metrics for "test_queue".
         try:
-            number_queued.remove("test_queue")
-            number_of_keys.remove("test_queue")
-            number_in_flight.remove("test_queue")
+            number_queued.remove("test_queue", "test_server")
+            number_of_keys.remove("test_queue", "test_server")
+            number_in_flight.remove("test_queue", "test_server")
         except KeyError:
             pass
 

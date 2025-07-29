@@ -163,7 +163,11 @@ def make_pool(
         **db_args,
     )
 
-    register_threadpool(f"database-{db_config.name}", connection_pool.threadpool)
+    register_threadpool(
+        name=f"database-{db_config.name}",
+        server_name=server_name,
+        threadpool=connection_pool.threadpool,
+    )
 
     return connection_pool
 
