@@ -26,7 +26,12 @@ from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, PushRuleActions, ReceiptTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    PushRuleActions,
+    ReceiptTypes,
+)
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -94,7 +99,9 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
         self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
 
-        msg = self.persist(type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello")
+        msg = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello"
+        )
         self.replicate()
         self.check("get_event", [msg.event_id], msg, asserter=self.assertEventsEqual)
 
@@ -116,7 +123,9 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
         self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
 
-        msg = self.persist(type=EventTypes.Message, msgtype="m.text", body="Hello")
+        msg = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello"
+        )
         self.replicate()
         self.check("get_event", [msg.event_id], msg, asserter=self.assertEventsEqual)
 
@@ -170,7 +179,9 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self.persist(
             type=EventTypes.Member, sender=USER_ID, key=USER_ID_2, membership="join"
         )
-        event1 = self.persist(type=EventTypes.Message, msgtype="m.text", body="hello")
+        event1 = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
+        )
         self.replicate()
 
         if send_receipt:
@@ -190,7 +201,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
         self.persist(
             type=EventTypes.Message,
-            msgtype="m.text",
+            msgtype=EventContentFields.M_TEXT,
             body="world",
             push_actions=[(USER_ID_2, ["notify"])],
         )
@@ -205,7 +216,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
         self.persist(
             type=EventTypes.Message,
-            msgtype="m.text",
+            msgtype=EventContentFields.M_TEXT,
             body="world",
             push_actions=[
                 (USER_ID_2, ["notify", {"set_tweak": "highlight", "value": True}])
@@ -230,7 +241,9 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self.persist(
             type=EventTypes.Member, sender=USER_ID, key=USER_ID_2, membership="join"
         )
-        event1 = self.persist(type=EventTypes.Message, msgtype="m.text", body="hello")
+        event1 = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
+        )
         self.replicate()
 
         if send_receipt:
@@ -252,7 +265,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         # The notify count should increment when we persist a message with notify
         self.persist(
             type=EventTypes.Message,
-            msgtype="m.text",
+            msgtype=EventContentFields.M_TEXT,
             body="world",
             push_actions=[(USER_ID_2, ["notify"])],
         )
@@ -269,9 +282,9 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         # with org.matrix.msc3768.notify_in_app
         self.persist(
             type=EventTypes.Message,
-            msgtype="m.text",
+            msgtype=EventContentFields.M_TEXT,
             body="world",
-            push_actions=[(USER_ID_2, [PushRuleActions.MSC_3768_NOTIFY_IN_APP])],
+            push_actions=[(USER_ID_2, [PushRuleActions.MSC3768_NOTIFY_IN_APP])],
         )
         self.replicate()
         self.check(
