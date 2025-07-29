@@ -365,14 +365,12 @@ class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
         labelvalues: StrSequence = (),
         unit: str = "",
     ):
-        Metric.__init__(self, name, documentation, "gaugehistogram", unit)
-
         # Sanity check the number of label values matches the number of label names.
         if len(labelvalues) != len(labelnames):
             raise ValueError("Incorrect label count")
 
-        # Call the super to set the labelnames. We use this stable API instead of
-        # setting the internal `_labelnames` field directly.
+        # Call the super to validate and set the labelnames. We use this stable API
+        # instead of setting the internal `_labelnames` field directly.
         super().__init__(
             name=name,
             documentation=documentation,
