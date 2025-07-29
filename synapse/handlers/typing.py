@@ -80,7 +80,9 @@ class FollowerTypingHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self.server_name = hs.config.server.server_name
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self.clock = hs.get_clock()
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
@@ -143,7 +145,11 @@ class FollowerTypingHandler:
             last_fed_poke = self._member_last_federation_poke.get(member, None)
             if not last_fed_poke or last_fed_poke + FEDERATION_PING_INTERVAL <= now:
                 run_as_background_process(
-                    "typing._push_remote", self._push_remote, member=member, typing=True
+                    "typing._push_remote",
+                    self.server_name,
+                    self._push_remote,
+                    member=member,
+                    typing=True,
                 )
 
         # Add a paranoia timer to ensure that we always have a timer for
@@ -216,6 +222,7 @@ class FollowerTypingHandler:
             if self.federation:
                 run_as_background_process(
                     "_send_changes_in_typing_to_remotes",
+                    self.server_name,
                     self._send_changes_in_typing_to_remotes,
                     row.room_id,
                     prev_typing,
@@ -378,7 +385,11 @@ class TypingWriterHandler(FollowerTypingHandler):
         if self.hs.is_mine_id(member.user_id):
             # Only send updates for changes to our own users.
             run_as_background_process(
-                "typing._push_remote", self._push_remote, member, typing
+                "typing._push_remote",
+                self.server_name,
+                self._push_remote,
+                member,
+                typing,
             )
 
         self._push_update_local(member=member, typing=typing)

@@ -34,6 +34,7 @@ class InviteAutoAccepter:
     def __init__(self, config: AutoAcceptInvitesConfig, api: ModuleApi):
         # Keep a reference to the Module API.
         self._api = api
+        self.server_name = api.server_name
         self._config = config
 
         if not self._config.enabled:
@@ -113,6 +114,7 @@ class InviteAutoAccepter:
         # that occurs when responding to invites over federation (see https://github.com/matrix-org/synapse-auto-accept-invite/issues/12)
         run_as_background_process(
             "retry_make_join",
+            self.server_name,
             self._retry_make_join,
             event.state_key,
             event.state_key,

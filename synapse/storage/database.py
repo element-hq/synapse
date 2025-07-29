@@ -61,7 +61,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import LaterGauge, register_threadpool
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
@@ -85,8 +85,16 @@ perf_logger = logging.getLogger("synapse.storage.TIME")
 sql_scheduling_timer = Histogram("synapse_storage_schedule_time", "sec")
 
 sql_query_timer = Histogram("synapse_storage_query_time", "sec", ["verb"])
-sql_txn_count = Counter("synapse_storage_transaction_time_count", "sec", ["desc"])
-sql_txn_duration = Counter("synapse_storage_transaction_time_sum", "sec", ["desc"])
+sql_txn_count = Counter(
+    "synapse_storage_transaction_time_count",
+    "sec",
+    labelnames=["desc", SERVER_NAME_LABEL],
+)
+sql_txn_duration = Counter(
+    "synapse_storage_transaction_time_sum",
+    "sec",
+    labelnames=["desc", SERVER_NAME_LABEL],
+)
 
 
 # Unique indexes which have been added in background updates. Maps from table name
@@ -118,9 +126,11 @@ class _PoolConnection(Connection):
 
 
 def make_pool(
+    *,
     reactor: IReactorCore,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
+    server_name: str,
 ) -> adbapi.ConnectionPool:
     """Get the connection pool for the database."""
 
@@ -144,7 +154,11 @@ def make_pool(
         **db_args,
     )
 
-    register_threadpool(f"database-{db_config.name}", connection_pool.threadpool)
+    register_threadpool(
+        name=f"database-{db_config.name}",
+        server_name=server_name,
+        threadpool=connection_pool.threadpool,
+    )
 
     return connection_pool
 
@@ -561,10 +575,16 @@ class DatabasePool:
         engine: BaseDatabaseEngine,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
-        self._db_pool = make_pool(hs.get_reactor(), database_config, engine)
+        self._db_pool = make_pool(
+            reactor=hs.get_reactor(),
+            db_config=database_config,
+            engine=engine,
+            server_name=self.server_name,
+        )
 
         self.updates = BackgroundUpdater(hs, self)
         LaterGauge(
@@ -602,6 +622,7 @@ class DatabasePool:
             0.0,
             run_as_background_process,
             "upsert_safety_check",
+            self.server_name,
             self._check_safe_to_upsert,
         )
 
@@ -644,6 +665,7 @@ class DatabasePool:
                 15.0,
                 run_as_background_process,
                 "upsert_safety_check",
+                self.server_name,
                 self._check_safe_to_upsert,
             )
 
@@ -866,8 +888,14 @@ class DatabasePool:
 
             self._current_txn_total_time += duration
             self._txn_perf_counters.update(desc, duration)
-            sql_txn_count.labels(desc).inc(1)
-            sql_txn_duration.labels(desc).inc(duration)
+            sql_txn_count.labels(
+                desc=desc,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc(1)
+            sql_txn_duration.labels(
+                desc=desc,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc(duration)
 
     async def runInteraction(
         self,
