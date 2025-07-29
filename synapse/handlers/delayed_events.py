@@ -22,7 +22,7 @@ from synapse.api.errors import ShadowBanError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
-from synapse.metrics import event_processing_positions
+from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
@@ -191,7 +191,9 @@ class DelayedEventsHandler:
                 self._event_pos = max_pos
 
                 # Expose current event processing position to prometheus
-                event_processing_positions.labels("delayed_events").set(max_pos)
+                event_processing_positions.labels(
+                    name="delayed_events", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
                 await self._store.update_delayed_events_stream_pos(max_pos)
 

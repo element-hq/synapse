@@ -525,8 +525,12 @@ async def start(hs: "HomeServer") -> None:
     )
 
     # Register the threadpools with our metrics.
-    register_threadpool("default", reactor.getThreadPool())
-    register_threadpool("gai_resolver", resolver_threadpool)
+    register_threadpool(
+        name="default", server_name=server_name, threadpool=reactor.getThreadPool()
+    )
+    register_threadpool(
+        name="gai_resolver", server_name=server_name, threadpool=resolver_threadpool
+    )
 
     # Set up the SIGHUP machinery.
     if hasattr(signal, "SIGHUP"):
