@@ -94,7 +94,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
         self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
 
-        msg = self.persist(type=EventTypes.Message, msgtype="m.text", body="Hello")
+        msg = self.persist(type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello")
         self.replicate()
         self.check("get_event", [msg.event_id], msg, asserter=self.assertEventsEqual)
 
