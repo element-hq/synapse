@@ -126,9 +126,11 @@ class _PoolConnection(Connection):
 
 
 def make_pool(
+    *,
     reactor: IReactorCore,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
+    server_name: str,
 ) -> adbapi.ConnectionPool:
     """Get the connection pool for the database."""
 
@@ -152,7 +154,11 @@ def make_pool(
         **db_args,
     )
 
-    register_threadpool(f"database-{db_config.name}", connection_pool.threadpool)
+    register_threadpool(
+        name=f"database-{db_config.name}",
+        server_name=server_name,
+        threadpool=connection_pool.threadpool,
+    )
 
     return connection_pool
 
@@ -573,7 +579,12 @@ class DatabasePool:
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
-        self._db_pool = make_pool(hs.get_reactor(), database_config, engine)
+        self._db_pool = make_pool(
+            reactor=hs.get_reactor(),
+            db_config=database_config,
+            engine=engine,
+            server_name=self.server_name,
+        )
 
         self.updates = BackgroundUpdater(hs, self)
         LaterGauge(

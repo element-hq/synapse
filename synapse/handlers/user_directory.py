@@ -35,6 +35,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
@@ -262,9 +263,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self.pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels("user_dir").set(
-                    max_pos
-                )
+                synapse.metrics.event_processing_positions.labels(
+                    name="user_dir", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
                 await self.store.update_user_directory_stream_pos(max_pos)
 

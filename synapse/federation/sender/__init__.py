@@ -711,10 +711,12 @@ class FederationSender(AbstractFederationSender):
                     assert ts is not None
 
                     synapse.metrics.event_processing_lag.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(now - ts)
                     synapse.metrics.event_processing_last_ts.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(ts)
 
                     events_processed_counter.labels(
@@ -732,7 +734,7 @@ class FederationSender(AbstractFederationSender):
                 ).inc()
 
                 synapse.metrics.event_processing_positions.labels(
-                    "federation_sender"
+                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
                 ).set(next_token)
 
         finally:
