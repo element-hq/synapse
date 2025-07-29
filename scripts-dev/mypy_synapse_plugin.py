@@ -157,44 +157,9 @@ class SynapsePlugin(Plugin):
         if "@" in fullname:
             fullname = fullname.split("@", 1)[0]
 
-        # TODO: Use `prometheus_metric_fullname_to_label_arg_map.keys()` once we've
-        # updated all of the metrics, see
-        # https://github.com/element-hq/synapse/issues/18592
-        if fullname in (
-            "prometheus_client.metrics.MetricWrapperBase",
-            "prometheus_client.metrics.Counter",
-            "prometheus_client.metrics.Histogram",
-            "prometheus_client.metrics.Gauge",
-            "prometheus_client.metrics.Summary",
-            "prometheus_client.metrics.Info",
-            "prometheus_client.metrics.Enum",
-            "synapse.metrics.LaterGauge",
-            "synapse.metrics.InFlightGauge",
-            "synapse.metrics.GaugeBucketCollector",
-            "prometheus_client.registry.Collector",
-            "prometheus_client.registry._EmptyCollector",
-            "prometheus_client.registry.CollectorRegistry",
-            "prometheus_client.process_collector.ProcessCollector",
-            "prometheus_client.platform_collector.PlatformCollector",
-            "prometheus_client.gc_collector.GCCollector",
-            "synapse.metrics._gc.GCCounts",
-            "synapse.metrics._gc.PyPyGCStats",
-            "synapse.metrics._reactor_metrics.ReactorLastSeenMetric",
-            "synapse.metrics.CPUMetrics",
-            "synapse.metrics.jemalloc.JemallocCollector",
-            "synapse.util.metrics.DynamicCollectorRegistry",
-            "synapse.metrics.background_process_metrics._Collector",
-            "prometheus_client.metrics_core.Metric",
-            "prometheus_client.metrics_core.UnknownMetricFamily",
-            "prometheus_client.metrics_core.CounterMetricFamily",
-            "prometheus_client.metrics_core.GaugeMetricFamily",
-            "prometheus_client.metrics_core.SummaryMetricFamily",
-            "prometheus_client.metrics_core.InfoMetricFamily",
-            "prometheus_client.metrics_core.HistogramMetricFamily",
-            "prometheus_client.metrics_core.GaugeHistogramMetricFamily",
-            "prometheus_client.metrics_core.StateSetMetricFamily",
-            "synapse.metrics.GaugeHistogramMetricFamilyWithLabels",
-        ):
+        # Look for any Prometheus metrics to make sure they have the `SERVER_NAME_LABEL`
+        # label.
+        if fullname in prometheus_metric_fullname_to_label_arg_map.keys():
             # Because it's difficult to determine the `fullname` of the function in the
             # callback, let's just pass it in while we have it.
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
