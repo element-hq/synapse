@@ -49,7 +49,7 @@ from synapse.handlers.profile import MAX_AVATAR_URL_LEN, MAX_DISPLAYNAME_LEN
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
-from synapse.metrics import event_processing_positions
+from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
@@ -2255,7 +2255,9 @@ class RoomForgetterHandler(StateDeltasHandler):
             self.pos = max_pos
 
             # Expose current event processing position to prometheus
-            event_processing_positions.labels("room_forgetter").set(max_pos)
+            event_processing_positions.labels(
+                name="room_forgetter", **{SERVER_NAME_LABEL: self.server_name}
+            ).set(max_pos)
 
             await self._store.update_room_forgetter_stream_pos(max_pos)
 
