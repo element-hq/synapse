@@ -367,7 +367,9 @@ class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
     ):
         # Sanity check the number of label values matches the number of label names.
         if len(labelvalues) != len(labelnames):
-            raise ValueError("Incorrect label count")
+            raise ValueError(
+                "The number of label values must match the number of label names"
+            )
 
         # Call the super to validate and set the labelnames. We use this stable API
         # instead of setting the internal `_labelnames` field directly.
