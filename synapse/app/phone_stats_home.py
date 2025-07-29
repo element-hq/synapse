@@ -28,6 +28,7 @@ from prometheus_client import Gauge
 
 from twisted.internet import defer
 
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
 )
@@ -57,16 +58,25 @@ Phone home stats are sent every 3 hours
 _stats_process: List[Tuple[int, "resource.struct_rusage"]] = []
 
 # Gauges to expose monthly active user control metrics
-current_mau_gauge = Gauge("synapse_admin_mau_current", "Current MAU")
+current_mau_gauge = Gauge(
+    "synapse_admin_mau_current",
+    "Current MAU",
+    labelnames=[SERVER_NAME_LABEL],
+)
 current_mau_by_service_gauge = Gauge(
     "synapse_admin_mau_current_mau_by_service",
     "Current MAU by service",
-    ["app_service"],
+    labelnames=["app_service", SERVER_NAME_LABEL],
 )
-max_mau_gauge = Gauge("synapse_admin_mau_max", "MAU Limit")
+max_mau_gauge = Gauge(
+    "synapse_admin_mau_max",
+    "MAU Limit",
+    labelnames=[SERVER_NAME_LABEL],
+)
 registered_reserved_users_mau_gauge = Gauge(
     "synapse_admin_mau_registered_reserved_users",
     "Registered users with reserved threepids",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -237,13 +247,21 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
                     await store.get_monthly_active_count_by_service()
                 )
                 reserved_users = await store.get_registered_reserved_users()
-            current_mau_gauge.set(float(current_mau_count))
+            current_mau_gauge.labels(**{SERVER_NAME_LABEL: server_name}).set(
+                float(current_mau_count)
+            )
 
             for app_service, count in current_mau_count_by_service.items():
-                current_mau_by_service_gauge.labels(app_service).set(float(count))
+                current_mau_by_service_gauge.labels(
+                    app_service=app_service, **{SERVER_NAME_LABEL: server_name}
+                ).set(float(count))
 
-            registered_reserved_users_mau_gauge.set(float(len(reserved_users)))
-            max_mau_gauge.set(float(hs.config.server.max_mau_value))
+            registered_reserved_users_mau_gauge.labels(
+                **{SERVER_NAME_LABEL: server_name}
+            ).set(float(len(reserved_users)))
+            max_mau_gauge.labels(**{SERVER_NAME_LABEL: server_name}).set(
+                float(hs.config.server.max_mau_value)
+            )
 
         return run_as_background_process(
             "generate_monthly_active_users",

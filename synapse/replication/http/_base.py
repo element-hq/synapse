@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 _pending_outgoing_requests = Gauge(
     "synapse_pending_outgoing_replication_requests",
     "Number of active outgoing replication requests, by replication method name",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 _outgoing_request_counter = Counter(
@@ -213,7 +213,10 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
 
         instance_map = hs.config.worker.instance_map
 
-        outgoing_gauge = _pending_outgoing_requests.labels(cls.NAME)
+        outgoing_gauge = _pending_outgoing_requests.labels(
+            name=cls.NAME,
+            **{SERVER_NAME_LABEL: server_name},
+        )
 
         replication_secret = None
         if hs.config.worker.worker_replication_secret:
