@@ -169,11 +169,9 @@ class SynapsePlugin(Plugin):
             "prometheus_client.metrics.Summary",
             "prometheus_client.metrics.Info",
             "prometheus_client.metrics.Enum",
-            # Tracked by https://github.com/element-hq/synapse/pull/18714
-            # "synapse.metrics.LaterGauge",
+            "synapse.metrics.LaterGauge",
             "synapse.metrics.InFlightGauge",
-            # Tracked by https://github.com/element-hq/synapse/pull/18715
-            # "synapse.metrics.GaugeBucketCollector",
+            "synapse.metrics.GaugeBucketCollector",
             "prometheus_client.registry.Collector",
             "prometheus_client.registry._EmptyCollector",
             "prometheus_client.registry.CollectorRegistry",
