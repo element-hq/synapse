@@ -137,9 +137,12 @@ should be in the source code.
 
 
 class SynapsePlugin(Plugin):
-    # Unfortunately, because mypy only chooses the first plugin that returns a non-None
-    # value, this check doesn't get run during our normal mypy lint process because
-    # `mypy_zope` also uses the `get_base_class_hook` method.
+    # FIXME: Unfortunately, because mypy only chooses the first plugin that returns a
+    # non-None value, this check doesn't get run during our normal mypy lint process
+    # because `mypy_zope` also uses the `get_base_class_hook` method. Currently, this
+    # only works if you comment out the `mypy_zope` plugin and squint through the output
+    # caused by those failures. Unaware of a suitable workaround to actually enforce
+    # this on a regulard basis and in CI. Related issue: https://github.com/python/mypy/issues/19524
     def get_base_class_hook(
         self, fullname: str
     ) -> Optional[Callable[[ClassDefContext], None]]:
