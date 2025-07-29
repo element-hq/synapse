@@ -233,7 +233,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
     @parameterized.expand([(True,), (False,)])
     @override_config({"experimental_features": {"msc3768_enabled": True}})
-    def test_push_actions_for_user_with_in_app_notifications(
+    def test_push_actions_for_user_with_in_app_notifications_notify(
         self, send_receipt: bool
     ) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
@@ -278,6 +278,37 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             ),
         )
 
+    @parameterized.expand([(True,), (False,)])
+    @override_config({"experimental_features": {"msc3768_enabled": True}})
+    def test_push_actions_for_user_with_in_app_notifications_notify_in_app(
+        self, send_receipt: bool
+    ) -> None:
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
+        self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
+        self.persist(
+            type=EventTypes.Member, sender=USER_ID, key=USER_ID_2, membership="join"
+        )
+        event1 = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
+        )
+        self.replicate()
+
+        if send_receipt:
+            self.get_success(
+                self.master_store.insert_receipt(
+                    ROOM_ID, ReceiptTypes.READ, USER_ID_2, [event1.event_id], None, {}
+                )
+            )
+
+        # We start out with zero highlight, unread and notify counts
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=0), {}
+            ),
+        )
+
         # The notify count should also increment when we persist a message
         # with org.matrix.msc3768.notify_in_app
         self.persist(
@@ -291,7 +322,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             "get_unread_event_push_actions_by_room_for_user",
             [ROOM_ID, USER_ID_2],
             RoomNotifCounts(
-                NotifCounts(highlight_count=0, unread_count=0, notify_count=2), {}
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=1), {}
             ),
         )
 
