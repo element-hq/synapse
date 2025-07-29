@@ -264,6 +264,11 @@ def run_as_background_process(
         "Prefer `ModuleApi.run_as_background_process` instead.",
     )
 
+    # Historically, since this function is exported from the module API, we can't just
+    # change the signature to require a `server_name` argument. Since
+    # `run_as_background_process` internally in Synapse requires `server_name` now, we
+    # just have to stub this out with a placeholder value and tell people to use the new
+    # function instead.
     stub_server_name = "synapse_module_running_from_unknown_server"
 
     return _run_as_background_process(
