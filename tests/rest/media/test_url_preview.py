@@ -34,6 +34,7 @@ from twisted.web.resource import Resource
 
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
+from synapse.rest.client import media
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
@@ -42,7 +43,6 @@ from synapse.util.stringutils import parse_and_validate_mxc_uri
 from tests import unittest
 from tests.server import FakeTransport
 from tests.test_utils import SMALL_PNG
-from tests.unittest import override_config
 
 try:
     import lxml
@@ -51,6 +51,7 @@ except ImportError:
 
 
 class URLPreviewTests(unittest.HomeserverTestCase):
+    servlets = [media.register_servlets]
     if not lxml:
         skip = "url preview feature requires lxml"
 
@@ -158,7 +159,9 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         The default implementation creates a JsonResource and calls each function in
         `servlets` to register servlets against it.
         """
-        return {"/_matrix/media": self.hs.get_media_repository_resource()}
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
 
     def _assert_small_png(self, json_body: JsonDict) -> None:
         """Assert properties from the SMALL_PNG test image."""
@@ -1260,7 +1263,6 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertIsNone(_port)
         return host, media_id
 
-    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_files(self) -> None:
         """Test that files are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
@@ -1279,7 +1281,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # Check fetching
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{host}/{media_id}",
+            f"/_matrix/client/v1/media/download/{host}/{media_id}",
             shorthand=False,
             await_result=False,
         )
@@ -1292,7 +1294,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{host}/{media_id}",
+            f"/_matrix/client/v1/media/download/{host}/{media_id}",
             shorthand=False,
             await_result=False,
         )
@@ -1303,7 +1305,6 @@ class URLPreviewTests(unittest.HomeserverTestCase):
             "URL cache file was unexpectedly retrieved from a storage provider",
         )
 
-    @override_config({"enable_authenticated_media": False})
     def test_storage_providers_exclude_thumbnails(self) -> None:
         """Test that thumbnails are not stored in or fetched from storage providers."""
         host, media_id = self._download_image()
@@ -1328,7 +1329,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         # Check fetching
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
+            f"/_matrix/client/v1/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
             shorthand=False,
             await_result=False,
         )
