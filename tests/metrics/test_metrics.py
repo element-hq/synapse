@@ -22,7 +22,13 @@ from typing import Dict, Protocol, Tuple
 
 from prometheus_client.core import Sample
 
-from synapse.metrics import REGISTRY, InFlightGauge, generate_latest
+from synapse.metrics import (
+    REGISTRY,
+    SERVER_NAME_LABEL,
+    LaterGauge,
+    InFlightGauge,
+    generate_latest,
+)
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
@@ -182,3 +188,62 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
 
         self.assertEqual(items["synapse_util_caches_cache_size"], "1.0")
         self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+
+
+class LaterGaugeTests(unittest.HomeserverTestCase):
+    def test_later_gauge_multiple_servers(self) -> None:
+        """
+        Test that LaterGauge metrics are reported correctly across multiple servers. We
+        will have an metrics entry for each homeserver that is labeled with the
+        `server_name` label.
+        """
+        later_gauge = LaterGauge(
+            name="foo",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+        )
+        later_gauge.register_hook(lambda: {("hs1",): 1})
+        later_gauge.register_hook(lambda: {("hs2",): 2})
+
+        metrics_map = get_latest_metrics()
+
+        # Find the metrics for the caches from both homeservers
+        hs1Metric = 'foo{server_name="hs1"}'
+        hs1MetricValue = metrics_map.get(hs1Metric)
+        self.assertIsNotNone(
+            hs1MetricValue,
+            f"Missing metric {hs1Metric} in cache metrics {metrics_map}",
+        )
+        hs2Metric = 'foo{server_name="hs2"}'
+        hs2MetricValue = metrics_map.get(hs2Metric)
+        self.assertIsNotNone(
+            hs2MetricValue,
+            f"Missing metric {hs2Metric} in cache metrics {metrics_map}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1MetricValue, "1.0")
+        self.assertEqual(hs2MetricValue, "2.0")
+
+
+def get_latest_metrics() -> Dict[str, str]:
+    """
+    Collect the latest metrics from the registry and parse them into an easy to use map.
+    The key includes the metric name and labels.
+
+    Example output:
+    {
+        "synapse_util_caches_cache_size": "0.0",
+        "synapse_util_caches_cache_max_size{name="some_cache",server_name="hs1"}": "777.0",
+        ...
+    }
+    """
+    metric_map = {
+        x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
+        for x in filter(
+            lambda x: len(x) > 0 and not x.startswith(b"#"),
+            generate_latest(REGISTRY).split(b"\n"),
+        )
+    }
+
+    return metric_map
