@@ -25,8 +25,8 @@ from prometheus_client.core import Sample
 from synapse.metrics import (
     REGISTRY,
     SERVER_NAME_LABEL,
-    LaterGauge,
     InFlightGauge,
+    LaterGauge,
     generate_latest,
 )
 from synapse.util.caches.deferred_cache import DeferredCache
