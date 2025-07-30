@@ -159,6 +159,8 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
             name=CACHE_NAME, server_name=self.hs.hostname, max_entries=777
         )
 
+        # Collect the latest metrics from the registry and filter them down to just the
+        # relevant cache metrics.
         items = {
             x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
             for x in filter(
@@ -170,8 +172,11 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         self.assertEqual(items["synapse_util_caches_cache_size"], "0.0")
         self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
 
+        # Add something to both caches to change the numbers
         cache.prefill("1", "hi")
 
+        # Collect the latest metrics from the registry and filter them down to just the
+        # relevant cache metrics.
         items = {
             x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
             for x in filter(
@@ -182,3 +187,106 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
 
         self.assertEqual(items["synapse_util_caches_cache_size"], "1.0")
         self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+
+    def test_cache_metric_multiple_servers(self) -> None:
+        """
+        Test that cache metrics are reported correctly across multiple servers. We will
+        have an metrics entry for each homeserver that is labeled with the `server_name`
+        label.
+        """
+        CACHE_NAME = "cache_metric_multiple_servers_test"
+        cache1: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, server_name="hs1", max_entries=777
+        )
+        cache2: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, server_name="hs2", max_entries=777
+        )
+
+        # Collect the latest metrics from the registry and filter them down to just the
+        # relevant cache metrics.
+        items = {
+            x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
+            for x in filter(
+                lambda x: CACHE_NAME.encode("ascii") in x,
+                generate_latest(REGISTRY).split(b"\n"),
+            )
+        }
+
+        hs1CacheSizeMetric = (
+            f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        )
+        hs2CacheSizeMetric = (
+            f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs2"}}'
+        )
+        hs1CacheMaxSizeMetric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        hs2CacheMaxSizeMetric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs2"}}'
+
+        # Find the metrics for the caches from both homeservers
+        hs1CacheSizeMetricValue = items.get(hs1CacheSizeMetric)
+        self.assertIsNotNone(
+            hs1CacheSizeMetricValue,
+            f"Missing metric {hs1CacheSizeMetric} in cache metrics {items}",
+        )
+        hs2CacheSizeMetricValue = items.get(hs2CacheSizeMetric)
+        self.assertIsNotNone(
+            hs2CacheSizeMetricValue,
+            f"Missing metric {hs2CacheSizeMetric} in cache metrics {items}",
+        )
+        hs1CacheMaxSizeMetricValue = items.get(hs1CacheMaxSizeMetric)
+        self.assertIsNotNone(
+            hs1CacheMaxSizeMetricValue,
+            f"Missing metric {hs1CacheMaxSizeMetric} in cache metrics {items}",
+        )
+        hs2CacheMaxSizeMetricValue = items.get(hs2CacheMaxSizeMetric)
+        self.assertIsNotNone(
+            hs2CacheMaxSizeMetricValue,
+            f"Missing metric {hs2CacheMaxSizeMetric} in cache metrics {items}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1CacheSizeMetricValue, "0.0")
+        self.assertEqual(hs2CacheSizeMetricValue, "0.0")
+        self.assertEqual(hs1CacheMaxSizeMetricValue, "777.0")
+        self.assertEqual(hs2CacheMaxSizeMetricValue, "777.0")
+
+        # Add something to both caches to change the numbers
+        cache1.prefill("1", "hi")
+        cache2.prefill("2", "ho")
+
+        # Collect the latest metrics from the registry and filter them down to just the
+        # relevant cache metrics.
+        items = {
+            x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
+            for x in filter(
+                lambda x: CACHE_NAME.encode("ascii") in x,
+                generate_latest(REGISTRY).split(b"\n"),
+            )
+        }
+
+        # Find the metrics for the caches from both homeservers
+        hs1CacheSizeMetricValue = items.get(hs1CacheSizeMetric)
+        self.assertIsNotNone(
+            hs1CacheSizeMetricValue,
+            f"Missing metric {hs1CacheSizeMetric} in cache metrics {items}",
+        )
+        hs2CacheSizeMetricValue = items.get(hs2CacheSizeMetric)
+        self.assertIsNotNone(
+            hs2CacheSizeMetricValue,
+            f"Missing metric {hs2CacheSizeMetric} in cache metrics {items}",
+        )
+        hs1CacheMaxSizeMetricValue = items.get(hs1CacheMaxSizeMetric)
+        self.assertIsNotNone(
+            hs1CacheMaxSizeMetricValue,
+            f"Missing metric {hs1CacheMaxSizeMetric} in cache metrics {items}",
+        )
+        hs2CacheMaxSizeMetricValue = items.get(hs2CacheMaxSizeMetric)
+        self.assertIsNotNone(
+            hs2CacheMaxSizeMetricValue,
+            f"Missing metric {hs2CacheMaxSizeMetric} in cache metrics {items}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1CacheSizeMetricValue, "1.0")
+        self.assertEqual(hs2CacheSizeMetricValue, "1.0")
+        self.assertEqual(hs1CacheMaxSizeMetricValue, "777.0")
+        self.assertEqual(hs2CacheMaxSizeMetricValue, "777.0")
