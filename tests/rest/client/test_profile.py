@@ -649,9 +649,12 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """
         Attempts to set a custom field that would push the overall profile too large.
         """
-        # Because we emit huge SQL log lines and trial sometimes crashes on these,
-        # disable SQL logging for this test
+        # FIXME: Because we emit huge SQL log lines and trial can't handle these,
+        # sometimes (flakily) failing the test run,
+        # disable SQL logging for this test.
         # ref: https://github.com/twisted/twisted/issues/12482
+        # To remove this, we would need to fix the above issue and
+        # update, including in olddeps (so several years' wait).
         sql_logger = logging.getLogger("synapse.storage.SQL")
         sql_logger_was_disabled = sql_logger.disabled
         sql_logger.disabled = True

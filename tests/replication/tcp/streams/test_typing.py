@@ -100,8 +100,11 @@ class TypingStreamTestCase(BaseStreamTestCase):
         This is emulated by jumping the stream ahead, then reconnecting (which
         sends the proper position and RDATA).
         """
-        # A huge RDATA log line is triggered in this test, which breaks trial
+        # FIXME: Because huge RDATA log line is triggered in this test,
+        # trial breaks, sometimes (flakily) failing the test run.
         # ref: https://github.com/twisted/twisted/issues/12482
+        # To remove this, we would need to fix the above issue and
+        # update, including in olddeps (so several years' wait).
         server_logger = logging.getLogger("tests.server")
         server_logger_was_disabled = server_logger.disabled
         server_logger.disabled = True
