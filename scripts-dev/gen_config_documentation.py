@@ -151,6 +151,10 @@ SECTION_HEADERS = {
             "being throttled."
         ),
     },
+    "media_storage": {
+        "title": "Media Storage",
+        "description": "Options related to media storage.",
+    },
     "recaptcha_public_key": {
         "title": "Captcha",
         "description": (
