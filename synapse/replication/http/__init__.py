@@ -31,7 +31,6 @@ from synapse.replication.http import (
     presence,
     push,
     register,
-    send_event,
     send_events,
     state,
     streams,
@@ -50,7 +49,6 @@ class ReplicationRestResource(JsonResource):
         self.register_servlets(hs)
 
     def register_servlets(self, hs: "HomeServer") -> None:
-        send_event.register_servlets(hs, self)
         send_events.register_servlets(hs, self)
         federation.register_servlets(hs, self)
         presence.register_servlets(hs, self)
