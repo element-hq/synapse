@@ -16,7 +16,7 @@ from http import HTTPStatus
 
 from parameterized import parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility

@@ -21,7 +21,7 @@
 
 import json
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomTypes
 from synapse.rest import admin

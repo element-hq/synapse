@@ -1,0 +1,1 @@
+Use `twisted.internet.testing` module in tests instead of deprecated `twisted.test.proto_helpers`.
