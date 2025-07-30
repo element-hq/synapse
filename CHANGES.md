@@ -6,7 +6,7 @@
 
 ### Internal Changes
 
-- Fix performance regression introduced in #18238 by adding a cache to `is_server_admin`. ([\#18747](https://github.com/element-hq/synapse/issues/18747))
+- Fix performance regression introduced in [#18238](https://github.com/element-hq/synapse/issues/18238) by adding a cache to `is_server_admin`. ([\#18747](https://github.com/element-hq/synapse/issues/18747))
 
 
 
