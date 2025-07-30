@@ -31,6 +31,7 @@ from typing import (
     Dict,
     Generic,
     Iterable,
+    List,
     Mapping,
     Optional,
     Sequence,
@@ -163,29 +164,42 @@ class LaterGauge(Collector):
     name: str
     desc: str
     labelnames: Optional[StrSequence] = attr.ib(hash=False)
-    # callback: should either return a value (if there are no labels for this metric),
-    # or dict mapping from a label tuple to a value
-    caller: Callable[
-        [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
-    ]
+    # List of callbacks: each callback should either return a value (if there are no
+    # labels for this metric), or dict mapping from a label tuple to a value
+    _hooks: List[
+        Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ]
+    ] = attr.ib(factory=list, hash=False)
 
     def collect(self) -> Iterable[Metric]:
         g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)
 
-        try:
-            calls = self.caller()
-        except Exception:
-            logger.exception("Exception running callback for LaterGauge(%s)", self.name)
+        for hook in self._hooks:
+            try:
+                hook_result = hook()
+            except Exception:
+                logger.exception(
+                    "Exception running callback for LaterGauge(%s)", self.name
+                )
+                yield g
+                return
+
+            if isinstance(hook_result, (int, float)):
+                g.add_metric([], hook_result)
+            else:
+                for k, v in hook_result.items():
+                    g.add_metric(k, v)
+
             yield g
-            return
 
-        if isinstance(calls, (int, float)):
-            g.add_metric([], calls)
-        else:
-            for k, v in calls.items():
-                g.add_metric(k, v)
-
-        yield g
+    def register_hook(
+        self,
+        hook: Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ) -> None:
+        self._hooks.push(hook)
 
     def __attrs_post_init__(self) -> None:
         self._register()
