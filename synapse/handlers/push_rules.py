@@ -147,6 +147,7 @@ def check_actions(
 
     Args:
         actions: the actions to check.
+        config: the homeserver configuration.
 
     Raises:
         InvalidRuleException if the rules aren't compliant with the spec.
