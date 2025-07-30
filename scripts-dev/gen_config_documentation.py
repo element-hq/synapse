@@ -151,9 +151,9 @@ SECTION_HEADERS = {
             "being throttled."
         ),
     },
-    "media_storage": {
-        "title": "Media Storage",
-        "description": "Options related to media storage.",
+    "enable_media_repo": {
+        "title": "Media Store",
+        "description": "Config options related to Synapse's media store."
     },
     "recaptcha_public_key": {
         "title": "Captcha",
