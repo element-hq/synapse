@@ -21,7 +21,7 @@
 
 from typing import Collection, List, Tuple
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.api.errors
 from synapse.api.constants import EduTypes

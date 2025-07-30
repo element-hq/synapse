@@ -20,7 +20,7 @@
 #
 from typing import Dict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.media._base import FileInfo

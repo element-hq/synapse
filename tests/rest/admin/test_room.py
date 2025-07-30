@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, Mock
 from parameterized import parameterized
 
 from twisted.internet.task import deferLater
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, Membership, RoomTypes

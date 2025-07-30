@@ -22,7 +22,7 @@
 import resource
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.phone_stats_home import phone_stats_home
 from synapse.rest import admin
