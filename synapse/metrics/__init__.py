@@ -199,7 +199,7 @@ class LaterGauge(Collector):
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
     ) -> None:
-        self._hooks.push(hook)
+        self._hooks.append(hook)
 
     def __attrs_post_init__(self) -> None:
         self._register()
