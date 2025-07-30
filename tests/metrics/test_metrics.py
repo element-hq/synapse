@@ -165,29 +165,42 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
             name=CACHE_NAME, server_name=self.hs.hostname, max_entries=777
         )
 
-        items = {
-            x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: b"cache_metrics_test_fgjkbdfg" in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        self.assertEqual(items["synapse_util_caches_cache_size"], "0.0")
-        self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+        cache_size_metric = f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="{self.hs.hostname}"}}'
+        cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="{self.hs.hostname}"}}'
+
+        cache_size_metric_value = metrics_map.get(cache_size_metric)
+        self.assertIsNotNone(
+            cache_size_metric_value,
+            f"Missing metric {cache_size_metric} in cache metrics {metrics_map}",
+        )
+        cache_max_size_metric_value = metrics_map.get(cache_max_size_metric)
+        self.assertIsNotNone(
+            cache_max_size_metric_value,
+            f"Missing metric {cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        self.assertEqual(cache_size_metric_value, "0.0")
+        self.assertEqual(cache_max_size_metric_value, "777.0")
 
         cache.prefill("1", "hi")
 
-        items = {
-            x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: b"cache_metrics_test_fgjkbdfg" in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        self.assertEqual(items["synapse_util_caches_cache_size"], "1.0")
-        self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+        cache_size_metric_value = metrics_map.get(cache_size_metric)
+        self.assertIsNotNone(
+            cache_size_metric_value,
+            f"Missing metric {cache_size_metric} in cache metrics {metrics_map}",
+        )
+        cache_max_size_metric_value = metrics_map.get(cache_max_size_metric)
+        self.assertIsNotNone(
+            cache_max_size_metric_value,
+            f"Missing metric {cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        self.assertEqual(cache_size_metric_value, "1.0")
+        self.assertEqual(cache_max_size_metric_value, "777.0")
 
 
 class LaterGaugeTests(unittest.HomeserverTestCase):
@@ -208,22 +221,22 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
         metrics_map = get_latest_metrics()
 
         # Find the metrics for the caches from both homeservers
-        hs1Metric = 'foo{server_name="hs1"}'
-        hs1MetricValue = metrics_map.get(hs1Metric)
+        hs1_metric = 'foo{server_name="hs1"}'
+        hs1_metric_value = metrics_map.get(hs1_metric)
         self.assertIsNotNone(
-            hs1MetricValue,
-            f"Missing metric {hs1Metric} in cache metrics {metrics_map}",
+            hs1_metric_value,
+            f"Missing metric {hs1_metric} in cache metrics {metrics_map}",
         )
-        hs2Metric = 'foo{server_name="hs2"}'
-        hs2MetricValue = metrics_map.get(hs2Metric)
+        hs2_metric = 'foo{server_name="hs2"}'
+        hs2_metric_value = metrics_map.get(hs2_metric)
         self.assertIsNotNone(
-            hs2MetricValue,
-            f"Missing metric {hs2Metric} in cache metrics {metrics_map}",
+            hs2_metric_value,
+            f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
         )
 
         # Sanity check the metric values
-        self.assertEqual(hs1MetricValue, "1.0")
-        self.assertEqual(hs2MetricValue, "2.0")
+        self.assertEqual(hs1_metric_value, "1.0")
+        self.assertEqual(hs2_metric_value, "2.0")
 
 
 def get_latest_metrics() -> Dict[str, str]:
