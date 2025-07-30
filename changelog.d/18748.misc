@@ -1,0 +1,1 @@
+Refactor cache metrics to be homeserver-scoped.
