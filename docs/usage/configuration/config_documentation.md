@@ -2034,6 +2034,11 @@ Example configuration:
 federation_rr_transactions_per_room_per_second: 40
 ```
 ---
+## Media Store
+
+Config options related to Synapse's media store.
+
+---
 ### `enable_media_repo`
 
 *(boolean)* Enable the media store service in the Synapse master. Set to false if you are using a separate media store worker. Defaults to `true`.
