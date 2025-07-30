@@ -153,7 +153,7 @@ SECTION_HEADERS = {
     },
     "enable_media_repo": {
         "title": "Media Store",
-        "description": "Config options related to Synapse's media store."
+        "description": "Config options related to Synapse's media store.",
     },
     "recaptcha_public_key": {
         "title": "Captcha",
