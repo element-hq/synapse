@@ -201,7 +201,7 @@ been removed.
 
 ## Authenticated media is now enforced by default
 
-The [`enable_authenticated_media`] configuration option now defaults to true.
+The `enable_authenticated_media` configuration option now defaults to true.
 
 This means that clients and remote (federated) homeservers now need to use
 the authenticated media endpoints in order to download media from your
@@ -218,8 +218,6 @@ be compatible.
 With that said, administrators who wish to disable this feature for broader
 compatibility can still do so by manually configuring
 `enable_authenticated_media: False`.
-
-[`enable_authenticated_media`]: usage/configuration/config_documentation.md#enable_authenticated_media
 
 
 # Upgrading to v1.119.0
