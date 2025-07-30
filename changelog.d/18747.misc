@@ -1,1 +1,0 @@
-Fix performance regression introduced in #18238 by adding a cache to `is_server_admin`.

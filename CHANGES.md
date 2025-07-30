@@ -1,3 +1,16 @@
+# Synapse 1.135.0rc2 (2025-07-30)
+
+### Bugfixes
+
+- Fix user failing to deactivate with MAS when `/_synapse/mas` is handled by a worker. ([\#18716](https://github.com/element-hq/synapse/issues/18716))
+
+### Internal Changes
+
+- Fix performance regression introduced in #18238 by adding a cache to `is_server_admin`. ([\#18747](https://github.com/element-hq/synapse/issues/18747))
+
+
+
+
 # Synapse 1.135.0rc1 (2025-07-22)
 
 ### Features
