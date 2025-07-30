@@ -159,34 +159,42 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
             name=CACHE_NAME, server_name=self.hs.hostname, max_entries=777
         )
 
-        # Collect the latest metrics from the registry and filter them down to just the
-        # relevant cache metrics.
-        items = {
-            x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: b"cache_metrics_test_fgjkbdfg" in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        self.assertEqual(items["synapse_util_caches_cache_size"], "0.0")
-        self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+        cache_size_metric = f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="{self.hs.hostname}"}}'
+        cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="{self.hs.hostname}"}}'
 
-        # Add something to both caches to change the numbers
+        cache_size_metric_value = metrics_map.get(cache_size_metric)
+        self.assertIsNotNone(
+            cache_size_metric_value,
+            f"Missing metric {cache_size_metric} in cache metrics {metrics_map}",
+        )
+        cache_max_size_metric_value = metrics_map.get(cache_max_size_metric)
+        self.assertIsNotNone(
+            cache_max_size_metric_value,
+            f"Missing metric {cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        self.assertEqual(cache_size_metric_value, "0.0")
+        self.assertEqual(cache_max_size_metric_value, "777.0")
+
         cache.prefill("1", "hi")
 
-        # Collect the latest metrics from the registry and filter them down to just the
-        # relevant cache metrics.
-        items = {
-            x.split(b"{")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: b"cache_metrics_test_fgjkbdfg" in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        self.assertEqual(items["synapse_util_caches_cache_size"], "1.0")
-        self.assertEqual(items["synapse_util_caches_cache_max_size"], "777.0")
+        cache_size_metric_value = metrics_map.get(cache_size_metric)
+        self.assertIsNotNone(
+            cache_size_metric_value,
+            f"Missing metric {cache_size_metric} in cache metrics {metrics_map}",
+        )
+        cache_max_size_metric_value = metrics_map.get(cache_max_size_metric)
+        self.assertIsNotNone(
+            cache_max_size_metric_value,
+            f"Missing metric {cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        self.assertEqual(cache_size_metric_value, "1.0")
+        self.assertEqual(cache_max_size_metric_value, "777.0")
 
     def test_cache_metric_multiple_servers(self) -> None:
         """
@@ -202,91 +210,98 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
             name=CACHE_NAME, server_name="hs2", max_entries=777
         )
 
-        # Collect the latest metrics from the registry and filter them down to just the
-        # relevant cache metrics.
-        items = {
-            x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: CACHE_NAME.encode("ascii") in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
-        hs1CacheSizeMetric = (
+        hs1_cache_size_metric = (
             f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs1"}}'
         )
-        hs2CacheSizeMetric = (
+        hs2_cache_size_metric = (
             f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs2"}}'
         )
-        hs1CacheMaxSizeMetric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs1"}}'
-        hs2CacheMaxSizeMetric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs2"}}'
+        hs1_cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        hs2_cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs2"}}'
 
         # Find the metrics for the caches from both homeservers
-        hs1CacheSizeMetricValue = items.get(hs1CacheSizeMetric)
+        hs1_cache_size_metric_value = metrics_map.get(hs1_cache_size_metric)
         self.assertIsNotNone(
-            hs1CacheSizeMetricValue,
-            f"Missing metric {hs1CacheSizeMetric} in cache metrics {items}",
+            hs1_cache_size_metric_value,
+            f"Missing metric {hs1_cache_size_metric} in cache metrics {metrics_map}",
         )
-        hs2CacheSizeMetricValue = items.get(hs2CacheSizeMetric)
+        hs2_cache_size_metric_value = metrics_map.get(hs2_cache_size_metric)
         self.assertIsNotNone(
-            hs2CacheSizeMetricValue,
-            f"Missing metric {hs2CacheSizeMetric} in cache metrics {items}",
+            hs2_cache_size_metric_value,
+            f"Missing metric {hs2_cache_size_metric} in cache metrics {metrics_map}",
         )
-        hs1CacheMaxSizeMetricValue = items.get(hs1CacheMaxSizeMetric)
+        hs1_cache_max_size_metric_value = metrics_map.get(hs1_cache_max_size_metric)
         self.assertIsNotNone(
-            hs1CacheMaxSizeMetricValue,
-            f"Missing metric {hs1CacheMaxSizeMetric} in cache metrics {items}",
+            hs1_cache_max_size_metric_value,
+            f"Missing metric {hs1_cache_max_size_metric} in cache metrics {metrics_map}",
         )
-        hs2CacheMaxSizeMetricValue = items.get(hs2CacheMaxSizeMetric)
+        hs2_cache_max_size_metric_value = metrics_map.get(hs2_cache_max_size_metric)
         self.assertIsNotNone(
-            hs2CacheMaxSizeMetricValue,
-            f"Missing metric {hs2CacheMaxSizeMetric} in cache metrics {items}",
+            hs2_cache_max_size_metric_value,
+            f"Missing metric {hs2_cache_max_size_metric} in cache metrics {metrics_map}",
         )
 
         # Sanity check the metric values
-        self.assertEqual(hs1CacheSizeMetricValue, "0.0")
-        self.assertEqual(hs2CacheSizeMetricValue, "0.0")
-        self.assertEqual(hs1CacheMaxSizeMetricValue, "777.0")
-        self.assertEqual(hs2CacheMaxSizeMetricValue, "777.0")
+        self.assertEqual(hs1_cache_size_metric_value, "0.0")
+        self.assertEqual(hs2_cache_size_metric_value, "0.0")
+        self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
+        self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
 
         # Add something to both caches to change the numbers
         cache1.prefill("1", "hi")
         cache2.prefill("2", "ho")
 
-        # Collect the latest metrics from the registry and filter them down to just the
-        # relevant cache metrics.
-        items = {
-            x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
-            for x in filter(
-                lambda x: CACHE_NAME.encode("ascii") in x,
-                generate_latest(REGISTRY).split(b"\n"),
-            )
-        }
+        metrics_map = get_latest_metrics()
 
         # Find the metrics for the caches from both homeservers
-        hs1CacheSizeMetricValue = items.get(hs1CacheSizeMetric)
+        hs1_cache_size_metric_value = metrics_map.get(hs1_cache_size_metric)
         self.assertIsNotNone(
-            hs1CacheSizeMetricValue,
-            f"Missing metric {hs1CacheSizeMetric} in cache metrics {items}",
+            hs1_cache_size_metric_value,
+            f"Missing metric {hs1_cache_size_metric} in cache metrics {metrics_map}",
         )
-        hs2CacheSizeMetricValue = items.get(hs2CacheSizeMetric)
+        hs2_cache_size_metric_value = metrics_map.get(hs2_cache_size_metric)
         self.assertIsNotNone(
-            hs2CacheSizeMetricValue,
-            f"Missing metric {hs2CacheSizeMetric} in cache metrics {items}",
+            hs2_cache_size_metric_value,
+            f"Missing metric {hs2_cache_size_metric} in cache metrics {metrics_map}",
         )
-        hs1CacheMaxSizeMetricValue = items.get(hs1CacheMaxSizeMetric)
+        hs1_cache_max_size_metric_value = metrics_map.get(hs1_cache_max_size_metric)
         self.assertIsNotNone(
-            hs1CacheMaxSizeMetricValue,
-            f"Missing metric {hs1CacheMaxSizeMetric} in cache metrics {items}",
+            hs1_cache_max_size_metric_value,
+            f"Missing metric {hs1_cache_max_size_metric} in cache metrics {metrics_map}",
         )
-        hs2CacheMaxSizeMetricValue = items.get(hs2CacheMaxSizeMetric)
+        hs2_cache_max_size_metric_value = metrics_map.get(hs2_cache_max_size_metric)
         self.assertIsNotNone(
-            hs2CacheMaxSizeMetricValue,
-            f"Missing metric {hs2CacheMaxSizeMetric} in cache metrics {items}",
+            hs2_cache_max_size_metric_value,
+            f"Missing metric {hs2_cache_max_size_metric} in cache metrics {metrics_map}",
         )
 
         # Sanity check the metric values
-        self.assertEqual(hs1CacheSizeMetricValue, "1.0")
-        self.assertEqual(hs2CacheSizeMetricValue, "1.0")
-        self.assertEqual(hs1CacheMaxSizeMetricValue, "777.0")
-        self.assertEqual(hs2CacheMaxSizeMetricValue, "777.0")
+        self.assertEqual(hs1_cache_size_metric_value, "1.0")
+        self.assertEqual(hs2_cache_size_metric_value, "1.0")
+        self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
+        self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
+
+def get_latest_metrics() -> Dict[str, str]:
+    """
+    Collect the latest metrics from the registry and parse them into an easy to use map.
+    The key includes the metric name and labels.
+
+    Example output:
+    {
+        "synapse_util_caches_cache_size": "0.0",
+        "synapse_util_caches_cache_max_size{name="some_cache",server_name="hs1"}": "777.0",
+        ...
+    }
+    """
+    metric_map = {
+        x.split(b" ")[0].decode("ascii"): x.split(b" ")[1].decode("ascii")
+        for x in filter(
+            lambda x: len(x) > 0 and not x.startswith(b"#"),
+            generate_latest(REGISTRY).split(b"\n"),
+        )
+    }
+
+    return metric_map
