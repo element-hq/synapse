@@ -20,7 +20,7 @@
 #
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.events.utils import CANONICALJSON_MAX_INT, CANONICALJSON_MIN_INT

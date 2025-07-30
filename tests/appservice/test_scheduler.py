@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, Mock
 from typing_extensions import TypeAlias
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import (
     ApplicationService,

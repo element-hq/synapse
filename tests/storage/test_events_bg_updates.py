@@ -15,7 +15,7 @@
 
 from typing import Dict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.room_versions import RoomVersion, RoomVersions

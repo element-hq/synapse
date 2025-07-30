@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.http.site import XForwardedForRequest
