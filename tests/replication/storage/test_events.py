@@ -29,6 +29,7 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
+    Membership,
     PushRuleActions,
     ReceiptTypes,
 )
@@ -89,7 +90,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         join = self.persist(
             type=EventTypes.Member,
             key=USER_ID,
-            membership="join",
+            membership=Membership.JOIN,
             prev_events=[(create.event_id, {})],
         )
         self.replicate()
@@ -97,7 +98,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
     def test_redactions(self) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
-        self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
 
         msg = self.persist(
             type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello"
@@ -121,7 +122,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
     def test_backfilled_redactions(self) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
-        self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
 
         msg = self.persist(
             type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello"
@@ -148,7 +149,9 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
     def test_invites(self) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
         self.check("get_invited_rooms_for_local_user", [USER_ID_2], [])
-        event = self.persist(type=EventTypes.Member, key=USER_ID_2, membership="invite")
+        event = self.persist(
+            type=EventTypes.Member, key=USER_ID_2, membership=Membership.INVITE
+        )
         assert event.internal_metadata.instance_name is not None
         assert event.internal_metadata.stream_ordering is not None
 
@@ -175,9 +178,12 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
     @parameterized.expand([(True,), (False,)])
     def test_push_actions_for_user(self, send_receipt: bool) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
-        self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
         self.persist(
-            type=EventTypes.Member, sender=USER_ID, key=USER_ID_2, membership="join"
+            type=EventTypes.Member,
+            sender=USER_ID,
+            key=USER_ID_2,
+            membership=Membership.JOIN,
         )
         event1 = self.persist(
             type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
@@ -237,9 +243,12 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self, send_receipt: bool
     ) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
-        self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
         self.persist(
-            type=EventTypes.Member, sender=USER_ID, key=USER_ID_2, membership="join"
+            type=EventTypes.Member,
+            sender=USER_ID,
+            key=USER_ID_2,
+            membership=Membership.JOIN,
         )
         event1 = self.persist(
             type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
@@ -284,9 +293,12 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self, send_receipt: bool
     ) -> None:
         self.persist(type=EventTypes.Create, key="", creator=USER_ID)
-        self.persist(type=EventTypes.Member, key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
         self.persist(
-            type=EventTypes.Member, sender=USER_ID, key=USER_ID_2, membership="join"
+            type=EventTypes.Member,
+            sender=USER_ID,
+            key=USER_ID_2,
+            membership=Membership.JOIN,
         )
         event1 = self.persist(
             type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
