@@ -76,6 +76,7 @@ import abc
 import contextlib
 import itertools
 import logging
+import weakref
 from bisect import bisect
 from contextlib import contextmanager
 from types import TracebackType
@@ -192,13 +193,12 @@ class BasePresenceHandler(abc.ABC):
     writer"""
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.presence_router = hs.get_presence_router()
         self.state = hs.get_state_handler()
-        self.is_mine_id = hs.is_mine_id
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
@@ -400,7 +400,7 @@ class BasePresenceHandler(abc.ABC):
         if not self._federation:
             return
 
-        states = [s for s in states if self.is_mine_id(s.user_id)]
+        states = [s for s in states if self.hs.is_mine_id(s.user_id)]
 
         if not states:
             return
@@ -665,7 +665,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         for new_state in states:
             old_state = self.user_to_current_state.get(new_state.user_id)
             self.user_to_current_state[new_state.user_id] = new_state
-            is_mine = self.is_mine_id(new_state.user_id)
+            is_mine = self.hs.is_mine_id(new_state.user_id)
             if not old_state or should_notify(old_state, new_state, is_mine):
                 state_to_notify.append(new_state)
 
@@ -793,7 +793,7 @@ class PresenceHandler(BasePresenceHandler):
                     obj=state.user_id,
                     then=state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
                 )
-                if self.is_mine_id(state.user_id):
+                if self.hs.is_mine_id(state.user_id):
                     self.wheel_timer.insert(
                         now=now,
                         obj=state.user_id,
@@ -971,7 +971,7 @@ class PresenceHandler(BasePresenceHandler):
                 new_state, should_notify, should_ping = handle_update(
                     prev_state,
                     new_state,
-                    is_mine=self.is_mine_id(user_id),
+                    is_mine=self.hs.is_mine_id(user_id),
                     wheel_timer=self.wheel_timer,
                     now=now,
                     # When overriding disabled presence, don't kick off all the
@@ -1077,7 +1077,7 @@ class PresenceHandler(BasePresenceHandler):
 
         changes = handle_timeouts(
             states,
-            is_mine_fn=self.is_mine_id,
+            is_mine_fn=self.hs.is_mine_id,
             syncing_user_devices=syncing_user_devices,
             user_to_devices=self._user_to_device_to_current_state,
             now=now,
@@ -1603,7 +1603,7 @@ class PresenceHandler(BasePresenceHandler):
         prev_local_users = []
         prev_remote_hosts = set()
         for user_id in prev_users:
-            if self.is_mine_id(user_id):
+            if self.hs.is_mine_id(user_id):
                 prev_local_users.append(user_id)
             else:
                 prev_remote_hosts.add(get_domain_from_id(user_id))
@@ -1615,7 +1615,7 @@ class PresenceHandler(BasePresenceHandler):
         newly_joined_local_users = []
         newly_joined_remote_hosts = set()
         for user_id in newly_joined_users:
-            if self.is_mine_id(user_id):
+            if self.hs.is_mine_id(user_id):
                 newly_joined_local_users.append(user_id)
             else:
                 host = get_domain_from_id(user_id)
@@ -1765,8 +1765,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         #
         #   AuthHandler -> Notifier -> PresenceEventSource -> ModuleApi -> AuthHandler
         self.server_name = hs.hostname
-        self.get_presence_handler = hs.get_presence_handler
-        self.get_presence_router = hs.get_presence_router
+        self.hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
 
@@ -1838,7 +1837,9 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
             # Figure out which other users this user should explicitly receive
             # updates for
             additional_users_interested_in = (
-                await self.get_presence_router().get_interested_users(user.to_string())
+                await self.hs.get_presence_router().get_interested_users(
+                    user.to_string()
+                )
             )
 
             # We have a set of users that we're interested in the presence of. We want to
@@ -1912,8 +1913,10 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 interested_and_updated_users.update(additional_users_interested_in)
 
             # Retrieve the current presence state for each user
-            users_to_state = await self.get_presence_handler().current_state_for_users(
-                interested_and_updated_users
+            users_to_state = (
+                await self.hs.get_presence_handler().current_state_for_users(
+                    interested_and_updated_users
+                )
             )
             presence_updates = list(users_to_state.values())
 
@@ -1953,8 +1956,10 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
         if updated_users is not None:
             # Get the actual presence update for each change
-            users_to_state = await self.get_presence_handler().current_state_for_users(
-                updated_users
+            users_to_state = (
+                await self.hs.get_presence_handler().current_state_for_users(
+                    updated_users
+                )
             )
             presence_updates = list(users_to_state.values())
 
@@ -1973,7 +1978,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         # for a single user
 
         # Filter through the presence router
-        users_to_state_set = await self.get_presence_router().get_users_for_states(
+        users_to_state_set = await self.hs.get_presence_router().get_users_for_states(
             presence_updates
         )
 

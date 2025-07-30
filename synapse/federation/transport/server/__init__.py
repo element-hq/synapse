@@ -20,6 +20,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Tuple, Type
 
 from synapse.api.errors import FederationDeniedError, SynapseError
@@ -63,7 +64,7 @@ class TransportLayerServer(JsonResource):
             servlet_groups: List of servlet groups to register.
                 Defaults to ``DEFAULT_SERVLET_GROUPS``.
         """
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
         self.servlet_groups = servlet_groups
 
@@ -72,11 +73,11 @@ class TransportLayerServer(JsonResource):
         self.authenticator = Authenticator(hs)
         self.ratelimiter = hs.get_federation_ratelimiter()
 
-        self.register_servlets()
+        self.register_servlets(hs)
 
-    def register_servlets(self) -> None:
+    def register_servlets(self, hs: "HomeServer") -> None:
         register_servlets(
-            self.hs,
+            hs=hs,
             resource=self,
             ratelimiter=self.ratelimiter,
             authenticator=self.authenticator,

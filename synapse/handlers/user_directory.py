@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
@@ -105,7 +106,6 @@ class UserDirectoryHandler(StateDeltasHandler):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
-        self.is_mine_id = hs.is_mine_id
         self.update_user_directory = hs.config.worker.should_update_user_directory
         self.search_all_users = hs.config.userdirectory.user_directory_search_all_users
         self.exclude_remote_users = (
@@ -113,7 +113,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
 
         # The current position in the current_state_delta stream
         self.pos: Optional[int] = None
@@ -360,7 +360,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         # being added multiple times. The batching upserts shouldn't make this
         # too bad, though.
         for user_id in users_in_room:
-            if not self.is_mine_id(
+            if not self._hs.is_mine_id(
                 user_id
             ) or await self.store.should_include_local_user_in_dir(user_id):
                 await self._track_user_joined_room(room_id, user_id)
@@ -393,7 +393,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         )
 
         # Both cases ignore excluded local users, so start by discarding them.
-        is_remote = not self.is_mine_id(state_key)
+        is_remote = not self._hs.is_mine_id(state_key)
         if not is_remote and not await self.store.should_include_local_user_in_dir(
             state_key
         ):
@@ -456,7 +456,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                 and (
                     # We can't apply any special rules to remote users so
                     # they're always included
-                    not self.is_mine_id(other)
+                    not self._hs.is_mine_id(other)
                     # Check the special rules whether the local user should be
                     # included in the user directory
                     or await self.store.should_include_local_user_in_dir(other)
@@ -466,7 +466,7 @@ class UserDirectoryHandler(StateDeltasHandler):
 
             # First, if the joining user is our local user then we need an
             # update for every other user in the room.
-            if self.is_mine_id(joining_user_id):
+            if self._hs.is_mine_id(joining_user_id):
                 for other_user_id in other_users_in_room:
                     updates_to_users_who_share_rooms.add(
                         (joining_user_id, other_user_id)
@@ -475,7 +475,7 @@ class UserDirectoryHandler(StateDeltasHandler):
             # Next, we need an update for every other local user in the room
             # that they now share a room with the joining user.
             for other_user_id in other_users_in_room:
-                if self.is_mine_id(other_user_id):
+                if self._hs.is_mine_id(other_user_id):
                     updates_to_users_who_share_rooms.add(
                         (other_user_id, joining_user_id)
                     )
@@ -504,7 +504,7 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         # Additionally, if they're a remote user and we're no longer joined
         # to any rooms they're in, remove them from the user directory.
-        if not self.is_mine_id(user_id):
+        if not self._hs.is_mine_id(user_id):
             rooms_user_is_in = await self.store.get_user_dir_rooms_user_is_in(user_id)
 
             if len(rooms_user_is_in) == 0:

@@ -20,6 +20,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union, cast
 
 import attr
@@ -170,11 +171,14 @@ class DataStore(
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
     ):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._clock = hs.get_clock()
         self.database_engine = database.engine
 
         super().__init__(database, db_conn, hs)
+
+    def shutdown(self) -> None:
+        super().shutdown()
 
     async def get_users_paginate(
         self,

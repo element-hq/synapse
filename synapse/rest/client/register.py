@@ -21,6 +21,7 @@
 #
 import logging
 import random
+import weakref
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from twisted.web.server import Request
@@ -81,7 +82,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.identity_handler = hs.get_identity_handler()
         self.config = hs.config
 
@@ -176,7 +177,7 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.identity_handler = hs.get_identity_handler()
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -256,7 +257,7 @@ class RegistrationSubmitTokenServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.config = hs.config
         self.clock = hs.get_clock()
@@ -322,7 +323,7 @@ class UsernameAvailabilityRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.registration_handler = hs.get_registration_handler()
         self.ratelimiter = FederationRateLimiter(
             hs.get_clock(),
@@ -386,7 +387,7 @@ class RegistrationTokenValidityRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.store = hs.get_datastores().main
         self.ratelimiter = Ratelimiter(
             store=self.store,
@@ -415,7 +416,7 @@ class RegisterRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
 
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.auth_handler = hs.get_auth_handler()

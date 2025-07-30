@@ -23,6 +23,7 @@
 """Contains functions for registering clients."""
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
 
 from prometheus_client import Counter
@@ -100,7 +101,7 @@ class RegistrationHandler:
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
         self._auth_handler = hs.get_auth_handler()

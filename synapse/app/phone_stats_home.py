@@ -198,9 +198,11 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # Rather than update on per session basis, batch up the requests.
     # If you increase the loop period, the accuracy of user_daily_visits
     # table will decrease
-    clock.looping_call(
-        hs.get_datastores().main.generate_user_daily_visits,
-        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
+    hs.register_looping_call(
+        clock.looping_call(
+            hs.get_datastores().main.generate_user_daily_visits,
+            5 * MILLISECONDS_PER_SECOND,
+        )
     )
 
     # monthly active user limiting functionality
@@ -237,11 +239,13 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
-        clock.looping_call(
-            phone_stats_home,
-            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
-            hs,
-            stats,
+        hs.register_looping_call(
+            clock.looping_call(
+                phone_stats_home,
+                PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+                hs,
+                stats,
+            )
         )
 
         # We need to defer this init for the cases that we daemonize

@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, cast
 
 from twisted.web.server import Request
@@ -50,7 +51,7 @@ class AuthRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
         self.registration_handler = hs.get_registration_handler()

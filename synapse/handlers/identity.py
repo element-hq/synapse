@@ -24,6 +24,7 @@
 
 import logging
 import urllib.parse
+import weakref
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import attr
@@ -67,7 +68,7 @@ class IdentityHandler:
             ip_allowlist=hs.config.server.federation_ip_range_allowlist,
         )
         self.federation_http_client = hs.get_federation_http_client()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         self._web_client_location = hs.config.email.invite_client_location
 

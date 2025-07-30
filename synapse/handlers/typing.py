@@ -20,6 +20,7 @@
 #
 import logging
 import random
+import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
 
 import attr
@@ -82,8 +83,7 @@ class FollowerTypingHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self.server_name = hs.config.server.server_name
         self.clock = hs.get_clock()
-        self.is_mine_id = hs.is_mine_id
-        self.is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
 
         self.federation = None
         if hs.should_send_federation():
@@ -139,7 +139,7 @@ class FollowerTypingHandler:
 
         # Check if we need to resend a keep alive over federation for this
         # user.
-        if self.federation and self.is_mine_id(member.user_id):
+        if self.federation and self.hs.is_mine_id(member.user_id):
             last_fed_poke = self._member_last_federation_poke.get(member, None)
             if not last_fed_poke or last_fed_poke + FEDERATION_PING_INTERVAL <= now:
                 run_as_background_process(
@@ -176,7 +176,7 @@ class FollowerTypingHandler:
                 store=self.store,
             )
             for domain in hosts:
-                if not self.is_mine_server_name(domain):
+                if not self.hs.is_mine_server_name(domain):
                     logger.debug("sending typing update to %s", domain)
                     self.federation.build_and_send_edu(
                         destination=domain,
@@ -233,11 +233,11 @@ class FollowerTypingHandler:
             return
 
         for user_id in now_typing - prev_typing:
-            if self.is_mine_id(user_id):
+            if self.hs.is_mine_id(user_id):
                 await self._push_remote(RoomMember(room_id, user_id), True)
 
         for user_id in prev_typing - now_typing:
-            if self.is_mine_id(user_id):
+            if self.hs.is_mine_id(user_id):
                 await self._push_remote(RoomMember(room_id, user_id), False)
 
     def get_current_token(self) -> int:
@@ -268,7 +268,7 @@ class TypingWriterHandler(FollowerTypingHandler):
         self.notifier = hs.get_notifier()
         self.event_auth_handler = hs.get_event_auth_handler()
 
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         hs.get_federation_registry().register_edu_handler(
             EduTypes.TYPING, self._recv_edu
@@ -304,7 +304,7 @@ class TypingWriterHandler(FollowerTypingHandler):
     ) -> None:
         target_user_id = target_user.to_string()
 
-        if not self.is_mine_id(target_user_id):
+        if not self.hs.is_mine_id(target_user_id):
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if target_user != requester.user:
@@ -339,7 +339,7 @@ class TypingWriterHandler(FollowerTypingHandler):
     ) -> None:
         target_user_id = target_user.to_string()
 
-        if not self.is_mine_id(target_user_id):
+        if not self.hs.is_mine_id(target_user_id):
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if target_user != requester.user:
@@ -360,7 +360,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
     def user_left_room(self, user: UserID, room_id: str) -> None:
         user_id = user.to_string()
-        if self.is_mine_id(user_id):
+        if self.hs.is_mine_id(user_id):
             member = RoomMember(room_id=room_id, user_id=user_id)
             self._stopped_typing(member)
 
@@ -509,14 +509,10 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         self.server_name = hs.hostname
         self._main_store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        # We can't call get_typing_handler here because there's a cycle:
-        #
-        #   Typing -> Notifier -> TypingNotificationEventSource -> Typing
-        #
-        self.get_typing_handler = hs.get_typing_handler
+        self.hs = weakref.proxy(hs)
 
     def _make_event_for(self, room_id: str) -> JsonMapping:
-        typing = self.get_typing_handler()._room_typing[room_id]
+        typing = self.hs.get_typing_handler()._room_typing[room_id]
         return {
             "type": EduTypes.TYPING,
             "room_id": room_id,
@@ -542,7 +538,7 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         with Measure(
             self.clock, name="typing.get_new_events_as", server_name=self.server_name
         ):
-            handler = self.get_typing_handler()
+            handler = self.hs.get_typing_handler()
 
             events = []
 
@@ -581,7 +577,7 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
             self.clock, name="typing.get_new_events", server_name=self.server_name
         ):
             from_key = int(from_key)
-            handler = self.get_typing_handler()
+            handler = self.hs.get_typing_handler()
 
             events = []
             for room_id in room_ids:
@@ -597,4 +593,4 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
             return events, handler._latest_room_serial
 
     def get_current_key(self) -> int:
-        return self.get_typing_handler()._latest_room_serial
+        return self.hs.get_typing_handler()._latest_room_serial

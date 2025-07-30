@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.http import servlet
@@ -46,7 +47,7 @@ class SendToDeviceRestServlet(servlet.RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.txns = HttpTransactionCache(hs)
         self.device_message_handler = hs.get_device_message_handler()

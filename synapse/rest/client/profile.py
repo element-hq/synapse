@@ -22,6 +22,7 @@
 """This module contains REST servlets to do with profile: /profile/<paths>"""
 
 import re
+import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
@@ -63,7 +64,7 @@ class ProfileRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
 
@@ -106,7 +107,7 @@ class ProfileFieldRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
 

@@ -26,6 +26,7 @@ import logging
 import math
 import random
 import string
+import weakref
 from collections import OrderedDict
 from http import HTTPStatus
 from typing import (
@@ -125,7 +126,7 @@ class RoomCreationHandler:
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
         self.clock = hs.get_clock()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.event_creation_handler = hs.get_event_creation_handler()
         self.room_member_handler = hs.get_room_member_handler()
@@ -1441,7 +1442,7 @@ class RoomCreationHandler:
 
 class RoomContextHandler:
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -1806,7 +1807,7 @@ class RoomShutdownHandler:
     DEFAULT_ROOM_NAME = "Content Violation Notification"
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.room_member_handler = hs.get_room_member_handler()
         self._room_creation_handler = hs.get_room_creation_handler()
         self._replication = hs.get_replication_data_handler()

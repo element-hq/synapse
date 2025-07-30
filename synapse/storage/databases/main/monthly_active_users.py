@@ -18,6 +18,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, cast
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -50,7 +51,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
     ):
         super().__init__(database, db_conn, hs)
         self._clock = hs.get_clock()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         if hs.config.redis.redis_enabled:
             # If we're using Redis, we can shift this update process off to

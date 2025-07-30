@@ -81,6 +81,9 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
 
+    def __del__(self) -> None:
+        logger.warning("Destructor")
+
     @wrap_as_background_process("read_forward_extremities")
     async def _read_forward_extremities(self) -> None:
         def fetch(txn: LoggingTransaction) -> List[Tuple[int, int]]:
@@ -394,6 +397,8 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         """
         Generates daily visit data for use in cohort/ retention analysis
         """
+
+        logger.info("generate user daily visits called")
 
         def _generate_user_daily_visits(txn: LoggingTransaction) -> None:
             logger.info("Calling _generate_user_daily_visits")

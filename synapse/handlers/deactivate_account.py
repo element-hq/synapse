@@ -20,6 +20,7 @@
 #
 import itertools
 import logging
+import weakref
 from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import Membership
@@ -38,7 +39,7 @@ class DeactivateAccountHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
         self._room_member_handler = hs.get_room_member_handler()

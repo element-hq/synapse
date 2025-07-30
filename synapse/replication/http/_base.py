@@ -24,6 +24,7 @@ import re
 import urllib.parse
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Dict, List, Tuple
+import weakref
 
 from prometheus_client import Counter, Gauge
 
@@ -205,6 +206,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
         parameter to specify which instance to hit (the instance must be in
         the `instance_map` config).
         """
+        _hs = weakref.proxy(hs)
         clock = hs.get_clock()
         client = hs.get_replication_client()
         local_instance_name = hs.get_instance_name()
@@ -224,8 +226,8 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
             *, instance_name: str = MAIN_PROCESS_INSTANCE_NAME, **kwargs: Any
         ) -> Any:
             # We have to pull these out here to avoid circular dependencies...
-            streams = hs.get_replication_command_handler().get_streams_to_replicate()
-            replication = hs.get_replication_data_handler()
+            streams = _hs.get_replication_command_handler().get_streams_to_replicate()
+            replication = _hs.get_replication_data_handler()
 
             with outgoing_gauge.track_inprogress():
                 if instance_name == local_instance_name:

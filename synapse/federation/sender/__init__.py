@@ -131,6 +131,7 @@ EDUs).
 
 import abc
 import logging
+import weakref
 from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
@@ -369,7 +370,7 @@ class _DestinationWakeupQueue:
 
 class FederationSender(AbstractFederationSender):
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.server_name = hs.hostname
 
         self.store = hs.get_datastores().main
@@ -378,8 +379,6 @@ class FederationSender(AbstractFederationSender):
         self._storage_controllers = hs.get_storage_controllers()
 
         self.clock = hs.get_clock()
-        self.is_mine_id = hs.is_mine_id
-        self.is_mine_server_name = hs.is_mine_server_name
 
         self._presence_router: Optional["PresenceRouter"] = None
         self._transaction_manager = TransactionManager(hs)
@@ -512,7 +511,7 @@ class FederationSender(AbstractFederationSender):
                 async def handle_event(event: EventBase) -> None:
                     # Only send events for this server.
                     send_on_behalf_of = event.internal_metadata.get_send_on_behalf_of()
-                    is_mine = self.is_mine_id(event.sender)
+                    is_mine = self.hs.is_mine_id(event.sender)
                     if not is_mine and send_on_behalf_of is None:
                         logger.debug("Not sending remote-origin event %s", event)
                         return
@@ -824,7 +823,7 @@ class FederationSender(AbstractFederationSender):
         domains: StrCollection = [
             d
             for d in domains_set
-            if not self.is_mine_server_name(d)
+            if not self.hs.is_mine_server_name(d)
             and self._federation_shard_config.should_handle(self._instance_name, d)
         ]
 
@@ -901,7 +900,7 @@ class FederationSender(AbstractFederationSender):
 
         # Ensure we only send out presence states for local users.
         for state in states:
-            assert self.is_mine_id(state.user_id)
+            assert self.hs.is_mine_id(state.user_id)
 
         destinations = await filter_destinations_by_retry_limiter(
             [
@@ -915,7 +914,7 @@ class FederationSender(AbstractFederationSender):
         )
 
         for destination in destinations:
-            if self.is_mine_server_name(destination):
+            if self.hs.is_mine_server_name(destination):
                 continue
 
             queue = self._get_per_destination_queue(destination)
@@ -940,7 +939,7 @@ class FederationSender(AbstractFederationSender):
             content: content of EDU
             key: clobbering key for this edu
         """
-        if self.is_mine_server_name(destination):
+        if self.hs.is_mine_server_name(destination):
             logger.info("Not sending EDU to ourselves")
             return
 
@@ -988,7 +987,7 @@ class FederationSender(AbstractFederationSender):
                 if self._federation_shard_config.should_handle(
                     self._instance_name, destination
                 )
-                and not self.is_mine_server_name(destination)
+                and not self.hs.is_mine_server_name(destination)
             ],
             clock=self.clock,
             store=self.store,
@@ -1015,7 +1014,7 @@ class FederationSender(AbstractFederationSender):
         might have come back.
         """
 
-        if self.is_mine_server_name(destination):
+        if self.hs.is_mine_server_name(destination):
             logger.warning("Not waking up ourselves")
             return
 

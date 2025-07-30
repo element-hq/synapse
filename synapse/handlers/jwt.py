@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import weakref
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from authlib.jose import JsonWebToken, JWTClaims
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 
 class JwtHandler:
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         self.jwt_secret = hs.config.jwt.jwt_secret
         self.jwt_subject_claim = hs.config.jwt.jwt_subject_claim

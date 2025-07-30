@@ -21,6 +21,7 @@
 #
 import logging
 import random
+import weakref
 from threading import Lock
 from typing import (
     TYPE_CHECKING,
@@ -125,7 +126,7 @@ class DeviceHandler:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()

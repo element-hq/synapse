@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import LimitBlockingTypes, UserTypes
@@ -46,7 +47,7 @@ class AuthBlocking:
         self._mau_limits_reserved_threepids = (
             hs.config.server.mau_limits_reserved_threepids
         )
-        self._is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
         self._track_appservice_user_ips = hs.config.appservice.track_appservice_user_ips
 
     async def check_auth_blocking(
@@ -84,7 +85,7 @@ class AuthBlocking:
         if requester:
             if requester.authenticated_entity.startswith("@"):
                 user_id = requester.authenticated_entity
-            elif self._is_mine_server_name(requester.authenticated_entity):
+            elif self.hs._is_mine_server_name(requester.authenticated_entity):
                 # We never block the server from doing actions on behalf of
                 # users.
                 return

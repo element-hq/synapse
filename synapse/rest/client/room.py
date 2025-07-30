@@ -23,6 +23,7 @@
 
 import logging
 import re
+import weakref
 from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Awaitable, Dict, List, Optional, Tuple
@@ -600,7 +601,7 @@ class PublicRoomListRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -800,7 +801,7 @@ class RoomMessageListRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
         self.pagination_handler = hs.get_pagination_handler()
         self.auth = hs.get_auth()
@@ -1003,7 +1004,7 @@ class RoomEventContextServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
         self.room_context_handler = hs.get_room_context_handler()
         self._event_serializer = hs.get_event_client_serializer()
@@ -1347,7 +1348,7 @@ class RoomTypingRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.presence_handler = hs.get_presence_handler()
         self.auth = hs.get_auth()
 

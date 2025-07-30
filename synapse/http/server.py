@@ -25,6 +25,7 @@ import logging
 import types
 import urllib
 import urllib.parse
+import weakref
 from http import HTTPStatus
 from http.client import FOUND
 from inspect import isawaitable
@@ -472,7 +473,7 @@ class JsonResource(DirectServeJsonResource):
         super().__init__(canonical_json, extract_context, clock=self.clock)
         # Map of path regex -> method -> callback.
         self._routes: Dict[Pattern[str], Dict[bytes, _PathEntry]] = {}
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
     def register_paths(
         self,
@@ -504,6 +505,9 @@ class JsonResource(DirectServeJsonResource):
             self._routes.setdefault(path_pattern, {})[method_bytes] = _PathEntry(
                 callback, servlet_classname
             )
+
+    def unregister_paths(self) -> None:
+        self._routes.clear()
 
     def _get_handler_for_request(
         self, request: "SynapseRequest"

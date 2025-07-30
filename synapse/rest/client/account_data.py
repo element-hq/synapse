@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from synapse.api.constants import AccountDataTypes, ReceiptTypes
@@ -67,7 +68,7 @@ class AccountDataServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.handler = hs.get_account_data_handler()
@@ -143,7 +144,7 @@ class UnstableAccountDataServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.handler = hs.get_account_data_handler()
 
@@ -180,7 +181,7 @@ class RoomAccountDataServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.handler = hs.get_account_data_handler()
@@ -278,7 +279,7 @@ class UnstableRoomAccountDataServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = hs
+        self._hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.handler = hs.get_account_data_handler()
 

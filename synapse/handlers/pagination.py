@@ -19,6 +19,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple, cast
 
 from twisted.python.failure import Failure
@@ -78,7 +79,7 @@ class PaginationHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()

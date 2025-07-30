@@ -22,6 +22,7 @@
 
 import logging
 import re
+import weakref
 from collections import Counter
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
 
@@ -375,7 +376,7 @@ class SigningKeyUploadServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.auth_handler = hs.get_auth_handler()

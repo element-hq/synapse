@@ -21,6 +21,7 @@
 import datetime
 import itertools
 import logging
+import weakref
 from queue import Empty, PriorityQueue
 from typing import (
     TYPE_CHECKING,
@@ -139,7 +140,7 @@ class EventFederationWorkerStore(
     ):
         super().__init__(database, db_conn, hs)
 
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         if hs.config.worker.run_background_tasks:
             hs.get_clock().looping_call(

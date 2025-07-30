@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -97,7 +98,7 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             writers=hs.config.worker.writers.presence,
         )
 
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._presence_on_startup = self._get_active_presence(db_conn)
 
         presence_cache_prefill, min_presence_val = self.db_pool.get_cache_dict(

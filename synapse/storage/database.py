@@ -23,6 +23,7 @@ import inspect
 import logging
 import time
 import types
+import weakref
 from collections import defaultdict
 from time import monotonic as monotonic_time
 from typing import (
@@ -560,7 +561,7 @@ class DatabasePool:
         database_config: DatabaseConnectionConfig,
         engine: BaseDatabaseEngine,
     ):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config

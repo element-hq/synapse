@@ -18,6 +18,7 @@
 #
 #
 import logging
+import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
@@ -43,7 +44,7 @@ class CapabilitiesRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.config = hs.config
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()

@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import weakref
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from unittest import mock
 
@@ -127,7 +128,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.handler = self.hs.get_room_summary_handler()
 
         # Create a user.
@@ -1145,7 +1146,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.handler = self.hs.get_room_summary_handler()
 
         # Create a user.

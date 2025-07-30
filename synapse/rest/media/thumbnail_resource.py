@@ -22,6 +22,7 @@
 
 import logging
 import re
+import weakref
 from typing import TYPE_CHECKING
 
 from synapse.http.server import set_corp_headers, set_cors_headers
@@ -61,7 +62,7 @@ class ThumbnailResource(RestServlet):
         self.store = hs.get_datastores().main
         self.media_repo = media_repo
         self.media_storage = media_storage
-        self._is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
         self._server_name = hs.hostname
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
@@ -85,7 +86,7 @@ class ThumbnailResource(RestServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
-        if self._is_mine_server_name(server_name):
+        if self.hs._is_mine_server_name(server_name):
             if self.dynamic_thumbnails:
                 await self.thumbnail_provider.select_or_generate_local_thumbnail(
                     request,

@@ -39,6 +39,8 @@ from typing import (
 
 import attr
 
+from twisted.internet.task import LoopingCall
+
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
@@ -108,9 +110,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             and self.hs.config.metrics.metrics_flags.known_servers
         ):
             self._known_servers_count = 1
-            self.hs.get_clock().looping_call(
-                self._count_known_servers,
-                60 * 1000,
+            self._count_known_servers_task: Optional[LoopingCall] = (
+                self.hs.get_clock().looping_call(
+                    self._count_known_servers,
+                    6 * 1000,
+                )
             )
             self.hs.get_clock().call_later(
                 1,
@@ -122,6 +126,13 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 [],
                 lambda: self._known_servers_count,
             )
+
+    def shutdown(self) -> None:
+        logger.info("Shutting down RoomMemberWorkerStore")
+        # print(self.hs.get_reactor().getDelayedCalls())
+        if self._count_known_servers_task is not None:
+            self._count_known_servers_task.stop()
+            self._count_known_servers_task = None
 
     @wrap_as_background_process("_count_known_servers")
     async def _count_known_servers(self) -> int:
@@ -157,6 +168,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         # We always know about ourselves, even if we have nothing in
         # room_memberships (for example, the server is new).
         self._known_servers_count = max([count, 1])
+        logger.info("Known servers: %s", self._known_servers_count)
         return self._known_servers_count
 
     @cached(max_entries=100000, iterable=True)

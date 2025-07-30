@@ -21,6 +21,7 @@
 #
 import logging
 import random
+import weakref
 from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -75,7 +76,7 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.datastore = hs.get_datastores().main
         self.config = hs.config
         self.identity_handler = hs.get_identity_handler()
@@ -149,7 +150,7 @@ class PasswordRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
         self.datastore = self.hs.get_datastores().main
@@ -281,7 +282,7 @@ class DeactivateAccountRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
         self._deactivate_account_handler = hs.get_deactivate_account_handler()
@@ -324,7 +325,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.config = hs.config
         self.identity_handler = hs.get_identity_handler()
         self.store = self.hs.get_datastores().main
@@ -406,7 +407,7 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
     PATTERNS = client_patterns("/account/3pid/msisdn/requestToken$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         super().__init__()
         self.store = self.hs.get_datastores().main
         self.identity_handler = hs.get_identity_handler()
@@ -586,7 +587,7 @@ class ThreepidRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.identity_handler = hs.get_identity_handler()
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
@@ -649,7 +650,7 @@ class ThreepidAddRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.identity_handler = hs.get_identity_handler()
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
@@ -699,7 +700,7 @@ class ThreepidBindRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.identity_handler = hs.get_identity_handler()
         self.auth = hs.get_auth()
 
@@ -727,7 +728,7 @@ class ThreepidUnbindRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.identity_handler = hs.get_identity_handler()
         self.auth = hs.get_auth()
         self.datastore = self.hs.get_datastores().main
@@ -757,7 +758,7 @@ class ThreepidDeleteRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
 

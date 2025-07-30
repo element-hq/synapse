@@ -40,6 +40,7 @@ from typing import (
     Tuple,
     cast,
 )
+import weakref
 
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec
@@ -551,7 +552,7 @@ async def start(hs: "HomeServer") -> None:
 
         signal.signal(signal.SIGHUP, run_sighup)
 
-        register_sighup(refresh_certificate, hs)
+        register_sighup(refresh_certificate, weakref.proxy(hs))
         register_sighup(reload_cache_config, hs.config)
 
     # Apply the cache config.

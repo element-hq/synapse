@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import SynapseError
@@ -42,7 +43,7 @@ class UserDirectorySearchRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
 

@@ -20,6 +20,7 @@
 #
 import abc
 import logging
+import weakref
 from enum import Enum, IntEnum
 from types import TracebackType
 from typing import (
@@ -248,7 +249,7 @@ class BackgroundUpdater:
     def __init__(self, hs: "HomeServer", database: "DatabasePool"):
         self._clock = hs.get_clock()
         self.db_pool = database
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         self._database_name = database.name()
 

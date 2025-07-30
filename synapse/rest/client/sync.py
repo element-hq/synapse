@@ -20,6 +20,7 @@
 #
 import itertools
 import logging
+import weakref
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
@@ -110,7 +111,7 @@ class SyncRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
@@ -682,7 +683,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.sync_handler = hs.get_sync_handler()
@@ -691,7 +692,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         # derived information from rooms (see how `_generate_sync_entry_for_rooms()`
         # prepares a bunch of data for `_generate_sync_entry_for_device_list()`).
         self.only_member_events_filter_collection = FilterCollection(
-            self.hs,
+            hs,
             {
                 "room": {
                     # We only care about membership events for the `device_lists`.

@@ -94,6 +94,7 @@ from typing import (
 )
 
 import attr
+from twisted.internet.task import LoopingCall
 
 from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -254,6 +255,8 @@ def _deserialize_action(actions: str, is_highlight: bool) -> List[Union[dict, st
 
 
 class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBaseStore):
+    _background_tasks: List[LoopingCall] = []
+
     def __init__(
         self,
         database: DatabasePool,
@@ -280,8 +283,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         self._rotate_count = 10000
         self._doing_notif_rotation = False
         if hs.config.worker.run_background_tasks:
-            self._rotate_notif_loop = self._clock.looping_call(
-                self._rotate_notifs, 30 * 1000
+            self._background_tasks.append(
+                self._clock.looping_call(
+                    self._rotate_notifs, 30 * 1000
+                )
             )
 
             self._clear_old_staging_loop = self._clock.looping_call(
@@ -324,6 +329,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             table="event_push_summary",
             columns=["room_id"],
         )
+
+    def __del__(self) -> None:
+        logger.warning("Stopping background tasks")
+        for task in self._background_tasks:
+            task.stop()
 
     async def _background_drop_null_thread_id_indexes(
         self, progress: JsonDict, batch_size: int
@@ -1917,6 +1927,8 @@ class EventPushActionsStore(EventPushActionsWorkerStore):
             where_clause="highlight=0",
         )
 
+    def __del__(self) -> None:
+        logger.warning("Destructor")
 
 def _action_has_highlight(actions: Collection[Union[Mapping, str]]) -> bool:
     for action in actions:

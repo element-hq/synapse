@@ -21,6 +21,7 @@
 
 import abc
 import logging
+import weakref
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
 import attr
@@ -175,7 +176,7 @@ class Keyring:
             process_batch_callback=self._inner_fetch_key_requests,
         )
 
-        self._is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
 
         # build a FetchKeyResult for each of our own keys, to shortcircuit the
         # fetcher.
@@ -279,7 +280,7 @@ class Keyring:
 
         # If we are the originating server, short-circuit the key-fetch for any keys
         # we already have
-        if self._is_mine_server_name(verify_request.server_name):
+        if self.hs._is_mine_server_name(verify_request.server_name):
             for key_id in verify_request.key_ids:
                 if key_id in self._local_verify_keys:
                     found_keys[key_id] = self._local_verify_keys[key_id]

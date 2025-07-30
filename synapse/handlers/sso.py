@@ -22,6 +22,7 @@ import abc
 import hashlib
 import io
 import logging
+import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -203,7 +204,7 @@ class SsoHandler:
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._server_name = hs.hostname
-        self._is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
         self._registration_handler = hs.get_registration_handler()
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
@@ -816,7 +817,7 @@ class SsoHandler:
                 avatar_url_parts = profile[ProfileFields.AVATAR_URL].split("/")
                 server_name = avatar_url_parts[-2]
                 media_id = avatar_url_parts[-1]
-                if self._is_mine_server_name(server_name):
+                if self.hs._is_mine_server_name(server_name):
                     media = await self._media_repo.store.get_local_media(media_id)
                     if media is not None and upload_name == media.upload_name:
                         logger.info("skipping saving the user avatar")

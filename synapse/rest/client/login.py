@@ -21,6 +21,7 @@
 
 import logging
 import re
+import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -91,7 +92,7 @@ class LoginRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._main_store = hs.get_datastores().main
 
         # JWT configuration variables.

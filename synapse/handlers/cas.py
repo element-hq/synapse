@@ -20,6 +20,7 @@
 #
 import logging
 import urllib.parse
+import weakref
 from typing import TYPE_CHECKING, Dict, List, Optional
 from xml.etree import ElementTree as ET
 
@@ -66,7 +67,7 @@ class CasHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._hostname = hs.hostname
         self._store = hs.get_datastores().main
         self._auth_handler = hs.get_auth_handler()

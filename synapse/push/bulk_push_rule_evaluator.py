@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -127,7 +128,7 @@ class BulkPushRuleEvaluator:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.server_name = hs.hostname  # nb must be called this for @measure_func

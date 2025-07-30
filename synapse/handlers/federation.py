@@ -25,6 +25,7 @@
 import enum
 import itertools
 import logging
+import weakref
 from enum import Enum
 from http import HTTPStatus
 from typing import (
@@ -133,7 +134,7 @@ class FederationHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
@@ -143,8 +144,6 @@ class FederationHandler:
         self.state_handler = hs.get_state_handler()
         self.server_name = hs.hostname
         self.keyring = hs.get_keyring()
-        self.is_mine_id = hs.is_mine_id
-        self.is_mine_server_name = hs.is_mine_server_name
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.event_creation_handler = hs.get_event_creation_handler()
         self.event_builder_factory = hs.get_event_builder_factory()
@@ -460,7 +459,7 @@ class FederationHandler:
 
             for dom in domains:
                 # We don't want to ask our own server for information we don't have
-                if self.is_mine_server_name(dom):
+                if self.hs.is_mine_server_name(dom):
                     continue
 
                 try:
@@ -1075,7 +1074,7 @@ class FederationHandler:
                 400, "The invite event was not from the server sending it"
             )
 
-        if not self.is_mine_id(event.state_key):
+        if not self.hs.is_mine_id(event.state_key):
             raise SynapseError(400, "The invite event must be for this server")
 
         # block any attempts to invite the server notices mxid

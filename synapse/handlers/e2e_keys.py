@@ -20,6 +20,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import attr
@@ -68,7 +69,7 @@ class E2eKeysHandler:
         self.federation = hs.get_federation_client()
         self.device_handler = hs.get_device_handler()
         self._appservice_handler = hs.get_application_service_handler()
-        self.is_mine = hs.is_mine
+        self.hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._task_scheduler = hs.get_task_scheduler()
@@ -201,7 +202,7 @@ class E2eKeysHandler:
 
             for user_id, device_ids in device_keys_query.items():
                 # we use UserID.from_string to catch invalid user ids
-                if self.is_mine(UserID.from_string(user_id)):
+                if self.hs.is_mine(UserID.from_string(user_id)):
                     local_query[user_id] = device_ids
                 else:
                     remote_queries[user_id] = device_ids
@@ -549,7 +550,7 @@ class E2eKeysHandler:
         result_dict: Dict[str, Dict[str, dict]] = {}
         for user_id, device_ids in query.items():
             # we use UserID.from_string to catch invalid user ids
-            if not self.is_mine(UserID.from_string(user_id)):
+            if not self.hs.is_mine(UserID.from_string(user_id)):
                 logger.warning("Request for keys for non-local user %s", user_id)
                 log_kv(
                     {
@@ -620,7 +621,7 @@ class E2eKeysHandler:
             "device_keys", {}
         )
         if any(
-            not self.is_mine(UserID.from_string(user_id))
+            not self.hs.is_mine(UserID.from_string(user_id))
             for user_id in device_keys_query
         ):
             raise SynapseError(400, "User is not hosted on this homeserver")
@@ -761,7 +762,7 @@ class E2eKeysHandler:
 
         for user_id, one_time_keys in query.items():
             # we use UserID.from_string to catch invalid user ids
-            if self.is_mine(UserID.from_string(user_id)):
+            if self.hs.is_mine(UserID.from_string(user_id)):
                 for device_id, algorithms in one_time_keys.items():
                     for algorithm, count in algorithms.items():
                         local_query.append((user_id, device_id, algorithm, count))
@@ -1431,7 +1432,7 @@ class E2eKeysHandler:
         # cross-sign a remote user, but does not share any rooms with them yet.
         # Thus, we would not have their key list yet. We instead fetch the key,
         # store it and notify clients of new, associated device IDs.
-        if self.is_mine(user) or key_type not in ["master", "self_signing"]:
+        if self.hs.is_mine(user) or key_type not in ["master", "self_signing"]:
             # Note that master and self_signing keys are the only cross-signing keys we
             # can request over federation
             raise NotFoundError("No %s key found for %s" % (key_type, user_id))

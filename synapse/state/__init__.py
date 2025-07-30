@@ -20,6 +20,7 @@
 #
 import heapq
 import logging
+import weakref
 from collections import ChainMap, defaultdict
 from typing import (
     TYPE_CHECKING,
@@ -193,7 +194,7 @@ class StateHandler:
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._storage_controllers = hs.get_storage_controllers()
         self._events_shard_config = hs.config.worker.events_shard_config

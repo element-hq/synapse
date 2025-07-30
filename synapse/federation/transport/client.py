@@ -22,6 +22,7 @@
 
 import logging
 import urllib
+import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -68,7 +69,7 @@ class TransportLayerClient:
 
     def __init__(self, hs: "HomeServer"):
         self.client = hs.get_federation_http_client()
-        self._is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
 
     async def get_room_state_ids(
         self, destination: str, room_id: str, event_id: str
@@ -270,7 +271,7 @@ class TransportLayerClient:
             transaction.transaction_id,
         )
 
-        if self._is_mine_server_name(transaction.destination):
+        if self.hs._is_mine_server_name(transaction.destination):
             raise RuntimeError("Transport layer cannot send to itself!")
 
         # FIXME: This is only used by the tests. The actual json sent is

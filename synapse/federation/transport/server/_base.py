@@ -23,6 +23,7 @@ import functools
 import logging
 import re
 import time
+import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional, Tuple, cast
 
@@ -64,7 +65,7 @@ class Authenticator:
         self._clock = hs.get_clock()
         self.keyring = hs.get_keyring()
         self.server_name = hs.hostname
-        self._is_mine_server_name = hs.is_mine_server_name
+        self.hs = weakref.proxy(hs)
         self.store = hs.get_datastores().main
         self.federation_domain_whitelist = (
             hs.config.federation.federation_domain_whitelist
@@ -108,7 +109,7 @@ class Authenticator:
                 json_request["signatures"].setdefault(origin, {})[key] = sig
 
                 # if the origin_server sent a destination along it needs to match our own server_name
-                if destination is not None and not self._is_mine_server_name(
+                if destination is not None and not self.hs._is_mine_server_name(
                     destination
                 ):
                     raise AuthenticationError(
@@ -277,7 +278,7 @@ class BaseFederationServlet:
         ratelimiter: FederationRateLimiter,
         server_name: str,
     ):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.authenticator = authenticator
         self.ratelimiter = ratelimiter
         self.server_name = server_name

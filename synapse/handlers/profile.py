@@ -20,6 +20,7 @@
 #
 import logging
 import random
+import weakref
 from typing import TYPE_CHECKING, List, Optional, Union
 
 from synapse.api.constants import ProfileFields
@@ -58,7 +59,7 @@ class ProfileHandler:
         self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         self.federation = hs.get_federation_client()
         hs.get_federation_registry().register_query_handler(
@@ -72,8 +73,6 @@ class ProfileHandler:
         self.allowed_avatar_mimetypes: Optional[List[str]] = (
             hs.config.server.allowed_avatar_mimetypes
         )
-
-        self._is_mine_server_name = hs.is_mine_server_name
 
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
@@ -366,7 +365,7 @@ class ProfileHandler:
         else:
             server_name = host
 
-        if self._is_mine_server_name(server_name):
+        if self.hs._is_mine_server_name(server_name):
             media_info: Optional[
                 Union[LocalMedia, RemoteMedia]
             ] = await self.store.get_local_media(media_id)

@@ -19,6 +19,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, List, Mapping, Optional, Union
 
 from synapse import event_auth
@@ -54,7 +55,7 @@ class EventAuthHandler:
         self._store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self._server_name = hs.hostname
-        self._is_mine_id = hs.is_mine_id
+        self.hs = weakref.proxy(hs)
 
     async def check_auth_rules_from_context(
         self,
@@ -255,7 +256,7 @@ class EventAuthHandler:
         if not await self.is_user_in_rooms(allowed_rooms, user_id):
             # If this is a remote request, the user might be in an allowed room
             # that we do not know about.
-            if not self._is_mine_id(user_id):
+            if not self.hs._is_mine_id(user_id):
                 for room_id in allowed_rooms:
                     if not await self._store.is_host_joined(room_id, self._server_name):
                         raise SynapseError(

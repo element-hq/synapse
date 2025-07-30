@@ -18,6 +18,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import EventTypes, Membership, RoomCreationPreset
@@ -44,7 +45,7 @@ class ServerNoticesManager:
         self._event_creation_handler = hs.get_event_creation_handler()
         self._message_handler = hs.get_message_handler()
         self._storage_controllers = hs.get_storage_controllers()
-        self._is_mine_id = hs.is_mine_id
+        self.hs = weakref.proxy(hs)
 
         self._notifier = hs.get_notifier()
         self.server_notices_mxid = self._config.servernotices.server_notices_mxid
@@ -148,7 +149,9 @@ class ServerNoticesManager:
         if self.server_notices_mxid is None:
             raise Exception("Server notices not enabled")
 
-        assert self._is_mine_id(user_id), "Cannot send server notices to remote users"
+        assert self.hs._is_mine_id(user_id), (
+            "Cannot send server notices to remote users"
+        )
 
         requester = create_requester(
             self.server_notices_mxid, authenticated_entity=self.server_name

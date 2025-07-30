@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, Optional
 
 from prometheus_client import Gauge
@@ -64,7 +65,7 @@ class PusherPool:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.pusher_factory = PusherFactory(hs)
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()

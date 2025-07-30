@@ -19,6 +19,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Tuple
 
 from twisted.web.server import Request
@@ -42,7 +43,7 @@ class AccountValidityRenewServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
 
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.account_activity_handler = hs.get_account_validity_handler()
         self.auth = hs.get_auth()
         self.account_renewed_template = (
@@ -83,7 +84,7 @@ class AccountValiditySendMailServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
 
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.account_activity_handler = hs.get_account_validity_handler()
         self.auth = hs.get_auth()
         self.account_validity_renew_by_email_enabled = (

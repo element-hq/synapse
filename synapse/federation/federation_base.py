@@ -20,6 +20,7 @@
 #
 #
 import logging
+import weakref
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Sequence
 
 from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
@@ -56,9 +57,8 @@ class InvalidEventSignatureError(RuntimeError):
 
 class FederationBase:
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
-        self._is_mine_server_name = hs.is_mine_server_name
         self.keyring = hs.get_keyring()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.store = hs.get_datastores().main

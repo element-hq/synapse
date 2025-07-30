@@ -21,6 +21,7 @@
 
 import logging
 import random
+import weakref
 from typing import TYPE_CHECKING, Iterable, List, Optional
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
@@ -44,7 +45,7 @@ class EventStreamHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
 
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()

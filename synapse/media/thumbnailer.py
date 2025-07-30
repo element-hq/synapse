@@ -20,6 +20,7 @@
 #
 #
 import logging
+import weakref
 from io import BytesIO
 from types import TracebackType
 from typing import TYPE_CHECKING, List, Optional, Tuple, Type
@@ -264,7 +265,7 @@ class ThumbnailProvider:
         media_repo: "MediaRepository",
         media_storage: MediaStorage,
     ):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.reactor = hs.get_reactor()
         self.media_repo = media_repo
         self.media_storage = media_storage

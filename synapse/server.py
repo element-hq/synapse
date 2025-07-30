@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar,
 from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
+from twisted.internet.task import LoopingCall
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
@@ -285,6 +286,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             hostname : The hostname for the server.
             config: The full config for the homeserver.
         """
+
         if not reactor:
             from twisted.internet import reactor as _reactor
 
@@ -310,6 +312,30 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+
+        self._looping_calls: List[LoopingCall] = []
+
+    def __del__(self) -> None:
+        logger.warning("Destructing HomeServer")
+
+    def shutdown(self) -> None:
+        logger.info("Received shutdown request")
+        
+        # logger.info("Unsubscribing replication callbacks")
+        # self.get_replication_notifier()._replication_callbacks.clear()
+
+        logger.info("Stopping looping calls: %d", len(self._looping_calls))
+        for looping_call in self._looping_calls:
+            looping_call.stop()
+            del looping_call
+
+        self._looping_calls = []
+
+        logger.info("Shutting down datastores")
+        self.get_datastores().main.shutdown()
+
+    def register_looping_call(self, looping_call: LoopingCall) -> None:
+        self._looping_calls.append(looping_call)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.

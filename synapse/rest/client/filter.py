@@ -20,6 +20,7 @@
 #
 
 import logging
+import weakref
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import AuthError, NotFoundError, StoreError, SynapseError
@@ -42,7 +43,7 @@ class GetFilterRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.filtering = hs.get_filtering()
 
@@ -81,7 +82,7 @@ class CreateFilterRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.auth = hs.get_auth()
         self.filtering = hs.get_filtering()
 

@@ -22,6 +22,7 @@
 import collections
 import itertools
 import logging
+import weakref
 from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
@@ -236,7 +237,7 @@ class PersistEventsStore:
         main_data_store: "DataStore",
         db_conn: LoggingDatabaseConnection,
     ):
-        self.hs = hs
+        self.hs = weakref.proxy(hs)
         self.db_pool = db
         self.store = main_data_store
         self.database_engine = db.engine
@@ -244,7 +245,6 @@ class PersistEventsStore:
         self._instance_name = hs.get_instance_name()
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
-        self.is_mine_id = hs.is_mine_id
 
         # This should only exist on instances that are configured to write
         assert hs.get_instance_name() in hs.config.worker.writers.events, (
@@ -553,7 +553,7 @@ class PersistEventsStore:
         user_ids_to_delete_membership_snapshots = [
             state_key
             for event_type, state_key in to_delete
-            if event_type == EventTypes.Member and self.is_mine_id(state_key)
+            if event_type == EventTypes.Member and self.hs.is_mine_id(state_key)
         ]
 
         membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues = {}
@@ -563,7 +563,9 @@ class PersistEventsStore:
         if to_insert:
             membership_event_id_to_user_id_map: Dict[str, str] = {}
             for state_key, event_id in to_insert.items():
-                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
+                if state_key[0] == EventTypes.Member and self.hs.is_mine_id(
+                    state_key[1]
+                ):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             membership_event_map: Dict[str, EventBase] = {}
@@ -1928,7 +1930,7 @@ class PersistEventsStore:
                 [
                     (room_id, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                    if etype == EventTypes.Member and self.is_mine_id(state_key)
+                    if etype == EventTypes.Member and self.hs.is_mine_id(state_key)
                 ],
             )
 
@@ -1945,7 +1947,7 @@ class PersistEventsStore:
                 [
                     (room_id, key[1], ev_id, ev_id, ev_id)
                     for key, ev_id in to_insert.items()
-                    if key[0] == EventTypes.Member and self.is_mine_id(key[1])
+                    if key[0] == EventTypes.Member and self.hs.is_mine_id(key[1])
                 ],
             )
 
@@ -2997,7 +2999,7 @@ class PersistEventsStore:
             # unless its an outlier, and an outlier is only "current" if it's an "out of
             # band membership", like a remote invite or a rejection of a remote invite.
             if (
-                self.is_mine_id(event.state_key)
+                self.hs.is_mine_id(event.state_key)
                 and not inhibit_local_membership_updates
                 and event.internal_metadata.is_outlier()
                 and event.internal_metadata.is_out_of_band_membership()
