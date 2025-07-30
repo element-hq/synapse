@@ -13,7 +13,7 @@
 #
 
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.server import HomeServer

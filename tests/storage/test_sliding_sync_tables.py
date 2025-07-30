@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple, cast
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions

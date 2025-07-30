@@ -78,9 +78,9 @@ from twisted.internet.interfaces import (
     ITransport,
 )
 from twisted.internet.protocol import ClientFactory, DatagramProtocol, Factory
+from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
 from twisted.python import threadpool
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactorClock
 from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site

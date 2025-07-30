@@ -70,8 +70,6 @@ class UserErasureWorkerStore(CacheInvalidationWorkerStore):
 
         return {u: u in erased_users for u in user_ids}
 
-
-class UserErasureStore(UserErasureWorkerStore):
     async def mark_user_erased(self, user_id: str) -> None:
         """Indicate that user_id wishes their message history to be erased.
 
@@ -113,3 +111,7 @@ class UserErasureStore(UserErasureWorkerStore):
             self._invalidate_cache_and_stream(txn, self.is_user_erased, (user_id,))
 
         await self.db_pool.runInteraction("mark_user_not_erased", f)
+
+
+class UserErasureStore(UserErasureWorkerStore):
+    pass

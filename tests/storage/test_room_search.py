@@ -22,7 +22,7 @@
 from typing import List, Tuple
 from unittest.case import SkipTest
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes

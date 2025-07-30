@@ -14,7 +14,7 @@
 #
 from typing import Literal, Union
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin, login, room, room_upgrade_rest_servlet

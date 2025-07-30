@@ -42,7 +42,7 @@ from urllib.parse import urlencode
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactorClock
+from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
 from synapse.api.constants import Membership, ReceiptTypes
@@ -185,7 +185,7 @@ class RestHelper:
     def join(
         self,
         room: str,
-        user: Optional[str] = None,
+        user: str,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
         appservice_user_id: Optional[str] = None,
