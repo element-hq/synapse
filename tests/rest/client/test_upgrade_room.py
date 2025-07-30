@@ -21,7 +21,7 @@
 from typing import Optional
 from unittest.mock import patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, RoomTypes
 from synapse.config.server import DEFAULT_ROOM_VERSION

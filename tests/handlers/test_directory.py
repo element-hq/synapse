@@ -22,7 +22,7 @@
 from typing import Any, Awaitable, Callable, Dict
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.api.errors
 import synapse.rest.admin

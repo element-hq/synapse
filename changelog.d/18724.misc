@@ -1,0 +1,1 @@
+Refactor `Histogram` metrics to be homeserver-scoped.

@@ -780,10 +780,10 @@ class PresenceHandler(BasePresenceHandler):
         )
 
         LaterGauge(
-            "synapse_handlers_presence_user_to_current_state_size",
-            "",
-            [],
-            lambda: len(self.user_to_current_state),
+            name="synapse_handlers_presence_user_to_current_state_size",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -883,10 +883,10 @@ class PresenceHandler(BasePresenceHandler):
             )
 
         LaterGauge(
-            "synapse_handlers_presence_wheel_timer_size",
-            "",
-            [],
-            lambda: len(self.wheel_timer),
+            name="synapse_handlers_presence_wheel_timer_size",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 
         # Used to handle sending of presence to newly joined users/servers
@@ -1568,9 +1568,9 @@ class PresenceHandler(BasePresenceHandler):
                 self._event_pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels("presence").set(
-                    max_pos
-                )
+                synapse.metrics.event_processing_positions.labels(
+                    name="presence", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
     async def _handle_state_delta(self, room_id: str, deltas: List[StateDelta]) -> None:
         """Process current state deltas for the room to find new joins that need

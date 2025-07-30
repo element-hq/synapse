@@ -144,27 +144,31 @@ def _get_in_flight_counts() -> Mapping[Tuple[str, ...], int]:
     # Cast to a list to prevent it changing while the Prometheus
     # thread is collecting metrics
     with _in_flight_requests_lock:
-        reqs = list(_in_flight_requests)
+        request_metrics = list(_in_flight_requests)
 
-    for rm in reqs:
-        rm.update_metrics()
+    for request_metric in request_metrics:
+        request_metric.update_metrics()
 
     # Map from (method, name) -> int, the number of in flight requests of that
     # type. The key type is Tuple[str, str], but we leave the length unspecified
     # for compatability with LaterGauge's annotations.
     counts: Dict[Tuple[str, ...], int] = {}
-    for rm in reqs:
-        key = (rm.method, rm.name)
+    for request_metric in request_metrics:
+        key = (
+            request_metric.method,
+            request_metric.name,
+            request_metric.our_server_name,
+        )
         counts[key] = counts.get(key, 0) + 1
 
     return counts
 
 
 LaterGauge(
-    "synapse_http_server_in_flight_requests_count",
-    "",
-    ["method", "servlet"],
-    _get_in_flight_counts,
+    name="synapse_http_server_in_flight_requests_count",
+    desc="",
+    labelnames=["method", "servlet", SERVER_NAME_LABEL],
+    caller=_get_in_flight_counts,
 )
 
 
@@ -236,9 +240,11 @@ class RequestMetrics:
 
         response_count.labels(**response_base_labels).inc()
 
-        response_timer.labels(code=response_code_str, **response_base_labels).observe(
-            time_sec - self.start_ts
-        )
+        response_timer.labels(
+            code=response_code_str,
+            **response_base_labels,
+            **{SERVER_NAME_LABEL: self.our_server_name},
+        ).observe(time_sec - self.start_ts)
 
         resource_usage = context.get_resource_usage()
 

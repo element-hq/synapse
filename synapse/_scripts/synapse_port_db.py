@@ -672,8 +672,14 @@ class Porter:
         engine = create_engine(db_config.config)
 
         hs = MockHomeserver(self.hs_config)
+        server_name = hs.hostname
 
-        with make_conn(db_config, engine, "portdb") as db_conn:
+        with make_conn(
+            db_config=db_config,
+            engine=engine,
+            default_txn_name="portdb",
+            server_name=server_name,
+        ) as db_conn:
             engine.check_database(
                 db_conn, allow_outdated_version=allow_outdated_version
             )

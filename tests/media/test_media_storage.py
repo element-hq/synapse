@@ -27,7 +27,7 @@ from unittest.mock import MagicMock, patch
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IResponse
 from twisted.web.resource import Resource

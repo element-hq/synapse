@@ -28,7 +28,7 @@ from typing import Callable, Optional, Tuple, Type, Union
 import mypy.types
 from mypy.erasetype import remove_instance_last_known_values
 from mypy.errorcodes import ErrorCode
-from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, Var
+from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, TupleExpr, Var
 from mypy.plugin import (
     FunctionLike,
     FunctionSigContext,
@@ -61,6 +61,8 @@ class SynapsePlugin(Plugin):
     ) -> Optional[Callable[[FunctionSigContext], FunctionLike]]:
         if fullname in (
             "prometheus_client.metrics.Counter",
+            "prometheus_client.metrics.Histogram",
+            "prometheus_client.metrics.Gauge",
             # TODO: Add other prometheus_client metrics that need checking as we
             # refactor, see https://github.com/element-hq/synapse/issues/18592
         ):
@@ -98,8 +100,8 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     ensures metrics are correctly separated by homeserver.
 
     There are also some metrics that apply at the process level, such as CPU usage,
-    Python garbage collection, Twisted reactor tick time which shouldn't have the
-    `SERVER_NAME_LABEL`. In those cases, use use a type ignore comment to disable the
+    Python garbage collection, and Twisted reactor tick time, which shouldn't have the
+    `SERVER_NAME_LABEL`. In those cases, use a type ignore comment to disable the
     check, e.g. `# type: ignore[missing-server-name-label]`.
     """
     # The true signature, this isn't being modified so this is what will be returned.
@@ -136,7 +138,7 @@ def check_prometheus_metric_instantiation(ctx: FunctionSigContext) -> CallableTy
     # ]
     # ```
     labelnames_arg_expression = ctx.args[2][0] if len(ctx.args[2]) > 0 else None
-    if isinstance(labelnames_arg_expression, ListExpr):
+    if isinstance(labelnames_arg_expression, (ListExpr, TupleExpr)):
         # Check if the `labelnames` argument includes the `server_name` label (`SERVER_NAME_LABEL`).
         for labelname_expression in labelnames_arg_expression.items:
             if (

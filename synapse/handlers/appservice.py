@@ -187,7 +187,8 @@ class ApplicationServicesHandler:
                         assert ts is not None
 
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                     async def handle_room_events(events: Iterable[EventBase]) -> None:
@@ -207,7 +208,8 @@ class ApplicationServicesHandler:
                     await self.store.set_appservice_last_pos(upper_bound)
 
                     synapse.metrics.event_processing_positions.labels(
-                        "appservice_sender"
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(upper_bound)
 
                     events_processed_counter.labels(
@@ -230,10 +232,12 @@ class ApplicationServicesHandler:
                         assert ts is not None
 
                         synapse.metrics.event_processing_lag.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).set(now - ts)
                         synapse.metrics.event_processing_last_ts.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).set(ts)
             finally:
                 self.is_processing = False

@@ -538,8 +538,11 @@ def serialize_event(
             d["content"] = dict(d["content"])
             d["content"]["redacts"] = e.redacts
 
-    if config.include_admin_metadata and e.internal_metadata.is_soft_failed():
-        d["unsigned"]["io.element.synapse.soft_failed"] = True
+    if config.include_admin_metadata:
+        if e.internal_metadata.is_soft_failed():
+            d["unsigned"]["io.element.synapse.soft_failed"] = True
+        if e.internal_metadata.policy_server_spammy:
+            d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
     only_event_fields = config.only_event_fields
     if only_event_fields:

@@ -82,9 +82,13 @@ sql_logger = logging.getLogger("synapse.storage.SQL")
 transaction_logger = logging.getLogger("synapse.storage.txn")
 perf_logger = logging.getLogger("synapse.storage.TIME")
 
-sql_scheduling_timer = Histogram("synapse_storage_schedule_time", "sec")
+sql_scheduling_timer = Histogram(
+    "synapse_storage_schedule_time", "sec", labelnames=[SERVER_NAME_LABEL]
+)
 
-sql_query_timer = Histogram("synapse_storage_query_time", "sec", ["verb"])
+sql_query_timer = Histogram(
+    "synapse_storage_query_time", "sec", labelnames=["verb", SERVER_NAME_LABEL]
+)
 sql_txn_count = Counter(
     "synapse_storage_transaction_time_count",
     "sec",
@@ -126,9 +130,11 @@ class _PoolConnection(Connection):
 
 
 def make_pool(
+    *,
     reactor: IReactorCore,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
+    server_name: str,
 ) -> adbapi.ConnectionPool:
     """Get the connection pool for the database."""
 
@@ -142,7 +148,12 @@ def make_pool(
         # etc.
         with LoggingContext("db.on_new_connection"):
             engine.on_new_connection(
-                LoggingDatabaseConnection(conn, engine, "on_new_connection")
+                LoggingDatabaseConnection(
+                    conn=conn,
+                    engine=engine,
+                    default_txn_name="on_new_connection",
+                    server_name=server_name,
+                )
             )
 
     connection_pool = adbapi.ConnectionPool(
@@ -152,15 +163,21 @@ def make_pool(
         **db_args,
     )
 
-    register_threadpool(f"database-{db_config.name}", connection_pool.threadpool)
+    register_threadpool(
+        name=f"database-{db_config.name}",
+        server_name=server_name,
+        threadpool=connection_pool.threadpool,
+    )
 
     return connection_pool
 
 
 def make_conn(
+    *,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
     default_txn_name: str,
+    server_name: str,
 ) -> "LoggingDatabaseConnection":
     """Make a new connection to the database and return it.
 
@@ -174,13 +191,18 @@ def make_conn(
         if not k.startswith("cp_")
     }
     native_db_conn = engine.module.connect(**db_params)
-    db_conn = LoggingDatabaseConnection(native_db_conn, engine, default_txn_name)
+    db_conn = LoggingDatabaseConnection(
+        conn=native_db_conn,
+        engine=engine,
+        default_txn_name=default_txn_name,
+        server_name=server_name,
+    )
 
     engine.on_new_connection(db_conn)
     return db_conn
 
 
-@attr.s(slots=True, auto_attribs=True)
+@attr.s(slots=True, auto_attribs=True, kw_only=True)
 class LoggingDatabaseConnection:
     """A wrapper around a database connection that returns `LoggingTransaction`
     as its cursor class.
@@ -191,6 +213,7 @@ class LoggingDatabaseConnection:
     conn: Connection
     engine: BaseDatabaseEngine
     default_txn_name: str
+    server_name: str
 
     def cursor(
         self,
@@ -204,8 +227,9 @@ class LoggingDatabaseConnection:
             txn_name = self.default_txn_name
 
         return LoggingTransaction(
-            self.conn.cursor(),
+            txn=self.conn.cursor(),
             name=txn_name,
+            server_name=self.server_name,
             database_engine=self.engine,
             after_callbacks=after_callbacks,
             async_after_callbacks=async_after_callbacks,
@@ -274,6 +298,7 @@ class LoggingTransaction:
     __slots__ = [
         "txn",
         "name",
+        "server_name",
         "database_engine",
         "after_callbacks",
         "async_after_callbacks",
@@ -282,8 +307,10 @@ class LoggingTransaction:
 
     def __init__(
         self,
+        *,
         txn: Cursor,
         name: str,
+        server_name: str,
         database_engine: BaseDatabaseEngine,
         after_callbacks: Optional[List[_CallbackListEntry]] = None,
         async_after_callbacks: Optional[List[_AsyncCallbackListEntry]] = None,
@@ -291,6 +318,7 @@ class LoggingTransaction:
     ):
         self.txn = txn
         self.name = name
+        self.server_name = server_name
         self.database_engine = database_engine
         self.after_callbacks = after_callbacks
         self.async_after_callbacks = async_after_callbacks
@@ -501,7 +529,9 @@ class LoggingTransaction:
         finally:
             secs = time.time() - start
             sql_logger.debug("[SQL time] {%s} %f sec", self.name, secs)
-            sql_query_timer.labels(sql.split()[0]).observe(secs)
+            sql_query_timer.labels(
+                verb=sql.split()[0], **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(secs)
 
     def close(self) -> None:
         self.txn.close()
@@ -573,14 +603,19 @@ class DatabasePool:
         self._clock = hs.get_clock()
         self._txn_limit = database_config.config.get("txn_limit", 0)
         self._database_config = database_config
-        self._db_pool = make_pool(hs.get_reactor(), database_config, engine)
+        self._db_pool = make_pool(
+            reactor=hs.get_reactor(),
+            db_config=database_config,
+            engine=engine,
+            server_name=self.server_name,
+        )
 
         self.updates = BackgroundUpdater(hs, self)
         LaterGauge(
-            "synapse_background_update_status",
-            "Background update status",
-            [],
-            self.updates.get_status,
+            name="synapse_background_update_status",
+            desc="Background update status",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): self.updates.get_status()},
         )
 
         self._previous_txn_total_time = 0.0
@@ -1020,7 +1055,9 @@ class DatabasePool:
                     operation_name="db.connection",
                 ):
                     sched_duration_sec = monotonic_time() - start_time
-                    sql_scheduling_timer.observe(sched_duration_sec)
+                    sql_scheduling_timer.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).observe(sched_duration_sec)
                     context.add_database_scheduled(sched_duration_sec)
 
                     if self._txn_limit > 0:
@@ -1053,7 +1090,10 @@ class DatabasePool:
                             )
 
                         db_conn = LoggingDatabaseConnection(
-                            conn, self.engine, "runWithConnection"
+                            conn=conn,
+                            engine=self.engine,
+                            default_txn_name="runWithConnection",
+                            server_name=self.server_name,
                         )
                         return func(db_conn, *args, **kwargs)
                     finally:
