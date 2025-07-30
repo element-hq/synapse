@@ -29,12 +29,14 @@ from http import HTTPStatus
 from typing import (
     Any,
     AnyStr,
+    Callable,
     Dict,
     Iterable,
     Literal,
     Mapping,
     MutableMapping,
     Optional,
+    Sequence,
     Tuple,
     overload,
 )
@@ -393,6 +395,32 @@ class RestHelper:
             expect_code,
             custom_headers=custom_headers,
         )
+
+    def send_events(
+        self,
+        room_id: str,
+        num_events: int,
+        content_fn: Callable[[int], JsonDict] = lambda idx: {
+            "msgtype": "m.text",
+            "body": f"Test event {idx}",
+        },
+        tok: Optional[str] = None,
+    ) -> Sequence[str]:
+        """
+        Helper to send a handful of sequential events and return their event IDs as a sequence.
+        """
+        event_ids = []
+
+        for event_index in range(num_events):
+            response = self.send_event(
+                room_id,
+                "m.room.message",
+                content_fn(event_index),
+                tok=tok,
+            )
+            event_ids.append(response["event_id"])
+
+        return event_ids
 
     def send_event(
         self,
