@@ -33,6 +33,7 @@ from mypy.errorcodes import ErrorCode
 from mypy.nodes import ARG_NAMED_OPT, ListExpr, NameExpr, TempNode, TupleExpr, Var
 from mypy.plugin import (
     ClassDefContext,
+    Context,
     FunctionLike,
     FunctionSigContext,
     MethodSigContext,
@@ -56,6 +57,12 @@ from mypy_zope import plugin as mypy_zope_plugin
 PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
     "missing-server-name-label",
     "`SERVER_NAME_LABEL` required in metric",
+    category="per-homeserver-tenant-metrics",
+)
+
+PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
+    "metric-type-missing-from-list",
+    "Every Prometheus metric type must be included in the `prometheus_metric_fullname_to_label_arg_map`.",
     category="per-homeserver-tenant-metrics",
 )
 
@@ -229,11 +236,14 @@ def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
         )
         for ancestor_type in ctx.cls.info.mro
     ):
-        assert fullname in prometheus_metric_fullname_to_label_arg_map, (
-            f"Expected {fullname} to be in `prometheus_metric_fullname_to_label_arg_map`, "
-            f"but it was not found. This is a problem with our custom mypy plugin. "
-            f"Please add it to the map."
-        )
+        if fullname not in prometheus_metric_fullname_to_label_arg_map:
+            ctx.api.fail(
+                f"Expected {fullname} to be in `prometheus_metric_fullname_to_label_arg_map`, "
+                f"but it was not found. This is a problem with our custom mypy plugin. "
+                f"Please add it to the map.",
+                Context(),
+                code=PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK,
+            )
 
 
 def check_prometheus_metric_instantiation(
