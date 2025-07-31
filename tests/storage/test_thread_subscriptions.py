@@ -12,12 +12,16 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from typing import Optional
+from typing import Optional, Tuple, Union
 
 from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
+from synapse.storage.databases.main.thread_subscriptions import (
+    AutomaticSubscriptionConflicted,
+    ThreadSubscriptionsWorkerStore,
+)
 from synapse.storage.engines.sqlite import Sqlite3Engine
 from synapse.util import Clock
 
@@ -97,10 +101,10 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self,
         thread_root_id: str,
         *,
-        automatic: bool,
+        automatic: Optional[Tuple[int, int]],
         room_id: Optional[str] = None,
         user_id: Optional[str] = None,
-    ) -> Optional[int]:
+    ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
         if user_id is None:
             user_id = self.user_id
 
@@ -112,7 +116,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
                 user_id,
                 room_id,
                 thread_root_id,
-                automatic=automatic,
+                automatic_event_orderings=automatic,
             )
         )
 
@@ -149,7 +153,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Subscribe
         self._subscribe(
             self.thread_root_id,
-            automatic=True,
+            automatic=(1, 1),
         )
 
         # Assert subscription went through
@@ -162,9 +166,12 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self.assertTrue(subscription.automatic)  # type: ignore
 
         # Now make it a manual subscription
-        self._subscribe(
-            self.thread_root_id,
-            automatic=False,
+        self.assertIsInstance(
+            self._subscribe(
+                self.thread_root_id,
+                automatic=None,
+            ),
+            int,
         )
 
         # Assert the manual subscription overrode the automatic one
@@ -178,8 +185,8 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
     def test_purge_thread_subscriptions_for_user(self) -> None:
         """Test purging all thread subscription settings for a user."""
         # Set subscription settings for multiple threads
-        self._subscribe(self.thread_root_id, automatic=True)
-        self._subscribe(self.other_thread_root_id, automatic=False)
+        self._subscribe(self.thread_root_id, automatic=(1, 1))
+        self._subscribe(self.other_thread_root_id, automatic=None)
 
         subscriptions = self.get_success(
             self.store.get_updated_thread_subscriptions_for_user(
@@ -217,10 +224,14 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
     def test_get_updated_thread_subscriptions(self) -> None:
         """Test getting updated thread subscriptions since a stream ID."""
 
-        stream_id1 = self._subscribe(self.thread_root_id, automatic=False)
-        stream_id2 = self._subscribe(self.other_thread_root_id, automatic=True)
-        assert stream_id1 is not None
-        assert stream_id2 is not None
+        stream_id1 = self._subscribe(self.thread_root_id, automatic=(1, 1))
+        stream_id2 = self._subscribe(self.other_thread_root_id, automatic=(2, 2))
+        assert stream_id1 is not None and not isinstance(
+            stream_id1, AutomaticSubscriptionConflicted
+        )
+        assert stream_id2 is not None and not isinstance(
+            stream_id2, AutomaticSubscriptionConflicted
+        )
 
         # Get updates since initial ID (should include both changes)
         updates = self.get_success(
@@ -242,16 +253,20 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         other_user_id = "@other_user:test"
 
         # Set thread subscription for main user
-        stream_id1 = self._subscribe(self.thread_root_id, automatic=True)
-        assert stream_id1 is not None
+        stream_id1 = self._subscribe(self.thread_root_id, automatic=(1, 1))
+        assert stream_id1 is not None and not isinstance(
+            stream_id1, AutomaticSubscriptionConflicted
+        )
 
         # Set thread subscription for other user
         stream_id2 = self._subscribe(
             self.other_thread_root_id,
-            automatic=True,
+            automatic=(1, 1),
             user_id=other_user_id,
         )
-        assert stream_id2 is not None
+        assert stream_id2 is not None and not isinstance(
+            stream_id2, AutomaticSubscriptionConflicted
+        )
 
         # Get updates for main user
         updates = self.get_success(
@@ -270,3 +285,27 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             updates, [(stream_id2, self.room_id, self.other_thread_root_id)]
         )
+
+    def test_should_skip_autosubscription_after_unsubscription(self) -> None:
+        """
+        Tests the comparison logic for whether an autoscription should be skipped
+        due to a chronologically earlier but logically later unsubscription.
+        """
+
+        func = ThreadSubscriptionsWorkerStore._should_skip_autosubscription_after_unsubscription
+
+        # Order of arguments:
+        # automatic cause event: stream order, then topological order
+        # unsubscribe maximums: stream order, then tological order
+
+        # both orderings agree that the unsub is after the cause event
+        self.assertTrue(func(1, 1, 2, 2))
+
+        # topological ordering is inconsistent with stream ordering,
+        # in that case favour stream ordering because it's what /sync uses
+        self.assertTrue(func(1, 2, 2, 1))
+
+        # the automatic subscription is caused by a backfilled event here
+        # unfortunately we must fall back to topological ordering here
+        self.assertTrue(func(-50, 2, 2, 3))
+        self.assertFalse(func(-50, 2, 2, 1))
