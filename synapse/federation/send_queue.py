@@ -81,7 +81,7 @@ queue_name_to_gauge_map: Dict[QueueNames, LaterGauge] = {}
 
 for queue_name in QueueNames:
     queue_name_to_gauge_map[queue_name] = LaterGauge(
-        name="synapse_federation_send_queue_%s_size" % (queue_name,),
+        name=f"synapse_federation_send_queue_{queue_name.value}_size",
         desc="",
         labelnames=[SERVER_NAME_LABEL],
     )
@@ -137,7 +137,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
             )
 
         for queue_name in QueueNames:
-            register(queue_name, queue=getattr(self, queue_name))
+            register(queue_name, queue=getattr(self, queue_name.value))
 
         self.clock.looping_call(self._clear_queue, 30 * 1000)
 
