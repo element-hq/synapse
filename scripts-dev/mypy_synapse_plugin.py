@@ -44,12 +44,14 @@ from mypy.types import (
     CallableType,
     Instance,
     NoneType,
+    Options,
     TupleType,
     TypeAliasType,
     TypeVarType,
     UninhabitedType,
     UnionType,
 )
+from mypy_zope import plugin as mypy_zope_plugin
 
 PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
     "missing-server-name-label",
@@ -137,16 +139,27 @@ should be in the source code.
 
 
 class SynapsePlugin(Plugin):
-    # FIXME: Unfortunately, because mypy only chooses the first plugin that returns a
-    # non-None value, this check doesn't get run during our normal mypy lint process
-    # because `mypy_zope` also uses the `get_base_class_hook` method. Currently, this
-    # only works if you comment out the `mypy_zope` plugin and squint through the output
-    # caused by those failures. Unaware of a suitable workaround to actually enforce
-    # this on a regulard basis and in CI. Related issue: https://github.com/python/mypy/issues/19524
+    def __init__(self, options: Options):
+        super().__init__(options)
+        self.mypy_zope_plugin = mypy_zope_plugin("TODO")(options)
+
     def get_base_class_hook(
         self, fullname: str
     ) -> Optional[Callable[[ClassDefContext], None]]:
-        return analyze_prometheus_metric_classes
+        def _get_base_class_hook(ctx: ClassDefContext) -> None:
+            # Run any `get_base_class_hook` checks from other plugins first.
+            #
+            # Unfortunately, because mypy only chooses the first plugin that returns a
+            # non-None value (known-limitation, c.f.
+            # https://github.com/python/mypy/issues/19524), we have to workaround this
+            # by putting our custom plugin first and then calling the other plugin's
+            # hook manually.
+            self.mypy_zope_plugin.get_base_class_hook(fullname)(ctx)
+
+            # Now run our own checks
+            analyze_prometheus_metric_classes(ctx)
+
+        return _get_base_class_hook
 
     def get_function_signature_hook(
         self, fullname: str
