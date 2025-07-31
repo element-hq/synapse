@@ -137,7 +137,9 @@ class FederationRemoteSendQueue(AbstractFederationSender):
             )
 
         for queue_name in QueueNames:
-            register(queue_name, queue=getattr(self, queue_name.value))
+            queue = getattr(self, queue_name.value)
+            assert isinstance(queue, Sized)
+            register(queue_name, queue=queue)
 
         self.clock.looping_call(self._clear_queue, 30 * 1000)
 
