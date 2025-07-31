@@ -137,11 +137,15 @@ can notice and manually allow via a type ignore comment as the source of truth
 should be in the source code.
 """
 
+# Unbound at this point because we don't know the mypy version yet.
+# This is set in the `plugin(...)` function below.
+MypyZopePluginClass: Type[Plugin]
+
 
 class SynapsePlugin(Plugin):
     def __init__(self, options: Options):
         super().__init__(options)
-        self.mypy_zope_plugin = mypy_zope_plugin("TODO")(options)
+        self.mypy_zope_plugin = MypyZopePluginClass(options)
 
     def get_base_class_hook(
         self, fullname: str
@@ -151,10 +155,11 @@ class SynapsePlugin(Plugin):
             #
             # Unfortunately, because mypy only chooses the first plugin that returns a
             # non-None value (known-limitation, c.f.
-            # https://github.com/python/mypy/issues/19524), we have to workaround this
-            # by putting our custom plugin first and then calling the other plugin's
-            # hook manually.
-            self.mypy_zope_plugin.get_base_class_hook(fullname)(ctx)
+            # https://github.com/python/mypy/issues/19524), we workaround this by
+            # putting our custom plugin first in the plugin order and then calling the
+            # other plugin's hook manually followed by our own checks.
+            if callback := self.mypy_zope_plugin.get_base_class_hook(fullname):
+                callback(ctx)
 
             # Now run our own checks
             analyze_prometheus_metric_classes(ctx)
@@ -654,10 +659,12 @@ def is_cacheable(
 
 
 def plugin(version: str) -> Type[SynapsePlugin]:
+    global MypyZopePluginClass
     # This is the entry point of the plugin, and lets us deal with the fact
     # that the mypy plugin interface is *not* stable by looking at the version
     # string.
     #
     # However, since we pin the version of mypy Synapse uses in CI, we don't
     # really care.
+    MypyZopePluginClass = mypy_zope_plugin(version)
     return SynapsePlugin
