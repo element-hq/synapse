@@ -243,7 +243,6 @@ class RequestMetrics:
         response_timer.labels(
             code=response_code_str,
             **response_base_labels,
-            **{SERVER_NAME_LABEL: self.our_server_name},
         ).observe(time_sec - self.start_ts)
 
         resource_usage = context.get_resource_usage()
