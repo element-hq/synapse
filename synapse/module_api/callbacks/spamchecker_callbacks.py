@@ -150,7 +150,7 @@ USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE = Union[
 ]
 USER_MAY_CREATE_ROOM_CALLBACK = Union[
     Callable[
-        [str, JsonDict],
+        [str, Optional[JsonDict]],
         Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE],
     ],
     Callable[  # Single argument variant for backwards compatibility
@@ -738,7 +738,7 @@ class SpamCheckerModuleApiCallbacks:
         return self.NOT_SPAM
 
     async def user_may_create_room(
-        self, userid: str, room_config: JsonDict
+        self, userid: str, room_config: Optional[JsonDict]
     ) -> Union[Tuple[Codes, dict], Literal["NOT_SPAM"]]:
         """Checks if a given user may create a room
 
@@ -758,7 +758,7 @@ class SpamCheckerModuleApiCallbacks:
                 if len(checker_args.parameters) == 2:
                     callback_with_requester_id = cast(
                         Callable[
-                            [str, JsonDict],
+                            [str, Optional[JsonDict]],
                             Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE],
                         ],
                         callback,

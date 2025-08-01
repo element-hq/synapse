@@ -192,15 +192,15 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 _Changed in Synapse v1.132.0: Added the `room_config` argument. Callbacks that only expect a single `user_id` argument are still supported._
 
 ```python
-async def user_may_create_room(user_id: str, room_config: synapse.module_api.JsonDict) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+async def user_may_create_room(user_id: str, room_config: Optional[synapse.module_api.JsonDict]) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
-Called when processing a room creation request.
+Called when processing a room creation or room upgrade request.
 
 The arguments passed to this callback are:
 
 * `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`).
-* `room_config`: The contents of the body of a [/createRoom request](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom) as a dictionary.
+* `room_config`: The contents of the body of the [/createRoom request](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom) as a dictionary. In the case of a room upgrade this is `None`.
 
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 

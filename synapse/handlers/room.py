@@ -483,6 +483,19 @@ class RoomCreationHandler:
         """
         user_id = requester.user.to_string()
 
+        # Note that we don't attempt to pass the room config as this is an upgrade
+        spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
+            user_id,
+            None,
+        )
+        if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+            raise SynapseError(
+                403,
+                "You are not permitted to create rooms",
+                errcode=spam_check[0],
+                additional_fields=spam_check[1],
+            )
+
         creation_content: JsonDict = {
             "room_version": new_room_version.identifier,
             "predecessor": {"room_id": old_room_id, "event_id": tombstone_event_id},
@@ -498,7 +511,7 @@ class RoomCreationHandler:
             # If so, mark the new room as non-federatable as well
             creation_content[EventContentFields.FEDERATE] = False
 
-        initial_state = {}
+        initial_state: MutableStateMap = {}
 
         # Replicate relevant room events
         types_to_copy: List[Tuple[str, Optional[str]]] = [
@@ -588,24 +601,6 @@ class RoomCreationHandler:
         # Raise the requester's power level in the new room if necessary
         if current_power_level_int < needed_power_level:
             user_power_levels[user_id] = needed_power_level
-
-        # We construct what the body of a call to /createRoom would look like for passing
-        # to the spam checker. We don't include a preset here, as we expect the
-        # initial state to contain everything we need.
-        spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
-            user_id,
-            {
-                "creation_content": creation_content,
-                "initial_state": list(initial_state.items()),
-            },
-        )
-        if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-            raise SynapseError(
-                403,
-                "You are not permitted to create rooms",
-                errcode=spam_check[0],
-                additional_fields=spam_check[1],
-            )
 
         await self._send_events_for_new_room(
             requester,
