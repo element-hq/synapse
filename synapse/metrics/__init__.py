@@ -74,8 +74,6 @@ logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
 
-all_gauges: Dict[str, Collector] = {}
-
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 SERVER_NAME_LABEL = "server_name"
@@ -204,15 +202,7 @@ class LaterGauge(Collector):
         self._hooks.append(hook)
 
     def __attrs_post_init__(self) -> None:
-        self._register()
-
-    def _register(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
-
         REGISTRY.register(self)
-        all_gauges[self.name] = self
 
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,
@@ -264,7 +254,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         # Protects access to _registrations
         self._lock = threading.Lock()
 
-        self._register_with_collector()
+        REGISTRY.register(self)
 
     def register(
         self,
@@ -354,14 +344,6 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
             for key, metrics in metrics_by_key.items():
                 gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
-
-    def _register_with_collector(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
-
-        REGISTRY.register(self)
-        all_gauges[self.name] = self
 
 
 class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
