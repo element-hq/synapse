@@ -22,7 +22,13 @@ from typing import Dict, Protocol, Tuple
 
 from prometheus_client.core import Sample
 
-from synapse.metrics import REGISTRY, InFlightGauge, generate_latest
+from synapse.metrics import (
+    REGISTRY,
+    SERVER_NAME_LABEL,
+    InFlightGauge,
+    LaterGauge,
+    generate_latest,
+)
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
@@ -283,6 +289,42 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         self.assertEqual(hs2_cache_size_metric_value, "1.0")
         self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
         self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
+
+class LaterGaugeTests(unittest.HomeserverTestCase):
+    def test_later_gauge_multiple_servers(self) -> None:
+        """
+        Test that LaterGauge metrics are reported correctly across multiple servers. We
+        will have an metrics entry for each homeserver that is labeled with the
+        `server_name` label.
+        """
+        later_gauge = LaterGauge(
+            name="foo",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+        )
+        later_gauge.register_hook(lambda: {("hs1",): 1})
+        later_gauge.register_hook(lambda: {("hs2",): 2})
+
+        metrics_map = get_latest_metrics()
+
+        # Find the metrics for the caches from both homeservers
+        hs1_metric = 'foo{server_name="hs1"}'
+        hs1_metric_value = metrics_map.get(hs1_metric)
+        self.assertIsNotNone(
+            hs1_metric_value,
+            f"Missing metric {hs1_metric} in cache metrics {metrics_map}",
+        )
+        hs2_metric = 'foo{server_name="hs2"}'
+        hs2_metric_value = metrics_map.get(hs2_metric)
+        self.assertIsNotNone(
+            hs2_metric_value,
+            f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1_metric_value, "1.0")
+        self.assertEqual(hs2_metric_value, "2.0")
 
 
 def get_latest_metrics() -> Dict[str, str]:
