@@ -37,6 +37,7 @@ from mypy.plugin import (
     FunctionLike,
     FunctionSigContext,
     MethodSigContext,
+    MypyFile,
     Plugin,
 )
 from mypy.typeops import bind_self
@@ -53,6 +54,7 @@ from mypy.types import (
     UnionType,
 )
 from mypy_zope import plugin as mypy_zope_plugin
+from pydantic.mypy import plugin as mypy_pydantic_plugin
 
 PROMETHEUS_METRIC_MISSING_SERVER_NAME_LABEL = ErrorCode(
     "missing-server-name-label",
@@ -146,13 +148,30 @@ should be in the source code.
 
 # Unbound at this point because we don't know the mypy version yet.
 # This is set in the `plugin(...)` function below.
+MypyPydanticPluginClass: Type[Plugin]
 MypyZopePluginClass: Type[Plugin]
 
 
 class SynapsePlugin(Plugin):
     def __init__(self, options: Options):
         super().__init__(options)
+        self.mypy_pydantic_plugin = MypyPydanticPluginClass(options)
         self.mypy_zope_plugin = MypyZopePluginClass(options)
+
+    def set_modules(self, modules: dict[str, MypyFile]) -> None:
+        """
+        This is called by mypy internals. We have to override this to ensure it's also
+        called for any other plugins that we're manually handling.
+
+        Here is how mypy describes it:
+
+        > [`self._modules`] can't be set in `__init__` because it is executed too soon
+        > in `build.py`. Therefore, `build.py` *must* set it later before graph processing
+        > starts by calling `set_modules()`.
+        """
+        super().set_modules(modules)
+        self.mypy_pydantic_plugin.set_modules(modules)
+        self.mypy_zope_plugin.set_modules(modules)
 
     def get_base_class_hook(
         self, fullname: str
@@ -165,6 +184,8 @@ class SynapsePlugin(Plugin):
             # https://github.com/python/mypy/issues/19524), we workaround this by
             # putting our custom plugin first in the plugin order and then calling the
             # other plugin's hook manually followed by our own checks.
+            if callback := self.mypy_pydantic_plugin.get_base_class_hook(fullname):
+                callback(ctx)
             if callback := self.mypy_zope_plugin.get_base_class_hook(fullname):
                 callback(ctx)
 
@@ -669,12 +690,13 @@ def is_cacheable(
 
 
 def plugin(version: str) -> Type[SynapsePlugin]:
-    global MypyZopePluginClass
+    global MypyPydanticPluginClass, MypyZopePluginClass
     # This is the entry point of the plugin, and lets us deal with the fact
     # that the mypy plugin interface is *not* stable by looking at the version
     # string.
     #
     # However, since we pin the version of mypy Synapse uses in CI, we don't
     # really care.
+    MypyPydanticPluginClass = mypy_pydantic_plugin(version)
     MypyZopePluginClass = mypy_zope_plugin(version)
     return SynapsePlugin
