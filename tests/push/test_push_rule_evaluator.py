@@ -808,6 +808,100 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             )
         )
 
+    def test_thread_subscription_subscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in a subscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                msc4306_thread_subscription_state=True,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                msc4306_thread_subscription_state=True,
+            )
+        )
+
+    def test_thread_subscription_unsubscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in an unsubscribed event.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                msc4306_thread_subscription_state=False,
+            )
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                msc4306_thread_subscription_state=False,
+            )
+        )
+
+    def test_thread_subscription_unthreaded(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an unthreaded event.
+        """
+        evaluator = self._get_evaluator(
+            {"msgtype": "m.text", "body": "Squawk"}, msc4306=True
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                msc4306_thread_subscription_state=None,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                msc4306_thread_subscription_state=None,
+            )
+        )
+
 
 class TestBulkPushRuleEvaluator(unittest.HomeserverTestCase):
     """Tests for the bulk push rule evaluator"""
