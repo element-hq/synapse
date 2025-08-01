@@ -69,7 +69,7 @@ from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
 from synapse.handlers.delayed_events import DelayedEventsHandler
-from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
+from synapse.handlers.device import DeviceHandler, DeviceWriterHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.e2e_keys import E2eKeysHandler
@@ -117,6 +117,7 @@ from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
+from synapse.handlers.thread_subscriptions import ThreadSubscriptionsHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
 from synapse.handlers.user_directory import UserDirectoryHandler
 from synapse.handlers.worker_lock import WorkerLocksHandler
@@ -422,7 +423,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor()
+        return Distributor(server_name=self.hostname)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
@@ -586,11 +587,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
-    def get_device_handler(self) -> DeviceWorkerHandler:
-        if self.config.worker.worker_app:
-            return DeviceWorkerHandler(self)
-        else:
-            return DeviceHandler(self)
+    def get_device_handler(self) -> DeviceHandler:
+        if self.get_instance_name() in self.config.worker.writers.device_lists:
+            return DeviceWriterHandler(self)
+
+        return DeviceHandler(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:
@@ -790,6 +791,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return TimestampLookupHandler(self)
 
     @cache_in_self
+    def get_thread_subscriptions_handler(self) -> ThreadSubscriptionsHandler:
+        return ThreadSubscriptionsHandler(self)
+
+    @cache_in_self
     def get_registration_handler(self) -> RegistrationHandler:
         return RegistrationHandler(self)
 
@@ -844,7 +849,8 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_ratelimiter(self) -> FederationRateLimiter:
         return FederationRateLimiter(
-            self.get_clock(),
+            our_server_name=self.hostname,
+            clock=self.get_clock(),
             config=self.config.ratelimiting.rc_federation,
             metrics_name="federation_servlets",
         )
@@ -975,7 +981,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         # Register the threadpool with our metrics.
-        register_threadpool("media", media_threadpool)
+        server_name = self.hostname
+        register_threadpool(
+            name="media", server_name=server_name, threadpool=media_threadpool
+        )
 
         return media_threadpool
 

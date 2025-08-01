@@ -178,6 +178,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/login$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/3pid$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/whoami$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/account/deactivate$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)",
+            "^/_matrix/client/(r0|v3)/delete_devices$",
             "^/_matrix/client/versions$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$",
             "^/_matrix/client/(r0|v3|unstable)/register$",
@@ -194,6 +197,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$",
             "^/_matrix/client/(r0|v3|unstable)/capabilities$",
             "^/_matrix/client/(r0|v3|unstable)/notifications$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
@@ -265,13 +271,6 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
-    "frontend_proxy": {
-        "app": "synapse.app.generic_worker",
-        "listener_resources": ["client", "replication"],
-        "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload"],
-        "shared_extra_conf": {},
-        "worker_extra_conf": "",
-    },
     "account_data": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -306,6 +305,13 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "device_lists": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "typing": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -319,6 +325,15 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
         "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/"],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
+    "thread_subscriptions": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/unstable/io.element.msc4306/.*",
+        ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
@@ -412,16 +427,18 @@ def add_worker_roles_to_shared_config(
     # streams
     instance_map = shared_config.setdefault("instance_map", {})
 
-    # This is a list of the stream_writers that there can be only one of. Events can be
-    # sharded, and therefore doesn't belong here.
-    singular_stream_writers = [
+    # This is a list of the stream_writers.
+    stream_writers = {
         "account_data",
+        "events",
+        "device_lists",
         "presence",
         "receipts",
         "to_device",
         "typing",
         "push_rules",
-    ]
+        "thread_subscriptions",
+    }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
     # roles, check each.
@@ -431,28 +448,11 @@ def add_worker_roles_to_shared_config(
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
 
-    if "event_persister" in worker_types_set:
-        # Event persisters write to the events stream, so we need to update
-        # the list of event stream writers
-        shared_config.setdefault("stream_writers", {}).setdefault("events", []).append(
-            worker_name
-        )
-
-        # Map of stream writer instance names to host/ports combos
-        if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
-            instance_map[worker_name] = {
-                "path": f"/run/worker.{worker_port}",
-            }
-        else:
-            instance_map[worker_name] = {
-                "host": "localhost",
-                "port": worker_port,
-            }
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
     for worker in worker_types_set:
-        if worker in singular_stream_writers:
+        if worker in stream_writers:
             shared_config.setdefault("stream_writers", {}).setdefault(
                 worker, []
             ).append(worker_name)
@@ -875,6 +875,13 @@ def generate_worker_files(
             )
         else:
             healthcheck_urls.append("http://localhost:%d/health" % (worker_port,))
+
+        # Special case for event_persister: those are just workers that write to
+        # the `events` stream. For other workers, the worker name is the same
+        # name of the stream they write to, but for some reason it is not the
+        # case for event_persister.
+        if "event_persister" in worker_types_set:
+            worker_types_set.add("events")
 
         # Update the shared config with sharding-related options if necessary
         add_worker_roles_to_shared_config(

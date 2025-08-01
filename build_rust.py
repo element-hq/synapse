@@ -19,17 +19,17 @@ def build(setup_kwargs: Dict[str, Any]) -> None:
         # This flag is a no-op in the latest versions. Instead, we need to
         # specify this in the `bdist_wheel` config below.
         py_limited_api=True,
-        # We force always building in release mode, as we can't tell the
-        # difference between using `poetry` in development vs production.
+        # We always build in release mode, as we can't distinguish
+        # between using `poetry` in development vs production.
         debug=False,
     )
     setup_kwargs.setdefault("rust_extensions", []).append(extension)
     setup_kwargs["zip_safe"] = False
 
-    # We lookup the minimum supported python version by looking at
-    # `python_requires` (e.g. ">=3.9.0,<4.0.0") and finding the first python
+    # We look up the minimum supported Python version with
+    # `python_requires` (e.g. ">=3.9.0,<4.0.0") and finding the first Python
     # version that matches. We then convert that into the `py_limited_api` form,
-    # e.g. cp39 for python 3.9.
+    # e.g. cp39 for Python 3.9.
     py_limited_api: str
     python_bounds = SpecifierSet(setup_kwargs["python_requires"])
     for minor_version in itertools.count(start=8):

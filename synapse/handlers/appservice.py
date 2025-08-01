@@ -42,6 +42,7 @@ from synapse.events import EventBase
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     event_processing_loop_counter,
     event_processing_loop_room_count,
 )
@@ -68,12 +69,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-events_processed_counter = Counter("synapse_handlers_appservice_events_processed", "")
+events_processed_counter = Counter(
+    "synapse_handlers_appservice_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 
 class ApplicationServicesHandler:
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
         self.is_mine_id = hs.is_mine_id
         self.appservice_api = hs.get_application_service_api()
@@ -166,7 +171,9 @@ class ApplicationServicesHandler:
                                 except Exception:
                                     logger.error("Application Services Failure")
 
-                            run_as_background_process("as_scheduler", start_scheduler)
+                            run_as_background_process(
+                                "as_scheduler", self.server_name, start_scheduler
+                            )
                             self.started_scheduler = True
 
                         # Fork off pushes to these services
@@ -180,7 +187,8 @@ class ApplicationServicesHandler:
                         assert ts is not None
 
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                     async def handle_room_events(events: Iterable[EventBase]) -> None:
@@ -200,16 +208,23 @@ class ApplicationServicesHandler:
                     await self.store.set_appservice_last_pos(upper_bound)
 
                     synapse.metrics.event_processing_positions.labels(
-                        "appservice_sender"
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(upper_bound)
 
-                    events_processed_counter.inc(len(events))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(events))
 
-                    event_processing_loop_room_count.labels("appservice_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                    event_processing_loop_counter.labels("appservice_sender").inc()
+                    event_processing_loop_counter.labels(
+                        name="appservice_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc()
 
                     if events:
                         now = self.clock.time_msec()
@@ -217,10 +232,12 @@ class ApplicationServicesHandler:
                         assert ts is not None
 
                         synapse.metrics.event_processing_lag.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).set(now - ts)
                         synapse.metrics.event_processing_last_ts.labels(
-                            "appservice_sender"
+                            name="appservice_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).set(ts)
             finally:
                 self.is_processing = False
@@ -638,7 +655,8 @@ class ApplicationServicesHandler:
 
         # Fetch the users who have modified their device list since then.
         users_with_changed_device_lists = await self.store.get_all_devices_changed(
-            from_key, to_key=new_key
+            MultiWriterStreamToken(stream=from_key),
+            to_key=MultiWriterStreamToken(stream=new_key),
         )
 
         # Filter out any users the application service is not interested in
@@ -846,7 +864,7 @@ class ApplicationServicesHandler:
 
         # user not found; could be the AS though, so check.
         services = self.store.get_app_services()
-        service_list = [s for s in services if s.sender == user_id]
+        service_list = [s for s in services if s.sender.to_string() == user_id]
         return len(service_list) == 0
 
     async def _check_user_exists(self, user_id: str) -> bool:

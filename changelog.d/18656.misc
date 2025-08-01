@@ -1,0 +1,1 @@
+Refactor `Counter` metrics to be homeserver-scoped.

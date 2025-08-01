@@ -50,6 +50,7 @@ from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
 from synapse.events.snapshot import EventContext
 from synapse.logging.context import make_deferred_yieldable, run_in_background
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.invite_rule import InviteRule
@@ -68,11 +69,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# FIXME: Unused metric, remove if not needed.
 push_rules_invalidation_counter = Counter(
-    "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter", ""
+    "synapse_push_bulk_push_rule_evaluator_push_rules_invalidation_counter",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
+# FIXME: Unused metric, remove if not needed.
 push_rules_state_size_counter = Counter(
-    "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter", ""
+    "synapse_push_bulk_push_rule_evaluator_push_rules_state_size_counter",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -128,6 +135,7 @@ class BulkPushRuleEvaluator:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
@@ -137,10 +145,11 @@ class BulkPushRuleEvaluator:
         self._related_event_match_enabled = self.hs.config.experimental.msc3664_enabled
 
         self.room_push_rule_cache_metrics = register_cache(
-            "cache",
-            "room_push_rule_cache",
+            cache_type="cache",
+            cache_name="room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,
             resizable=False,
+            server_name=self.server_name,
         )
 
     async def _get_rules_for_event(

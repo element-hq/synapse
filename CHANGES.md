@@ -1,3 +1,80 @@
+# Synapse 1.135.0rc2 (2025-07-30)
+
+### Bugfixes
+
+- Fix user failing to deactivate with MAS when `/_synapse/mas` is handled by a worker. ([\#18716](https://github.com/element-hq/synapse/issues/18716))
+
+### Internal Changes
+
+- Fix performance regression introduced in [#18238](https://github.com/element-hq/synapse/issues/18238) by adding a cache to `is_server_admin`. ([\#18747](https://github.com/element-hq/synapse/issues/18747))
+
+
+
+
+# Synapse 1.135.0rc1 (2025-07-22)
+
+### Features
+
+- Add `recaptcha_private_key_path` and `recaptcha_public_key_path` config option. ([\#17984](https://github.com/element-hq/synapse/issues/17984), [\#18684](https://github.com/element-hq/synapse/issues/18684))
+- Add plain-text handling for rich-text topics as per [MSC3765](https://github.com/matrix-org/matrix-spec-proposals/pull/3765). ([\#18195](https://github.com/element-hq/synapse/issues/18195))
+- If enabled by the user, server admins will see [soft failed](https://spec.matrix.org/v1.13/server-server-api/#soft-failure) events over the Client-Server API. ([\#18238](https://github.com/element-hq/synapse/issues/18238))
+- Add experimental support for [MSC4277: Harmonizing the reporting endpoints](https://github.com/matrix-org/matrix-spec-proposals/pull/4277). ([\#18263](https://github.com/element-hq/synapse/issues/18263))
+- Add ability to limit amount of media uploaded by a user in a given time period. ([\#18527](https://github.com/element-hq/synapse/issues/18527))
+- Enable workers to write directly to the device lists stream and handle device list updates, reducing load on the main process. ([\#18581](https://github.com/element-hq/synapse/issues/18581))
+- Support arbitrary profile fields. Contributed by @clokep. ([\#18635](https://github.com/element-hq/synapse/issues/18635))
+- Advertise support for Matrix v1.12. ([\#18647](https://github.com/element-hq/synapse/issues/18647))
+- Add an option to issue redactions as an admin user via the [admin redaction endpoint](https://element-hq.github.io/synapse/latest/admin_api/user_admin_api.html#redact-all-the-events-of-a-user). ([\#18671](https://github.com/element-hq/synapse/issues/18671))
+- Add experimental and incomplete support for [MSC4306: Thread Subscriptions](https://github.com/matrix-org/matrix-spec-proposals/blob/rei/msc_thread_subscriptions/proposals/4306-thread-subscriptions.md). ([\#18674](https://github.com/element-hq/synapse/issues/18674))
+- Include `event_id` when getting state with `?format=event`. Contributed by @tulir @ Beeper. ([\#18675](https://github.com/element-hq/synapse/issues/18675))
+
+### Bugfixes
+
+- Fix CPU and database spinning when retrying sending events to servers whilst at the same time purging those events. ([\#18499](https://github.com/element-hq/synapse/issues/18499))
+- Don't allow creation of tags with names longer than 255 bytes, [as per the spec](https://spec.matrix.org/v1.15/client-server-api/#events-14). ([\#18660](https://github.com/element-hq/synapse/issues/18660))
+- Fix `sliding_sync_connections`-related errors when porting from SQLite to Postgres. ([\#18677](https://github.com/element-hq/synapse/issues/18677))
+- Fix the MAS integration not working when Synapse is started with `--daemonize` or using `synctl`. ([\#18691](https://github.com/element-hq/synapse/issues/18691))
+
+### Improved Documentation
+
+- Document that some config options for the user directory are in violation of the Matrix spec. ([\#18548](https://github.com/element-hq/synapse/issues/18548))
+- Update `rc_delayed_event_mgmt` docs to the actual nesting level. Contributed by @HarHarLinks. ([\#18692](https://github.com/element-hq/synapse/issues/18692))
+
+### Internal Changes
+
+- Add a dedicated internal API for Matrix Authentication Service to Synapse communication. ([\#18520](https://github.com/element-hq/synapse/issues/18520))
+- Allow user registrations to be done on workers. ([\#18552](https://github.com/element-hq/synapse/issues/18552))
+- Remove unnecessary HTTP replication calls. ([\#18564](https://github.com/element-hq/synapse/issues/18564))
+- Refactor `Measure` block metrics to be homeserver-scoped. ([\#18601](https://github.com/element-hq/synapse/issues/18601))
+- Refactor cache metrics to be homeserver-scoped. ([\#18604](https://github.com/element-hq/synapse/issues/18604))
+- Unbreak "Latest dependencies" workflow by using the `--without dev` poetry option instead of removed `--no-dev`. ([\#18617](https://github.com/element-hq/synapse/issues/18617))
+- Update URL Preview code to work with `lxml` 6.0.0+. ([\#18622](https://github.com/element-hq/synapse/issues/18622))
+- Use `markdown-it-py` instead of `commonmark` in the release script. ([\#18637](https://github.com/element-hq/synapse/issues/18637))
+- Fix typing errors with upgraded mypy version. ([\#18653](https://github.com/element-hq/synapse/issues/18653))
+- Add doc comment explaining that config files are shallowly merged. ([\#18664](https://github.com/element-hq/synapse/issues/18664))
+- Minor speed up of insertion into `stream_positions` table. ([\#18672](https://github.com/element-hq/synapse/issues/18672))
+- Remove unused `allow_no_prev_events` option when creating an event. ([\#18676](https://github.com/element-hq/synapse/issues/18676))
+- Clean up `MetricsResource` and Prometheus hacks. ([\#18687](https://github.com/element-hq/synapse/issues/18687))
+- Fix dirty `Cargo.lock` changes appearing after install (`base64`). ([\#18689](https://github.com/element-hq/synapse/issues/18689))
+- Prevent dirty `Cargo.lock` changes from install. ([\#18693](https://github.com/element-hq/synapse/issues/18693))
+- Correct spelling of 'Admin token used' log line. ([\#18697](https://github.com/element-hq/synapse/issues/18697))
+- Reduce log spam when client stops downloading media while it is being streamed to them. ([\#18699](https://github.com/element-hq/synapse/issues/18699))
+
+
+
+### Updates to locked dependencies
+
+* Bump authlib from 1.6.0 to 1.6.1. ([\#18704](https://github.com/element-hq/synapse/issues/18704))
+* Bump base64 from 0.21.7 to 0.22.1. ([\#18666](https://github.com/element-hq/synapse/issues/18666))
+* Bump jsonschema from 4.24.0 to 4.25.0. ([\#18707](https://github.com/element-hq/synapse/issues/18707))
+* Bump lxml from 5.4.0 to 6.0.0. ([\#18631](https://github.com/element-hq/synapse/issues/18631))
+* Bump mypy from 1.13.0 to 1.16.1. ([\#18653](https://github.com/element-hq/synapse/issues/18653))
+* Bump once_cell from 1.19.0 to 1.21.3. ([\#18710](https://github.com/element-hq/synapse/issues/18710))
+* Bump phonenumbers from 9.0.8 to 9.0.9. ([\#18681](https://github.com/element-hq/synapse/issues/18681))
+* Bump ruff from 0.12.2 to 0.12.5. ([\#18683](https://github.com/element-hq/synapse/issues/18683), [\#18705](https://github.com/element-hq/synapse/issues/18705))
+* Bump serde_json from 1.0.140 to 1.0.141. ([\#18709](https://github.com/element-hq/synapse/issues/18709))
+* Bump sigstore/cosign-installer from 3.9.1 to 3.9.2. ([\#18708](https://github.com/element-hq/synapse/issues/18708))
+* Bump types-jsonschema from 4.24.0.20250528 to 4.24.0.20250708. ([\#18682](https://github.com/element-hq/synapse/issues/18682))
+
 # Synapse 1.134.0 (2025-07-15)
 
 No significant changes since 1.134.0rc1.

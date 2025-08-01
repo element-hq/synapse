@@ -19,7 +19,7 @@
 #
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
@@ -130,6 +130,10 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_displayname"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(
+            capabilities["m.profile_fields"]["disallowed"], ["displayname"]
+        )
 
     @override_config({"enable_set_avatar_url": False})
     def test_get_set_avatar_url_capabilities_avatar_url_disabled(self) -> None:
@@ -141,6 +145,8 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_avatar_url"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(capabilities["m.profile_fields"]["disallowed"], ["avatar_url"])
 
     @override_config(
         {
@@ -159,6 +165,10 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_displayname"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(
+            capabilities["m.profile_fields"]["disallowed"], ["displayname"]
+        )
         self.assertTrue(capabilities["uk.tcpip.msc4133.profile_fields"]["enabled"])
         self.assertEqual(
             capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],
@@ -180,6 +190,8 @@ class CapabilitiesTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertFalse(capabilities["m.set_avatar_url"]["enabled"])
+        self.assertTrue(capabilities["m.profile_fields"]["enabled"])
+        self.assertEqual(capabilities["m.profile_fields"]["disallowed"], ["avatar_url"])
         self.assertTrue(capabilities["uk.tcpip.msc4133.profile_fields"]["enabled"])
         self.assertEqual(
             capabilities["uk.tcpip.msc4133.profile_fields"]["disallowed"],

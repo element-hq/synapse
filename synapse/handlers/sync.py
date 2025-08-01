@@ -63,6 +63,7 @@ from synapse.logging.opentracing import (
     start_active_span,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -104,7 +105,7 @@ non_empty_sync_counter = Counter(
     "Count of non empty sync responses. type is initial_sync/full_state_sync"
     "/incremental_sync. lazy_loaded indicates if lazy loaded members were "
     "enabled for that request.",
-    ["type", "lazy_loaded"],
+    labelnames=["type", "lazy_loaded", SERVER_NAME_LABEL],
 )
 
 # Store the cache that tracks which lazy-loaded members have been sent to a given
@@ -353,8 +354,9 @@ class SyncHandler:
         #    cached result any more, and we could flush the entry from the cache to save
         #    memory.
         self.response_cache: ResponseCache[SyncRequestKey] = ResponseCache(
-            hs.get_clock(),
-            "sync",
+            clock=hs.get_clock(),
+            name="sync",
+            server_name=self.server_name,
             timeout_ms=hs.config.caches.sync_response_cache_duration,
         )
 
@@ -362,8 +364,9 @@ class SyncHandler:
         self.lazy_loaded_members_cache: ExpiringCache[
             Tuple[str, Optional[str]], LruCache[str, str]
         ] = ExpiringCache(
-            "lazy_loaded_members_cache",
-            self.clock,
+            cache_name="lazy_loaded_members_cache",
+            server_name=self.server_name,
+            clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
@@ -612,7 +615,11 @@ class SyncHandler:
                 lazy_loaded = "true"
             else:
                 lazy_loaded = "false"
-            non_empty_sync_counter.labels(sync_label, lazy_loaded).inc()
+            non_empty_sync_counter.labels(
+                type=sync_label,
+                lazy_loaded=lazy_loaded,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
 
         return result
 
@@ -1134,7 +1141,7 @@ class SyncHandler:
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
-            cache = LruCache(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
+            cache = LruCache(max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
             self.lazy_loaded_members_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)

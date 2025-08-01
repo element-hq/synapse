@@ -23,7 +23,7 @@
 import copy
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import SynapseError
 from synapse.server import HomeServer

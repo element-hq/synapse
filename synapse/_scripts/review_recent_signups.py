@@ -29,19 +29,21 @@ import attr
 
 from synapse.config._base import (
     Config,
+    ConfigError,
     RootConfig,
     find_config_files,
     read_config_files,
 )
 from synapse.config.database import DatabaseConfig
+from synapse.config.server import ServerConfig
 from synapse.storage.database import DatabasePool, LoggingTransaction, make_conn
 from synapse.storage.engines import create_engine
 
 
 class ReviewConfig(RootConfig):
-    "A config class that just pulls out the database config"
+    "A config class that just pulls out the server and database config"
 
-    config_classes = [DatabaseConfig]
+    config_classes = [ServerConfig, DatabaseConfig]
 
 
 @attr.s(auto_attribs=True)
@@ -148,6 +150,10 @@ def main() -> None:
     config_dict = read_config_files(config_files)
     config.parse_config_dict(config_dict, "", "")
 
+    server_name = config.server.server_name
+    if not isinstance(server_name, str):
+        raise ConfigError("Must be a string", ("server_name",))
+
     since_ms = time.time() * 1000 - Config.parse_duration(config_args.since)
     exclude_users_with_email = config_args.exclude_emails
     exclude_users_with_appservice = config_args.exclude_app_service
@@ -159,7 +165,12 @@ def main() -> None:
 
     engine = create_engine(database_config.config)
 
-    with make_conn(database_config, engine, "review_recent_signups") as db_conn:
+    with make_conn(
+        db_config=database_config,
+        engine=engine,
+        default_txn_name="review_recent_signups",
+        server_name=server_name,
+    ) as db_conn:
         # This generates a type of Cursor, not LoggingTransaction.
         user_infos = get_recent_users(
             db_conn.cursor(),

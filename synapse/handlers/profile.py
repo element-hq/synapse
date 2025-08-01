@@ -55,6 +55,7 @@ class ProfileHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.hs = hs
@@ -92,9 +93,7 @@ class ProfileHandler:
 
         if self.hs.is_mine(target_user):
             profileinfo = await self.store.get_profileinfo(target_user)
-            extra_fields = {}
-            if self.hs.config.experimental.msc4133_enabled:
-                extra_fields = await self.store.get_profile_fields(target_user)
+            extra_fields = await self.store.get_profile_fields(target_user)
 
             if (
                 profileinfo.display_name is None
@@ -125,7 +124,7 @@ class ProfileHandler:
             except RequestSendFailed as e:
                 raise SynapseError(502, "Failed to fetch profile") from e
             except HttpResponseException as e:
-                if e.code < 500 and e.code != 404:
+                if e.code < 500 and e.code not in (403, 404):
                     # Other codes are not allowed in c2s API
                     logger.info(
                         "Server replied with wrong response: %s %s", e.code, e.msg
@@ -550,16 +549,16 @@ class ProfileHandler:
                 # since then we send a null in the JSON response
                 if avatar_url is not None:
                     response["avatar_url"] = avatar_url
-            if self.hs.config.experimental.msc4133_enabled:
-                if just_field is None:
-                    response.update(await self.store.get_profile_fields(user))
-                elif just_field not in (
-                    ProfileFields.DISPLAYNAME,
-                    ProfileFields.AVATAR_URL,
-                ):
-                    response[just_field] = await self.store.get_profile_field(
-                        user, just_field
-                    )
+
+            if just_field is None:
+                response.update(await self.store.get_profile_fields(user))
+            elif just_field not in (
+                ProfileFields.DISPLAYNAME,
+                ProfileFields.AVATAR_URL,
+            ):
+                response[just_field] = await self.store.get_profile_field(
+                    user, just_field
+                )
         except StoreError as e:
             if e.code == 404:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)

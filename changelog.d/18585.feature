@@ -1,0 +1,1 @@
+When admins enable themselves to see soft-failed events, they will also see if the cause is due to the policy server flagging them as spam via `unsigned`.

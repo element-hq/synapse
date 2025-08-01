@@ -77,10 +77,6 @@ WELL_KNOWN_RETRY_ATTEMPTS = 3
 logger = logging.getLogger(__name__)
 
 
-_well_known_cache: TTLCache[bytes, Optional[bytes]] = TTLCache("well-known")
-_had_valid_well_known_cache: TTLCache[bytes, bool] = TTLCache("had-valid-well-known")
-
-
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class WellKnownLookupResult:
     delegated_server: Optional[bytes]
@@ -101,6 +97,11 @@ class WellKnownResolver:
         """
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
+            reactor
+            agent
+            user_agent
+            well_known_cache
+            had_well_known_cache
         """
 
         self.server_name = server_name
@@ -108,10 +109,14 @@ class WellKnownResolver:
         self._clock = Clock(reactor)
 
         if well_known_cache is None:
-            well_known_cache = _well_known_cache
+            well_known_cache = TTLCache(
+                cache_name="well-known", server_name=server_name
+            )
 
         if had_well_known_cache is None:
-            had_well_known_cache = _had_valid_well_known_cache
+            had_well_known_cache = TTLCache(
+                cache_name="had-valid-well-known", server_name=server_name
+            )
 
         self._well_known_cache = well_known_cache
         self._had_valid_well_known_cache = had_well_known_cache

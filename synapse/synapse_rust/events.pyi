@@ -33,6 +33,9 @@ class EventInternalMetadata:
     proactively_send: bool
     redacted: bool
 
+    policy_server_spammy: bool
+    """whether the policy server indicated that this event is spammy"""
+
     txn_id: str
     """The transaction ID, if it was set when the event was created."""
     token_id: int

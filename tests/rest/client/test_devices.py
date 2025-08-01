@@ -21,7 +21,7 @@
 from http import HTTPStatus
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import NotFoundError
 from synapse.appservice import ApplicationService
@@ -472,7 +472,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             id="msc4190",
             token="some_token",
             hs_token="some_token",
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [{"regex": "@.*", "exclusive": False}]
             },
@@ -483,7 +483,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             id="regular",
             token="other_token",
             hs_token="other_token",
-            sender="@as2:example.com",
+            sender=UserID.from_string("@as2:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [{"regex": "@.*", "exclusive": False}]
             },

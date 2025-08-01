@@ -67,7 +67,6 @@ from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.replication.http.send_event import ReplicationSendEventRestServlet
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -97,6 +96,7 @@ class MessageHandler:
     """Contains some read only APIs to get state about a room"""
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.state = hs.get_state_handler()
@@ -112,7 +112,7 @@ class MessageHandler:
 
         if not hs.config.worker.worker_app:
             run_as_background_process(
-                "_schedule_next_expiry", self._schedule_next_expiry
+                "_schedule_next_expiry", self.server_name, self._schedule_next_expiry
             )
 
     async def get_room_data(
@@ -444,6 +444,7 @@ class MessageHandler:
             delay,
             run_as_background_process,
             "_expire_event",
+            self.server_name,
             self._expire_event,
             event_id,
         )
@@ -504,7 +505,6 @@ class EventCreationHandler:
 
         self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
 
-        self.send_event = ReplicationSendEventRestServlet.make_client(hs)
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
         self.request_ratelimiter = hs.get_request_ratelimiter()
@@ -546,6 +546,7 @@ class EventCreationHandler:
             self.clock.looping_call(
                 lambda: run_as_background_process(
                     "send_dummy_events_to_fill_extremities",
+                    self.server_name,
                     self._send_dummy_events_to_fill_extremities,
                 ),
                 5 * 60 * 1000,
@@ -563,8 +564,9 @@ class EventCreationHandler:
         self._external_cache_joined_hosts_updates: Optional[ExpiringCache] = None
         if self._external_cache.is_enabled():
             self._external_cache_joined_hosts_updates = ExpiringCache(
-                "_external_cache_joined_hosts_updates",
-                self.clock,
+                cache_name="_external_cache_joined_hosts_updates",
+                server_name=self.server_name,
+                clock=self.clock,
                 expiry_ms=30 * 60 * 1000,
             )
 
@@ -645,38 +647,46 @@ class EventCreationHandler:
         """
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
-        requester_suspended = await self.store.get_user_suspended_status(
-            requester.user.to_string()
+        # The requester may be a regular user, but puppeted by the server.
+        request_by_server = (
+            requester.authenticated_entity == self.hs.config.server.server_name
         )
-        if requester_suspended:
-            # We want to allow suspended users to perform "corrective" actions
-            # asked of them by server admins, such as redact their messages and
-            # leave rooms.
-            if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
-                if event_dict["type"] == "m.room.redaction":
-                    event = await self.store.get_event(
-                        event_dict["content"]["redacts"], allow_none=True
-                    )
-                    if event:
-                        if event.sender != requester.user.to_string():
+
+        # If the request is initiated by the server, ignore whether the
+        # requester or target is suspended.
+        if not request_by_server:
+            requester_suspended = await self.store.get_user_suspended_status(
+                requester.user.to_string()
+            )
+            if requester_suspended:
+                # We want to allow suspended users to perform "corrective" actions
+                # asked of them by server admins, such as redact their messages and
+                # leave rooms.
+                if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
+                    if event_dict["type"] == "m.room.redaction":
+                        event = await self.store.get_event(
+                            event_dict["content"]["redacts"], allow_none=True
+                        )
+                        if event:
+                            if event.sender != requester.user.to_string():
+                                raise SynapseError(
+                                    403,
+                                    "You can only redact your own events while account is suspended.",
+                                    Codes.USER_ACCOUNT_SUSPENDED,
+                                )
+                    if event_dict["type"] == "m.room.member":
+                        if event_dict["content"]["membership"] != "leave":
                             raise SynapseError(
                                 403,
-                                "You can only redact your own events while account is suspended.",
+                                "Changing membership while account is suspended is not allowed.",
                                 Codes.USER_ACCOUNT_SUSPENDED,
                             )
-                if event_dict["type"] == "m.room.member":
-                    if event_dict["content"]["membership"] != "leave":
-                        raise SynapseError(
-                            403,
-                            "Changing membership while account is suspended is not allowed.",
-                            Codes.USER_ACCOUNT_SUSPENDED,
-                        )
-            else:
-                raise SynapseError(
-                    403,
-                    "Sending messages while account is suspended is not allowed.",
-                    Codes.USER_ACCOUNT_SUSPENDED,
-                )
+                else:
+                    raise SynapseError(
+                        403,
+                        "Sending messages while account is suspended is not allowed.",
+                        Codes.USER_ACCOUNT_SUSPENDED,
+                    )
 
         if event_dict["type"] == EventTypes.Create and event_dict["state_key"] == "":
             room_version_id = event_dict["content"]["room_version"]
@@ -1102,6 +1112,9 @@ class EventCreationHandler:
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)
                 if not policy_allowed:
+                    # We shouldn't need to set the metadata because the raise should
+                    # cause the request to be denied, but just in case:
+                    event.internal_metadata.policy_server_spammy = True
                     logger.warning(
                         "Event not allowed by policy server, rejecting %s",
                         event.event_id,
@@ -2032,6 +2045,7 @@ class EventCreationHandler:
                 # matters as sometimes presence code can take a while.
                 run_as_background_process(
                     "bump_presence_active_time",
+                    self.server_name,
                     self._bump_active_time,
                     requester.user,
                     requester.device_id,

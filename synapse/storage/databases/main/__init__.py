@@ -19,7 +19,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
 import logging
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union, cast
 
@@ -35,6 +34,9 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.stats import UserSortOrder
+from synapse.storage.databases.main.thread_subscriptions import (
+    ThreadSubscriptionsWorkerStore,
+)
 from synapse.storage.engines import BaseDatabaseEngine
 from synapse.storage.types import Cursor
 from synapse.types import get_domain_from_id
@@ -141,6 +143,7 @@ class DataStore(
     SearchStore,
     TagsStore,
     AccountDataStore,
+    ThreadSubscriptionsWorkerStore,
     PushRulesWorkerStore,
     StreamWorkerStore,
     OpenIdStore,

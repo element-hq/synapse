@@ -117,6 +117,55 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.136.0
+
+## Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`
+
+The `run_as_background_process` function is now a method of the `ModuleApi` class. If
+you were using the function directly from the module API, it will continue to work fine
+but the background process metrics will not include an accurate `server_name` label.
+This kind of metric labeling isn't relevant for many use cases and is used to
+differentiate Synapse instances running in the same Python process (relevant to Synapse
+Pro: Small Hosts). We recommend updating your usage to use the new
+`ModuleApi.run_as_background_process` method to stay on top of future changes.
+
+<details>
+<summary>Example <code>run_as_background_process</code> upgrade</summary>
+
+Before:
+```python
+class MyModule:
+    def __init__(self, module_api: ModuleApi) -> None:
+        run_as_background_process(__name__ + ":setup_database", self.setup_database)
+```
+
+After:
+```python
+class MyModule:
+    def __init__(self, module_api: ModuleApi) -> None:
+        module_api.run_as_background_process(__name__ + ":setup_database", self.setup_database)
+```
+
+</details>
+
+## Metric labels have changed on `synapse_federation_last_received_pdu_time` and `synapse_federation_last_sent_pdu_time`
+
+Previously, the `synapse_federation_last_received_pdu_time` and
+`synapse_federation_last_sent_pdu_time` metrics both used the `server_name` label to
+differentiate between different servers that we send and receive events from.
+
+Since we're now using the `server_name` label to differentiate between different Synapse
+homeserver instances running in the same process, these metrics have been changed as follows:
+
+ - `synapse_federation_last_received_pdu_time` now uses the `origin_server_name` label
+ - `synapse_federation_last_sent_pdu_time` now uses the `destination_server_name` label
+
+The Grafana dashboard JSON in `contrib/grafana/synapse.json` has been updated to reflect
+this change but you will need to manually update your own existing Grafana dashboards
+using these metrics.
+
+
+
 # Upgrading to v1.135.0
 
 ## `on_user_registration` module API callback may now run on any worker
