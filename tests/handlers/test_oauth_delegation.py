@@ -20,9 +20,12 @@
 #
 
 import json
+import threading
+import time
 from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
-from typing import Any, Dict, Union
+from typing import Any, Coroutine, Dict, Generator, Optional, TypeVar, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
@@ -34,8 +37,10 @@ from signedjson.key import (
 )
 from signedjson.sign import sign_json
 
+from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -745,6 +750,339 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             store.get_user_ip_and_agents(UserID.from_string(OIDC_ADMIN_USERID))
         )
         self.assertEqual(conn_infos, [])
+
+
+class FakeMasHandler(BaseHTTPRequestHandler):
+    server: "FakeMasServer"
+
+    def do_POST(self) -> None:
+        self.server.calls += 1
+
+        if self.path != "/oauth2/introspect":
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.close()
+            return
+
+        auth = self.headers.get("Authorization")
+        if auth is None or auth != f"Bearer {self.server.secret}":
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.close()
+            return
+
+        content_length = self.headers.get("Content-Length")
+        if content_length is None:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.close()
+            return
+
+        raw_body = self.rfile.read(int(content_length))
+        body = parse_qs(raw_body)
+        param = body.get(b"token")
+        if param is None:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.close()
+            return
+
+        self.server.last_token_seen = param[0].decode("utf-8")
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps(self.server.introspection_response).encode("utf-8"))
+
+    def log_message(self, format: str, *args: Any) -> None:
+        # Don't log anything; by default, the server logs to stderr
+        pass
+
+
+class FakeMasServer(HTTPServer):
+    """A fake MAS server for testing.
+
+    This opens a real HTTP server on a random port, on a separate thread.
+    """
+
+    introspection_response: JsonDict = {}
+    """Determines what the response to the introspection endpoint will be."""
+
+    secret: str = "verysecret"
+    """The shared secret used to authenticate the introspection endpoint."""
+
+    last_token_seen: Optional[str] = None
+    """What is the last access token seen by the introspection endpoint."""
+
+    calls: int = 0
+    """How many times has the introspection endpoint been called."""
+
+    _thread: threading.Thread
+
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), FakeMasHandler)
+
+        self._thread = threading.Thread(
+            target=self.serve_forever,
+            name="FakeMasServer",
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
+        self._thread.start()
+
+    def shutdown(self) -> None:
+        super().shutdown()
+        self._thread.join()
+
+    @property
+    def endpoint(self) -> str:
+        return f"http://127.0.0.1:{self.server_port}/"
+
+
+T = TypeVar("T")
+
+
+class MasAuthDelegation(HomeserverTestCase):
+    server: FakeMasServer
+
+    def till_deferred_has_result(
+        self,
+        awaitable: Union[
+            "Coroutine[Deferred[Any], Any, T]",
+            "Generator[Deferred[Any], Any, T]",
+            "Deferred[T]",
+        ],
+    ) -> "Deferred[T]":
+        """Wait until a deferred has a result.
+
+        This is useful because the Rust HTTP client will resolve the deferred
+        using reactor.callFromThread, which are only run when we call
+        reactor.advance.
+        """
+        deferred = ensureDeferred(awaitable)
+        tries = 0
+        while not deferred.called:
+            time.sleep(0.1)
+            self.reactor.advance(0)
+            tries += 1
+            if tries > 100:
+                raise Exception("Timed out waiting for deferred to resolve")
+
+        return deferred
+
+    def default_config(self) -> Dict[str, Any]:
+        config = super().default_config()
+        config["public_baseurl"] = BASE_URL
+        config["disable_registration"] = True
+        config["matrix_authentication_service"] = {
+            "enabled": True,
+            "endpoint": self.server.endpoint,
+            "secret": self.server.secret,
+        }
+        return config
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.server = FakeMasServer()
+        hs = self.setup_test_homeserver()
+        # This triggers the server startup hooks, which starts the Tokio thread pool
+        reactor.run()
+        self._auth = checked_cast(MasDelegatedAuth, hs.get_auth())
+        return hs
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        # Provision the user and the device we use in the tests.
+        store = homeserver.get_datastores().main
+        self.get_success(store.register_user(USER_ID))
+        self.get_success(
+            store.store_device(USER_ID, DEVICE, initial_device_display_name=None)
+        )
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        # MemoryReactor doesn't trigger the shutdown phases, and we want the
+        # Tokio thread pool to be stopped
+        # XXX: This logic should probably get moved somewhere else
+        shutdown_triggers = self.reactor.triggers.get("shutdown", {})
+        for phase in ["before", "during", "after"]:
+            triggers = shutdown_triggers.get(phase, [])
+            for callbable, args, kwargs in triggers:
+                callbable(*args, **kwargs)
+
+    def test_simple_introspection(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": " ".join(
+                [
+                    MATRIX_USER_SCOPE,
+                    f"{MATRIX_DEVICE_SCOPE_PREFIX}{DEVICE}",
+                ]
+            ),
+            "username": USERNAME,
+            "expires_in": 60,
+        }
+
+        requester = self.get_success(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            )
+        )
+
+        self.assertEquals(requester.user.to_string(), USER_ID)
+        self.assertEquals(requester.device_id, DEVICE)
+        self.assertFalse(self.get_success(self._auth.is_server_admin(requester)))
+
+        self.assertEquals(
+            self.server.last_token_seen,
+            "some_token",
+        )
+
+    def test_inexistent_device(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": " ".join(
+                [
+                    MATRIX_USER_SCOPE,
+                    f"{MATRIX_DEVICE_SCOPE_PREFIX}ABCDEF",
+                ]
+            ),
+            "username": USERNAME,
+            "expires_in": 60,
+        }
+
+        failure = self.get_failure(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            ),
+            InvalidClientTokenError,
+        )
+        self.assertEqual(failure.value.code, 401)
+
+    def test_inexistent_user(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": " ".join([MATRIX_USER_SCOPE]),
+            "username": "inexistent_user",
+            "expires_in": 60,
+        }
+
+        failure = self.get_failure(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            ),
+            AuthError,
+        )
+        # This is a 500, it should never happen really
+        self.assertEqual(failure.value.code, 500)
+
+    def test_missing_scope(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": "openid",
+            "username": USERNAME,
+            "expires_in": 60,
+        }
+
+        failure = self.get_failure(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            ),
+            InvalidClientTokenError,
+        )
+        self.assertEqual(failure.value.code, 401)
+
+    def test_invalid_response(self) -> None:
+        self.server.introspection_response = {}
+
+        failure = self.get_failure(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            ),
+            SynapseError,
+        )
+        self.assertEqual(failure.value.code, 503)
+
+    def test_device_id_in_body(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": MATRIX_USER_SCOPE,
+            "username": USERNAME,
+            "expires_in": 60,
+            "device_id": DEVICE,
+        }
+
+        requester = self.get_success(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            )
+        )
+
+        self.assertEqual(requester.device_id, DEVICE)
+
+    def test_admin_scope(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": " ".join([SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE]),
+            "username": USERNAME,
+            "expires_in": 60,
+        }
+
+        requester = self.get_success(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            )
+        )
+
+        self.assertEqual(requester.user.to_string(), USER_ID)
+        self.assertTrue(self.get_success(self._auth.is_server_admin(requester)))
+
+    def test_cached_expired_introspection(self) -> None:
+        """The handler should raise an error if the introspection response gives
+        an expiry time, the introspection response is cached and then the entry is
+        re-requested after it has expired."""
+
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": " ".join(
+                [
+                    MATRIX_USER_SCOPE,
+                    f"{MATRIX_DEVICE_SCOPE_PREFIX}{DEVICE}",
+                ]
+            ),
+            "username": USERNAME,
+            "expires_in": 60,
+        }
+
+        self.assertEqual(self.server.calls, 0)
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"some_token"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+
+        # The first CS-API request causes a successful introspection
+        self.get_success(
+            self.till_deferred_has_result(self._auth.get_user_by_req(request))
+        )
+        self.assertEqual(self.server.calls, 1)
+
+        # Sleep for 60 seconds so the token expires.
+        self.reactor.advance(60.0)
+
+        # Now the CS-API request fails because the token expired
+        self.assertFailure(
+            self.till_deferred_has_result(self._auth.get_user_by_req(request)),
+            InvalidClientTokenError,
+        )
+        # Ensure another introspection request was not sent
+        self.assertEqual(self.server.calls, 1)
 
 
 @parameterized_class(
