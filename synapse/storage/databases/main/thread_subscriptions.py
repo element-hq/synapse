@@ -14,6 +14,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
+    FrozenSet,
     Iterable,
     List,
     Optional,
@@ -99,6 +100,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 self.get_subscription_for_thread.invalidate(
                     (row.user_id, row.room_id, row.event_id)
                 )
+                self.get_subscribers_to_thread.invalidate((row.room_id, row.event_id))
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
 
@@ -194,6 +196,16 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         """
         assert self._can_write_to_thread_subscriptions
 
+        def _invalidate_subscription_caches(txn: LoggingTransaction) -> None:
+            txn.call_after(
+                self.get_subscription_for_thread.invalidate,
+                (user_id, room_id, thread_root_event_id),
+            )
+            txn.call_after(
+                self.get_subscribers_to_thread.invalidate,
+                (room_id, thread_root_event_id),
+            )
+
         def _subscribe_user_to_thread_txn(
             txn: LoggingTransaction,
         ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
@@ -234,10 +246,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                         "unsubscribed_at_topological_ordering": None,
                     },
                 )
-                txn.call_after(
-                    self.get_subscription_for_thread.invalidate,
-                    (user_id, room_id, thread_root_event_id),
-                )
+                _invalidate_subscription_caches(txn)
                 return stream_id
 
             # we already have either a subscription or a prior unsubscription here
@@ -291,10 +300,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                     "unsubscribed_at_topological_ordering": None,
                 },
             )
-            txn.call_after(
-                self.get_subscription_for_thread.invalidate,
-                (user_id, room_id, thread_root_event_id),
-            )
+            _invalidate_subscription_caches(txn)
 
             return stream_id
 
@@ -376,6 +382,10 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 self.get_subscription_for_thread.invalidate,
                 (user_id, room_id, thread_root_event_id),
             )
+            txn.call_after(
+                self.get_subscribers_to_thread.invalidate,
+                (room_id, thread_root_event_id),
+            )
 
             return stream_id
 
@@ -388,7 +398,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         Purge all subscriptions for the user.
         The fact that subscriptions have been purged will not be streamed;
         all stream rows for the user will in fact be removed.
-        This is intended only for dealing with user deactivation.
+
+        This must only be used for user deactivation,
+        because it does not invalidate the `subscribers_to_thread` cache.
         """
 
         def _purge_thread_subscription_settings_for_user_txn(
@@ -448,6 +460,27 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         automatic = bool(automatic_rawbool)
 
         return ThreadSubscription(automatic=automatic)
+
+    @cached(max_entries=100)
+    async def get_subscribers_to_thread(
+        self, room_id: str, thread_root_event_id: str
+    ) -> FrozenSet[str]:
+        """
+        Returns:
+            the set of user_ids for local users who are subscribed to the given thread.
+        """
+        return frozenset(
+            await self.db_pool.simple_select_onecol(
+                table="thread_subscriptions",
+                keyvalues={
+                    "room_id": room_id,
+                    "event_id": thread_root_event_id,
+                    "subscribed": True,
+                },
+                retcol="user_id",
+                desc="get_subscribers_to_thread",
+            )
+        )
 
     def get_max_thread_subscriptions_stream_id(self) -> int:
         """Get the current maximum stream_id for thread subscriptions.
