@@ -26,6 +26,7 @@ from typing import Any, Dict, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
+from parameterized import parameterized_class
 from signedjson.key import (
     encode_verify_key_base64,
     generate_signing_key,
@@ -48,7 +49,7 @@ from synapse.http.site import SynapseRequest
 from synapse.rest import admin
 from synapse.rest.client import account, devices, keys, login, logout, register
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 
 from tests.server import FakeChannel
@@ -109,12 +110,7 @@ async def get_json(url: str) -> JsonDict:
 class MSC3861OAuthDelegation(HomeserverTestCase):
     servlets = [
         account.register_servlets,
-        devices.register_servlets,
         keys.register_servlets,
-        register.register_servlets,
-        login.register_servlets,
-        logout.register_servlets,
-        admin.register_servlets,
     ]
 
     def default_config(self) -> Dict[str, Any]:
@@ -635,6 +631,174 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
 
+    def test_admin_token(self) -> None:
+        """The handler should return a requester with admin rights when admin_token is used."""
+        self._set_introspection_returnvalue({"active": False})
+
+        request = Mock(args={})
+        request.args[b"access_token"] = [b"admin_token_value"]
+        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
+        requester = self.get_success(self.auth.get_user_by_req(request))
+        self.assertEqual(
+            requester.user.to_string(),
+            OIDC_ADMIN_USERID,
+        )
+        self.assertEqual(requester.is_guest, False)
+        self.assertEqual(requester.device_id, None)
+        self.assertEqual(
+            get_awaitable_result(self.auth.is_server_admin(requester)), True
+        )
+
+        # There should be no call to the introspection endpoint
+        self._rust_client.post.assert_not_called()
+
+    @override_config({"mau_stats_only": True})
+    def test_request_tracking(self) -> None:
+        """Using an access token should update the client_ips and MAU tables."""
+        # To start, there are no MAU users.
+        store = self.hs.get_datastores().main
+        mau = self.get_success(store.get_monthly_active_count())
+        self.assertEqual(mau, 0)
+
+        known_token = "token-token-GOOD-:)"
+
+        async def mock_http_client_request(
+            url: str, request_body: str, **kwargs: Any
+        ) -> bytes:
+            """Mocked auth provider response."""
+            token = parse_qs(request_body)["token"][0]
+            if token == known_token:
+                return json.dumps(
+                    {
+                        "active": True,
+                        "scope": MATRIX_USER_SCOPE,
+                        "sub": SUBJECT,
+                        "username": USERNAME,
+                    },
+                ).encode("utf-8")
+
+            return json.dumps({"active": False}).encode("utf-8")
+
+        self._rust_client.post = mock_http_client_request
+
+        EXAMPLE_IPV4_ADDR = "123.123.123.123"
+        EXAMPLE_USER_AGENT = "httprettygood"
+
+        # First test a known access token
+        channel = FakeChannel(self.site, self.reactor)
+        # type-ignore: FakeChannel is a mock of an HTTPChannel, not a proper HTTPChannel
+        req = SynapseRequest(channel, self.site, self.hs.hostname)  # type: ignore[arg-type]
+        req.client.host = EXAMPLE_IPV4_ADDR
+        req.requestHeaders.addRawHeader("Authorization", f"Bearer {known_token}")
+        req.requestHeaders.addRawHeader("User-Agent", EXAMPLE_USER_AGENT)
+        req.content = BytesIO(b"")
+        req.requestReceived(
+            b"GET",
+            b"/_matrix/client/v3/account/whoami",
+            b"1.1",
+        )
+        channel.await_result()
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(channel.json_body["user_id"], USER_ID, channel.json_body)
+
+        # Expect to see one MAU entry, from the first request
+        mau = self.get_success(store.get_monthly_active_count())
+        self.assertEqual(mau, 1)
+
+        conn_infos = self.get_success(
+            store.get_user_ip_and_agents(UserID.from_string(USER_ID))
+        )
+        self.assertEqual(len(conn_infos), 1, conn_infos)
+        conn_info = conn_infos[0]
+        self.assertEqual(conn_info["access_token"], known_token)
+        self.assertEqual(conn_info["ip"], EXAMPLE_IPV4_ADDR)
+        self.assertEqual(conn_info["user_agent"], EXAMPLE_USER_AGENT)
+
+        # Now test MAS making a request using the special __oidc_admin token
+        MAS_IPV4_ADDR = "127.0.0.1"
+        MAS_USER_AGENT = "masmasmas"
+
+        channel = FakeChannel(self.site, self.reactor)
+        req = SynapseRequest(channel, self.site, self.hs.hostname)  # type: ignore[arg-type]
+        req.client.host = MAS_IPV4_ADDR
+        req.requestHeaders.addRawHeader(
+            "Authorization", f"Bearer {self.auth._admin_token()}"
+        )
+        req.requestHeaders.addRawHeader("User-Agent", MAS_USER_AGENT)
+        req.content = BytesIO(b"")
+        req.requestReceived(
+            b"GET",
+            b"/_matrix/client/v3/account/whoami",
+            b"1.1",
+        )
+        channel.await_result()
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        self.assertEqual(
+            channel.json_body["user_id"], OIDC_ADMIN_USERID, channel.json_body
+        )
+
+        # Still expect to see one MAU entry, from the first request
+        mau = self.get_success(store.get_monthly_active_count())
+        self.assertEqual(mau, 1)
+
+        conn_infos = self.get_success(
+            store.get_user_ip_and_agents(UserID.from_string(OIDC_ADMIN_USERID))
+        )
+        self.assertEqual(conn_infos, [])
+
+
+@parameterized_class(
+    ("config",),
+    [
+        (
+            {
+                "matrix_authentication_service": {
+                    "enabled": True,
+                    "endpoint": "http://localhost:1234/",
+                    "secret": "secret",
+                },
+            },
+        ),
+    ]
+    # Run the tests with experimental delegation only if authlib is available
+    + [
+        (
+            {
+                "experimental_features": {
+                    "msc3861": {
+                        "enabled": True,
+                        "issuer": ISSUER,
+                        "client_id": CLIENT_ID,
+                        "client_auth_method": "client_secret_post",
+                        "client_secret": CLIENT_SECRET,
+                        "admin_token": "admin_token_value",
+                    }
+                }
+            },
+        ),
+    ]
+    * HAS_AUTHLIB,
+)
+class DisabledEndpointsTestCase(HomeserverTestCase):
+    servlets = [
+        account.register_servlets,
+        devices.register_servlets,
+        keys.register_servlets,
+        register.register_servlets,
+        login.register_servlets,
+        logout.register_servlets,
+        admin.register_servlets,
+    ]
+
+    config: Dict[str, Any]
+
+    def default_config(self) -> Dict[str, Any]:
+        config = super().default_config()
+        config["public_baseurl"] = BASE_URL
+        config["disable_registration"] = True
+        config.update(self.config)
+        return config
+
     def expect_unauthorized(
         self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
     ) -> None:
@@ -774,13 +938,11 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         # Because we still support those endpoints with ASes, it checks the
         # access token before returning 404
-        self._set_introspection_returnvalue(
-            {
-                "active": True,
-                "sub": SUBJECT,
-                "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
-                "username": USERNAME,
-            },
+        self.hs.get_auth().get_user_by_req = AsyncMock(  # type: ignore[method-assign]
+            return_value=create_requester(
+                user_id=USER_ID,
+                device_id=DEVICE,
+            )
         )
 
         self.expect_unrecognized("POST", "/_matrix/client/v3/delete_devices", auth=True)
@@ -810,118 +972,3 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         self.expect_unrecognized("GET", "/_synapse/admin/v1/users/foo/admin")
         self.expect_unrecognized("PUT", "/_synapse/admin/v1/users/foo/admin")
         self.expect_unrecognized("POST", "/_synapse/admin/v1/account_validity/validity")
-
-    def test_admin_token(self) -> None:
-        """The handler should return a requester with admin rights when admin_token is used."""
-        self._set_introspection_returnvalue({"active": False})
-
-        request = Mock(args={})
-        request.args[b"access_token"] = [b"admin_token_value"]
-        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
-        requester = self.get_success(self.auth.get_user_by_req(request))
-        self.assertEqual(
-            requester.user.to_string(),
-            OIDC_ADMIN_USERID,
-        )
-        self.assertEqual(requester.is_guest, False)
-        self.assertEqual(requester.device_id, None)
-        self.assertEqual(
-            get_awaitable_result(self.auth.is_server_admin(requester)), True
-        )
-
-        # There should be no call to the introspection endpoint
-        self._rust_client.post.assert_not_called()
-
-    @override_config({"mau_stats_only": True})
-    def test_request_tracking(self) -> None:
-        """Using an access token should update the client_ips and MAU tables."""
-        # To start, there are no MAU users.
-        store = self.hs.get_datastores().main
-        mau = self.get_success(store.get_monthly_active_count())
-        self.assertEqual(mau, 0)
-
-        known_token = "token-token-GOOD-:)"
-
-        async def mock_http_client_request(
-            url: str, request_body: str, **kwargs: Any
-        ) -> bytes:
-            """Mocked auth provider response."""
-            token = parse_qs(request_body)["token"][0]
-            if token == known_token:
-                return json.dumps(
-                    {
-                        "active": True,
-                        "scope": MATRIX_USER_SCOPE,
-                        "sub": SUBJECT,
-                        "username": USERNAME,
-                    },
-                ).encode("utf-8")
-
-            return json.dumps({"active": False}).encode("utf-8")
-
-        self._rust_client.post = mock_http_client_request
-
-        EXAMPLE_IPV4_ADDR = "123.123.123.123"
-        EXAMPLE_USER_AGENT = "httprettygood"
-
-        # First test a known access token
-        channel = FakeChannel(self.site, self.reactor)
-        # type-ignore: FakeChannel is a mock of an HTTPChannel, not a proper HTTPChannel
-        req = SynapseRequest(channel, self.site, self.hs.hostname)  # type: ignore[arg-type]
-        req.client.host = EXAMPLE_IPV4_ADDR
-        req.requestHeaders.addRawHeader("Authorization", f"Bearer {known_token}")
-        req.requestHeaders.addRawHeader("User-Agent", EXAMPLE_USER_AGENT)
-        req.content = BytesIO(b"")
-        req.requestReceived(
-            b"GET",
-            b"/_matrix/client/v3/account/whoami",
-            b"1.1",
-        )
-        channel.await_result()
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-        self.assertEqual(channel.json_body["user_id"], USER_ID, channel.json_body)
-
-        # Expect to see one MAU entry, from the first request
-        mau = self.get_success(store.get_monthly_active_count())
-        self.assertEqual(mau, 1)
-
-        conn_infos = self.get_success(
-            store.get_user_ip_and_agents(UserID.from_string(USER_ID))
-        )
-        self.assertEqual(len(conn_infos), 1, conn_infos)
-        conn_info = conn_infos[0]
-        self.assertEqual(conn_info["access_token"], known_token)
-        self.assertEqual(conn_info["ip"], EXAMPLE_IPV4_ADDR)
-        self.assertEqual(conn_info["user_agent"], EXAMPLE_USER_AGENT)
-
-        # Now test MAS making a request using the special __oidc_admin token
-        MAS_IPV4_ADDR = "127.0.0.1"
-        MAS_USER_AGENT = "masmasmas"
-
-        channel = FakeChannel(self.site, self.reactor)
-        req = SynapseRequest(channel, self.site, self.hs.hostname)  # type: ignore[arg-type]
-        req.client.host = MAS_IPV4_ADDR
-        req.requestHeaders.addRawHeader(
-            "Authorization", f"Bearer {self.auth._admin_token()}"
-        )
-        req.requestHeaders.addRawHeader("User-Agent", MAS_USER_AGENT)
-        req.content = BytesIO(b"")
-        req.requestReceived(
-            b"GET",
-            b"/_matrix/client/v3/account/whoami",
-            b"1.1",
-        )
-        channel.await_result()
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
-        self.assertEqual(
-            channel.json_body["user_id"], OIDC_ADMIN_USERID, channel.json_body
-        )
-
-        # Still expect to see one MAU entry, from the first request
-        mau = self.get_success(store.get_monthly_active_count())
-        self.assertEqual(mau, 1)
-
-        conn_infos = self.get_success(
-            store.get_user_ip_and_agents(UserID.from_string(OIDC_ADMIN_USERID))
-        )
-        self.assertEqual(conn_infos, [])
