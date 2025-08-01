@@ -1,0 +1,1 @@
+Prevent "Move labelled issues to correct projects" GitHub Actions workflow from failing when an issue is already on the project board.

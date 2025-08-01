@@ -16,6 +16,10 @@ jobs:
         with:
           project-url: "https://github.com/orgs/matrix-org/projects/67"
           github-token: ${{ secrets.ELEMENT_BOT_TOKEN }}
+        # This action will error if the issue already exists on the project. Which is
+        # common as `X-Needs-Info` will often be added to issues that are already in
+        # the triage queue. Prevent the whole job from failing in this case.
+        continue-on-error: true
       - name: Set status
         env:
           GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
