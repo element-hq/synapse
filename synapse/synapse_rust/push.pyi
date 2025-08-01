@@ -49,6 +49,7 @@ class FilteredPushRules:
         msc3664_enabled: bool,
         msc4028_push_encrypted_events: bool,
         msc4210_enabled: bool,
+        msc4306_enabled: bool,
     ): ...
     def rules(self) -> Collection[Tuple[PushRule, bool]]: ...
 
@@ -67,13 +68,19 @@ class PushRuleEvaluator:
         room_version_feature_flags: Tuple[str, ...],
         msc3931_enabled: bool,
         msc4210_enabled: bool,
+        msc4306_enabled: bool,
     ): ...
     def run(
         self,
         push_rules: FilteredPushRules,
         user_id: Optional[str],
         display_name: Optional[str],
+        msc4306_thread_subscription_state: Optional[bool],
     ) -> Collection[Union[Mapping, str]]: ...
     def matches(
-        self, condition: JsonDict, user_id: Optional[str], display_name: Optional[str]
+        self,
+        condition: JsonDict,
+        user_id: Optional[str],
+        display_name: Optional[str],
+        msc4306_thread_subscription_state: Optional[bool] = None,
     ) -> bool: ...

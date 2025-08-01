@@ -19,7 +19,7 @@ def build(setup_kwargs: Dict[str, Any]) -> None:
         # This flag is a no-op in the latest versions. Instead, we need to
         # specify this in the `bdist_wheel` config below.
         py_limited_api=True,
-        # We always build in release mode, as we can't distinguish 
+        # We always build in release mode, as we can't distinguish
         # between using `poetry` in development vs production.
         debug=False,
     )

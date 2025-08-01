@@ -206,7 +206,10 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         bulk_evaluator._action_for_event_by_user.assert_not_called()
 
     def _create_and_process(
-        self, bulk_evaluator: BulkPushRuleEvaluator, content: Optional[JsonDict] = None
+        self,
+        bulk_evaluator: BulkPushRuleEvaluator,
+        content: Optional[JsonDict] = None,
+        type: str = "test",
     ) -> bool:
         """Returns true iff the `mentions` trigger an event push action."""
         # Create a new message event which should cause a notification.
@@ -214,7 +217,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
             self.event_creation_handler.create_event(
                 self.requester,
                 {
-                    "type": "test",
+                    "type": type,
                     "room_id": self.room_id,
                     "content": content or {},
                     "sender": f"@bob:{self.hs.hostname}",
@@ -444,5 +447,75 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                         "user_ids": [self.alice],
                     },
                 },
+            )
+        )
+
+    @override_config({"experimental_features": {"msc4306_enabled": True}})
+    def test_thread_subscriptions(self) -> None:
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+        (thread_root_id,) = self.helper.send_events(self.room_id, 1, tok=self.token)
+
+        self.assertFalse(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "test message before subscription",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
+            )
+        )
+
+        self.get_success(
+            self.hs.get_datastores().main.subscribe_user_to_thread(
+                self.alice,
+                self.room_id,
+                thread_root_id,
+                automatic_event_orderings=None,
+            )
+        )
+
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "test message after subscription",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
+            )
+        )
+
+    def test_with_disabled_thread_subscriptions(self) -> None:
+        """
+        Test what happens with threaded events when MSC4306 is disabled.
+
+        FUTURE: If MSC4306 becomes enabled-by-default/accepted, this test is to be removed.
+        """
+        bulk_evaluator = BulkPushRuleEvaluator(self.hs)
+        (thread_root_id,) = self.helper.send_events(self.room_id, 1, tok=self.token)
+
+        # When MSC4306 is not enabled, a threaded message generates a notification
+        # by default.
+        self.assertTrue(
+            self._create_and_process(
+                bulk_evaluator,
+                {
+                    "msgtype": "m.text",
+                    "body": "test message before subscription",
+                    "m.relates_to": {
+                        "rel_type": RelationTypes.THREAD,
+                        "event_id": thread_root_id,
+                    },
+                },
+                type="m.room.message",
             )
         )
