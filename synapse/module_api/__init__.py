@@ -342,7 +342,9 @@ class ModuleApi:
         self._device_handler = hs.get_device_handler()
         self.custom_template_dir = hs.config.server.custom_template_directory
         self._callbacks = hs.get_module_api_callbacks()
-        self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
         self._event_serializer = hs.get_event_client_serializer()
 
         try:
@@ -549,7 +551,7 @@ class ModuleApi:
 
         Added in Synapse v1.46.0.
         """
-        if self.msc3861_oauth_delegation_enabled:
+        if self._auth_delegation_enabled:
             raise ConfigError(
                 "Cannot use password auth provider callbacks when OAuth delegation is enabled"
             )

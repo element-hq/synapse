@@ -164,7 +164,29 @@ The Grafana dashboard JSON in `contrib/grafana/synapse.json` has been updated to
 this change but you will need to manually update your own existing Grafana dashboards
 using these metrics.
 
+## Stable integration with Matrix Authentication Service
 
+Support for [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service) is now stable, with a simplified configuration.
+This stable integration requires MAS 0.20.0 or later.
+
+The existing `experimental_features.msc3861` configuration option is now deprecated and will be removed in Synapse v1.137.0.
+
+Synapse deployments already using MAS should now use the new configuration options:
+
+```yaml
+matrix_authentication_service:
+  # Enable the MAS integration
+  enabled: true
+  # The base URL where Synapse will contact MAS
+  endpoint: http://localhost:8080
+  # The shared secret used to authenticate MAS requests, must be the same as `matrix.secret` in the MAS configuration
+  # See https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#matrix
+  secret: "asecurerandomsecretstring"
+```
+
+They must remove the `experimental_features.msc3861` configuration option from their configuration.
+
+They can also remove the client previously used by Synapse [in the MAS configuration](https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#clients) as it is no longer in use.
 
 # Upgrading to v1.135.0
 
@@ -186,10 +208,10 @@ native ICU library on your system is no longer required.
 ## Documented endpoint which can be delegated to a federation worker
 
 The endpoint `^/_matrix/federation/v1/version$` can be delegated to a federation
-worker. This is not new behaviour, but had not been documented yet. The 
-[list of delegatable endpoints](workers.md#synapseappgeneric_worker) has 
+worker. This is not new behaviour, but had not been documented yet. The
+[list of delegatable endpoints](workers.md#synapseappgeneric_worker) has
 been updated to include it. Make sure to check your reverse proxy rules if you
-are using workers. 
+are using workers.
 
 # Upgrading to v1.126.0
 

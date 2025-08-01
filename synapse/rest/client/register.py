@@ -1044,7 +1044,7 @@ def _calculate_registration_flows(
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
         RegisterAppServiceOnlyRestServlet(hs).register(http_server)
         return
 

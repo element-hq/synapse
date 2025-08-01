@@ -28,7 +28,6 @@ from authlib.oauth2.auth import encode_client_secret_basic, encode_client_secret
 from authlib.oauth2.rfc7523 import ClientSecretJWT, PrivateKeyJWT, private_key_jwt_sign
 from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
-from prometheus_client import Histogram
 
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
@@ -54,18 +53,13 @@ from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 
+from . import introspection_response_timer
+
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-introspection_response_timer = Histogram(
-    "synapse_api_auth_delegated_introspection_response",
-    "Time taken to get a response for an introspection request",
-    labelnames=["code", SERVER_NAME_LABEL],
-)
-
 
 # Scope as defined by MSC2967
 # https://github.com/matrix-org/matrix-spec-proposals/pull/2967
