@@ -1,0 +1,1 @@
+Fix an issue that could cause logcontexts to be lost on rate-limited requests. Found by @realtyem.
