@@ -21,7 +21,7 @@
 
 from typing import Optional, Tuple
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import MAIN_TIMELINE, RelationTypes
 from synapse.rest import admin
