@@ -532,8 +532,9 @@ the stream writer for the `account_data` stream:
 
 ##### The `receipts` stream
 
-The following endpoints should be routed directly to the worker configured as
-the stream writer for the `receipts` stream:
+The `receipts` stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly one of the workers
+configured as stream writer for the `receipts` stream:
 
     ^/_matrix/client/(r0|v3|unstable)/rooms/.*/receipt
     ^/_matrix/client/(r0|v3|unstable)/rooms/.*/read_markers
