@@ -24,6 +24,7 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     cast,
 )
 
@@ -39,6 +40,7 @@ from synapse.types import (
     MultiWriterStreamToken,
     SlidingSyncStreamToken,
     StrCollection,
+    StreamKeyType,
     StreamToken,
 )
 from synapse.types.handlers.sliding_sync import (
@@ -68,6 +70,7 @@ class SlidingSyncExtensionHandler:
         self.event_sources = hs.get_event_sources()
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
+        self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
 
     @trace
     async def get_extensions_response(
@@ -80,8 +83,11 @@ class SlidingSyncExtensionHandler:
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
-    ) -> SlidingSyncResult.Extensions:
+    ) -> Tuple[SlidingSyncResult.Extensions, StreamToken]:
         """Handle extension requests.
+
+        May clamp the `to_token` and return a new, earlier, one to replace it, if some
+        of the extensions are limited to sending less data down sync.
 
         Args:
             sync_config: Sync configuration
@@ -93,12 +99,13 @@ class SlidingSyncExtensionHandler:
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
+                Extensions may limit themselves to earlier than this.
             from_token: The point in the stream to sync from.
         """
 
         if sync_config.extensions is None:
-            return SlidingSyncResult.Extensions()
+            return SlidingSyncResult.Extensions(), to_token
 
         to_device_coro = None
         if sync_config.extensions.to_device is not None:
@@ -156,19 +163,45 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        thread_subs_coro = None
+        if (
+            sync_config.extensions.thread_subscriptions is not None
+            and self._enable_thread_subscriptions
+        ):
+            thread_subs_coro = self.get_thread_subscriptions_extension_response(
+                sync_config=sync_config,
+                thread_subscriptions_request=sync_config.extensions.thread_subscriptions,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         (
             to_device_response,
             e2ee_response,
             account_data_response,
             receipts_response,
             typing_response,
+            thread_subs_result,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
             account_data_coro,
             receipts_coro,
             typing_coro,
+            thread_subs_coro,
         )
+
+        if thread_subs_result is not None:
+            thread_subs_response, limited_thread_subs_stream_position = (
+                thread_subs_result
+            )
+            if limited_thread_subs_stream_position is not None:
+                to_token = to_token.copy_and_replace(
+                    StreamKeyType.THREAD_SUBSCRIPTIONS,
+                    limited_thread_subs_stream_position,
+                )
+        else:
+            thread_subs_response = None
 
         return SlidingSyncResult.Extensions(
             to_device=to_device_response,
@@ -176,7 +209,8 @@ class SlidingSyncExtensionHandler:
             account_data=account_data_response,
             receipts=receipts_response,
             typing=typing_response,
-        )
+            thread_subscriptions=thread_subs_response,
+        ), to_token
 
     def find_relevant_room_ids_for_extension(
         self,
@@ -877,3 +911,69 @@ class SlidingSyncExtensionHandler:
         return SlidingSyncResult.Extensions.TypingExtension(
             room_id_to_typing_map=room_id_to_typing_map,
         )
+
+    async def get_thread_subscriptions_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        thread_subscriptions_request: SlidingSyncConfig.Extensions.ThreadSubscriptionsExtension,
+        to_token: StreamToken,
+        from_token: Optional[SlidingSyncStreamToken],
+    ) -> Tuple[
+        Optional[SlidingSyncResult.Extensions.ThreadSubscriptionsExtension],
+        Optional[int],
+    ]:
+        """Handle Thread Subscriptions extension (MSC4308)
+
+        Args:
+            sync_config: Sync configuration
+            thread_subscriptions_request: The thread_subscriptions extension from the request
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+
+        Returns:
+            - the response (or None if empty)
+            - optionally, a new thread_subscriptions stream position to use as the new position in
+              the `to_token` (because we generated a limited response)
+        """
+        if not thread_subscriptions_request.enabled:
+            return None, None
+
+        limit = thread_subscriptions_request.limit
+
+        if from_token:
+            from_stream_id = from_token.stream_token.thread_subscriptions_key
+        else:
+            from_stream_id = StreamToken.START.thread_subscriptions_key
+
+        to_stream_id = to_token.thread_subscriptions_key
+
+        updates = await self.store.get_updated_thread_subscriptions_for_user(
+            user_id=sync_config.user.to_string(),
+            from_id=from_stream_id,
+            to_id=to_stream_id,
+            limit=limit,
+        )
+
+        if len(updates) == 0:
+            return None, None
+
+        changes = [
+            SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadSubscriptionChange(
+                room_id=room_id,
+                root_event_id=thread_root_id,
+                subscribed=subscribed,
+                automatic=automatic,
+            )
+            for _stream_id, room_id, thread_root_id, subscribed, automatic in updates
+        ]
+
+        limited_max_stream_position = None
+        if len(updates) == limit:
+            # Given the limited window, we didn't send down all
+            # thread subscription changes to the client.
+            # So don't advance our to_token all the way yet.
+            limited_max_stream_position = updates[-1][0]
+
+        return SlidingSyncResult.Extensions.ThreadSubscriptionsExtension(
+            changed=changes
+        ), limited_max_stream_position
