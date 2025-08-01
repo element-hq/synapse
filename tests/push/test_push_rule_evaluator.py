@@ -829,6 +829,8 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                     "kind": "io.element.msc4306.thread_subscription",
                     "subscribed": True,
                 },
+                None,
+                None,
                 msc4306_thread_subscription_state=True,
             )
         )
@@ -838,6 +840,8 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                     "kind": "io.element.msc4306.thread_subscription",
                     "subscribed": False,
                 },
+                None,
+                None,
                 msc4306_thread_subscription_state=True,
             )
         )
@@ -863,6 +867,8 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                     "kind": "io.element.msc4306.thread_subscription",
                     "subscribed": True,
                 },
+                None,
+                None,
                 msc4306_thread_subscription_state=False,
             )
         )
@@ -872,6 +878,8 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                     "kind": "io.element.msc4306.thread_subscription",
                     "subscribed": False,
                 },
+                None,
+                None,
                 msc4306_thread_subscription_state=False,
             )
         )
@@ -889,6 +897,8 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                     "kind": "io.element.msc4306.thread_subscription",
                     "subscribed": True,
                 },
+                None,
+                None,
                 msc4306_thread_subscription_state=None,
             )
         )
@@ -898,6 +908,8 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
                     "kind": "io.element.msc4306.thread_subscription",
                     "subscribed": False,
                 },
+                None,
+                None,
                 msc4306_thread_subscription_state=None,
             )
         )
