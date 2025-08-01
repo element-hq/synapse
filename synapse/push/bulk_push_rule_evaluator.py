@@ -25,6 +25,7 @@ from typing import (
     Any,
     Collection,
     Dict,
+    FrozenSet,
     List,
     Mapping,
     Optional,
@@ -480,6 +481,15 @@ class BulkPushRuleEvaluator:
             self.hs.config.experimental.msc4306_enabled,
         )
 
+        msc4306_thread_subscribers: Optional[FrozenSet[str]] = None
+        if self.hs.config.experimental.msc4306_enabled and thread_id != MAIN_TIMELINE:
+            # pull out, in batch, all local subscribers to this thread
+            # (in the common case, they will all be getting processed for push
+            # rules right now)
+            msc4306_thread_subscribers = await self.store.get_subscribers_to_thread(
+                event.room_id, thread_id
+            )
+
         for uid, rules in rules_by_user.items():
             if event.sender == uid:
                 continue
@@ -505,14 +515,8 @@ class BulkPushRuleEvaluator:
                 actions_by_user[uid] = []
 
             msc4306_thread_subscription_state: Optional[bool] = None
-            if (
-                self.hs.config.experimental.msc4306_enabled
-                and thread_id != MAIN_TIMELINE
-            ):
-                subscription = await self.store.get_subscription_for_thread(
-                    uid, event.room_id, thread_id
-                )
-                msc4306_thread_subscription_state = subscription is not None
+            if msc4306_thread_subscribers is not None:
+                msc4306_thread_subscription_state = uid in msc4306_thread_subscribers
 
             actions = evaluator.run(
                 rules, uid, display_name, msc4306_thread_subscription_state
