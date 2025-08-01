@@ -1,3 +1,10 @@
+# Synapse 1.135.0 (2025-08-01)
+
+No significant changes since 1.135.0rc2.
+
+
+
+
 # Synapse 1.135.0rc2 (2025-07-30)
 
 ### Bugfixes
