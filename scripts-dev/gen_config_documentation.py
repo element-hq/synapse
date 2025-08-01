@@ -151,7 +151,7 @@ SECTION_HEADERS = {
             "being throttled."
         ),
     },
-    "enable_authenticated_media": {
+    "enable_media_repo": {
         "title": "Media Store",
         "description": "Config options related to Synapse's media store.",
     },

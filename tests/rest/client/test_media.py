@@ -24,11 +24,13 @@ import json
 import os
 import re
 import shutil
+from binascii import unhexlify
 from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
 
+import attr
 from parameterized import parameterized, parameterized_class
 from PIL import Image as Image
 
@@ -61,23 +63,168 @@ from synapse.util import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest
-from tests.media.test_media_storage import (
-    SVG,
-    TestImage,
-    empty_file,
-    small_cmyk_jpeg,
-    small_lossless_webp,
-    small_png,
-    small_png_with_transparency,
-)
 from tests.server import FakeChannel, FakeTransport, ThreadedMemoryReactorClock
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
 from tests.unittest import override_config
 
 try:
     import lxml
 except ImportError:
     lxml = None  # type: ignore[assignment]
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class TestImage:
+    """An image for testing thumbnailing with the expected results
+
+    Attributes:
+        data: The raw image to thumbnail
+        content_type: The type of the image as a content type, e.g. "image/png"
+        extension: The extension associated with the format, e.g. ".png"
+        expected_cropped: The expected bytes from cropped thumbnailing, or None if
+            test should just check for success.
+        expected_scaled: The expected bytes from scaled thumbnailing, or None if
+            test should just check for a valid image returned.
+        expected_found: True if the file should exist on the server, or False if
+            a 404/400 is expected.
+        unable_to_thumbnail: True if we expect the thumbnailing to fail (400), or
+            False if the thumbnailing should succeed or a normal 404 is expected.
+        is_inline: True if we expect the file to be served using an inline
+            Content-Disposition or False if we expect an attachment.
+    """
+
+    data: bytes
+    content_type: bytes
+    extension: bytes
+    expected_cropped: Optional[bytes] = None
+    expected_scaled: Optional[bytes] = None
+    expected_found: bool = True
+    unable_to_thumbnail: bool = False
+    is_inline: bool = True
+
+
+small_png = TestImage(
+    SMALL_PNG,
+    b"image/png",
+    b".png",
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000020000000200806"
+        b"000000737a7af40000001a49444154789cedc101010000008220"
+        b"ffaf6e484001000000ef0610200001194334ee0000000049454e"
+        b"44ae426082"
+    ),
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000001000000010806"
+        b"0000001f15c4890000000d49444154789c636060606000000005"
+        b"0001a5f645400000000049454e44ae426082"
+    ),
+)
+
+small_png_with_transparency = TestImage(
+    unhexlify(
+        b"89504e470d0a1a0a0000000d49484452000000010000000101000"
+        b"00000376ef9240000000274524e5300010194fdae0000000a4944"
+        b"4154789c636800000082008177cd72b60000000049454e44ae426"
+        b"082"
+    ),
+    b"image/png",
+    b".png",
+    # Note that we don't check the output since it varies across
+    # different versions of Pillow.
+)
+
+small_cmyk_jpeg = TestImage(
+    SMALL_CMYK_JPEG,
+    b"image/jpeg",
+    b".jpeg",
+    # These values were sourced simply by seeing at what the tests produced at
+    # the time of writing. If this changes, the tests will fail.
+    unhexlify(
+        b"ffd8ffe000104a46494600010100000100010000ffdb00430006"
+        b"040506050406060506070706080a100a0a09090a140e0f0c1017"
+        b"141818171416161a1d251f1a1b231c1616202c20232627292a29"
+        b"191f2d302d283025282928ffdb0043010707070a080a130a0a13"
+        b"281a161a28282828282828282828282828282828282828282828"
+        b"2828282828282828282828282828282828282828282828282828"
+        b"2828ffc00011080020002003012200021101031101ffc4001f00"
+        b"0001050101010101010000000000000000010203040506070809"
+        b"0a0bffc400b5100002010303020403050504040000017d010203"
+        b"00041105122131410613516107227114328191a1082342b1c115"
+        b"52d1f02433627282090a161718191a25262728292a3435363738"
+        b"393a434445464748494a535455565758595a636465666768696a"
+        b"737475767778797a838485868788898a92939495969798999aa2"
+        b"a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9ca"
+        b"d2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7"
+        b"f8f9faffc4001f01000301010101010101010100000000000001"
+        b"02030405060708090a0bffc400b5110002010204040304070504"
+        b"0400010277000102031104052131061241510761711322328108"
+        b"144291a1b1c109233352f0156272d10a162434e125f11718191a"
+        b"262728292a35363738393a434445464748494a53545556575859"
+        b"5a636465666768696a737475767778797a82838485868788898a"
+        b"92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9"
+        b"bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8"
+        b"e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f00fa"
+        b"a68a28a0028a28a0028a28a0028a28a00fffd9"
+    ),
+    unhexlify(
+        b"ffd8ffe000104a46494600010100000100010000ffdb00430006"
+        b"040506050406060506070706080a100a0a09090a140e0f0c1017"
+        b"141818171416161a1d251f1a1b231c1616202c20232627292a29"
+        b"191f2d302d283025282928ffdb0043010707070a080a130a0a13"
+        b"281a161a28282828282828282828282828282828282828282828"
+        b"2828282828282828282828282828282828282828282828282828"
+        b"2828ffc00011080001000103012200021101031101ffc4001f00"
+        b"0001050101010101010000000000000000010203040506070809"
+        b"0a0bffc400b5100002010303020403050504040000017d010203"
+        b"00041105122131410613516107227114328191a1082342b1c115"
+        b"52d1f02433627282090a161718191a25262728292a3435363738"
+        b"393a434445464748494a535455565758595a636465666768696a"
+        b"737475767778797a838485868788898a92939495969798999aa2"
+        b"a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9ca"
+        b"d2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7"
+        b"f8f9faffc4001f01000301010101010101010100000000000001"
+        b"02030405060708090a0bffc400b5110002010204040304070504"
+        b"0400010277000102031104052131061241510761711322328108"
+        b"144291a1b1c109233352f0156272d10a162434e125f11718191a"
+        b"262728292a35363738393a434445464748494a53545556575859"
+        b"5a636465666768696a737475767778797a82838485868788898a"
+        b"92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9"
+        b"bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8"
+        b"e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f00fa"
+        b"a68a28a00fffd9"
+    ),
+)
+
+small_lossless_webp = TestImage(
+    unhexlify(b"524946461a000000574542505650384c0d0000002f00000010071011118888fe0700"),
+    b"image/webp",
+    b".webp",
+)
+
+empty_file = TestImage(
+    b"",
+    b"image/gif",
+    b".gif",
+    expected_found=False,
+    unable_to_thumbnail=True,
+)
+
+SVG = TestImage(
+    b"""<?xml version="1.0"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="400" height="400">
+  <circle cx="100" cy="100" r="50" stroke="black"
+    stroke-width="5" fill="red" />
+</svg>""",
+    b"image/svg",
+    b".svg",
+    expected_found=False,
+    unable_to_thumbnail=True,
+    is_inline=False,
+)
 
 
 class MediaDomainBlockingTests(unittest.HomeserverTestCase):
@@ -142,6 +289,45 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         )
         self.register_user("user", "password")
         self.tok = self.login("user", "password")
+
+    @override_config(
+        {
+            # Disable downloads from the domain we'll be trying to download from.
+            # Should result in a 404.
+            "prevent_media_downloads_from": ["evil.com"]
+        }
+    )
+    def test_cannot_download_blocked_media(self) -> None:
+        """
+        Tests to ensure that remote media which is blocked cannot be downloaded.
+        """
+        response = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/evil.com/{self.remote_media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(response.code, 404)
+
+    @override_config(
+        {
+            # Disable downloads from a domain we won't be requesting downloads from.
+            # This proves we haven't broken anything.
+            "prevent_media_downloads_from": ["not-listed.com"],
+        }
+    )
+    def test_remote_media_normally_unblocked(self) -> None:
+        """
+        Tests to ensure that remote media is normally able to be downloaded
+        when no domain block is in place.
+        """
+        response = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/evil.com/{self.remote_media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+        self.assertEqual(response.code, 200)
 
     @override_config(
         {
@@ -2552,7 +2738,6 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         os.mkdir(self.storage_path)
         os.mkdir(self.media_store_path)
         config["media_store_path"] = self.media_store_path
-        config["enable_authenticated_media"] = True
 
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",

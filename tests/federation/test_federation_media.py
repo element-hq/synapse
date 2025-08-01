@@ -35,7 +35,7 @@ from synapse.types import UserID
 from synapse.util import Clock
 
 from tests import unittest
-from tests.media.test_media_storage import small_png
+from tests.rest.client.test_media import small_png
 from tests.test_utils import SMALL_PNG
 
 

@@ -291,7 +291,7 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+        if not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
 
@@ -336,7 +336,7 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+        if not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
 
@@ -437,7 +437,7 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+        if not allow_authenticated:
             if media_info.authenticated:
                 respond_404(request)
                 return
@@ -521,7 +521,7 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+        if not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
 
