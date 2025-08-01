@@ -337,7 +337,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
                     callback_return = await self._async_render(request)
                 except LimitExceededError as e:
                     if e.pause:
-                        self._clock.sleep(e.pause)
+                        await self._clock.sleep(e.pause)
                     raise
 
                 if callback_return is not None:
