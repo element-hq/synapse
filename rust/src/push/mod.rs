@@ -174,6 +174,9 @@ pub enum Action {
     Notify,
     SetTweak(SetTweak),
 
+    // In-app only notification as per MSC3768
+    NotifyInApp,
+
     // Legacy actions that should be understood, but are equivalent to no-ops.
     DontNotify,
     Coalesce,
@@ -228,6 +231,7 @@ impl Serialize for Action {
         match self {
             Action::DontNotify => serializer.serialize_str("dont_notify"),
             Action::Notify => serializer.serialize_str("notify"),
+            Action::NotifyInApp => serializer.serialize_str("org.matrix.msc3768.notify_in_app"),
             Action::Coalesce => serializer.serialize_str("coalesce"),
             Action::SetTweak(tweak) => tweak.serialize(serializer),
             Action::Unknown(value) => value.serialize(serializer),
@@ -254,6 +258,7 @@ impl<'de> Deserialize<'de> for Action {
             ActionDeserializeHelper::Str(s) => match &*s {
                 "dont_notify" => Ok(Action::DontNotify),
                 "notify" => Ok(Action::Notify),
+                "org.matrix.msc3768.notify_in_app" => Ok(Action::NotifyInApp),
                 "coalesce" => Ok(Action::Coalesce),
                 _ => Err(D::Error::custom("unrecognized action")),
             },
@@ -786,6 +791,7 @@ fn test_deserialize_custom_condition() {
 fn test_deserialize_action() {
     let _: Action = serde_json::from_str(r#""notify""#).unwrap();
     let _: Action = serde_json::from_str(r#""dont_notify""#).unwrap();
+    let _: Action = serde_json::from_str(r#""org.matrix.msc3768.notify_in_app""#).unwrap();
     let _: Action = serde_json::from_str(r#""coalesce""#).unwrap();
     let _: Action = serde_json::from_str(r#"{"set_tweak": "highlight"}"#).unwrap();
 }

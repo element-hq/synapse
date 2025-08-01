@@ -26,7 +26,13 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import ReceiptTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    Membership,
+    PushRuleActions,
+    ReceiptTypes,
+)
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -39,6 +45,8 @@ from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import PersistedEventPosition
 from synapse.util import Clock
+
+from tests.unittest import override_config
 
 from ._base import BaseWorkerStoreTestCase
 
@@ -75,28 +83,30 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
     def test_get_latest_event_ids_in_room(self) -> None:
-        create = self.persist(type="m.room.create", key="", creator=USER_ID)
+        create = self.persist(type=EventTypes.Create, key="", creator=USER_ID)
         self.replicate()
         self.check("get_latest_event_ids_in_room", (ROOM_ID,), {create.event_id})
 
         join = self.persist(
-            type="m.room.member",
+            type=EventTypes.Member,
             key=USER_ID,
-            membership="join",
+            membership=Membership.JOIN,
             prev_events=[(create.event_id, {})],
         )
         self.replicate()
         self.check("get_latest_event_ids_in_room", (ROOM_ID,), {join.event_id})
 
     def test_redactions(self) -> None:
-        self.persist(type="m.room.create", key="", creator=USER_ID)
-        self.persist(type="m.room.member", key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
 
-        msg = self.persist(type="m.room.message", msgtype="m.text", body="Hello")
+        msg = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello"
+        )
         self.replicate()
         self.check("get_event", [msg.event_id], msg, asserter=self.assertEventsEqual)
 
-        redaction = self.persist(type="m.room.redaction", redacts=msg.event_id)
+        redaction = self.persist(type=EventTypes.Redaction, redacts=msg.event_id)
         self.replicate()
 
         msg_dict = msg.get_dict()
@@ -111,15 +121,17 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
     def test_backfilled_redactions(self) -> None:
-        self.persist(type="m.room.create", key="", creator=USER_ID)
-        self.persist(type="m.room.member", key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
 
-        msg = self.persist(type="m.room.message", msgtype="m.text", body="Hello")
+        msg = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="Hello"
+        )
         self.replicate()
         self.check("get_event", [msg.event_id], msg, asserter=self.assertEventsEqual)
 
         redaction = self.persist(
-            type="m.room.redaction", redacts=msg.event_id, backfill=True
+            type=EventTypes.Redaction, redacts=msg.event_id, backfill=True
         )
         self.replicate()
 
@@ -135,9 +147,11 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
     def test_invites(self) -> None:
-        self.persist(type="m.room.create", key="", creator=USER_ID)
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
         self.check("get_invited_rooms_for_local_user", [USER_ID_2], [])
-        event = self.persist(type="m.room.member", key=USER_ID_2, membership="invite")
+        event = self.persist(
+            type=EventTypes.Member, key=USER_ID_2, membership=Membership.INVITE
+        )
         assert event.internal_metadata.instance_name is not None
         assert event.internal_metadata.stream_ordering is not None
 
@@ -163,12 +177,17 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
 
     @parameterized.expand([(True,), (False,)])
     def test_push_actions_for_user(self, send_receipt: bool) -> None:
-        self.persist(type="m.room.create", key="", creator=USER_ID)
-        self.persist(type="m.room.member", key=USER_ID, membership="join")
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
         self.persist(
-            type="m.room.member", sender=USER_ID, key=USER_ID_2, membership="join"
+            type=EventTypes.Member,
+            sender=USER_ID,
+            key=USER_ID_2,
+            membership=Membership.JOIN,
         )
-        event1 = self.persist(type="m.room.message", msgtype="m.text", body="hello")
+        event1 = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
+        )
         self.replicate()
 
         if send_receipt:
@@ -187,8 +206,8 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
         self.persist(
-            type="m.room.message",
-            msgtype="m.text",
+            type=EventTypes.Message,
+            msgtype=EventContentFields.M_TEXT,
             body="world",
             push_actions=[(USER_ID_2, ["notify"])],
         )
@@ -202,8 +221,8 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         )
 
         self.persist(
-            type="m.room.message",
-            msgtype="m.text",
+            type=EventTypes.Message,
+            msgtype=EventContentFields.M_TEXT,
             body="world",
             push_actions=[
                 (USER_ID_2, ["notify", {"set_tweak": "highlight", "value": True}])
@@ -215,6 +234,107 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             [ROOM_ID, USER_ID_2],
             RoomNotifCounts(
                 NotifCounts(highlight_count=1, unread_count=0, notify_count=2), {}
+            ),
+        )
+
+    @parameterized.expand([(True,), (False,)])
+    @override_config({"experimental_features": {"msc3768_enabled": True}})
+    def test_push_actions_for_user_with_in_app_notifications_notify(
+        self, send_receipt: bool
+    ) -> None:
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
+        self.persist(
+            type=EventTypes.Member,
+            sender=USER_ID,
+            key=USER_ID_2,
+            membership=Membership.JOIN,
+        )
+        event1 = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
+        )
+        self.replicate()
+
+        if send_receipt:
+            self.get_success(
+                self.master_store.insert_receipt(
+                    ROOM_ID, ReceiptTypes.READ, USER_ID_2, [event1.event_id], None, {}
+                )
+            )
+
+        # We start out with zero highlight, unread and notify counts
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=0), {}
+            ),
+        )
+
+        # The notify count should increment when we persist a message with notify
+        self.persist(
+            type=EventTypes.Message,
+            msgtype=EventContentFields.M_TEXT,
+            body="world",
+            push_actions=[(USER_ID_2, ["notify"])],
+        )
+        self.replicate()
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=1), {}
+            ),
+        )
+
+    @parameterized.expand([(True,), (False,)])
+    @override_config({"experimental_features": {"msc3768_enabled": True}})
+    def test_push_actions_for_user_with_in_app_notifications_notify_in_app(
+        self, send_receipt: bool
+    ) -> None:
+        self.persist(type=EventTypes.Create, key="", creator=USER_ID)
+        self.persist(type=EventTypes.Member, key=USER_ID, membership=Membership.JOIN)
+        self.persist(
+            type=EventTypes.Member,
+            sender=USER_ID,
+            key=USER_ID_2,
+            membership=Membership.JOIN,
+        )
+        event1 = self.persist(
+            type=EventTypes.Message, msgtype=EventContentFields.M_TEXT, body="hello"
+        )
+        self.replicate()
+
+        if send_receipt:
+            self.get_success(
+                self.master_store.insert_receipt(
+                    ROOM_ID, ReceiptTypes.READ, USER_ID_2, [event1.event_id], None, {}
+                )
+            )
+
+        # We start out with zero highlight, unread and notify counts
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=0), {}
+            ),
+        )
+
+        # The notify count should also increment when we persist a message
+        # with org.matrix.msc3768.notify_in_app
+        self.persist(
+            type=EventTypes.Message,
+            msgtype=EventContentFields.M_TEXT,
+            body="world",
+            push_actions=[(USER_ID_2, [PushRuleActions.MSC3768_NOTIFY_IN_APP])],
+        )
+        self.replicate()
+        self.check(
+            "get_unread_event_push_actions_by_room_for_user",
+            [ROOM_ID, USER_ID_2],
+            RoomNotifCounts(
+                NotifCounts(highlight_count=0, unread_count=0, notify_count=1), {}
             ),
         )
 
@@ -240,7 +360,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self,
         sender: str = USER_ID,
         room_id: str = ROOM_ID,
-        type: str = "m.room.message",
+        type: str = EventTypes.Message,
         key: Optional[str] = None,
         internal: Optional[dict] = None,
         depth: Optional[int] = None,
