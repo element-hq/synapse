@@ -1,0 +1,1 @@
+Ensure PDUs sent via `/send` pass canonical JSON checks.
