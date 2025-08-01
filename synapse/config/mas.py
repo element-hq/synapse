@@ -28,7 +28,7 @@ from synapse.config.experimental import read_secret_from_file_once
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, RootConfig
 
 
 class MasConfigModel(ParseModel):
@@ -84,6 +84,99 @@ class MasConfig(Config):
         self.endpoint = parsed.endpoint
         self._secret = parsed.secret
         self._secret_path = parsed.secret_path
+
+        self.check_config_conflicts(self.root)
+
+    def check_config_conflicts(
+        self,
+        root: RootConfig,
+    ) -> None:
+        """Checks for any configuration conflicts with other parts of Synapse.
+
+        Raises:
+            ConfigError: If there are any configuration conflicts.
+        """
+
+        if not self.enabled:
+            return
+
+        if root.experimental.msc3861.enabled:
+            raise ConfigError(
+                "Experimental MSC3861 was replaced by Matrix Authentication Service."
+                "Please disable MSC3861 or disable Matrix Authentication Service.",
+                ("experimental", "msc3861"),
+            )
+
+        if (
+            root.auth.password_enabled_for_reauth
+            or root.auth.password_enabled_for_login
+        ):
+            raise ConfigError(
+                "Password auth cannot be enabled when OAuth delegation is enabled",
+                ("password_config", "enabled"),
+            )
+
+        if root.registration.enable_registration:
+            raise ConfigError(
+                "Registration cannot be enabled when OAuth delegation is enabled",
+                ("enable_registration",),
+            )
+
+        # We only need to test the user consent version, as if it must be set if the user_consent section was present in the config
+        if root.consent.user_consent_version is not None:
+            raise ConfigError(
+                "User consent cannot be enabled when OAuth delegation is enabled",
+                ("user_consent",),
+            )
+
+        if (
+            root.oidc.oidc_enabled
+            or root.saml2.saml2_enabled
+            or root.cas.cas_enabled
+            or root.jwt.jwt_enabled
+        ):
+            raise ConfigError("SSO cannot be enabled when OAuth delegation is enabled")
+
+        if bool(root.authproviders.password_providers):
+            raise ConfigError(
+                "Password auth providers cannot be enabled when OAuth delegation is enabled"
+            )
+
+        if root.captcha.enable_registration_captcha:
+            raise ConfigError(
+                "CAPTCHA cannot be enabled when OAuth delegation is enabled",
+                ("captcha", "enable_registration_captcha"),
+            )
+
+        if root.auth.login_via_existing_enabled:
+            raise ConfigError(
+                "Login via existing session cannot be enabled when OAuth delegation is enabled",
+                ("login_via_existing_session", "enabled"),
+            )
+
+        if root.registration.refresh_token_lifetime:
+            raise ConfigError(
+                "refresh_token_lifetime cannot be set when OAuth delegation is enabled",
+                ("refresh_token_lifetime",),
+            )
+
+        if root.registration.nonrefreshable_access_token_lifetime:
+            raise ConfigError(
+                "nonrefreshable_access_token_lifetime cannot be set when OAuth delegation is enabled",
+                ("nonrefreshable_access_token_lifetime",),
+            )
+
+        if root.registration.session_lifetime:
+            raise ConfigError(
+                "session_lifetime cannot be set when OAuth delegation is enabled",
+                ("session_lifetime",),
+            )
+
+        if root.registration.enable_3pid_changes:
+            raise ConfigError(
+                "enable_3pid_changes cannot be enabled when OAuth delegation is enabled",
+                ("enable_3pid_changes",),
+            )
 
     def secret(self) -> str:
         if self._secret is not None:

@@ -110,5 +110,6 @@ class HomeServerConfig(RootConfig):
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
         UserTypesConfig,
+        # This must be last, as it checks for conflicts with other config options.
         MasConfig,
     ]
