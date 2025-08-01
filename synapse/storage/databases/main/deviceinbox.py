@@ -1031,7 +1031,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
-            self._clock.sleep(1)
+            await self._clock.sleep(1)
 
     async def get_devices_with_messages(
         self, user_id: str, device_ids: StrCollection

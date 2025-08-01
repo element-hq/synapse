@@ -202,6 +202,93 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         self.assertEqual(cache_size_metric_value, "1.0")
         self.assertEqual(cache_max_size_metric_value, "777.0")
 
+    def test_cache_metric_multiple_servers(self) -> None:
+        """
+        Test that cache metrics are reported correctly across multiple servers. We will
+        have an metrics entry for each homeserver that is labeled with the `server_name`
+        label.
+        """
+        CACHE_NAME = "cache_metric_multiple_servers_test"
+        cache1: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, server_name="hs1", max_entries=777
+        )
+        cache2: DeferredCache[str, str] = DeferredCache(
+            name=CACHE_NAME, server_name="hs2", max_entries=777
+        )
+
+        metrics_map = get_latest_metrics()
+
+        hs1_cache_size_metric = (
+            f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        )
+        hs2_cache_size_metric = (
+            f'synapse_util_caches_cache_size{{name="{CACHE_NAME}",server_name="hs2"}}'
+        )
+        hs1_cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs1"}}'
+        hs2_cache_max_size_metric = f'synapse_util_caches_cache_max_size{{name="{CACHE_NAME}",server_name="hs2"}}'
+
+        # Find the metrics for the caches from both homeservers
+        hs1_cache_size_metric_value = metrics_map.get(hs1_cache_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_size_metric_value,
+            f"Missing metric {hs1_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_size_metric_value = metrics_map.get(hs2_cache_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_size_metric_value,
+            f"Missing metric {hs2_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs1_cache_max_size_metric_value = metrics_map.get(hs1_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_max_size_metric_value,
+            f"Missing metric {hs1_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_max_size_metric_value = metrics_map.get(hs2_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_max_size_metric_value,
+            f"Missing metric {hs2_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1_cache_size_metric_value, "0.0")
+        self.assertEqual(hs2_cache_size_metric_value, "0.0")
+        self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
+        self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
+        # Add something to both caches to change the numbers
+        cache1.prefill("1", "hi")
+        cache2.prefill("2", "ho")
+
+        metrics_map = get_latest_metrics()
+
+        # Find the metrics for the caches from both homeservers
+        hs1_cache_size_metric_value = metrics_map.get(hs1_cache_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_size_metric_value,
+            f"Missing metric {hs1_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_size_metric_value = metrics_map.get(hs2_cache_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_size_metric_value,
+            f"Missing metric {hs2_cache_size_metric} in cache metrics {metrics_map}",
+        )
+        hs1_cache_max_size_metric_value = metrics_map.get(hs1_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs1_cache_max_size_metric_value,
+            f"Missing metric {hs1_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+        hs2_cache_max_size_metric_value = metrics_map.get(hs2_cache_max_size_metric)
+        self.assertIsNotNone(
+            hs2_cache_max_size_metric_value,
+            f"Missing metric {hs2_cache_max_size_metric} in cache metrics {metrics_map}",
+        )
+
+        # Sanity check the metric values
+        self.assertEqual(hs1_cache_size_metric_value, "1.0")
+        self.assertEqual(hs2_cache_size_metric_value, "1.0")
+        self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
+        self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
 
 class LaterGaugeTests(unittest.HomeserverTestCase):
     def test_later_gauge_multiple_servers(self) -> None:
