@@ -1235,6 +1235,10 @@ class SlidingSyncRoomLists:
                 )
             )
 
+        deleted_rooms = await self.store.get_deleted_rooms_for_user(
+            user_id, to_token.room_key.stream
+        )
+
         # 1) Assemble a list of the last membership events in some given ranges. Someone
         # could have left and joined multiple times during the given range but we only
         # care about end-result so we grab the last one.
@@ -1295,6 +1299,32 @@ class SlidingSyncRoomLists:
                     event_pos=last_membership_change_in_from_to_range.event_pos,
                     room_version_id=await self.store.get_room_version_id(room_id),
                 )
+        for room_id, room_version_id, stream_pos in deleted_rooms:
+            if newly_left_room_map[room_id]:
+                logger.info(
+                    "Room %s in newly deleted list, not handling for %s",
+                    room_id,
+                    user_id,
+                )
+                # It's possible that if the user is syncing at the same time the room is deleted then they will
+                # see a genuine leave event from the room, so we don't need a synthetic leave.
+                continue
+            # Otherwise, generate a synthetic leave to tell clients that the room has been deleted.
+            logger.info(
+                "Generating synthetic leave for %s in %s as room was deleted.",
+                user_id,
+                room_id,
+            )
+            # Note we use RoomsForUserStateReset here as it's ideal for the purpose of a deleted
+            # room where the event that caused us to leave no longer exists.
+            newly_left_room_map[room_id] = RoomsForUserStateReset(
+                room_id=room_id,
+                sender=None,
+                membership=Membership.LEAVE,
+                event_id=None,
+                event_pos=stream_pos,
+                room_version_id=room_version_id,
+            )
 
         # 2) Figure out `newly_joined`
         for room_id in possibly_newly_joined_room_ids:

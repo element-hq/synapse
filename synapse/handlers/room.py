@@ -1834,6 +1834,7 @@ class RoomShutdownHandler:
         self._replication = hs.get_replication_data_handler()
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
         self.event_creation_handler = hs.get_event_creation_handler()
+        self.as_handler = hs.get_application_service_handler()
         self.store = hs.get_datastores().main
 
     async def shutdown_room(
@@ -1953,12 +1954,23 @@ class RoomShutdownHandler:
         else:
             logger.info("Shutting down room %r", room_id)
 
-        users = await self.store.get_local_users_related_to_room(room_id)
-        for user_id, membership in users:
-            # If the user is not in the room (or is banned), nothing to do.
-            if membership not in (Membership.JOIN, Membership.INVITE, Membership.KNOCK):
-                continue
+        # If the user is not in the room (or is banned), nothing to do.
+        users = [
+            user
+            for user in await self.store.get_local_users_related_to_room(room_id)
+            if user[1] in (Membership.JOIN, Membership.INVITE, Membership.KNOCK)
+        ]
 
+        # When deleting a room, we want to store the local membership state so that we
+        # can still send synthetic leaves down sync after the room has been purged (if indeed it has).
+        # We must do this prior to kicking as otherwise the current_state_events
+        # table will be empty.
+        delete_stream_id = await self.store.store_deleted_room_members(room_id)
+        await self.as_handler.notify_room_deletion(
+            room_id, delete_stream_id, [user_id for user_id, _membership in users]
+        )
+
+        for user_id, membership in users:
             logger.info("Kicking %r from %r...", user_id, room_id)
 
             try:

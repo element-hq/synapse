@@ -36,7 +36,7 @@ from prometheus_client import Counter
 from twisted.internet import defer
 
 import synapse
-from synapse.api.constants import EduTypes, EventTypes
+from synapse.api.constants import EduTypes, EventTypes, Membership
 from synapse.appservice import ApplicationService
 from synapse.events import EventBase
 from synapse.handlers.presence import format_user_presence_state
@@ -147,6 +147,24 @@ class ApplicationServicesHandler:
 
                     events_by_room: Dict[str, List[EventBase]] = {}
                     for event in events:
+                        # We never want to send leave events from deleted rooms to the AS since the events
+                        # may have been purged by the time it's pushed to the AS. Instead, we handle this
+                        # elsewhere.
+                        membership = event.content.get("membership")
+                        state_key = event.get_state_key()
+                        if (
+                            state_key is not None
+                            and event.type == EventTypes.Member
+                            and membership == Membership.LEAVE
+                        ):
+                            if await self.store.has_room_been_deleted(event.room_id):
+                                logger.debug(
+                                    "Filtering %s from appservice as it's a leave event (%s) from deleted room %s",
+                                    event.event_id,
+                                    state_key,
+                                    event.room_id,
+                                )
+                                continue
                         events_by_room.setdefault(event.room_id, []).append(event)
 
                     async def handle_event(event: EventBase) -> None:
@@ -241,6 +259,18 @@ class ApplicationServicesHandler:
                         ).set(ts)
             finally:
                 self.is_processing = False
+
+    async def notify_room_deletion(
+        self, room_id: str, deleted_stream_id: int, users: Iterable[str]
+    ) -> None:
+        services = self.store.get_app_services()
+        for service in services:
+            if any(
+                service.is_interested_in_user(user_id) for user_id in users
+            ) or await service.is_interested_in_room(room_id, self.store):
+                await self.store.create_appservice_stream_id_txn(
+                    service, deleted_stream_id
+                )
 
     def notify_interested_services_ephemeral(
         self,

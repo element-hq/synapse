@@ -52,7 +52,7 @@ from synapse.api.constants import (
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.handlers.relations import BundledAggregations
 from synapse.logging import issue9533_logger
 from synapse.logging.context import current_context
@@ -1845,7 +1845,7 @@ class SyncHandler:
             full_state,
         )
 
-        logger.debug(
+        logger.info(
             "Calculating sync response for %r between %s and %s",
             sync_config.user,
             sync_result_builder.since_token,
@@ -2402,6 +2402,9 @@ class SyncHandler:
 
         since_token = sync_result_builder.since_token
         user_id = sync_result_builder.sync_config.user.to_string()
+        logger.info(
+            "Generating _generate_sync_entry_for_rooms for %s %s", user_id, since_token
+        )
 
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
@@ -2443,19 +2446,22 @@ class SyncHandler:
         # no point in going further.
         if not sync_result_builder.full_state:
             if since_token and not ephemeral_by_room and not account_data_by_room:
-                have_changed = await self._have_rooms_changed(sync_result_builder)
+                have_changed = await self._have_rooms_changed(
+                    sync_result_builder, user_id
+                )
                 log_kv({"rooms_have_changed": have_changed})
                 if not have_changed:
                     tags_by_room = await self.store.get_updated_tags(
                         user_id, since_token.account_data_key
                     )
                     if not tags_by_room:
-                        logger.debug("no-oping sync")
+                        logger.info("no-oping sync")
                         return set(), set()
 
         # 3. Work out which rooms need reporting in the sync response.
         ignored_users = await self.store.ignored_users(user_id)
         if since_token:
+            logger.info("With since_token %s %s", user_id, since_token)
             room_changes = await self._get_room_changes_for_incremental_sync(
                 sync_result_builder, ignored_users
             )
@@ -2500,7 +2506,7 @@ class SyncHandler:
         return set(newly_joined_rooms), set(newly_left_rooms)
 
     async def _have_rooms_changed(
-        self, sync_result_builder: "SyncResultBuilder"
+        self, sync_result_builder: "SyncResultBuilder", user_id: str
     ) -> bool:
         """Returns whether there may be any new events that should be sent down
         the sync. Returns True if there are.
@@ -2513,6 +2519,13 @@ class SyncHandler:
         assert since_token
 
         if membership_change_events or sync_result_builder.forced_newly_joined_room_ids:
+            return True
+
+        # If we have any deleted rooms to send down sync (which do not appear down the event paths)
+        # then also emit a room change.
+        if await self.store.has_deleted_rooms_for_user(
+            user_id, since_token.room_key.stream
+        ):
             return True
 
         stream_id = since_token.room_key.stream
@@ -2772,6 +2785,56 @@ class SyncHandler:
                 )
 
             room_entries.append(entry)
+
+        deleted_left_rooms = await self.store.get_deleted_rooms_for_user(
+            user_id, since_token.room_key.stream
+        )
+
+        for room_id, room_version, deleted_stream_id in deleted_left_rooms:
+            if room_id in newly_left_rooms:
+                # It's possible that if the user is syncing at the same time the room is deleted then they will
+                # see a genuine leave event from the room, so we don't need a synthetic leave.
+                continue
+            # Otherwise, generate a synthetic leave to tell clients that the room has been deleted.
+            logger.info(
+                "Generating synthetic leave for %s in %s as room was deleted.",
+                user_id,
+                room_id,
+            )
+            # Synthetic leaves for deleted rooms
+            leave_evt = make_event_from_dict(
+                {
+                    "state_key": user_id,
+                    "sender": user_id,
+                    "room_id": room_id,
+                    "type": "m.room.member",
+                    "content": {
+                        "membership": "leave",
+                        "reason": "The room has been deleted",
+                    },
+                },
+                # We have no idea what the room version is since the room is gone
+                KNOWN_ROOM_VERSIONS[room_version],
+            )
+            # Ensure the event is treated as an outlier since we are not persisting this!
+            leave_evt.internal_metadata.outlier = True
+            leave_evt.internal_metadata.out_of_band_membership = True
+            leave_evt.internal_metadata.stream_ordering = deleted_stream_id.stream
+
+            room_entries.append(
+                RoomSyncResultBuilder(
+                    room_id=room_id,
+                    rtype="archived",
+                    events=[leave_evt],
+                    newly_joined=False,
+                    full_state=False,
+                    since_token=since_token,
+                    upto_token=since_token,
+                    end_token=since_token,
+                    out_of_band=True,
+                )
+            )
+            newly_left_rooms.append(room_id)
 
         return _RoomChanges(
             room_entries,
