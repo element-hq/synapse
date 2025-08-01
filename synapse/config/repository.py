@@ -288,8 +288,6 @@ class ContentRepositoryConfig(Config):
                 remote_media_lifetime
             )
 
-        self.enable_authenticated_media = config.get("enable_authenticated_media", True)
-
         self.media_upload_limits: List[MediaUploadLimit] = []
         for limit_config in config.get("media_upload_limits", []):
             time_period_ms = self.parse_duration(limit_config["time_period"])

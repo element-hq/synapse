@@ -40,7 +40,6 @@ from tests.http import (
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeChannel, FakeTransport, make_request
 from tests.test_utils import SMALL_PNG
-from tests.unittest import override_config
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +91,7 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
             self.reactor,
             self._hs_to_site[hs],
             "GET",
-            f"/_matrix/media/r0/download/{target}/{media_id}",
+            f"/_matrix/client/v1/media/download/{target}/{media_id}",
             shorthand=False,
             access_token=self.access_token,
             await_result=False,
@@ -149,7 +148,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
 
         return channel, request
 
-    @override_config({"enable_authenticated_media": False})
     def test_basic(self) -> None:
         """Test basic fetching of remote media from a single worker."""
         hs1 = self.make_worker_hs("synapse.app.generic_worker")
@@ -166,7 +164,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.result["body"], b"Hello!")
 
-    @override_config({"enable_authenticated_media": False})
     def test_download_simple_file_race(self) -> None:
         """Test that fetching remote media from two different processes at the
         same time works.
@@ -206,7 +203,6 @@ class MediaRepoShardTestCase(BaseMultiWorkerStreamTestCase):
         # We expect only one new file to have been persisted.
         self.assertEqual(start_count + 1, self._count_remote_media())
 
-    @override_config({"enable_authenticated_media": False})
     def test_download_image_race(self) -> None:
         """Test that fetching remote *images* from two different processes at
         the same time works.
