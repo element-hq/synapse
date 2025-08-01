@@ -260,7 +260,7 @@ information.
     ^/_matrix/client/(r0|v3|unstable)/keys/claim$
     ^/_matrix/client/(r0|v3|unstable)/room_keys/
     ^/_matrix/client/(r0|v3|unstable)/keys/upload
-    ^/_matrix/client/(api/v1|r0|v3|unstable/keys/device_signing/upload$
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
     # Registration/login requests
@@ -561,7 +561,7 @@ configured as stream writer for the `device_lists` stream:
     ^/_matrix/client/(r0|v3)/delete_devices$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
     ^/_matrix/client/(r0|v3|unstable)/keys/upload
-    ^/_matrix/client/(api/v1|r0|v3|unstable/keys/device_signing/upload$
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
 #### Restrict outbound federation traffic to a specific set of workers
