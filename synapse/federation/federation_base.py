@@ -343,6 +343,21 @@ def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventB
     if room_version.strict_canonicaljson:
         validate_canonicaljson(pdu_json)
 
+    # enforce that MSC4291 auth events don't include the create event.
+    # N.B. if they DO include a spurious create event, it'll fail auth checks elsewhere, so we don't
+    # need to do expensive DB lookups to find which event ID is the create event here.
+    if room_version.msc4291_room_ids_as_hashes:
+        room_id = pdu_json.get("room_id")
+        if room_id:
+            create_event_id = "$" + room_id[1:]
+            auth_events = pdu_json.get("auth_events")
+            if auth_events:
+                if create_event_id in auth_events:
+                    raise SynapseError(
+                        400,
+                        "auth_events must not contain the create event",
+                        Codes.BAD_JSON,
+                    )
     event = make_event_from_dict(pdu_json, room_version)
     return event
 

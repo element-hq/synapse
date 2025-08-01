@@ -101,6 +101,9 @@ def compute_content_hash(
     event_dict.pop("outlier", None)
     event_dict.pop("destinations", None)
 
+    # N.B. no need to pop the room_id from create events in MSC4291 rooms
+    # as they shouldn't have one.
+
     event_json_bytes = encode_canonical_json(event_dict)
 
     hashed = hash_algorithm(event_json_bytes)

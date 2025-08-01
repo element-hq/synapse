@@ -1160,9 +1160,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         elif effective_membership_state == Membership.KNOCK:
             if not is_host_in_room:
-                # The knock needs to be sent over federation instead
-                remote_room_hosts.append(get_domain_from_id(room_id))
-
+                # we used to add the domain of the room ID to remote_room_hosts.
+                # This is not safe in MSC4291 rooms which do not have a domain.
                 content["membership"] = Membership.KNOCK
 
                 try:

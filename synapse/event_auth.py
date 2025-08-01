@@ -261,7 +261,8 @@ async def check_state_independent_auth_rules(
                 f"Event {event.event_id} has unexpected auth_event for {k}: {auth_event_id}",
             )
 
-        # We also need to check that the auth event itself is not rejected.
+        # 2.3 ... If there are entries which were themselves rejected under the checks performed on receipt
+        # of a PDU, reject.
         if auth_event.rejected_reason:
             raise AuthError(
                 403,
@@ -271,7 +272,7 @@ async def check_state_independent_auth_rules(
 
         auth_dict[k] = auth_event_id
 
-    # 3. If event does not have a m.room.create in its auth_events, reject.
+    # 2.4. If event does not have a m.room.create in its auth_events, reject.
     creation_event = auth_dict.get((EventTypes.Create, ""), None)
     if not creation_event:
         raise AuthError(403, "No create event in auth events")
@@ -311,13 +312,14 @@ def check_state_dependent_auth_rules(
 
     # Later code relies on there being a create event e.g _can_federate, _is_membership_change_allowed
     # so produce a more intelligible error if we don't have one.
-    if auth_dict.get(CREATE_KEY) is None:
+    create_event = auth_dict.get(CREATE_KEY)
+    if create_event is None:
         raise AuthError(
             403, f"Event {event.event_id} is missing a create event in auth_events."
         )
 
     # additional check for m.federate
-    creating_domain = get_domain_from_id(event.room_id)
+    creating_domain = get_domain_from_id(create_event.sender)
     originating_domain = get_domain_from_id(event.sender)
     if creating_domain != originating_domain:
         if not _can_federate(event, auth_dict):
@@ -470,12 +472,20 @@ def _check_create(event: "EventBase") -> None:
     if event.prev_event_ids():
         raise AuthError(403, "Create event has prev events")
 
-    # 1.2 If the domain of the room_id does not match the domain of the sender,
-    # reject.
-    sender_domain = get_domain_from_id(event.sender)
-    room_id_domain = get_domain_from_id(event.room_id)
-    if room_id_domain != sender_domain:
-        raise AuthError(403, "Creation event's room_id domain does not match sender's")
+    if event.room_version.msc4291_room_ids_as_hashes:
+        # 1.2 If the create event has a room_id, reject
+        if "room_id" in event:
+            raise AuthError(403, "Create event has a room_id")
+    else:
+        # 1.2 If the domain of the room_id does not match the domain of the sender,
+        # reject.
+        if not event.room_version.msc4291_room_ids_as_hashes:
+            sender_domain = get_domain_from_id(event.sender)
+            room_id_domain = get_domain_from_id(event.room_id)
+            if room_id_domain != sender_domain:
+                raise AuthError(
+                    403, "Creation event's room_id domain does not match sender's"
+                )
 
     # 1.3 If content.room_version is present and is not a recognised version, reject
     room_version_prop = event.content.get("room_version", "1")
@@ -533,7 +543,13 @@ def _is_membership_change_allowed(
 
     target_user_id = event.state_key
 
-    creating_domain = get_domain_from_id(event.room_id)
+    # We need the create event in order to check if we can federate or not.
+    # If it's missing, yell loudly. Previously we only did this inside the
+    # _can_federate check.
+    create_event = auth_events.get((EventTypes.Create, ""))
+    if not create_event:
+        raise AuthError(403, "Create event missing from auth_events")
+    creating_domain = get_domain_from_id(create_event.sender)
     target_domain = get_domain_from_id(target_user_id)
     if creating_domain != target_domain:
         if not _can_federate(event, auth_events):
