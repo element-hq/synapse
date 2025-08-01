@@ -115,7 +115,8 @@ class ReactorLastSeenMetric(Collector):
         self._call_wrapper = call_wrapper
 
     def collect(self) -> Iterable[Metric]:
-        cm = GaugeMetricFamily(
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        cm = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
             "python_twisted_reactor_last_seen",
             "Seconds since the Twisted reactor was last seen",
         )
@@ -166,4 +167,5 @@ except Exception as e:
 
 
 if wrapper:
-    REGISTRY.register(ReactorLastSeenMetric(wrapper))
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(ReactorLastSeenMetric(wrapper))  # type: ignore[missing-server-name-label]

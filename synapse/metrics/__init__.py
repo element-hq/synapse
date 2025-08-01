@@ -170,7 +170,9 @@ class LaterGauge(Collector):
     ]
 
     def collect(self) -> Iterable[Metric]:
-        g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)
+        # The decision to add `SERVER_NAME_LABEL` is from the `LaterGauge` usage itself
+        # (we don't enforce it here, one level up).
+        g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
         try:
             calls = self.caller()
@@ -304,7 +306,9 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
         Note: may be called by a separate thread.
         """
-        in_flight = GaugeMetricFamily(
+        # The decision to add `SERVER_NAME_LABEL` is from the `GaugeBucketCollector`
+        # usage itself (we don't enforce it here, one level up).
+        in_flight = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
             self.name + "_total", self.desc, labels=self.labels
         )
 
@@ -328,7 +332,9 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         yield in_flight
 
         for name in self.sub_metrics:
-            gauge = GaugeMetricFamily(
+            # The decision to add `SERVER_NAME_LABEL` is from the `InFlightGauge` usage
+            # itself (we don't enforce it here, one level up).
+            gauge = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
                 "_".join([self.name, name]), "", labels=self.labels
             )
             for key, metrics in metrics_by_key.items():
@@ -483,7 +489,9 @@ class GaugeBucketCollector(Collector):
         # that bucket or below.
         accumulated_values = itertools.accumulate(bucket_values)
 
-        return GaugeHistogramMetricFamilyWithLabels(
+        # The decision to add `SERVER_NAME_LABEL` is from the `GaugeBucketCollector`
+        # usage itself (we don't enforce it here, one level up).
+        return GaugeHistogramMetricFamilyWithLabels(  # type: ignore[missing-server-name-label]
             name=self._name,
             documentation=self._documentation,
             labelnames=self._labelnames,
@@ -519,16 +527,19 @@ class CPUMetrics(Collector):
             line = s.read()
             raw_stats = line.split(") ", 1)[1].split(" ")
 
-            user = GaugeMetricFamily("process_cpu_user_seconds_total", "")
+            # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+            user = GaugeMetricFamily("process_cpu_user_seconds_total", "")  # type: ignore[missing-server-name-label]
             user.add_metric([], float(raw_stats[11]) / self.ticks_per_sec)
             yield user
 
-            sys = GaugeMetricFamily("process_cpu_system_seconds_total", "")
+            # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+            sys = GaugeMetricFamily("process_cpu_system_seconds_total", "")  # type: ignore[missing-server-name-label]
             sys.add_metric([], float(raw_stats[12]) / self.ticks_per_sec)
             yield sys
 
 
-REGISTRY.register(CPUMetrics())
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 
 
 #
