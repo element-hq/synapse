@@ -14,7 +14,6 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Iterable,
     List,
     Optional,
@@ -47,6 +46,14 @@ class ThreadSubscription:
     """
     whether the subscription was made automatically (as opposed to by manual
     action from the user)
+    """
+
+
+class AutomaticSubscriptionConflicted:
+    """
+    Marker return value to signal that an automatic subscription was skipped,
+    because it conflicted with an unsubscription that we consider to have
+    been made later than the event causing the automatic subscription.
     """
 
 
@@ -101,9 +108,53 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             self._thread_subscriptions_id_gen.advance(instance_name, token)
         super().process_replication_position(stream_name, instance_name, token)
 
+    @staticmethod
+    def _should_skip_autosubscription_after_unsubscription(
+        autosub_stream_ordering: int,
+        autosub_topological_ordering: int,
+        unsubscribed_at_stream_ordering: int,
+        unsubscribed_at_topological_ordering: int,
+    ) -> bool:
+        """
+        Returns whether an automatic subscription occurring following an unsubscription
+        should be skipped, because the unsubscription already 'acknowledges' the event
+        causing the automatic subscription (the cause event).
+
+        Args:
+            autosub_stream_ordering: the stream_ordering of the cause event
+            autosub_topological_ordering: the topological_ordering of the cause event
+            unsubscribed_at_stream_ordering: the maximum stream ordering at the time of unsubscription
+            unsubscribed_at_topological_ordering: the maximum stream ordering at the time of unsubscription
+
+        Returns:
+            True if the automatic subscription should be skipped
+        """
+        # these two orderings should be positive, because they don't refer to a specific event
+        # but rather the maximum at the time of unsubscription
+        assert unsubscribed_at_stream_ordering > 0
+        assert unsubscribed_at_topological_ordering > 0
+
+        if unsubscribed_at_stream_ordering >= autosub_stream_ordering > 0:
+            # non-backfilled events: the unsubscription is later according to
+            # the stream
+            return True
+
+        if autosub_stream_ordering < 0:
+            # the auto-subscription cause event was backfilled, so fall back to
+            # topological ordering
+            if unsubscribed_at_topological_ordering >= autosub_topological_ordering:
+                return True
+
+        return False
+
     async def subscribe_user_to_thread(
-        self, user_id: str, room_id: str, thread_root_event_id: str, *, automatic: bool
-    ) -> Optional[int]:
+        self,
+        user_id: str,
+        room_id: str,
+        thread_root_event_id: str,
+        *,
+        automatic_event_orderings: Optional[Tuple[int, int]],
+    ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
         """Updates a user's subscription settings for a specific thread root.
 
         If no change would be made to the subscription, does not produce any database change.
@@ -112,50 +163,100 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             user_id: The ID of the user whose settings are being updated.
             room_id: The ID of the room the thread root belongs to.
             thread_root_event_id: The event ID of the thread root.
-            automatic: Whether the subscription was performed automatically by the user's client.
-                Only `False` will overwrite an existing value of automatic for a subscription row.
+            automatic_event_id:
+                Value depends on whether the subscription was performed automatically by the user's client.
+                For manual subscriptions: None.
+                For automatic subscriptions: (stream_ordering, topological_ordering) of the event.
 
         Returns:
-            The stream ID for this update, if the update isn't no-opped.
+            If a subscription is made: (int) the stream ID for this update.
+            If a subscription already exists and did not need to be updated: None
+            If an automatic subscription conflicted with an unsubscription: AutomaticSubscriptionConflicted
         """
         assert self._can_write_to_thread_subscriptions
 
-        def _subscribe_user_to_thread_txn(txn: LoggingTransaction) -> Optional[int]:
-            already_automatic = self.db_pool.simple_select_one_onecol_txn(
+        def _subscribe_user_to_thread_txn(
+            txn: LoggingTransaction,
+        ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
+            requested_automatic = automatic_event_orderings is not None
+
+            row = self.db_pool.simple_select_one_txn(
                 txn,
                 table="thread_subscriptions",
                 keyvalues={
                     "user_id": user_id,
                     "event_id": thread_root_event_id,
                     "room_id": room_id,
-                    "subscribed": True,
                 },
-                retcol="automatic",
+                retcols=(
+                    "subscribed",
+                    "automatic",
+                    "unsubscribed_at_stream_ordering",
+                    "unsubscribed_at_topological_ordering",
+                ),
                 allow_none=True,
             )
 
-            if already_automatic is None:
-                already_subscribed = False
-                already_automatic = True
-            else:
-                already_subscribed = True
-                # convert int (SQLite bool) to Python bool
-                already_automatic = bool(already_automatic)
+            if row is None:
+                # We have never subscribed before, simply insert the row and finish
+                stream_id = self._thread_subscriptions_id_gen.get_next_txn(txn)
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    table="thread_subscriptions",
+                    values={
+                        "user_id": user_id,
+                        "event_id": thread_root_event_id,
+                        "room_id": room_id,
+                        "subscribed": True,
+                        "stream_id": stream_id,
+                        "instance_name": self._instance_name,
+                        "automatic": requested_automatic,
+                        "unsubscribed_at_stream_ordering": None,
+                        "unsubscribed_at_topological_ordering": None,
+                    },
+                )
+                txn.call_after(
+                    self.get_subscription_for_thread.invalidate,
+                    (user_id, room_id, thread_root_event_id),
+                )
+                return stream_id
 
-            if already_subscribed and already_automatic == automatic:
-                # there is nothing we need to do here
+            # we already have either a subscription or a prior unsubscription here
+            (
+                subscribed,
+                already_automatic,
+                unsubscribed_at_stream_ordering,
+                unsubscribed_at_topological_ordering,
+            ) = row
+
+            if subscribed and (not already_automatic or requested_automatic):
+                # we are already subscribed and the current subscription state
+                # is good enough (either we already have a manual subscription,
+                # or we requested an automatic subscription)
+                # In that case, nothing to change here.
                 return None
 
+            if not subscribed and requested_automatic:
+                assert automatic_event_orderings is not None
+                # we previously unsubscribed and we are now automatically subscribing
+                # Check whether the new autosubscription should be skipped
+                autosub_stream_ordering, autosub_topological_ordering = (
+                    automatic_event_orderings
+                )
+                if ThreadSubscriptionsWorkerStore._should_skip_autosubscription_after_unsubscription(
+                    autosub_stream_ordering,
+                    autosub_topological_ordering,
+                    unsubscribed_at_stream_ordering,
+                    unsubscribed_at_topological_ordering,
+                ):
+                    # skip the subscription
+                    return AutomaticSubscriptionConflicted()
+
+            # At this point: we have now finished checking that we need to make
+            # a subscription, updating the current row.
+
             stream_id = self._thread_subscriptions_id_gen.get_next_txn(txn)
-
-            values: Dict[str, Optional[Union[bool, int, str]]] = {
-                "subscribed": True,
-                "stream_id": stream_id,
-                "instance_name": self._instance_name,
-                "automatic": already_automatic and automatic,
-            }
-
-            self.db_pool.simple_upsert_txn(
+            self.db_pool.simple_update_txn(
                 txn,
                 table="thread_subscriptions",
                 keyvalues={
@@ -163,9 +264,15 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                     "event_id": thread_root_event_id,
                     "room_id": room_id,
                 },
-                values=values,
+                updatevalues={
+                    "subscribed": True,
+                    "stream_id": stream_id,
+                    "instance_name": self._instance_name,
+                    "automatic": requested_automatic,
+                    "unsubscribed_at_stream_ordering": None,
+                    "unsubscribed_at_topological_ordering": None,
+                },
             )
-
             txn.call_after(
                 self.get_subscription_for_thread.invalidate,
                 (user_id, room_id, thread_root_event_id),
@@ -214,6 +321,21 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
             stream_id = self._thread_subscriptions_id_gen.get_next_txn(txn)
 
+            # Find the maximum stream ordering and topological ordering of the room,
+            # which we then store against this unsubscription so we can skip future
+            # automatic subscriptions that are caused by an event logically earlier
+            # than this unsubscription.
+            txn.execute(
+                """
+                SELECT MAX(stream_ordering) AS mso, MAX(topological_ordering) AS mto FROM events
+                WHERE room_id = ?
+                """,
+                (room_id,),
+            )
+            ord_row = txn.fetchone()
+            assert ord_row is not None
+            max_stream_ordering, max_topological_ordering = ord_row
+
             self.db_pool.simple_update_txn(
                 txn,
                 table="thread_subscriptions",
@@ -227,6 +349,8 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                     "subscribed": False,
                     "stream_id": stream_id,
                     "instance_name": self._instance_name,
+                    "unsubscribed_at_stream_ordering": max_stream_ordering,
+                    "unsubscribed_at_topological_ordering": max_topological_ordering,
                 },
             )
 

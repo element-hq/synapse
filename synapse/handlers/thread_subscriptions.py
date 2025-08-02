@@ -1,8 +1,14 @@
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
-from synapse.api.errors import AuthError, NotFoundError
-from synapse.storage.databases.main.thread_subscriptions import ThreadSubscription
+from synapse.api.constants import RelationTypes
+from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
+from synapse.events import relation_from_event
+from synapse.storage.databases.main.thread_subscriptions import (
+    AutomaticSubscriptionConflicted,
+    ThreadSubscription,
+)
 from synapse.types import UserID
 
 if TYPE_CHECKING:
@@ -55,22 +61,28 @@ class ThreadSubscriptionsHandler:
         room_id: str,
         thread_root_event_id: str,
         *,
-        automatic: bool,
+        automatic_event_id: Optional[str],
     ) -> Optional[int]:
         """Sets or updates a user's subscription settings for a specific thread root.
 
         Args:
             requester_user_id: The ID of the user whose settings are being updated.
             thread_root_event_id: The event ID of the thread root.
-            automatic: whether the user was subscribed by an automatic decision by
-                their client.
+            automatic_event_id: if the user was subscribed by an automatic decision by
+                their client, the event ID that caused this.
 
         Returns:
             The stream ID for this update, if the update isn't no-opped.
 
         Raises:
             NotFoundError if the user cannot access the thread root event, or it isn't
-            known to this homeserver.
+            known to this homeserver. Ditto for the automatic cause event if supplied.
+
+            SynapseError(400, M_NOT_IN_THREAD): if client supplied an automatic cause event
+            but user cannot access the event.
+
+            SynapseError(409, M_SKIPPED): if client requested an automatic subscription
+            but it was skipped because the cause event is logically later than an unsubscription.
         """
         # First check that the user can access the thread root event
         # and that it exists
@@ -84,12 +96,49 @@ class ThreadSubscriptionsHandler:
             logger.info("rejecting thread subscriptions change (thread not accessible)")
             raise NotFoundError("No such thread root")
 
-        return await self.store.subscribe_user_to_thread(
+        if automatic_event_id:
+            event = await self.event_handler.get_event(
+                user_id, room_id, automatic_event_id
+            )
+            if event is None:
+                raise NotFoundError("No such automatic subscription cause event")
+            relation = relation_from_event(event)
+            if (
+                relation is None
+                or relation.rel_type != RelationTypes.THREAD
+                or relation.parent_id != thread_root_event_id
+            ):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "Automatic subscription must be caused by an event in the thread",
+                    errcode=Codes.NOT_IN_THREAD,
+                )
+
+            stream_ordering = event.internal_metadata.stream_ordering
+            assert stream_ordering is not None
+            automatic_event_orderings = (
+                stream_ordering,
+                # depth is topological_ordering
+                event.depth,
+            )
+        else:
+            automatic_event_orderings = None
+
+        outcome = await self.store.subscribe_user_to_thread(
             user_id.to_string(),
             event.room_id,
             thread_root_event_id,
-            automatic=automatic,
+            automatic_event_orderings=automatic_event_orderings,
         )
+
+        if isinstance(outcome, AutomaticSubscriptionConflicted):
+            raise SynapseError(
+                HTTPStatus.CONFLICT,
+                "Automatic subscription obsoleted by an unsubscription request.",
+                errcode=Codes.SKIPPED,
+            )
+
+        return outcome
 
     async def unsubscribe_user_from_thread(
         self, user_id: UserID, room_id: str, thread_root_event_id: str
