@@ -1,0 +1,1 @@
+Add support for MSC4291: Room IDs as hashes of create event.
