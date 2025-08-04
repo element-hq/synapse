@@ -12188,8 +12188,9 @@ the stream writer for the <code>account_data</code> stream:</p>
 ^/_matrix/client/(r0|v3|unstable)/.*/account_data
 </code></pre>
 <h5 id="the-receipts-stream"><a class="header" href="#the-receipts-stream">The <code>receipts</code> stream</a></h5>
-<p>The following endpoints should be routed directly to the worker configured as
-the stream writer for the <code>receipts</code> stream:</p>
+<p>The <code>receipts</code> stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the <code>receipts</code> stream:</p>
 <pre><code>^/_matrix/client/(r0|v3|unstable)/rooms/.*/receipt
 ^/_matrix/client/(r0|v3|unstable)/rooms/.*/read_markers
 </code></pre>
@@ -12205,7 +12206,7 @@ the stream writer for the <code>push_rules</code> stream:</p>
 </code></pre>
 <h5 id="the-device_lists-stream"><a class="header" href="#the-device_lists-stream">The <code>device_lists</code> stream</a></h5>
 <p>The <code>device_lists</code> stream supports multiple writers. The following endpoints
-can be handled by any worker, but should be routed directly one of the workers
+can be handled by any worker, but should be routed directly to one of the workers
 configured as stream writer for the <code>device_lists</code> stream:</p>
 <pre><code>^/_matrix/client/(r0|v3)/delete_devices$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
