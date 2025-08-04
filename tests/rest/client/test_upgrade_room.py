@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventContentFields, EventTypes, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin
 from synapse.rest.client import login, room, room_upgrade_rest_servlet
@@ -411,3 +411,24 @@ class UpgradeRoomTest(unittest.HomeserverTestCase):
 
         channel = self._upgrade_room(expire_cache=False)
         self.assertEqual(200, channel.code, channel.result)
+
+    def test_bans(self) -> None:
+        """
+        Test that bans get copied over when upgrading a room.
+        """
+
+        users_to_ban = ["@user2:test", "@user3:test", "@user4:test"]
+        for user in users_to_ban:
+            self.helper.ban(self.room_id, self.creator, user, tok=self.creator_token)
+
+        channel = self._upgrade_room(self.creator_token)
+        self.assertEqual(200, channel.code, channel.result)
+
+        for user in users_to_ban:
+            content = self.helper.get_state(
+                self.room_id,
+                event_type=EventTypes.Member,
+                state_key=user,
+                tok=self.creator_token,
+            )
+            self.assertEqual(content[EventContentFields.MEMBERSHIP], Membership.BAN)
