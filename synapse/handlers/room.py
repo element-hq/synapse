@@ -51,6 +51,7 @@ from synapse.api.constants import (
     HistoryVisibility,
     JoinRules,
     Membership,
+    MTextFields,
     RoomCreationPreset,
     RoomEncryptionAlgorithms,
     RoomTypes,
@@ -65,6 +66,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.api.filtering import Filter
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase
@@ -92,6 +94,7 @@ from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util import stringutils
 from synapse.util.caches.response_cache import ResponseCache
+from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import parse_and_validate_server_name
 from synapse.visibility import filter_events_for_client
 
@@ -118,6 +121,7 @@ class EventContext:
 
 class RoomCreationHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.auth = hs.get_auth()
@@ -129,7 +133,12 @@ class RoomCreationHandler:
         self.room_member_handler = hs.get_room_member_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
         self.config = hs.config
-        self.request_ratelimiter = hs.get_request_ratelimiter()
+        self.common_request_ratelimiter = hs.get_request_ratelimiter()
+        self.creation_ratelimiter = Ratelimiter(
+            store=self.store,
+            clock=self.clock,
+            cfg=self.config.ratelimiting.rc_room_creation,
+        )
 
         # Room state based off defined presets
         self._presets_dict: Dict[str, Dict[str, Any]] = {
@@ -174,7 +183,10 @@ class RoomCreationHandler:
         # succession, only process the first attempt and return its result to
         # subsequent requests
         self._upgrade_response_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "room_upgrade", timeout_ms=FIVE_MINUTES_IN_MS
+            clock=hs.get_clock(),
+            name="room_upgrade",
+            server_name=self.server_name,
+            timeout_ms=FIVE_MINUTES_IN_MS,
         )
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
 
@@ -198,7 +210,11 @@ class RoomCreationHandler:
         Raises:
             ShadowBanError if the requester is shadow-banned.
         """
-        await self.request_ratelimiter.ratelimit(requester)
+        await self.creation_ratelimiter.ratelimit(requester, update=False)
+
+        # then apply the ratelimits
+        await self.common_request_ratelimiter.ratelimit(requester)
+        await self.creation_ratelimiter.ratelimit(requester)
 
         user_id = requester.user.to_string()
 
@@ -592,7 +608,7 @@ class RoomCreationHandler:
                 additional_fields=spam_check[1],
             )
 
-        await self._send_events_for_new_room(
+        _, last_event_id, _ = await self._send_events_for_new_room(
             requester,
             new_room_id,
             new_room_version,
@@ -605,29 +621,32 @@ class RoomCreationHandler:
         )
 
         # Transfer membership events
-        old_room_member_state_ids = (
-            await self._storage_controllers.state.get_current_state_ids(
-                old_room_id, StateFilter.from_types([(EventTypes.Member, None)])
-            )
-        )
+        ban_event_ids = await self.store.get_ban_event_ids_in_room(old_room_id)
+        if ban_event_ids:
+            ban_events = await self.store.get_events_as_list(ban_event_ids)
 
-        # map from event_id to BaseEvent
-        old_room_member_state_events = await self.store.get_events(
-            old_room_member_state_ids.values()
-        )
-        for old_event in old_room_member_state_events.values():
-            # Only transfer ban events
-            if (
-                "membership" in old_event.content
-                and old_event.content["membership"] == "ban"
-            ):
-                await self.room_member_handler.update_membership(
-                    requester,
-                    UserID.from_string(old_event.state_key),
-                    new_room_id,
-                    "ban",
+            # Add any banned users to the new room.
+            #
+            # Note generally we should send membership events via
+            # `update_membership`, however in this case its fine to bypass as
+            # these bans don't need any special treatment, i.e. the sender is in
+            # the room and they don't need any extra signatures, etc.
+            for batched_events in batch_iter(ban_events, 1000):
+                await self.event_creation_handler.create_and_send_new_client_events(
+                    requester=requester,
+                    room_id=new_room_id,
+                    prev_event_id=last_event_id,
+                    event_dicts=[
+                        {
+                            "type": EventTypes.Member,
+                            "state_key": ban_event.state_key,
+                            "room_id": new_room_id,
+                            "sender": requester.user.to_string(),
+                            "content": ban_event.content,
+                        }
+                        for ban_event in batched_events
+                    ],
                     ratelimit=False,
-                    content=old_event.content,
                 )
 
         # XXX invites/joins
@@ -804,11 +823,23 @@ class RoomCreationHandler:
                 )
 
         if ratelimit:
-            # Rate limit once in advance, but don't rate limit the individual
-            # events in the room — room creation isn't atomic and it's very
-            # janky if half the events in the initial state don't make it because
-            # of rate limiting.
-            await self.request_ratelimiter.ratelimit(requester)
+            # Limit the rate of room creations,
+            # using both the limiter specific to room creations as well
+            # as the general request ratelimiter.
+            #
+            # Note that we don't rate limit the individual
+            # events in the room — room creation isn't atomic and
+            # historically it was very janky if half the events in the
+            # initial state don't make it because of rate limiting.
+
+            # First check the room creation ratelimiter without updating it
+            # (this is so we don't consume a token if the other ratelimiter doesn't
+            # allow us to proceed)
+            await self.creation_ratelimiter.ratelimit(requester, update=False)
+
+            # then apply the ratelimits
+            await self.common_request_ratelimiter.ratelimit(requester)
+            await self.creation_ratelimiter.ratelimit(requester)
 
         room_version_id = config.get(
             "room_version", self.config.server.default_room_version.identifier
@@ -1303,7 +1334,13 @@ class RoomCreationHandler:
             topic = room_config["topic"]
             topic_event, topic_context = await create_event(
                 EventTypes.Topic,
-                {"topic": topic},
+                {
+                    EventContentFields.TOPIC: topic,
+                    EventContentFields.M_TOPIC: {
+                        # The mimetype property defaults to `text/plain` if omitted.
+                        EventContentFields.M_TEXT: [{MTextFields.BODY: topic}]
+                    },
+                },
                 True,
             )
             events_to_send.append((topic_event, topic_context))

@@ -51,6 +51,7 @@ from synapse.events.snapshot import (
 )
 from synapse.logging.context import ContextResourceUsage
 from synapse.logging.opentracing import tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
@@ -74,6 +75,7 @@ metrics_logger = logging.getLogger("synapse.state.metrics")
 state_groups_histogram = Histogram(
     "synapse_state_number_state_groups_in_resolution",
     "Number of state groups used when performing a state resolution",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
@@ -83,6 +85,7 @@ EVICTION_TIMEOUT_SECONDS = 60 * 60
 
 _NEXT_STATE_ID = 1
 
+CREATE_KEY = (EventTypes.Create, "")
 POWER_KEY = (EventTypes.PowerLevels, "")
 
 
@@ -188,7 +191,8 @@ class StateHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.clock = hs.get_clock()
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self.hs = hs
@@ -605,20 +609,24 @@ _biggest_room_by_cpu_counter = Counter(
     "synapse_state_res_cpu_for_biggest_room_seconds",
     "CPU time spent performing state resolution for the single most expensive "
     "room for state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 _biggest_room_by_db_counter = Counter(
     "synapse_state_res_db_for_biggest_room_seconds",
     "Database time spent performing state resolution for the single most "
     "expensive room for state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 _cpu_times = Histogram(
     "synapse_state_res_cpu_for_all_rooms_seconds",
     "CPU time (utime+stime) spent computing a single state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 _db_times = Histogram(
     "synapse_state_res_db_for_all_rooms_seconds",
     "Database time spent computing a single state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -630,6 +638,7 @@ class StateResolutionHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
 
         self.resolve_linearizer = Linearizer(name="state_resolve_lock")
@@ -638,6 +647,7 @@ class StateResolutionHandler:
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
             ExpiringCache(
                 cache_name="state_cache",
+                server_name=self.server_name,
                 clock=self.clock,
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
@@ -731,7 +741,9 @@ class StateResolutionHandler:
                     f"State groups have been deleted: {shortstr(missing_state_groups)}"
                 )
 
-            state_groups_histogram.observe(len(state_groups_ids))
+            state_groups_histogram.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(len(state_groups_ids))
 
             new_state = await self.resolve_events_with_store(
                 room_id,
@@ -746,7 +758,9 @@ class StateResolutionHandler:
             # which will be used as a cache key for future resolutions, but
             # not get persisted.
 
-            with Measure(self.clock, "state.create_group_ids"):
+            with Measure(
+                self.clock, name="state.create_group_ids", server_name=self.server_name
+            ):
                 cache = _make_state_cache_entry(new_state, state_groups_ids)
 
             self._state_cache[group_names] = cache
@@ -784,7 +798,9 @@ class StateResolutionHandler:
             a map from (type, state_key) to event_id.
         """
         try:
-            with Measure(self.clock, "state._resolve_events") as m:
+            with Measure(
+                self.clock, name="state._resolve_events", server_name=self.server_name
+            ) as m:
                 room_version_obj = KNOWN_ROOM_VERSIONS[room_version]
                 if room_version_obj.state_res == StateResolutionVersions.V1:
                     return await v1.resolve_events_with_store(
@@ -814,8 +830,12 @@ class StateResolutionHandler:
         room_metrics.db_time += rusage.db_txn_duration_sec
         room_metrics.db_events += rusage.evt_db_fetch_count
 
-        _cpu_times.observe(rusage.ru_utime + rusage.ru_stime)
-        _db_times.observe(rusage.db_txn_duration_sec)
+        _cpu_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
+            rusage.ru_utime + rusage.ru_stime
+        )
+        _db_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
+            rusage.db_txn_duration_sec
+        )
 
     def _report_metrics(self) -> None:
         if not self._state_res_metrics:
@@ -872,7 +892,9 @@ class StateResolutionHandler:
 
         # report info on the single biggest to prometheus
         _, biggest_metrics = biggest[0]
-        prometheus_counter_metric.inc(extract_key(biggest_metrics))
+        prometheus_counter_metric.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            extract_key(biggest_metrics)
+        )
 
 
 def _make_state_cache_entry(

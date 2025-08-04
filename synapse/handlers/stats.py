@@ -32,10 +32,11 @@ from typing import (
 )
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.metrics import event_processing_positions
+from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import JsonDict
+from synapse.util.events import get_plain_text_topic_from_event_content
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -53,6 +54,7 @@ class StatsHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.state = hs.get_state_handler()
@@ -88,7 +90,7 @@ class StatsHandler:
             finally:
                 self._is_processing = False
 
-        run_as_background_process("stats.notify_new_event", process)
+        run_as_background_process("stats.notify_new_event", self.server_name, process)
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB
@@ -145,7 +147,9 @@ class StatsHandler:
 
             logger.debug("Handled room stats to %s -> %s", self.pos, max_pos)
 
-            event_processing_positions.labels("stats").set(max_pos)
+            event_processing_positions.labels(
+                name="stats", **{SERVER_NAME_LABEL: self.server_name}
+            ).set(max_pos)
 
             self.pos = max_pos
 
@@ -299,7 +303,9 @@ class StatsHandler:
             elif delta.event_type == EventTypes.Name:
                 room_state["name"] = event_content.get("name")
             elif delta.event_type == EventTypes.Topic:
-                room_state["topic"] = event_content.get("topic")
+                room_state["topic"] = get_plain_text_topic_from_event_content(
+                    event_content
+                )
             elif delta.event_type == EventTypes.RoomAvatar:
                 room_state["avatar"] = event_content.get("url")
             elif delta.event_type == EventTypes.CanonicalAlias:

@@ -23,6 +23,7 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
     Collection,
     Dict,
@@ -66,7 +67,6 @@ from synapse.handlers.auth import (
     ON_LOGGED_OUT_CALLBACK,
     AuthHandler,
 )
-from synapse.handlers.device import DeviceHandler
 from synapse.handlers.push_rules import RuleSpec, check_actions
 from synapse.http.client import SimpleHttpClient
 from synapse.http.server import (
@@ -81,7 +81,9 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process as _run_as_background_process,
+)
 from synapse.module_api.callbacks.account_validity_callbacks import (
     IS_USER_EXPIRED_CALLBACK,
     ON_LEGACY_ADMIN_REQUEST,
@@ -104,6 +106,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import (
     CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK,
     CHECK_REGISTRATION_FOR_SPAM_CALLBACK,
     CHECK_USERNAME_FOR_SPAM_CALLBACK,
+    FEDERATED_USER_MAY_INVITE_CALLBACK,
     SHOULD_DROP_FEDERATED_EVENT_CALLBACK,
     USER_MAY_CREATE_ROOM_ALIAS_CALLBACK,
     USER_MAY_CREATE_ROOM_CALLBACK,
@@ -158,6 +161,9 @@ from synapse.util.caches.descriptors import CachedFunction, cached as _cached
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
+    # Old versions don't have `LiteralString`
+    from typing_extensions import LiteralString
+
     from synapse.app.generic_worker import GenericWorkerStore
     from synapse.server import HomeServer
 
@@ -214,6 +220,65 @@ class UserIpAndAgent:
     user_agent: str
     # The time at which this user agent/ip was last seen.
     last_seen: int
+
+
+def run_as_background_process(
+    desc: "LiteralString",
+    func: Callable[..., Awaitable[Optional[T]]],
+    *args: Any,
+    bg_start_span: bool = True,
+    **kwargs: Any,
+) -> "defer.Deferred[Optional[T]]":
+    """
+    XXX: Deprecated: use `ModuleApi.run_as_background_process` instead.
+
+    Run the given function in its own logcontext, with resource metrics
+
+    This should be used to wrap processes which are fired off to run in the
+    background, instead of being associated with a particular request.
+
+    It returns a Deferred which completes when the function completes, but it doesn't
+    follow the synapse logcontext rules, which makes it appropriate for passing to
+    clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+    normal synapse async function).
+
+    Args:
+        desc: a description for this background process type
+        server_name: The homeserver name that this background process is being run for
+            (this should be `hs.hostname`).
+        func: a function, which may return a Deferred or a coroutine
+        bg_start_span: Whether to start an opentracing span. Defaults to True.
+            Should only be disabled for processes that will not log to or tag
+            a span.
+        args: positional args for func
+        kwargs: keyword args for func
+
+    Returns:
+        Deferred which returns the result of func, or `None` if func raises.
+        Note that the returned Deferred does not follow the synapse logcontext
+        rules.
+    """
+
+    logger.warning(
+        "Using deprecated `run_as_background_process` that's exported from the Module API. "
+        "Prefer `ModuleApi.run_as_background_process` instead.",
+    )
+
+    # Historically, since this function is exported from the module API, we can't just
+    # change the signature to require a `server_name` argument. Since
+    # `run_as_background_process` internally in Synapse requires `server_name` now, we
+    # just have to stub this out with a placeholder value and tell people to use the new
+    # function instead.
+    stub_server_name = "synapse_module_running_from_unknown_server"
+
+    return _run_as_background_process(
+        desc,
+        stub_server_name,
+        func,
+        *args,
+        bg_start_span=bg_start_span,
+        **kwargs,
+    )
 
 
 def cached(
@@ -277,13 +342,15 @@ class ModuleApi:
         self._device_handler = hs.get_device_handler()
         self.custom_template_dir = hs.config.server.custom_template_directory
         self._callbacks = hs.get_module_api_callbacks()
-        self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
         self._event_serializer = hs.get_event_client_serializer()
 
         try:
             app_name = self._hs.config.email.email_app_name
 
-            self._from_string = self._hs.config.email.email_notif_from % {
+            self._from_string = self._hs.config.email.email_notif_from % {  # type: ignore[operator]
                 "app": app_name
             }
         except (KeyError, TypeError):
@@ -315,6 +382,7 @@ class ModuleApi:
         ] = None,
         user_may_join_room: Optional[USER_MAY_JOIN_ROOM_CALLBACK] = None,
         user_may_invite: Optional[USER_MAY_INVITE_CALLBACK] = None,
+        federated_user_may_invite: Optional[FEDERATED_USER_MAY_INVITE_CALLBACK] = None,
         user_may_send_3pid_invite: Optional[USER_MAY_SEND_3PID_INVITE_CALLBACK] = None,
         user_may_create_room: Optional[USER_MAY_CREATE_ROOM_CALLBACK] = None,
         user_may_create_room_alias: Optional[
@@ -338,6 +406,7 @@ class ModuleApi:
             should_drop_federated_event=should_drop_federated_event,
             user_may_join_room=user_may_join_room,
             user_may_invite=user_may_invite,
+            federated_user_may_invite=federated_user_may_invite,
             user_may_send_3pid_invite=user_may_send_3pid_invite,
             user_may_create_room=user_may_create_room,
             user_may_create_room_alias=user_may_create_room_alias,
@@ -482,7 +551,7 @@ class ModuleApi:
 
         Added in Synapse v1.46.0.
         """
-        if self.msc3861_oauth_delegation_enabled:
+        if self._auth_delegation_enabled:
             raise ConfigError(
                 "Cannot use password auth provider callbacks when OAuth delegation is enabled"
             )
@@ -922,8 +991,6 @@ class ModuleApi:
     ) -> Generator["defer.Deferred[Any]", Any, None]:
         """Invalidate an access token for a user
 
-        Can only be called from the main process.
-
         Added in Synapse v0.25.0.
 
         Args:
@@ -936,10 +1003,6 @@ class ModuleApi:
         Raises:
             synapse.api.errors.AuthError: the access token is invalid
         """
-        assert isinstance(self._device_handler, DeviceHandler), (
-            "invalidate_access_token can only be called on the main process"
-        )
-
         # see if the access token corresponds to a device
         user_info = yield defer.ensureDeferred(
             self._auth.get_user_by_access_token(access_token)
@@ -1327,7 +1390,7 @@ class ModuleApi:
 
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
-                run_as_background_process,
+                self.run_as_background_process,
                 msec,
                 desc,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
@@ -1385,7 +1448,7 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            run_as_background_process,
+            self.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
@@ -1591,6 +1654,44 @@ class ModuleApi:
         state_events = await self._store.get_events(state_ids.values())
 
         return {key: state_events[event_id] for key, event_id in state_ids.items()}
+
+    def run_as_background_process(
+        self,
+        desc: "LiteralString",
+        func: Callable[..., Awaitable[Optional[T]]],
+        *args: Any,
+        bg_start_span: bool = True,
+        **kwargs: Any,
+    ) -> "defer.Deferred[Optional[T]]":
+        """Run the given function in its own logcontext, with resource metrics
+
+        This should be used to wrap processes which are fired off to run in the
+        background, instead of being associated with a particular request.
+
+        It returns a Deferred which completes when the function completes, but it doesn't
+        follow the synapse logcontext rules, which makes it appropriate for passing to
+        clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+        normal synapse async function).
+
+        Args:
+            desc: a description for this background process type
+            server_name: The homeserver name that this background process is being run for
+                (this should be `hs.hostname`).
+            func: a function, which may return a Deferred or a coroutine
+            bg_start_span: Whether to start an opentracing span. Defaults to True.
+                Should only be disabled for processes that will not log to or tag
+                a span.
+            args: positional args for func
+            kwargs: keyword args for func
+
+        Returns:
+            Deferred which returns the result of func, or `None` if func raises.
+            Note that the returned Deferred does not follow the synapse logcontext
+            rules.
+        """
+        return _run_as_background_process(
+            desc, self.server_name, func, *args, bg_start_span=bg_start_span, **kwargs
+        )
 
     async def defer_to_thread(
         self,

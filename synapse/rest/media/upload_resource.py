@@ -120,7 +120,7 @@ class UploadServlet(BaseUploadServlet):
 
         try:
             content: IO = request.content  # type: ignore
-            content_uri = await self.media_repo.create_content(
+            content_uri = await self.media_repo.create_or_update_content(
                 media_type, upload_name, content, content_length, requester.user
             )
         except SpamMediaException:
@@ -170,13 +170,13 @@ class AsyncUploadServlet(BaseUploadServlet):
 
             try:
                 content: IO = request.content  # type: ignore
-                await self.media_repo.update_content(
-                    media_id,
+                await self.media_repo.create_or_update_content(
                     media_type,
                     upload_name,
                     content,
                     content_length,
                     requester.user,
+                    media_id=media_id,
                 )
             except SpamMediaException:
                 # For uploading of media we want to respond with a 400, instead of

@@ -32,7 +32,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -2841,6 +2841,16 @@ class UserRestTestCase(unittest.HomeserverTestCase):
             "GET",
             "/_matrix/client/v3/sync",
             access_token=self.other_user_token,
+        )
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.USER_LOCKED, channel.json_body["errcode"])
+        self.assertTrue(channel.json_body["soft_logout"])
+
+        # User is not authorized to log in anymore
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/r0/login",
+            {"type": "m.login.password", "user": "user", "password": "pass"},
         )
         self.assertEqual(401, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.USER_LOCKED, channel.json_body["errcode"])
@@ -5656,6 +5666,54 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                 if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
                     matched.append(event_id)
         self.assertEqual(len(matched), len(originals))
+
+    def test_use_admin_param_for_redactions(self) -> None:
+        """
+        Test that if the `use_admin` param is set to true, the admin user is used to issue
+        the redactions and that they succeed in a room where the admin user has sufficient
+        power to issue redactions
+        """
+
+        originals = []
+        join = self.helper.join(self.rm1, self.bad_user, tok=self.bad_user_tok)
+        originals.append(join["event_id"])
+        for i in range(15):
+            event = {"body": f"hello{i}", "msgtype": "m.text"}
+            res = self.helper.send_event(
+                self.rm1, "m.room.message", event, tok=self.bad_user_tok
+            )
+            originals.append(res["event_id"])
+
+        # redact messages
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [self.rm1], "use_admin": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # messages are redacted, and redactions are issued by the admin user
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.rm1}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matches = []
+        for event in channel.json_body["chunk"]:
+            for event_id in originals:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    matches.append((event_id, event))
+        # we redacted 16 messages
+        self.assertEqual(len(matches), 16)
+
+        for redaction_tuple in matches:
+            redaction = redaction_tuple[1]
+            if redaction["sender"] != self.admin:
+                self.fail("Redaction was not issued by admin account")
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):

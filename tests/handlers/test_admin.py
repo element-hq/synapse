@@ -22,7 +22,7 @@
 from collections import Counter
 from unittest.mock import Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage

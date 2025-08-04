@@ -22,14 +22,14 @@
 
 from typing import List, Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import APP_SERVICE_REGISTRATION_TYPE, LoginType
 from synapse.api.errors import Codes, HttpResponseException, SynapseError
 from synapse.appservice import ApplicationService
 from synapse.rest.client import register, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests import unittest
@@ -118,7 +118,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
             ApplicationService(
                 token=as_token,
                 id="SomeASID",
-                sender="@as_sender:test",
+                sender=UserID.from_string("@as_sender:test"),
                 namespaces={"users": [{"regex": "@as_*", "exclusive": True}]},
             )
         )
@@ -263,7 +263,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
             ApplicationService(
                 token=as_token_1,
                 id="SomeASID",
-                sender="@as_sender_1:test",
+                sender=UserID.from_string("@as_sender_1:test"),
                 namespaces={"users": [{"regex": "@as_1.*", "exclusive": True}]},
             )
         )
@@ -273,7 +273,7 @@ class TestMauLimit(unittest.HomeserverTestCase):
             ApplicationService(
                 token=as_token_2,
                 id="AnotherASID",
-                sender="@as_sender_2:test",
+                sender=UserID.from_string("@as_sender_2:test"),
                 namespaces={"users": [{"regex": "@as_2.*", "exclusive": True}]},
             )
         )

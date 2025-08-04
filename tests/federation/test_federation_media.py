@@ -22,7 +22,7 @@ import os
 import shutil
 import tempfile
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage
@@ -67,7 +67,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "text/plain",
                 "test_upload",
                 content,
@@ -110,7 +110,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
         content = io.BytesIO(SMALL_PNG)
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "image/png",
                 "test_png_upload",
                 content,
@@ -152,7 +152,7 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "text/plain",
                 "test_upload",
                 content,
@@ -215,7 +215,7 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def test_thumbnail_download_scaled(self) -> None:
         content = io.BytesIO(small_png.data)
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "image/png",
                 "test_png_thumbnail",
                 content,
@@ -255,7 +255,7 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def test_thumbnail_download_cropped(self) -> None:
         content = io.BytesIO(small_png.data)
         content_uri = self.get_success(
-            self.media_repo.create_content(
+            self.media_repo.create_or_update_content(
                 "image/png",
                 "test_png_thumbnail",
                 content,

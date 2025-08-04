@@ -41,7 +41,6 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
-from synapse.storage.databases.main.events import SLIDING_SYNC_RELEVANT_STATE_SET
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import CachedFunction
@@ -105,10 +104,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             # caches to invalidate. (This reduces the amount of writes to the DB
             # that happen).
             self._cache_id_gen = MultiWriterIdGenerator(
-                db_conn,
-                database,
+                db_conn=db_conn,
+                db=database,
                 notifier=hs.get_replication_notifier(),
                 stream_name="caches",
+                server_name=self.server_name,
                 instance_name=hs.get_instance_name(),
                 tables=[
                     (
@@ -284,6 +284,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         super().process_replication_position(stream_name, instance_name, token)
 
     def _process_event_stream_row(self, token: int, row: EventsStreamRow) -> None:
+        # This is needed to avoid a circular import.
+        from synapse.storage.databases.main.events import (
+            SLIDING_SYNC_RELEVANT_STATE_SET,
+        )
+
         data = row.data
 
         if row.type == EventsStreamEventRow.TypeId:
@@ -347,6 +352,11 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         relates_to: Optional[str],
         backfilled: bool,
     ) -> None:
+        # This is needed to avoid a circular import.
+        from synapse.storage.databases.main.events import (
+            SLIDING_SYNC_RELEVANT_STATE_SET,
+        )
+
         # XXX: If you add something to this function make sure you add it to
         # `_invalidate_caches_for_room_events` as well.
 

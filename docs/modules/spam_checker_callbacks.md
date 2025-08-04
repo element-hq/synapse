@@ -80,6 +80,8 @@ Called when processing an invitation, both when one is created locally or when
 receiving an invite over federation. Both inviter and invitee are represented by
 their Matrix user ID (e.g. `@alice:example.com`).
 
+Note that federated invites will call `federated_user_may_invite` before this callback.
+
 
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
@@ -95,6 +97,34 @@ callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the nex
 The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
 be used. If this happens, Synapse will not call any of the subsequent implementations of
 this callback.
+
+
+### `federated_user_may_invite`
+
+_First introduced in Synapse v1.133.0_
+
+```python
+async def federated_user_may_invite(event: "synapse.events.EventBase") -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
+```
+
+Called when processing an invitation received over federation. Unlike `user_may_invite`,
+this callback receives the entire event, including any stripped state in the `unsigned`
+section, not just the room and user IDs.
+
+The callback must return one of:
+  - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
+    decide to reject it.
+  - `synapse.module_api.errors.Codes` to reject the operation with an error code. In case
+    of doubt, `synapse.module_api.errors.Codes.FORBIDDEN` is a good error code.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns `synapse.module_api.NOT_SPAM`, Synapse falls through to the next one.
+The value of the first callback that does not return `synapse.module_api.NOT_SPAM` will
+be used. If this happens, Synapse will not call any of the subsequent implementations of
+this callback.
+
+If all of the callbacks return `synapse.module_api.NOT_SPAM`, Synapse will also fall
+through to the `user_may_invite` callback before approving the invite.
 
 
 ### `user_may_send_3pid_invite`

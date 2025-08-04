@@ -21,7 +21,7 @@
 
 from typing import Iterable, Optional, Set
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes
 from synapse.api.errors import Codes, SynapseError

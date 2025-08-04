@@ -21,7 +21,7 @@
 from unittest.mock import Mock
 
 from twisted.internet.interfaces import IReactorTime
-from twisted.test.proto_helpers import MemoryReactor, MemoryReactorClock
+from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 
 from synapse.rest.client.register import register_servlets
 from synapse.server import HomeServer

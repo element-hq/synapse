@@ -34,6 +34,7 @@ from synapse.logging.opentracing import (
     tags,
     whitelisted_homeserver,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util import json_decoder
 from synapse.util.metrics import measure_func
@@ -47,7 +48,7 @@ issue_8631_logger = logging.getLogger("synapse.8631_debug")
 last_pdu_ts_metric = Gauge(
     "synapse_federation_last_sent_pdu_time",
     "The timestamp of the last PDU which was successfully sent to the given domain",
-    labelnames=("server_name",),
+    labelnames=("destination_server_name", SERVER_NAME_LABEL),
 )
 
 
@@ -58,7 +59,7 @@ class TransactionManager:
     """
 
     def __init__(self, hs: "synapse.server.HomeServer"):
-        self._server_name = hs.hostname
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self._store = hs.get_datastores().main
         self._transaction_actions = TransactionActions(self._store)
@@ -116,7 +117,7 @@ class TransactionManager:
             transaction = Transaction(
                 origin_server_ts=int(self.clock.time_msec()),
                 transaction_id=txn_id,
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=destination,
                 pdus=[p.get_pdu_json() for p in pdus],
                 edus=[edu.get_dict() for edu in edus],
@@ -191,6 +192,7 @@ class TransactionManager:
 
             if pdus and destination in self._federation_metrics_domains:
                 last_pdu = pdus[-1]
-                last_pdu_ts_metric.labels(server_name=destination).set(
-                    last_pdu.origin_server_ts / 1000
-                )
+                last_pdu_ts_metric.labels(
+                    destination_server_name=destination,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).set(last_pdu.origin_server_ts / 1000)

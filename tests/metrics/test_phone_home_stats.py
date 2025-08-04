@@ -14,7 +14,7 @@
 import logging
 from unittest.mock import AsyncMock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.phone_stats_home import (
     PHONE_HOME_INTERVAL_SECONDS,

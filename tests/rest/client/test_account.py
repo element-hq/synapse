@@ -28,7 +28,7 @@ from unittest.mock import Mock
 import pkg_resources
 
 from twisted.internet.interfaces import IReactorTCP
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import LoginType, Membership
@@ -764,10 +764,10 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         as_token = "i_am_an_app_service"
 
         appservice = ApplicationService(
-            as_token,
+            token=as_token,
             id="1234",
             namespaces={"users": [{"regex": user_id, "exclusive": True}]},
-            sender=user_id,
+            sender=UserID.from_string(user_id),
         )
         self.hs.get_datastores().main.services_cache.append(appservice)
 

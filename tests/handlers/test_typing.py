@@ -26,7 +26,7 @@ from unittest.mock import ANY, AsyncMock, Mock, call
 
 from netaddr import IPSet
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.api.constants import EduTypes
@@ -86,11 +86,13 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         self.mock_federation_client = AsyncMock(spec=["put_json"])
         self.mock_federation_client.put_json.return_value = (200, "OK")
         self.mock_federation_client.agent = MatrixFederationAgent(
-            reactor,
+            server_name="OUR_STUB_HOMESERVER_NAME",
+            reactor=reactor,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            proxy_config=None,
         )
 
         # the tests assume that we are starting at unix time 1000

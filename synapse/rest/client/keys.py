@@ -23,8 +23,9 @@
 import logging
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
     InteractiveAuthIncompleteError,
     InvalidAPICallError,
@@ -404,19 +405,11 @@ class SigningKeyUploadServlet(RestServlet):
         if is_cross_signing_setup:
             # With MSC3861, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
-            if self.hs.config.experimental.msc3861.enabled:
+            if self.hs.config.mas.enabled:
                 if not master_key_updatable_without_uia:
-                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
-                    # We import lazily here because of the authlib requirement
-                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-                    auth = cast(MSC3861DelegatedAuth, self.auth)
-
-                    uri = await auth.account_management_url()
-                    if uri is not None:
-                        url = f"{uri}?action=org.matrix.cross_signing_reset"
-                    else:
-                        url = await auth.issuer()
+                    assert isinstance(self.auth, MasDelegatedAuth)
+                    url = await self.auth.account_management_url()
+                    url = f"{url}?action=org.matrix.cross_signing_reset"
 
                     # We use a dummy session ID as this isn't really a UIA flow, but we
                     # reuse the same API shape for better client compatibility.
@@ -437,6 +430,41 @@ class SigningKeyUploadServlet(RestServlet):
                             "then try again.",
                         },
                     )
+
+            elif self.hs.config.experimental.msc3861.enabled:
+                if not master_key_updatable_without_uia:
+                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
+                    # We import lazily here because of the authlib requirement
+                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+
+                    assert isinstance(self.auth, MSC3861DelegatedAuth)
+
+                    uri = await self.auth.account_management_url()
+                    if uri is not None:
+                        url = f"{uri}?action=org.matrix.cross_signing_reset"
+                    else:
+                        url = await self.auth.issuer()
+
+                    # We use a dummy session ID as this isn't really a UIA flow, but we
+                    # reuse the same API shape for better client compatibility.
+                    raise InteractiveAuthIncompleteError(
+                        "dummy",
+                        {
+                            "session": "dummy",
+                            "flows": [
+                                {"stages": ["org.matrix.cross_signing_reset"]},
+                            ],
+                            "params": {
+                                "org.matrix.cross_signing_reset": {
+                                    "url": url,
+                                },
+                            },
+                            "msg": "To reset your end-to-end encryption cross-signing "
+                            f"identity, you first need to approve it at {url} and "
+                            "then try again.",
+                        },
+                    )
+
             else:
                 # Without MSC3861, we require UIA.
                 await self.auth_handler.validate_user_via_ui_auth(
@@ -504,6 +532,5 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     OneTimeKeyServlet(hs).register(http_server)
     if hs.config.experimental.msc3983_appservice_otk_claims:
         UnstableOneTimeKeyServlet(hs).register(http_server)
-    if hs.config.worker.worker_app is None:
-        SigningKeyUploadServlet(hs).register(http_server)
-        SignaturesUploadServlet(hs).register(http_server)
+    SigningKeyUploadServlet(hs).register(http_server)
+    SignaturesUploadServlet(hs).register(http_server)

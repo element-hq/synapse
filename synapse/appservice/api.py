@@ -48,6 +48,7 @@ from synapse.events import EventBase
 from synapse.events.utils import SerializeEventConfig, serialize_event
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
 
@@ -59,29 +60,31 @@ logger = logging.getLogger(__name__)
 sent_transactions_counter = Counter(
     "synapse_appservice_api_sent_transactions",
     "Number of /transactions/ requests sent",
-    ["service"],
+    labelnames=["service", SERVER_NAME_LABEL],
 )
 
 failed_transactions_counter = Counter(
     "synapse_appservice_api_failed_transactions",
     "Number of /transactions/ requests that failed to send",
-    ["service"],
+    labelnames=["service", SERVER_NAME_LABEL],
 )
 
 sent_events_counter = Counter(
-    "synapse_appservice_api_sent_events", "Number of events sent to the AS", ["service"]
+    "synapse_appservice_api_sent_events",
+    "Number of events sent to the AS",
+    labelnames=["service", SERVER_NAME_LABEL],
 )
 
 sent_ephemeral_counter = Counter(
     "synapse_appservice_api_sent_ephemeral",
     "Number of ephemeral events sent to the AS",
-    ["service"],
+    labelnames=["service", SERVER_NAME_LABEL],
 )
 
 sent_todevice_counter = Counter(
     "synapse_appservice_api_sent_todevice",
     "Number of todevice messages sent to the AS",
-    ["service"],
+    labelnames=["service", SERVER_NAME_LABEL],
 )
 
 HOUR_IN_MS = 60 * 60 * 1000
@@ -126,11 +129,15 @@ class ApplicationServiceApi(SimpleHttpClient):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.config = hs.config.appservice
 
         self.protocol_meta_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "as_protocol_meta", timeout_ms=HOUR_IN_MS
+            clock=hs.get_clock(),
+            name="as_protocol_meta",
+            server_name=self.server_name,
+            timeout_ms=HOUR_IN_MS,
         )
 
     def _get_headers(self, service: "ApplicationService") -> Dict[bytes, List[bytes]]:
@@ -378,6 +385,7 @@ class ApplicationServiceApi(SimpleHttpClient):
                     "left": list(device_list_summary.left),
                 }
 
+        labels = {"service": service.id, SERVER_NAME_LABEL: self.server_name}
         try:
             args = None
             if self.config.use_appservice_legacy_authorization:
@@ -395,10 +403,10 @@ class ApplicationServiceApi(SimpleHttpClient):
                     service.url,
                     [event.get("event_id") for event in events],
                 )
-            sent_transactions_counter.labels(service.id).inc()
-            sent_events_counter.labels(service.id).inc(len(serialized_events))
-            sent_ephemeral_counter.labels(service.id).inc(len(ephemeral))
-            sent_todevice_counter.labels(service.id).inc(len(to_device_messages))
+            sent_transactions_counter.labels(**labels).inc()
+            sent_events_counter.labels(**labels).inc(len(serialized_events))
+            sent_ephemeral_counter.labels(**labels).inc(len(ephemeral))
+            sent_todevice_counter.labels(**labels).inc(len(to_device_messages))
             return True
         except CodeMessageException as e:
             logger.warning(
@@ -417,7 +425,7 @@ class ApplicationServiceApi(SimpleHttpClient):
                 ex.args,
                 exc_info=logger.isEnabledFor(logging.DEBUG),
             )
-        failed_transactions_counter.labels(service.id).inc()
+        failed_transactions_counter.labels(**labels).inc()
         return False
 
     async def claim_client_keys(
@@ -555,6 +563,9 @@ class ApplicationServiceApi(SimpleHttpClient):
                         )
                         and service.is_interested_in_user(e.state_key)
                     ),
+                    # Appservices are considered 'trusted' by the admin and should have
+                    # applicable metadata on their events.
+                    include_admin_metadata=True,
                 ),
             )
             for e in events

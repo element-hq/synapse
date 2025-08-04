@@ -19,7 +19,7 @@
 #
 #
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.databases.main.e2e_room_keys import RoomKey

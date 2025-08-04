@@ -160,6 +160,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="un_partial_stated_room_stream",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[("un_partial_stated_room_stream", "instance_name", "stream_id")],
             sequence_name="un_partial_stated_room_stream_sequence",
@@ -1574,6 +1575,11 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """Get the event ID of the initial join that started the partial
         join, and the device list stream ID at the point we started the partial
         join.
+
+        This only returns the minimum device list stream ID at the time of
+        joining, not the full device list stream token. The only impact of this
+        is that we may be sending again device list updates that we've already
+        sent to some destinations, which is harmless.
         """
 
         return cast(
@@ -1935,6 +1941,65 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 desc="set_room_is_public_appservice_false",
             )
 
+    async def has_auth_chain_index(self, room_id: str) -> bool:
+        """Check if the room has (or can have) a chain cover index.
+
+        Defaults to True if we don't have an entry in `rooms` table nor any
+        events for the room.
+        """
+
+        has_auth_chain_index = await self.db_pool.simple_select_one_onecol(
+            table="rooms",
+            keyvalues={"room_id": room_id},
+            retcol="has_auth_chain_index",
+            desc="has_auth_chain_index",
+            allow_none=True,
+        )
+
+        if has_auth_chain_index:
+            return True
+
+        # It's possible that we already have events for the room in our DB
+        # without a corresponding room entry. If we do then we don't want to
+        # mark the room as having an auth chain cover index.
+        max_ordering = await self.db_pool.simple_select_one_onecol(
+            table="events",
+            keyvalues={"room_id": room_id},
+            retcol="MAX(stream_ordering)",
+            allow_none=True,
+            desc="has_auth_chain_index_fallback",
+        )
+
+        return max_ordering is None
+
+    async def maybe_store_room_on_outlier_membership(
+        self, room_id: str, room_version: RoomVersion
+    ) -> None:
+        """
+        When we receive an invite or any other event over federation that may relate to a room
+        we are not in, store the version of the room if we don't already know the room version.
+        """
+        # It's possible that we already have events for the room in our DB
+        # without a corresponding room entry. If we do then we don't want to
+        # mark the room as having an auth chain cover index.
+        has_auth_chain_index = await self.has_auth_chain_index(room_id)
+
+        await self.db_pool.simple_upsert(
+            desc="maybe_store_room_on_outlier_membership",
+            table="rooms",
+            keyvalues={"room_id": room_id},
+            values={},
+            insertion_values={
+                "room_version": room_version.identifier,
+                "is_public": False,
+                # We don't worry about setting the `creator` here because
+                # we don't process any messages in a room while a user is
+                # invited (only after the join).
+                "creator": "",
+                "has_auth_chain_index": has_auth_chain_index,
+            },
+        )
+
 
 class _BackgroundUpdates:
     REMOVE_TOMESTONED_ROOMS_BG_UPDATE = "remove_tombstoned_rooms_from_directory"
@@ -2186,37 +2251,6 @@ class RoomBackgroundUpdateStore(RoomWorkerStore):
 
         return len(rooms)
 
-    async def has_auth_chain_index(self, room_id: str) -> bool:
-        """Check if the room has (or can have) a chain cover index.
-
-        Defaults to True if we don't have an entry in `rooms` table nor any
-        events for the room.
-        """
-
-        has_auth_chain_index = await self.db_pool.simple_select_one_onecol(
-            table="rooms",
-            keyvalues={"room_id": room_id},
-            retcol="has_auth_chain_index",
-            desc="has_auth_chain_index",
-            allow_none=True,
-        )
-
-        if has_auth_chain_index:
-            return True
-
-        # It's possible that we already have events for the room in our DB
-        # without a corresponding room entry. If we do then we don't want to
-        # mark the room as having an auth chain cover index.
-        max_ordering = await self.db_pool.simple_select_one_onecol(
-            table="events",
-            keyvalues={"room_id": room_id},
-            retcol="MAX(stream_ordering)",
-            allow_none=True,
-            desc="has_auth_chain_index_fallback",
-        )
-
-        return max_ordering is None
-
     async def _background_populate_room_depth_min_depth2(
         self, progress: JsonDict, batch_size: int
     ) -> int:
@@ -2421,6 +2455,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
 
         self._event_reports_id_gen = IdGenerator(db_conn, "event_reports", "id")
         self._room_reports_id_gen = IdGenerator(db_conn, "room_reports", "id")
+        self._user_reports_id_gen = IdGenerator(db_conn, "user_reports", "id")
 
         self._instance_name = hs.get_instance_name()
 
@@ -2566,34 +2601,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
             updatevalues={"join_event_id": join_event_id},
         )
 
-    async def maybe_store_room_on_outlier_membership(
-        self, room_id: str, room_version: RoomVersion
-    ) -> None:
-        """
-        When we receive an invite or any other event over federation that may relate to a room
-        we are not in, store the version of the room if we don't already know the room version.
-        """
-        # It's possible that we already have events for the room in our DB
-        # without a corresponding room entry. If we do then we don't want to
-        # mark the room as having an auth chain cover index.
-        has_auth_chain_index = await self.has_auth_chain_index(room_id)
-
-        await self.db_pool.simple_upsert(
-            desc="maybe_store_room_on_outlier_membership",
-            table="rooms",
-            keyvalues={"room_id": room_id},
-            values={},
-            insertion_values={
-                "room_version": room_version.identifier,
-                "is_public": False,
-                # We don't worry about setting the `creator` here because
-                # we don't process any messages in a room while a user is
-                # invited (only after the join).
-                "creator": "",
-                "has_auth_chain_index": has_auth_chain_index,
-            },
-        )
-
     async def add_event_report(
         self,
         room_id: str,
@@ -2659,6 +2666,37 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "reason": reason,
             },
             desc="add_room_report",
+        )
+        return next_id
+
+    async def add_user_report(
+        self,
+        target_user_id: str,
+        user_id: str,
+        reason: str,
+        received_ts: int,
+    ) -> int:
+        """Add a user report
+
+        Args:
+            target_user_id: The user ID being reported.
+            user_id: User who reported the user.
+            reason: Description that the user specifies.
+            received_ts: Time when the user submitted the report (milliseconds).
+        Returns:
+            ID of the room report.
+        """
+        next_id = self._user_reports_id_gen.get_next()
+        await self.db_pool.simple_insert(
+            table="user_reports",
+            values={
+                "id": next_id,
+                "received_ts": received_ts,
+                "target_user_id": target_user_id,
+                "user_id": user_id,
+                "reason": reason,
+            },
+            desc="add_user_report",
         )
         return next_id
 

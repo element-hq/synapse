@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, Mock
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes
 from synapse.events.presence_router import PresenceRouter, load_legacy_presence_router

@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
+from twisted.internet.testing import MemoryReactor
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.app.generic_worker import GenericWorkerServer
@@ -220,7 +220,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         fetching updates for given stream.
         """
 
-        path: bytes = request.path  # type: ignore
+        path: bytes = request.path
         self.assertRegex(
             path,
             rb"^/_synapse/replication/get_repl_stream_updates/%s/[^/]+$"

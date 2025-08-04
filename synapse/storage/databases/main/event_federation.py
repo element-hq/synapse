@@ -45,14 +45,16 @@ from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
-from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
+from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.background_updates import ForeignKeyConstraint
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.signatures import SignatureWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
@@ -69,17 +71,20 @@ if TYPE_CHECKING:
 oldest_pdu_in_federation_staging = Gauge(
     "synapse_federation_server_oldest_inbound_pdu_in_staging",
     "The age in seconds since we received the oldest pdu in the federation staging area",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 number_pdus_in_federation_queue = Gauge(
     "synapse_federation_server_number_inbound_pdu_in_staging",
     "The total number of events in the inbound federation staging",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 pdus_pruned_from_federation_queue = Counter(
     "synapse_federation_server_number_inbound_pdu_pruned",
     "The number of events in the inbound federation staging that have been "
     "pruned due to the queue getting too long",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 logger = logging.getLogger(__name__)
@@ -123,7 +128,9 @@ class _NoChainCoverIndex(Exception):
         super().__init__("Unexpectedly no chain cover for events in %s" % (room_id,))
 
 
-class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBaseStore):
+class EventFederationWorkerStore(
+    SignatureWorkerStore, EventsWorkerStore, CacheInvalidationWorkerStore
+):
     # TODO: this attribute comes from EventPushActionWorkerStore. Should we inherit from
     # that store so that mypy can deduce this for itself?
     stream_ordering_month_ago: Optional[int]
@@ -145,7 +152,10 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
 
         # Cache of event ID to list of auth event IDs and their depths.
         self._event_auth_cache: LruCache[str, List[Tuple[str, int]]] = LruCache(
-            500000, "_event_auth_cache", size_callback=len
+            max_size=500000,
+            server_name=self.server_name,
+            cache_name="_event_auth_cache",
+            size_callback=len,
         )
 
         # Flag used by unit tests to disable fallback when there is no chain cover
@@ -1997,7 +2007,9 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         if not to_delete:
             return False
 
-        pdus_pruned_from_federation_queue.inc(len(to_delete))
+        pdus_pruned_from_federation_queue.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(len(to_delete))
         logger.info(
             "Pruning %d events in room %s from federation queue",
             len(to_delete),
@@ -2050,8 +2062,25 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             "_get_stats_for_federation_staging", _get_stats_for_federation_staging_txn
         )
 
-        number_pdus_in_federation_queue.set(count)
-        oldest_pdu_in_federation_staging.set(age)
+        number_pdus_in_federation_queue.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(count)
+        oldest_pdu_in_federation_staging.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(age)
+
+    async def clean_room_for_join(self, room_id: str) -> None:
+        await self.db_pool.runInteraction(
+            "clean_room_for_join", self._clean_room_for_join_txn, room_id
+        )
+
+    def _clean_room_for_join_txn(self, txn: LoggingTransaction, room_id: str) -> None:
+        query = "DELETE FROM event_forward_extremities WHERE room_id = ?"
+
+        txn.execute(query, (room_id,))
+        self._invalidate_cache_and_stream(
+            txn, self.get_latest_event_ids_in_room, (room_id,)
+        )
 
 
 class EventFederationStore(EventFederationWorkerStore):
@@ -2077,17 +2106,6 @@ class EventFederationStore(EventFederationWorkerStore):
         self.db_pool.updates.register_background_update_handler(
             self.EVENT_AUTH_STATE_ONLY, self._background_delete_non_state_event_auth
         )
-
-    async def clean_room_for_join(self, room_id: str) -> None:
-        await self.db_pool.runInteraction(
-            "clean_room_for_join", self._clean_room_for_join_txn, room_id
-        )
-
-    def _clean_room_for_join_txn(self, txn: LoggingTransaction, room_id: str) -> None:
-        query = "DELETE FROM event_forward_extremities WHERE room_id = ?"
-
-        txn.execute(query, (room_id,))
-        txn.call_after(self.get_latest_event_ids_in_room.invalidate, (room_id,))
 
     async def _background_delete_non_state_event_auth(
         self, progress: JsonDict, batch_size: int

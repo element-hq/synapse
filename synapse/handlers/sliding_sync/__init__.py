@@ -38,6 +38,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -79,7 +80,7 @@ logger = logging.getLogger(__name__)
 sync_processing_time = Histogram(
     "synapse_sliding_sync_processing_time",
     "Time taken to generate a sliding sync response, ignoring wait times.",
-    ["initial"],
+    labelnames=["initial", SERVER_NAME_LABEL],
 )
 
 # Limit the number of state_keys we should remember sending down the connection for each
@@ -94,6 +95,7 @@ MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
 
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
@@ -368,9 +370,9 @@ class SlidingSyncHandler:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
 
         end_time_s = self.clock.time()
-        sync_processing_time.labels(from_token is not None).observe(
-            end_time_s - start_time_s
-        )
+        sync_processing_time.labels(
+            initial=from_token is not None, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time_s - start_time_s)
 
         return sliding_sync_result
 
