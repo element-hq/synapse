@@ -22,7 +22,7 @@
 import logging
 import random
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from canonicaljson import encode_canonical_json
 
@@ -55,7 +55,11 @@ from synapse.api.urls import ConsentURIBuilder
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
-from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    EventContext,
+    UnpersistedEventContext,
+    UnpersistedEventContextBase,
+)
 from synapse.events.utils import SerializeEventConfig, maybe_upsert_event_field
 from synapse.events.validator import EventValidator
 from synapse.handlers.directory import DirectoryHandler
@@ -66,6 +70,7 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
+    JsonDict,
     PersistedEventPosition,
     Requester,
     RoomAlias,
@@ -1519,6 +1524,92 @@ class EventCreationHandler:
         ).addErrback(unwrapFirstError)
 
         return result
+
+    async def create_and_send_new_client_events(
+        self,
+        requester: Requester,
+        room_id: str,
+        prev_event_id: str,
+        event_dicts: Sequence[JsonDict],
+        ratelimit: bool = True,
+        ignore_shadow_ban: bool = False,
+    ) -> None:
+        """Helper to create and send a batch of new client events.
+
+        This supports sending membership events in very limited circumstances
+        (namely that the event is valid as is and doesn't need federation
+        requests or anything). Callers should prefer to use `update_membership`,
+        which correctly handles membership events in all cases. We allow
+        sending membership events here as its useful when copying e.g. bans
+        between rooms.
+
+        All other events and state events are supported.
+
+        Args:
+            requester: The requester sending the events.
+            room_id: The room ID to send the events in.
+            prev_event_id: The event ID to use as the previous event for the first
+                of the events, must have already been persisted.
+            event_dicts: A sequence of event dictionaries to create and send.
+            ratelimit: Whether to rate limit this send.
+            ignore_shadow_ban: True if shadow-banned users should be allowed to
+                send these events.
+        """
+
+        if not event_dicts:
+            # Nothing to do.
+            return
+
+        state_groups = await self._storage_controllers.state.get_state_group_for_events(
+            [prev_event_id]
+        )
+        if prev_event_id not in state_groups:
+            # This should only happen if we got passed a prev event ID that
+            # hasn't been persisted yet.
+            raise Exception("Previous event ID not found ")
+
+        current_state_group = state_groups[prev_event_id]
+        state_map = await self._storage_controllers.state.get_state_ids_for_group(
+            current_state_group
+        )
+
+        events_and_contexts_to_send = []
+        state_map = dict(state_map)
+        depth = None
+
+        for event_dict in event_dicts:
+            event, context = await self.create_event(
+                requester=requester,
+                event_dict=event_dict,
+                prev_event_ids=[prev_event_id],
+                depth=depth,
+                # Take a copy to ensure each event gets a unique copy of
+                # state_map since it is modified below.
+                state_map=dict(state_map),
+                for_batch=True,
+            )
+            events_and_contexts_to_send.append((event, context))
+
+            prev_event_id = event.event_id
+            depth = event.depth + 1
+            if event.is_state():
+                # If this is a state event, we need to update the state map
+                # so that it can be used for the next event.
+                state_map[(event.type, event.state_key)] = event.event_id
+
+        datastore = self.hs.get_datastores().state
+        events_and_context = (
+            await UnpersistedEventContext.batch_persist_unpersisted_contexts(
+                events_and_contexts_to_send, room_id, current_state_group, datastore
+            )
+        )
+
+        await self.handle_new_client_event(
+            requester,
+            events_and_context,
+            ignore_shadow_ban=ignore_shadow_ban,
+            ratelimit=ratelimit,
+        )
 
     async def _persist_events(
         self,
