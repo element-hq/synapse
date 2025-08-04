@@ -656,6 +656,43 @@ properties:
       - - master.hostname.example.com
         - 10.1.0.0/16
         - 172.30.0.0/16
+  matrix_authentication_service:
+    type: object
+    description: >-
+      The `matrix_authentication_service` setting configures integration with
+      [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service).
+    properties:
+      enabled:
+        type: boolean
+        description: >-
+          Whether or not to enable the MAS integration. If this is set to
+          `false`, Synapse will use its legacy internal authentication API.
+        default: false
+
+      endpoint:
+        type: string
+        format: uri
+        description: >-
+          The URL where Synapse can reach MAS. This *must* have the `discovery`
+          and `oauth` resources mounted.
+        default: http://localhost:8080
+
+      secret:
+        type: ["string", "null"]
+        description: >-
+          A shared secret that will be used to authenticate requests from and to MAS.
+
+      secret_path:
+        type: ["string", "null"]
+        description: >-
+          Alternative to `secret`, reading the shared secret from a file.
+          The file should be a plain text file, containing only the secret.
+          Synapse reads the secret from the given file once at startup.
+
+    examples:
+      - enabled: true
+        secret: someverysecuresecret
+        endpoint: http://localhost:8080
   dummy_events_threshold:
     type: integer
     description: >-

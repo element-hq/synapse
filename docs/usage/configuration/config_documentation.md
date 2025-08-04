@@ -643,6 +643,28 @@ no_proxy_hosts:
 - 172.30.0.0/16
 ```
 ---
+### `matrix_authentication_service`
+
+*(object)* The `matrix_authentication_service` setting configures integration with [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service).
+
+This setting has the following sub-options:
+
+* `enabled` (boolean): Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its legacy internal authentication API. Defaults to `false`.
+
+* `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
+
+* `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
+
+* `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+matrix_authentication_service:
+  enabled: true
+  secret: someverysecuresecret
+  endpoint: http://localhost:8080
+```
+---
 ### `dummy_events_threshold`
 
 *(integer)* Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an `org.matrix.dummy_event` event, which will reduce the forward extremities in the room.
