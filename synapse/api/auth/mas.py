@@ -91,10 +91,9 @@ class IntrospectionResponse(BaseModel):
         if not self.active:
             return False
 
+        # Compatibility tokens don't expire and don't have an 'expires_in' field
         if self.expires_in is None:
-            # The 'expires_in' field was introduced in MAS 0.15, we can assume
-            # it is always set
-            raise AuthError(500, "token `expires_in` is not set")
+            return True
 
         absolute_expiry_ms = self.expires_in * 1000 + self.retrieved_at_ms
         return now_ms < absolute_expiry_ms

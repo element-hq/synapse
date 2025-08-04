@@ -939,6 +939,34 @@ class MasAuthDelegation(HomeserverTestCase):
             "some_token",
         )
 
+    def test_unexpiring_token(self) -> None:
+        self.server.introspection_response = {
+            "active": True,
+            "sub": SUBJECT,
+            "scope": " ".join(
+                [
+                    MATRIX_USER_SCOPE,
+                    f"{MATRIX_DEVICE_SCOPE_PREFIX}{DEVICE}",
+                ]
+            ),
+            "username": USERNAME,
+        }
+
+        requester = self.get_success(
+            self.till_deferred_has_result(
+                self._auth.get_user_by_access_token("some_token")
+            )
+        )
+
+        self.assertEquals(requester.user.to_string(), USER_ID)
+        self.assertEquals(requester.device_id, DEVICE)
+        self.assertFalse(self.get_success(self._auth.is_server_admin(requester)))
+
+        self.assertEquals(
+            self.server.last_token_seen,
+            "some_token",
+        )
+
     def test_inexistent_device(self) -> None:
         self.server.introspection_response = {
             "active": True,
