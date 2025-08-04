@@ -1,1 +1,1 @@
-Make `.sleep(..)` return a coroutine, so that mypy can catch places where we don't await on it.
+Make `Clock.sleep(..)` return a coroutine, so that mypy can catch places where we don't await on it.
