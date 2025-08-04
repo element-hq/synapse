@@ -666,7 +666,7 @@ properties:
         type: boolean
         description: >-
           Whether or not to enable the MAS integration. If this is set to
-          `false`, Synapse will use its internal authentication API.
+          `false`, Synapse will use its legacy internal authentication API.
         default: false
 
       endpoint:

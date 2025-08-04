@@ -649,7 +649,7 @@ no_proxy_hosts:
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its internal authentication API. Defaults to `false`.
+* `enabled` (boolean): Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its legacy internal authentication API. Defaults to `false`.
 
 * `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
 
