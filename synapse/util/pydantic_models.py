@@ -72,8 +72,8 @@ class AnyEventId(StrictStr):
             # Room version 3 is base64, 4+ are base64Url
             # In both cases, the base64 is unpadded.
             # refs:
-            # - https://spec.matrix.org/v1.15/rooms/v3/
-            # - https://spec.matrix.org/v1.15/rooms/v4/
+            # - https://spec.matrix.org/v1.15/rooms/v3/ e.g. $acR1l0raoZnm60CBwAVgqbZqoO/mYU81xysh1u7XcJk
+            # - https://spec.matrix.org/v1.15/rooms/v4/ e.g. $Rqnc-F-dvnEYJTyHq_iKxU2bZ1CI92-kuZq3a5lr5Zg
             b64_hash = value[1:]
             if cls.EVENT_ID_HASH_ROOM_VERSION_3_PLUS.fullmatch(b64_hash) is None:
                 raise ValueError(
