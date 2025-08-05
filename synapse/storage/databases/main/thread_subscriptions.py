@@ -130,9 +130,17 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         Returns:
             True if the automatic subscription should be skipped
         """
-        # these two orderings should be positive, because they don't refer to a specific event
-        # but rather the maximum at the time of unsubscription
-        assert unsubscribed_at.stream > 0
+        # For normal rooms, these two orderings should be positive, because
+        # they don't refer to a specific event but rather the maximum at the
+        # time of unsubscription.
+        # However, for rooms that have never been joined and that are being peeked at,
+        # we might not have a single non-backfilled event and therefore the stream
+        # ordering might be negative.
+        # In this case, we clamp it at zero and ensure we fall back to
+        # using topological ordering.
+        unsubscribed_at = attr.evolve(
+            unsubscribed_at, stream=max(0, unsubscribed_at.stream)
+        )
         assert unsubscribed_at.topological > 0
 
         if unsubscribed_at.stream >= autosub.stream > 0:
