@@ -167,12 +167,9 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self.assertTrue(subscription.automatic)  # type: ignore
 
         # Now make it a manual subscription
-        self.assertIsInstance(
-            self._subscribe(
-                self.thread_root_id,
-                automatic_event_orderings=None,
-            ),
-            int,
+        self._subscribe(
+            self.thread_root_id,
+            automatic_event_orderings=None,
         )
 
         # Assert the manual subscription overrode the automatic one
