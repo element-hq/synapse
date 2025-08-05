@@ -32,6 +32,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types import EventOrderings
 from synapse.util.caches.descriptors import cached
 
 if TYPE_CHECKING:
@@ -110,10 +111,9 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
     @staticmethod
     def _should_skip_autosubscription_after_unsubscription(
-        autosub_stream_ordering: int,
-        autosub_topological_ordering: int,
-        unsubscribed_at_stream_ordering: int,
-        unsubscribed_at_topological_ordering: int,
+        *,
+        autosub: EventOrderings,
+        unsubscribed_at: EventOrderings,
     ) -> bool:
         """
         Returns whether an automatic subscription occurring *after* an unsubscription
@@ -123,28 +123,27 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         To determine *after*, we use `stream_ordering` unless the event is backfilled (negative `stream_ordering`) and fallback to topological ordering.
 
         Args:
-            autosub_stream_ordering: the stream_ordering of the cause event
-            autosub_topological_ordering: the topological_ordering of the cause event
-            unsubscribed_at_stream_ordering: the maximum stream ordering at the time of unsubscription
-            unsubscribed_at_topological_ordering: the maximum stream ordering at the time of unsubscription
+            autosub: the stream_ordering and topological_ordering of the cause event
+            unsubscribed_at:
+                the maximum stream ordering and the maximum topological ordering at the time of unsubscription
 
         Returns:
             True if the automatic subscription should be skipped
         """
         # these two orderings should be positive, because they don't refer to a specific event
         # but rather the maximum at the time of unsubscription
-        assert unsubscribed_at_stream_ordering > 0
-        assert unsubscribed_at_topological_ordering > 0
+        assert unsubscribed_at.stream > 0
+        assert unsubscribed_at.topological > 0
 
-        if unsubscribed_at_stream_ordering >= autosub_stream_ordering > 0:
+        if unsubscribed_at.stream >= autosub.stream > 0:
             # non-backfilled events: the unsubscription is later according to
             # the stream
             return True
 
-        if autosub_stream_ordering < 0:
+        if autosub.stream < 0:
             # the auto-subscription cause event was backfilled, so fall back to
             # topological ordering
-            if unsubscribed_at_topological_ordering >= autosub_topological_ordering:
+            if unsubscribed_at.topological >= autosub.topological:
                 return True
 
         return False
@@ -155,7 +154,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         room_id: str,
         thread_root_event_id: str,
         *,
-        automatic_event_orderings: Optional[Tuple[int, int]],
+        automatic_event_orderings: Optional[EventOrderings],
     ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
         """Updates a user's subscription settings for a specific thread root.
 
@@ -165,10 +164,10 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             user_id: The ID of the user whose settings are being updated.
             room_id: The ID of the room the thread root belongs to.
             thread_root_event_id: The event ID of the thread root.
-            automatic_event_id:
+            automatic_event_orderings:
                 Value depends on whether the subscription was performed automatically by the user's client.
                 For manual subscriptions: None.
-                For automatic subscriptions: (stream_ordering, topological_ordering) of the event.
+                For automatic subscriptions: the orderings of the event.
 
         Returns:
             If a subscription is made: (int) the stream ID for this update.
@@ -242,14 +241,12 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 assert automatic_event_orderings is not None
                 # we previously unsubscribed and we are now automatically subscribing
                 # Check whether the new autosubscription should be skipped
-                autosub_stream_ordering, autosub_topological_ordering = (
-                    automatic_event_orderings
-                )
                 if ThreadSubscriptionsWorkerStore._should_skip_autosubscription_after_unsubscription(
-                    autosub_stream_ordering,
-                    autosub_topological_ordering,
-                    unsubscribed_at_stream_ordering,
-                    unsubscribed_at_topological_ordering,
+                    autosub=automatic_event_orderings,
+                    unsubscribed_at=EventOrderings(
+                        unsubscribed_at_stream_ordering,
+                        unsubscribed_at_topological_ordering,
+                    ),
                 ):
                     # skip the subscription
                     return AutomaticSubscriptionConflicted()

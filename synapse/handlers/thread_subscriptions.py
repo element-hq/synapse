@@ -9,7 +9,7 @@ from synapse.storage.databases.main.thread_subscriptions import (
     AutomaticSubscriptionConflicted,
     ThreadSubscription,
 )
-from synapse.types import UserID
+from synapse.types import EventOrderings, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -114,13 +114,7 @@ class ThreadSubscriptionsHandler:
                     errcode=Codes.MSC4306_NOT_IN_THREAD,
                 )
 
-            stream_ordering = event.internal_metadata.stream_ordering
-            assert stream_ordering is not None
-            automatic_event_orderings = (
-                stream_ordering,
-                # depth is topological_ordering
-                event.depth,
-            )
+            automatic_event_orderings = EventOrderings.from_event(event)
         else:
             automatic_event_orderings = None
 
