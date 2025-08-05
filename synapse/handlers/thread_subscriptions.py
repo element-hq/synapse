@@ -87,22 +87,22 @@ class ThreadSubscriptionsHandler:
         # First check that the user can access the thread root event
         # and that it exists
         try:
-            event = await self.event_handler.get_event(
+            thread_root_event = await self.event_handler.get_event(
                 user_id, room_id, thread_root_event_id
             )
-            if event is None:
+            if thread_root_event is None:
                 raise NotFoundError("No such thread root")
         except AuthError:
             logger.info("rejecting thread subscriptions change (thread not accessible)")
             raise NotFoundError("No such thread root")
 
         if automatic_event_id:
-            event = await self.event_handler.get_event(
+            autosub_cause_event = await self.event_handler.get_event(
                 user_id, room_id, automatic_event_id
             )
-            if event is None:
+            if autosub_cause_event is None:
                 raise NotFoundError("Automatic subscription event not found")
-            relation = relation_from_event(event)
+            relation = relation_from_event(autosub_cause_event)
             if (
                 relation is None
                 or relation.rel_type != RelationTypes.THREAD
@@ -114,13 +114,13 @@ class ThreadSubscriptionsHandler:
                     errcode=Codes.MSC4306_NOT_IN_THREAD,
                 )
 
-            automatic_event_orderings = EventOrderings.from_event(event)
+            automatic_event_orderings = EventOrderings.from_event(autosub_cause_event)
         else:
             automatic_event_orderings = None
 
         outcome = await self.store.subscribe_user_to_thread(
             user_id.to_string(),
-            event.room_id,
+            room_id,
             thread_root_event_id,
             automatic_event_orderings=automatic_event_orderings,
         )
