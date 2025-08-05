@@ -111,7 +111,7 @@ class ThreadSubscriptionsHandler:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
                     "Automatic subscription must be caused by an event in the thread",
-                    errcode=Codes.NOT_IN_THREAD,
+                    errcode=Codes.MSC4306_NOT_IN_THREAD,
                 )
 
             stream_ordering = event.internal_metadata.stream_ordering
@@ -135,7 +135,7 @@ class ThreadSubscriptionsHandler:
             raise SynapseError(
                 HTTPStatus.CONFLICT,
                 "Automatic subscription obsoleted by an unsubscription request.",
-                errcode=Codes.SKIPPED,
+                errcode=Codes.MSC4306_CONFLICTING_UNSUBSCRIPTION,
             )
 
         return outcome
