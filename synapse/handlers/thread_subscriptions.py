@@ -110,7 +110,7 @@ class ThreadSubscriptionsHandler:
             ):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
-                    "Automatic subscription must be caused by an event in the thread",
+                    "Automatic subscription must use an event in the thread",
                     errcode=Codes.MSC4306_NOT_IN_THREAD,
                 )
 
