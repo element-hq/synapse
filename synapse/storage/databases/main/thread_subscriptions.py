@@ -168,6 +168,15 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         If no change would be made to the subscription, does not produce any database change.
 
+        Case-by-case:
+            - if we already have an automatic subscription:
+                - new automatic subscriptions will be no-ops (no database write),
+                - new manual subscriptions will overwrite the automatic subscription
+            - if we already have a manual subscription:
+              we don't update (no database write) in either case, because:
+                - the existing manual subscription wins over a new automatic subscription request
+                - there would be no need to write a manual subscription because we already have one
+
         Args:
             user_id: The ID of the user whose settings are being updated.
             room_id: The ID of the room the thread root belongs to.
