@@ -26,7 +26,7 @@ Please check [the relevant section in the upgrade notes](https://github.com/elem
 
 ### Deprecations and Removals
 
-- Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`. See above. ([\#18737](https://github.com/element-hq/synapse/issues/18737))
+- Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`. See [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11360) for more information. ([\#18737](https://github.com/element-hq/synapse/issues/18737))
 
 ### Internal Changes
 
