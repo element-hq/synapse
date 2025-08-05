@@ -131,7 +131,7 @@ class ServerNoticesTests(unittest.HomeserverTestCase):
                 break
 
             # Sleep and try again.
-            self.clock.sleep(0.1)
+            self.get_success(self.clock.sleep(0.1))
         else:
             self.fail(
                 f"Failed to join the server notices room. No 'join' field in sync_body['rooms']: {sync_body['rooms']}"
