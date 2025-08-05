@@ -26,7 +26,7 @@ from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.constants import EventContentFields, RelationTypes
+from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.push.bulk_push_rule_evaluator import BulkPushRuleEvaluator
 from synapse.rest import admin
@@ -466,7 +466,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
                         "event_id": thread_root_id,
                     },
                 },
-                type="m.room.message",
+                type=EventTypes.Message,
             )
         )
 
