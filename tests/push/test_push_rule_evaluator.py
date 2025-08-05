@@ -848,7 +848,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
 
     def test_thread_subscription_unsubscribed(self) -> None:
         """
-        Test MSC4306 thread subscription push rules against an event in an unsubscribed event.
+        Test MSC4306 thread subscription push rules against an event in an unsubscribed thread.
         """
         evaluator = self._get_evaluator(
             {
