@@ -461,6 +461,21 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
 
         return ThreadSubscription(automatic=automatic)
 
+    # max_entries=100 rationale:
+    # this returns a potentially large datastructure
+    # (since each entry contains a set which contains a potentially large number of user IDs),
+    # whereas the default of 10'000 entries for @cached feels more
+    # suitable for very small cache entries.
+    #
+    # Overall, when bearing in mind the usual profile of a small community-server or company-server
+    # (where cache tuning hasn't been done, so we're in out-of-box configuration), it is very
+    # unlikely we would benefit from keeping hot the subscribers for as many as 100 threads,
+    # since it's unlikely that so many threads will be active in a short span of time on a small homeserver.
+    # It feels that medium servers will probably also not exhaust this limit.
+    # Larger homeservers are more likely to be carefully tuned, either with a larger global cache factor
+    # or carefully following the usage patterns & cache metrics.
+    # Finally, the query is not so intensive that computing it every time is a huge deal, but given people
+    # often send messages back-to-back in the same thread it seems like it would offer a mild benefit.
     @cached(max_entries=100)
     async def get_subscribers_to_thread(
         self, room_id: str, thread_root_event_id: str
