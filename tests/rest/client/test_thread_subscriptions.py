@@ -15,6 +15,7 @@ from http import HTTPStatus
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, profile, room, thread_subscriptions
 from synapse.server import HomeServer
@@ -277,7 +278,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             access_token=self.token,
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.text_body)
-        self.assertEqual(channel.json_body["errcode"], "M_NOT_IN_THREAD")
+        self.assertEqual(channel.json_body["errcode"], Codes.MSC4306_NOT_IN_THREAD)
 
     def test_auto_resubscription_conflict(self) -> None:
         """
@@ -301,7 +302,9 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(channel.code, HTTPStatus.CONFLICT, channel.text_body)
             self.assertEqual(
-                channel.json_body["errcode"], "M_SKIPPED", channel.text_body
+                channel.json_body["errcode"],
+                Codes.MSC4306_CONFLICTING_UNSUBSCRIPTION,
+                channel.text_body,
             )
 
             # Check the subscription was not made
