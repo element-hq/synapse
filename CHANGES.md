@@ -1,5 +1,7 @@
 # Synapse 1.136.0rc1 (2025-08-05)
 
+Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11360) as this release contains changes to MAS support, metrics labels and the module API which may require your attention when upgrading.
+
 ### Features
 
 - Add configurable rate limiting for the creation of rooms. ([\#18514](https://github.com/element-hq/synapse/issues/18514))
@@ -7,7 +9,7 @@
 - When admins enable themselves to see soft-failed events, they will also see if the cause is due to the policy server flagging them as spam via `unsigned`. ([\#18585](https://github.com/element-hq/synapse/issues/18585))
 - Add ability to configure forward/outbound proxy via homeserver config instead of environment variables. See `http_proxy`, `https_proxy`, `no_proxy_hosts`. ([\#18686](https://github.com/element-hq/synapse/issues/18686))
 - Advertise experimental support for [MSC4306](https://github.com/matrix-org/matrix-spec-proposals/pull/4306) (Thread Subscriptions) through `/_matrix/clients/versions` if enabled. ([\#18722](https://github.com/element-hq/synapse/issues/18722))
-- Stable support for delegating authentication to [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service/). ([\#18759](https://github.com/element-hq/synapse/issues/18759))
+- Stabilise support for delegating authentication to [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service/). ([\#18759](https://github.com/element-hq/synapse/issues/18759))
 
 ### Bugfixes
 
@@ -24,30 +26,24 @@
 
 ### Deprecations and Removals
 
-- Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`. See the relevant section in the upgrade notes for more information. ([\#18737](https://github.com/element-hq/synapse/issues/18737))
+- Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`. See above. ([\#18737](https://github.com/element-hq/synapse/issues/18737))
 
 ### Internal Changes
 
 - Add debug logging for HMAC digest verification failures when using the admin API to register users. ([\#18474](https://github.com/element-hq/synapse/issues/18474))
 - Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
 - Fix config documentation generation script on Windows by enforcing UTF-8. ([\#18580](https://github.com/element-hq/synapse/issues/18580))
-- Refactor `Counter` metrics to be homeserver-scoped. ([\#18656](https://github.com/element-hq/synapse/issues/18656))
-- Refactor background process metrics to be homeserver-scoped. ([\#18670](https://github.com/element-hq/synapse/issues/18670))
-- Refactor `LaterGauge` metrics to be homeserver-scoped. ([\#18714](https://github.com/element-hq/synapse/issues/18714))
-- Refactor `GaugeBucketCollector` metrics to be homeserver-scoped. ([\#18715](https://github.com/element-hq/synapse/issues/18715))
+- Refactor cache, background process, `Counter`, `LaterGauge`, `GaugeBucketCollector`, `Histogram`, and `Gauge` metrics to be homeserver-scoped. ([\#18656](https://github.com/element-hq/synapse/issues/18656), [\#18714](https://github.com/element-hq/synapse/issues/18714), [\#18715](https://github.com/element-hq/synapse/issues/18715), [\#18724](https://github.com/element-hq/synapse/issues/18724), [\#18753](https://github.com/element-hq/synapse/issues/18753), [\#18725](https://github.com/element-hq/synapse/issues/18725), [\#18670](https://github.com/element-hq/synapse/issues/18670), [\#18748](https://github.com/element-hq/synapse/issues/18748))
 - Reduce database usage in Sliding Sync by not querying for background update completion after the update is known to be complete. ([\#18718](https://github.com/element-hq/synapse/issues/18718))
 - Improve order of validation and ratelimiting in room creation. ([\#18723](https://github.com/element-hq/synapse/issues/18723))
-- Refactor `Histogram` metrics to be homeserver-scoped. ([\#18724](https://github.com/element-hq/synapse/issues/18724), [\#18753](https://github.com/element-hq/synapse/issues/18753))
-- Refactor `Gauge` metrics to be homeserver-scoped. ([\#18725](https://github.com/element-hq/synapse/issues/18725))
 - Bump minimum version bound on Twisted to 21.2.0. ([\#18727](https://github.com/element-hq/synapse/issues/18727), [\#18729](https://github.com/element-hq/synapse/issues/18729))
 - Use `twisted.internet.testing` module in tests instead of deprecated `twisted.test.proto_helpers`. ([\#18728](https://github.com/element-hq/synapse/issues/18728))
 - Remove obsolete `/send_event` replication endpoint. ([\#18730](https://github.com/element-hq/synapse/issues/18730))
 - Update metrics linting to be able to handle custom metrics. ([\#18733](https://github.com/element-hq/synapse/issues/18733))
 - Work around `twisted.protocols.amp.TooLong` error by reducing logging in some tests. ([\#18736](https://github.com/element-hq/synapse/issues/18736))
-- Refactor cache metrics to be homeserver-scoped. ([\#18748](https://github.com/element-hq/synapse/issues/18748))
 - Prevent "Move labelled issues to correct projects" GitHub Actions workflow from failing when an issue is already on the project board. ([\#18755](https://github.com/element-hq/synapse/issues/18755))
 - Bump minimum supported Rust version (MSRV) to 1.82.0. Missed in [#18553](https://github.com/element-hq/synapse/pull/18553) (released in Synapse 1.134.0). ([\#18757](https://github.com/element-hq/synapse/issues/18757))
-- Make `Clock.sleep(..)` return a coroutine, so that mypy can catch places where we don't await on it. ([\#18772](https://github.com/element-hq/synapse/issues/18772))
+- Make `Clock.sleep(...)` return a coroutine, so that mypy can catch places where we don't await on it. ([\#18772](https://github.com/element-hq/synapse/issues/18772))
 
 
 
