@@ -364,7 +364,7 @@ class RoomIdWithDomain(DomainSpecificString):
 ROOM_ID_PATTERN_DOMAINLESS = re.compile(r"^[A-Za-z0-9\-_]{43}$")
 
 
-@attr.s(slots=True, frozen=True, repr=False)
+@attr.s(slots=True, frozen=True, auto_attribs=True, repr=False)
 class RoomID:
     """Structure representing a room id without a domain.
     There are two forms of room IDs:
