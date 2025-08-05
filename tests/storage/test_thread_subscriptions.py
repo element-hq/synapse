@@ -331,8 +331,16 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
     def test_get_subscribers_to_thread(self) -> None:
         """
         Test getting all subscribers to a thread at once.
+
+        To check cache invalidations are correct, we do multiple
+        step-by-step rounds of subscription changes and assertions.
         """
         other_user_id = "@other_user:test"
+
+        subscribers = self.get_success(
+            self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
+        )
+        self.assertEqual(subscribers, frozenset())
 
         self._subscribe(self.thread_root_id, automatic=None, user_id=self.user_id)
 
