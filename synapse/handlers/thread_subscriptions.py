@@ -101,7 +101,7 @@ class ThreadSubscriptionsHandler:
                 user_id, room_id, automatic_event_id
             )
             if event is None:
-                raise NotFoundError("No such automatic subscription cause event")
+                raise NotFoundError("Automatic subscription event not found")
             relation = relation_from_event(event)
             if (
                 relation is None
