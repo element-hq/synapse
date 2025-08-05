@@ -120,7 +120,8 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         should be skipped, because the unsubscription already 'acknowledges' the event
         causing the automatic subscription (the cause event).
 
-        To determine *after*, we use `stream_ordering` unless the event is backfilled (negative `stream_ordering`) and fallback to topological ordering.
+        To determine *after*, we use `stream_ordering` unless the event is backfilled
+        (negative `stream_ordering`) and fallback to topological ordering.
 
         Args:
             autosub: the stream_ordering and topological_ordering of the cause event
