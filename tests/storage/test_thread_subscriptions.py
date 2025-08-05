@@ -102,7 +102,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self,
         thread_root_id: str,
         *,
-        automatic: Optional[EventOrderings],
+        automatic_event_orderings: Optional[EventOrderings],
         room_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> Optional[Union[int, AutomaticSubscriptionConflicted]]:
@@ -117,7 +117,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
                 user_id,
                 room_id,
                 thread_root_id,
-                automatic_event_orderings=automatic,
+                automatic_event_orderings=automatic_event_orderings,
             )
         )
 
@@ -154,7 +154,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Subscribe
         self._subscribe(
             self.thread_root_id,
-            automatic=EventOrderings(1, 1),
+            automatic_event_orderings=EventOrderings(1, 1),
         )
 
         # Assert subscription went through
@@ -170,7 +170,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self.assertIsInstance(
             self._subscribe(
                 self.thread_root_id,
-                automatic=None,
+                automatic_event_orderings=None,
             ),
             int,
         )
@@ -186,8 +186,10 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
     def test_purge_thread_subscriptions_for_user(self) -> None:
         """Test purging all thread subscription settings for a user."""
         # Set subscription settings for multiple threads
-        self._subscribe(self.thread_root_id, automatic=EventOrderings(1, 1))
-        self._subscribe(self.other_thread_root_id, automatic=None)
+        self._subscribe(
+            self.thread_root_id, automatic_event_orderings=EventOrderings(1, 1)
+        )
+        self._subscribe(self.other_thread_root_id, automatic_event_orderings=None)
 
         subscriptions = self.get_success(
             self.store.get_updated_thread_subscriptions_for_user(
@@ -226,10 +228,10 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         """Test getting updated thread subscriptions since a stream ID."""
 
         stream_id1 = self._subscribe(
-            self.thread_root_id, automatic=EventOrderings(1, 1)
+            self.thread_root_id, automatic_event_orderings=EventOrderings(1, 1)
         )
         stream_id2 = self._subscribe(
-            self.other_thread_root_id, automatic=EventOrderings(2, 2)
+            self.other_thread_root_id, automatic_event_orderings=EventOrderings(2, 2)
         )
         assert stream_id1 is not None and not isinstance(
             stream_id1, AutomaticSubscriptionConflicted
@@ -263,7 +265,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
 
         # Set thread subscription for main user
         stream_id1 = self._subscribe(
-            self.thread_root_id, automatic=EventOrderings(1, 1)
+            self.thread_root_id, automatic_event_orderings=EventOrderings(1, 1)
         )
         assert stream_id1 is not None and not isinstance(
             stream_id1, AutomaticSubscriptionConflicted
@@ -272,7 +274,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Set thread subscription for other user
         stream_id2 = self._subscribe(
             self.other_thread_root_id,
-            automatic=EventOrderings(1, 1),
+            automatic_event_orderings=EventOrderings(1, 1),
             user_id=other_user_id,
         )
         assert stream_id2 is not None and not isinstance(
