@@ -453,7 +453,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
     @override_config({"experimental_features": {"msc4306_enabled": True}})
     def test_thread_subscriptions(self) -> None:
         bulk_evaluator = BulkPushRuleEvaluator(self.hs)
-        (thread_root_id,) = self.helper.send_events(self.room_id, 1, tok=self.token)
+        (thread_root_id,) = self.helper.send_messages(self.room_id, 1, tok=self.token)
 
         self.assertFalse(
             self._create_and_process(
@@ -501,7 +501,7 @@ class TestBulkPushRuleEvaluator(HomeserverTestCase):
         FUTURE: If MSC4306 becomes enabled-by-default/accepted, this test is to be removed.
         """
         bulk_evaluator = BulkPushRuleEvaluator(self.hs)
-        (thread_root_id,) = self.helper.send_events(self.room_id, 1, tok=self.token)
+        (thread_root_id,) = self.helper.send_messages(self.room_id, 1, tok=self.token)
 
         # When MSC4306 is not enabled, a threaded message generates a notification
         # by default.

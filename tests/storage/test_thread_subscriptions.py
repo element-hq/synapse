@@ -342,14 +342,18 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(subscribers, frozenset())
 
-        self._subscribe(self.thread_root_id, automatic=None, user_id=self.user_id)
+        self._subscribe(
+            self.thread_root_id, automatic_event_orderings=None, user_id=self.user_id
+        )
 
         subscribers = self.get_success(
             self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
         )
         self.assertEqual(subscribers, frozenset((self.user_id,)))
 
-        self._subscribe(self.thread_root_id, automatic=None, user_id=other_user_id)
+        self._subscribe(
+            self.thread_root_id, automatic_event_orderings=None, user_id=other_user_id
+        )
 
         subscribers = self.get_success(
             self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
