@@ -383,7 +383,9 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
         room_id = events[0].room_id
         # First we try everything in-memory to check that the test case works.
         event_map = {ev.event_id: ev for ev in events}
-        resolution = self.successResultOf(
+        for ev in events:
+            print(f"{ev.event_id} => {ev.type} {ev.state_key} => {ev.content}")
+        resolution = self.get_success(
             resolve_events_with_store(
                 FakeClock(),
                 room_id,
@@ -395,7 +397,7 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(resolution, expected)
 
-        got_auth_diff = self.successResultOf(
+        got_auth_diff = self.get_success(
             self._get_auth_difference_and_conflicted_subgraph(
                 room_id,
                 state_maps,
