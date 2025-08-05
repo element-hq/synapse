@@ -386,27 +386,23 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
         for ev in events:
             print(f"{ev.event_id} => {ev.type} {ev.state_key} => {ev.content}")
         resolution = self.get_success(
-            defer.ensureDeferred(
-                resolve_events_with_store(
-                    FakeClock(),
-                    room_id,
-                    events[0].room_version,
-                    state_maps,
-                    event_map=event_map,
-                    state_res_store=TestStateResolutionStore(event_map),
-                )
+            resolve_events_with_store(
+                FakeClock(),
+                room_id,
+                events[0].room_version,
+                state_maps,
+                event_map=event_map,
+                state_res_store=TestStateResolutionStore(event_map),
             )
         )
         self.assertEqual(resolution, expected)
 
         got_auth_diff = self.get_success(
-            defer.ensureDeferred(
-                self._get_auth_difference_and_conflicted_subgraph(
-                    room_id,
-                    state_maps,
-                    event_map,
-                    TestStateResolutionStore(event_map),
-                )
+            self._get_auth_difference_and_conflicted_subgraph(
+                room_id,
+                state_maps,
+                event_map,
+                TestStateResolutionStore(event_map),
             )
         )
         # we should never see the create event in the auth diff. If we do, this implies the
