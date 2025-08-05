@@ -240,13 +240,17 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
 
         # Get updates since initial ID (should include both changes)
         updates = self.get_success(
-            self.store.get_updated_thread_subscriptions(0, stream_id2, 10)
+            self.store.get_updated_thread_subscriptions(
+                from_id=0, to_id=stream_id2, limit=10
+            )
         )
         self.assertEqual(len(updates), 2)
 
         # Get updates since first change (should include only the second change)
         updates = self.get_success(
-            self.store.get_updated_thread_subscriptions(stream_id1, stream_id2, 10)
+            self.store.get_updated_thread_subscriptions(
+                from_id=stream_id1, to_id=stream_id2, limit=10
+            )
         )
         self.assertEqual(
             updates,
@@ -278,7 +282,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Get updates for main user
         updates = self.get_success(
             self.store.get_updated_thread_subscriptions_for_user(
-                self.user_id, 0, stream_id2, 10
+                self.user_id, from_id=0, to_id=stream_id2, limit=10
             )
         )
         self.assertEqual(updates, [(stream_id1, self.room_id, self.thread_root_id)])
@@ -286,7 +290,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Get updates for other user
         updates = self.get_success(
             self.store.get_updated_thread_subscriptions_for_user(
-                other_user_id, 0, max(stream_id1, stream_id2), 10
+                other_user_id, from_id=0, to_id=max(stream_id1, stream_id2), limit=10
             )
         )
         self.assertEqual(

@@ -439,7 +439,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         return self._thread_subscriptions_id_gen.get_current_token()
 
     async def get_updated_thread_subscriptions(
-        self, from_id: int, to_id: int, limit: int
+        self, *, from_id: int, to_id: int, limit: int
     ) -> List[Tuple[int, str, str, str]]:
         """Get updates to thread subscriptions between two stream IDs.
 
@@ -472,7 +472,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
         )
 
     async def get_updated_thread_subscriptions_for_user(
-        self, user_id: str, from_id: int, to_id: int, limit: int
+        self, user_id: str, *, from_id: int, to_id: int, limit: int
     ) -> List[Tuple[int, str, str]]:
         """Get updates to thread subscriptions for a specific user.
 
