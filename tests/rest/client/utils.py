@@ -47,7 +47,7 @@ import attr
 from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import Membership, ReceiptTypes
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -396,7 +396,7 @@ class RestHelper:
             custom_headers=custom_headers,
         )
 
-    def send_events(
+    def send_messages(
         self,
         room_id: str,
         num_events: int,
@@ -414,7 +414,7 @@ class RestHelper:
         for event_index in range(num_events):
             response = self.send_event(
                 room_id,
-                "m.room.message",
+                EventTypes.Message,
                 content_fn(event_index),
                 tok=tok,
             )

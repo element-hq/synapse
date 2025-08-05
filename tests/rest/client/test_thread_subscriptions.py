@@ -49,10 +49,12 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Create a room and send a message to use as a thread root
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
         self.helper.join(self.room_id, self.other_user_id, tok=self.other_token)
-        (self.root_event_id,) = self.helper.send_events(self.room_id, 1, tok=self.token)
+        (self.root_event_id,) = self.helper.send_messages(
+            self.room_id, 1, tok=self.token
+        )
 
         # Send a message in the thread
-        self.threaded_events = self.helper.send_events(
+        self.threaded_events = self.helper.send_messages(
             self.room_id,
             2,
             content_fn=lambda idx: {
@@ -265,7 +267,9 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         actually in the thread.
         This is an error.
         """
-        (unrelated_event_id,) = self.helper.send_events(self.room_id, 1, tok=self.token)
+        (unrelated_event_id,) = self.helper.send_messages(
+            self.room_id, 1, tok=self.token
+        )
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
@@ -310,7 +314,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
 
         # But if a new event is sent after the unsubscription took place,
         # that one can be used for an automatic subscription
-        (later_event_id,) = self.helper.send_events(
+        (later_event_id,) = self.helper.send_messages(
             self.room_id,
             1,
             content_fn=lambda _: {
