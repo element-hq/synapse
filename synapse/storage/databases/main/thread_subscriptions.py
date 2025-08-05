@@ -253,6 +253,7 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
                 # is good enough (either we already have a manual subscription,
                 # or we requested an automatic subscription)
                 # In that case, nothing to change here.
+                # (See docstring for case-by-case explanation)
                 return None
 
             if not subscribed and requested_automatic:
