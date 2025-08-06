@@ -173,18 +173,6 @@ state_transition_counter = Counter(
     labelnames=["locality", "from", "to", SERVER_NAME_LABEL],
 )
 
-presence_user_to_current_state_size_gauge = LaterGauge(
-    name="synapse_handlers_presence_user_to_current_state_size",
-    desc="",
-    labelnames=[SERVER_NAME_LABEL],
-)
-
-presence_wheel_timer_size_gauge = LaterGauge(
-    name="synapse_handlers_presence_wheel_timer_size",
-    desc="",
-    labelnames=[SERVER_NAME_LABEL],
-)
-
 # If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
 # "currently_active"
 LAST_ACTIVE_GRANULARITY = 60 * 1000
@@ -791,8 +779,11 @@ class PresenceHandler(BasePresenceHandler):
             EduTypes.PRESENCE, self.incoming_presence
         )
 
-        presence_user_to_current_state_size_gauge.register_hook(
-            lambda: {(self.server_name,): len(self.user_to_current_state)}
+        LaterGauge(
+            name="synapse_handlers_presence_user_to_current_state_size",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -891,8 +882,11 @@ class PresenceHandler(BasePresenceHandler):
                 60 * 1000,
             )
 
-        presence_wheel_timer_size_gauge.register_hook(
-            lambda: {(self.server_name,): len(self.wheel_timer)}
+        LaterGauge(
+            name="synapse_handlers_presence_wheel_timer_size",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 
         # Used to handle sending of presence to newly joined users/servers

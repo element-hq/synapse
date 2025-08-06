@@ -131,31 +131,27 @@ def _get_counts_from_rate_limiter_instance(
 # We track the number of affected hosts per time-period so we can
 # differentiate one really noisy homeserver from a general
 # ratelimit tuning problem across the federation.
-sleep_affected_hosts_gauge = LaterGauge(
+LaterGauge(
     name="synapse_rate_limit_sleep_affected_hosts",
     desc="Number of hosts that had requests put to sleep",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
-)
-sleep_affected_hosts_gauge.register_hook(
-    lambda: _get_counts_from_rate_limiter_instance(
+    caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_sleep()
             for ratelimiter in rate_limiter_instance.ratelimiters.values()
         )
-    )
+    ),
 )
-reject_affected_hosts_gauge = LaterGauge(
+LaterGauge(
     name="synapse_rate_limit_reject_affected_hosts",
     desc="Number of hosts that had requests rejected",
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
-)
-reject_affected_hosts_gauge.register_hook(
-    lambda: _get_counts_from_rate_limiter_instance(
+    caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_reject()
             for ratelimiter in rate_limiter_instance.ratelimiters.values()
         )
-    )
+    ),
 )
 
 
