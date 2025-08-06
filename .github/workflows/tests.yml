@@ -393,6 +393,7 @@ jobs:
       - changes
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         job:  ${{ fromJson(needs.calculate-test-jobs.outputs.trial_test_matrix) }}
 
