@@ -527,11 +527,9 @@ pending_commands = LaterGauge(
     name="synapse_replication_tcp_protocol_pending_commands",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
-)
-pending_commands.register_hook(
-    lambda: {
+    caller=lambda: {
         (p.name, p.server_name): len(p.pending_commands) for p in connected_connections
-    }
+    },
 )
 
 
@@ -546,11 +544,9 @@ transport_send_buffer = LaterGauge(
     name="synapse_replication_tcp_protocol_transport_send_buffer",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
-)
-transport_send_buffer.register_hook(
-    lambda: {
+    caller=lambda: {
         (p.name, p.server_name): transport_buffer_size(p) for p in connected_connections
-    }
+    },
 )
 
 
@@ -575,12 +571,10 @@ tcp_transport_kernel_send_buffer = LaterGauge(
     name="synapse_replication_tcp_protocol_transport_kernel_send_buffer",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
-)
-tcp_transport_kernel_send_buffer.register_hook(
-    lambda: {
+    caller=lambda: {
         (p.name, p.server_name): transport_kernel_read_buffer_size(p, False)
         for p in connected_connections
-    }
+    },
 )
 
 
@@ -588,10 +582,8 @@ tcp_transport_kernel_read_buffer = LaterGauge(
     name="synapse_replication_tcp_protocol_transport_kernel_read_buffer",
     desc="",
     labelnames=["name", SERVER_NAME_LABEL],
-)
-tcp_transport_kernel_read_buffer.register_hook(
-    lambda: {
+    caller=lambda: {
         (p.name, p.server_name): transport_kernel_read_buffer_size(p, True)
         for p in connected_connections
-    }
+    },
 )

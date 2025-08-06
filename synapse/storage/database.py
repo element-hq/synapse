@@ -100,12 +100,6 @@ sql_txn_duration = Counter(
     labelnames=["desc", SERVER_NAME_LABEL],
 )
 
-background_update_status = LaterGauge(
-    name="synapse_background_update_status",
-    desc="Background update status",
-    labelnames=[SERVER_NAME_LABEL],
-)
-
 
 # Unique indexes which have been added in background updates. Maps from table name
 # to the name of the background update which added the unique index to that table.
@@ -617,8 +611,11 @@ class DatabasePool:
         )
 
         self.updates = BackgroundUpdater(hs, self)
-        background_update_status.register_hook(
-            lambda: {(self.server_name,): self.updates.get_status()},
+        LaterGauge(
+            name="synapse_background_update_status",
+            desc="Background update status",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): self.updates.get_status()},
         )
 
         self._previous_txn_total_time = 0.0
