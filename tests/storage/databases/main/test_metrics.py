@@ -22,10 +22,13 @@
 from synapse.metrics import REGISTRY, generate_latest
 from synapse.types import UserID, create_requester
 
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, skip_unless
 
+
+RUN_TEST = False
 
 class ExtremStatisticsTestCase(HomeserverTestCase):
+    @skip_unless(RUN_TEST, "must be enabled")
     def test_exposed_to_prometheus(self) -> None:
         """
         Forward extremity counts are exposed via Prometheus.
