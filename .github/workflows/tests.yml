@@ -436,7 +436,7 @@ jobs:
           ) &
           MONITOR_PID=$!
 
-          poetry run trial tests.storage.databases.main.test_metrics.ExtremStatisticsTestCase.test_exposed_to_prometheus
+          poetry run trial tests
           STATUS=$?
 
           kill $MONITOR_PID
