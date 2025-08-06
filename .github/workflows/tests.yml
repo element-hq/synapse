@@ -439,7 +439,7 @@ jobs:
           ) &
           MONITOR_PID=$!
 
-          poetry run trial tests
+          poetry run trial --jobs=6 tests
           STATUS=$?
 
           kill $MONITOR_PID
