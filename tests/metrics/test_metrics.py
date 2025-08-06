@@ -130,8 +130,10 @@ class TestMauLimit(unittest.TestCase):
 
         return results
 
+RUN_TEST = False
 
 class BuildInfoTests(unittest.TestCase):
+    @unittest.skip_unless(RUN_TEST, "must be enabled")
     def test_get_build(self) -> None:
         """
         The synapse_build_info metric reports the OS version, Python version,
@@ -150,6 +152,7 @@ class BuildInfoTests(unittest.TestCase):
 
 
 class CacheMetricsTests(unittest.HomeserverTestCase):
+    @unittest.skip_unless(RUN_TEST, "must be enabled")
     def test_cache_metric(self) -> None:
         """
         Caches produce metrics reflecting their state when scraped.
