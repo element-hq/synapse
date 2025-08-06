@@ -93,6 +93,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         self._last_device_delete_cache: ExpiringCache[
             Tuple[str, Optional[str]], int
         ] = ExpiringCache(
+            hs=hs,
             cache_name="last_device_delete_cache",
             server_name=self.server_name,
             clock=self._clock,
@@ -152,12 +153,12 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         )
 
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            hs.register_looping_call(self._clock.looping_call(
                 run_as_background_process,
                 DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
                 self._delete_old_federation_inbox_rows,
-            )
+            ))
 
     def process_replication_rows(
         self,

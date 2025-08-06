@@ -133,7 +133,7 @@ class FederationClient(FederationBase):
         super().__init__(hs)
 
         self.pdu_destination_tried: Dict[str, Dict[str, int]] = {}
-        self._clock.looping_call(self._clear_tried_cache, 60 * 1000)
+        hs.register_looping_call(self._clock.looping_call(self._clear_tried_cache, 60 * 1000))
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
 
@@ -143,6 +143,7 @@ class FederationClient(FederationBase):
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
+            hs=hs,
             cache_name="get_pdu_cache",
             server_name=self.server_name,
             clock=self._clock,
@@ -162,6 +163,7 @@ class FederationClient(FederationBase):
             Tuple[str, bool],
             Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
         ] = ExpiringCache(
+            hs=hs,
             cache_name="get_room_hierarchy_cache",
             server_name=self.server_name,
             clock=self._clock,

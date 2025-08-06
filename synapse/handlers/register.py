@@ -98,7 +98,7 @@ class LoginDict(TypedDict):
 
 class RegistrationHandler:
     def __init__(self, hs: "HomeServer"):
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
         self.hs = weakref.proxy(hs)
@@ -127,7 +127,19 @@ class RegistrationHandler:
             )
         else:
             self.device_handler = hs.get_device_handler()
-            self._register_device_client = self.register_device_inner
+            self_ref = weakref.proxy(self)
+            async def do_it(
+                user_id: str,
+                device_id: Optional[str],
+                initial_display_name: Optional[str],
+                is_guest: bool = False,
+                is_appservice_ghost: bool = False,
+                should_issue_refresh_token: bool = False,
+                auth_provider_id: Optional[str] = None,
+                auth_provider_session_id: Optional[str] = None,
+            ):
+                return RegistrationHandler.register_device_inner(self_ref, user_id, device_id,initial_display_name, is_guest,is_appservice_ghost,should_issue_refresh_token, auth_provider_id,auth_provider_session_id)
+            self._register_device_client = do_it
             self.pusher_pool = hs.get_pusherpool()
 
         self.session_lifetime = hs.config.registration.session_lifetime

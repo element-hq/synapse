@@ -277,10 +277,10 @@ class EventsWorkerStore(SQLBaseStore):
 
         if hs.config.worker.run_background_tasks:
             # We periodically clean out old transaction ID mappings
-            self._clock.looping_call(
+            hs.register_looping_call(self._clock.looping_call(
                 self._cleanup_old_transaction_ids,
                 5 * 60 * 1000,
-            )
+            ))
 
         self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
             AsyncLruCache(

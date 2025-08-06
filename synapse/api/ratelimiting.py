@@ -21,6 +21,7 @@
 #
 
 from typing import TYPE_CHECKING, Dict, Hashable, Optional, Tuple
+import weakref
 
 from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import RatelimitSettings
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
     from synapse.module_api.callbacks.ratelimit_callbacks import (
         RatelimitModuleApiCallbacks,
     )
+    from synapse.server import HomeServer
 
 
 class Ratelimiter:
@@ -75,6 +77,7 @@ class Ratelimiter:
 
     def __init__(
         self,
+        hs: "HomeServer",
         store: DataStore,
         clock: Clock,
         cfg: RatelimitSettings,
@@ -83,7 +86,7 @@ class Ratelimiter:
         self.clock = clock
         self.rate_hz = cfg.per_second
         self.burst_count = cfg.burst_count
-        self.store = store
+        self.store = weakref.proxy(store)
         self._limiter_name = cfg.key
         self._ratelimit_callbacks = ratelimit_callbacks
 
@@ -94,7 +97,7 @@ class Ratelimiter:
         #   * The rate_hz (leak rate) of this particular bucket.
         self.actions: Dict[Hashable, Tuple[float, float, float]] = {}
 
-        self.clock.looping_call(self._prune_message_counts, 60 * 1000)
+        hs.register_looping_call(self.clock.looping_call(self._prune_message_counts, 60 * 1000))
 
     def _get_key(
         self, requester: Optional[Requester], key: Optional[Hashable]
@@ -348,6 +351,7 @@ class Ratelimiter:
 class RequestRatelimiter:
     def __init__(
         self,
+        hs: "HomeServer",
         store: DataStore,
         clock: Clock,
         rc_message: RatelimitSettings,
@@ -358,6 +362,7 @@ class RequestRatelimiter:
 
         # The rate_hz and burst_count are overridden on a per-user basis
         self.request_ratelimiter = Ratelimiter(
+            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=RatelimitSettings(key=rc_message.key, per_second=0, burst_count=0),
@@ -368,6 +373,7 @@ class RequestRatelimiter:
         # by the presence of rate limits in the config
         if rc_admin_redaction:
             self.admin_redaction_ratelimiter: Optional[Ratelimiter] = Ratelimiter(
+                hs=hs,
                 store=self.store,
                 clock=self.clock,
                 cfg=rc_admin_redaction,

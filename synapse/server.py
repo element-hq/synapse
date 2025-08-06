@@ -1,6 +1,4 @@
 #
-# This file is licensed under the Affero General Public License (AGPL) version 3.
-#
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023-2024 New Vector, Ltd
 #
@@ -29,7 +27,9 @@ import abc
 import functools
 import logging
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
+import weakref
 
+from twisted.internet import defer
 from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
@@ -129,7 +129,7 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import LaterGauge, register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -216,7 +216,15 @@ def cache_in_self(builder: F) -> F:
     @functools.wraps(builder)
     def _get(self: "HomeServer") -> T:
         try:
-            return getattr(self, depname)
+            dep = getattr(self, depname)
+            try:
+                return_dep = weakref.proxy(dep)
+            except:
+                if isinstance(dep, dict):
+                    return_dep = {k: weakref.proxy(v) for k, v in dep.items()}
+                else:
+                    logger.warning("Failed creating proxy for %s", depname)
+            return return_dep
         except AttributeError:
             pass
 
@@ -230,8 +238,17 @@ def cache_in_self(builder: F) -> F:
             setattr(self, depname, dep)
         finally:
             building[0] = False
+    
+        return_dep = dep
+        try:
+            return_dep = weakref.proxy(dep)
+        except:
+            if isinstance(dep, dict):
+                return_dep = {k: weakref.proxy(v) for k, v in dep.items()}
+            else:
+                logger.warning("Failed creating proxy for %s", depname)
 
-        return dep
+        return return_dep
 
     return cast(F, _get)
 
@@ -314,28 +331,69 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
         self._looping_calls: List[LoopingCall] = []
-
-    def __del__(self) -> None:
-        logger.warning("Destructing HomeServer")
+        self._later_gauges: List[LaterGauge] = []
+        self._background_processes: List[defer.Deferred] = []
 
     def shutdown(self) -> None:
         logger.info("Received shutdown request")
         
-        # logger.info("Unsubscribing replication callbacks")
-        # self.get_replication_notifier()._replication_callbacks.clear()
+        logger.info("Unsubscribing replication callbacks")
+        self.get_replication_notifier()._replication_callbacks.clear()
+
+        logger.info("Stopping replication")
+        for connection in self.get_replication_command_handler()._connections:
+            connection.close()
+        self.get_replication_command_handler()._connections.clear()
+
+        logger.info("Stopping replication streams")
+        # self.get_replication_command_handler()._factory.continueTrying = False
+        # self.get_replication_command_handler()._factory.stopFactory()
+        # self.get_replication_command_handler()._factory.stopTrying()
+        # self.get_replication_command_handler()._connection.disconnect()
+        # self.get_replication_command_handler()._factory.synapse_outbound_redis_connection.disconnect()
+        # self.get_replication_command_handler()._factory = None
+        self.get_replication_command_handler()._streams.clear()
+        self.get_replication_command_handler()._streams_to_replicate.clear()
+        STREAMS_MAP.clear()
+
+        from synapse.util.batching_queue import number_of_keys
+        number_of_keys.clear()
+        from synapse.util.batching_queue import number_queued
+        number_queued.clear()
+
+        # TODO: unregister all metrics that bind to HS resources!
+        logger.info("Stopping later gauges: %d", len(self._later_gauges))
+        for later_gauge in self._later_gauges:
+            later_gauge.unregister()
+        self._later_gauges.clear()
+
+        logger.info("Unregistering db background updates")
+        for db in self.get_datastores().databases:
+            db.stop_background_updates()
 
         logger.info("Stopping looping calls: %d", len(self._looping_calls))
         for looping_call in self._looping_calls:
             looping_call.stop()
-            del looping_call
+        self._looping_calls.clear()
 
-        self._looping_calls = []
+        self._looping_calls.clear()
 
-        logger.info("Shutting down datastores")
-        self.get_datastores().main.shutdown()
+        logger.info("Stopping background processes: %d", len(self._background_processes))
+        for process in self._background_processes:
+            process.cancel()
+        self._background_processes.clear()
+
+        for call in self.get_reactor().getDelayedCalls():
+            call.cancel()
 
     def register_looping_call(self, looping_call: LoopingCall) -> None:
         self._looping_calls.append(looping_call)
+
+    def register_later_gauge(self, later_gauge: LaterGauge) -> None:
+        self._later_gauges.append(later_gauge)
+
+    def register_background_process(self, process: defer.Deferred) -> None:
+        self._background_processes.append(process)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
@@ -454,6 +512,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
         return Ratelimiter(
+            hs=self,
             store=self.get_datastores().main,
             clock=self.get_clock(),
             cfg=self.config.ratelimiting.rc_registration,
@@ -970,6 +1029,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_request_ratelimiter(self) -> RequestRatelimiter:
         return RequestRatelimiter(
+            self,
             self.get_datastores().main,
             self.get_clock(),
             self.config.ratelimiting.rc_message,

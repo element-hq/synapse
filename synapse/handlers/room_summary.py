@@ -104,6 +104,7 @@ class RoomSummaryHandler:
         self._server_name = hs.hostname
         self._federation_client = hs.get_federation_client()
         self._ratelimiter = Ratelimiter(
+            hs=hs,
             store=self._store,
             clock=hs.get_clock(),
             cfg=RatelimitSettings("<room summary>", per_second=5, burst_count=10),

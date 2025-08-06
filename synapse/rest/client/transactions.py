@@ -57,7 +57,7 @@ class HttpTransactionCache:
         ] = {}
         # Try to clean entries every 30 mins. This means entries will exist
         # for at *LEAST* 30 mins, and at *MOST* 60 mins.
-        self.cleaner = self.clock.looping_call(self._cleanup, CLEANUP_PERIOD_MS)
+        hs.register_looping_call(self.clock.looping_call(self._cleanup, CLEANUP_PERIOD_MS))
 
     def _get_transaction_key(self, request: IRequest, requester: Requester) -> Hashable:
         """A helper function which returns a transaction key that can be used

@@ -76,13 +76,10 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         # Read the extrems every 60 minutes
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000)
+            hs.register_looping_call(self._clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000))
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
-
-    def __del__(self) -> None:
-        logger.warning("Destructor")
 
     @wrap_as_background_process("read_forward_extremities")
     async def _read_forward_extremities(self) -> None:

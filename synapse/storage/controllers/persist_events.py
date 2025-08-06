@@ -198,7 +198,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         """
         self._event_persist_queues: Dict[str, Deque[_EventPersistQueueItem]] = {}
         self._currently_persisting_rooms: Set[str] = set()
-        self._per_item_callback = per_item_callback
+        self._per_item_callback = weakref.proxy(per_item_callback)
 
     async def add_to_queue(
         self,

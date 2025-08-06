@@ -69,6 +69,7 @@ from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
+from synapse.types import ISynapseReactor
 from synapse.util.check_dependencies import VERSION, check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
@@ -82,6 +83,14 @@ def gz_wrap(r: Resource) -> Resource:
 
 class SynapseHomeServer(HomeServer):
     DATASTORE_CLASS = DataStore
+
+    def shutdown(self) -> None:
+        super().shutdown()
+        for listener in self._listening_services:
+            listener.loseConnection()
+        self._listening_services.clear()
+
+        self._reactor.stop()
 
     def _listener_http(
         self,
@@ -308,7 +317,8 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-def setup(config_options: List[str]) -> SynapseHomeServer:
+from typing import Optional
+def setup(config_options: List[str], reactor: Optional[ISynapseReactor]=None) -> SynapseHomeServer:
     """
     Args:
         config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.
@@ -365,6 +375,7 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
         config.server.server_name,
         config=config,
         version_string=f"Synapse/{VERSION}",
+        reactor=reactor,
     )
 
     synapse.config.logger.setup_logging(hs, config, use_worker_options=False)

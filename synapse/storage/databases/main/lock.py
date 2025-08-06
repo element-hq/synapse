@@ -103,9 +103,9 @@ class LockStore(SQLBaseStore):
 
         self._acquiring_locks: Set[Tuple[str, str]] = set()
 
-        self._clock.looping_call(
+        hs.register_looping_call(self._clock.looping_call(
             self._reap_stale_read_write_locks, _LOCK_TIMEOUT_MS / 10.0
-        )
+        ))
 
     @wrap_as_background_process("LockStore._on_shutdown")
     async def _on_shutdown(self) -> None:

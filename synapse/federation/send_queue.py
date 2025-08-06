@@ -112,12 +112,12 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # lambda binds to the queue rather than to the name of the queue which
         # changes. ARGH.
         def register(name: str, queue: Sized) -> None:
-            LaterGauge(
+            hs.register_later_gauge(LaterGauge(
                 "synapse_federation_send_queue_%s_size" % (queue_name,),
                 "",
                 [],
                 lambda: len(queue),
-            )
+            ))
 
         for queue_name in [
             "presence_map",
@@ -129,7 +129,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         ]:
             register(queue_name, getattr(self, queue_name))
 
-        self.clock.looping_call(self._clear_queue, 30 * 1000)
+        hs.register_looping_call(self.clock.looping_call(self._clear_queue, 30 * 1000))
 
     def _next_pos(self) -> int:
         pos = self.pos

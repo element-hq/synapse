@@ -206,11 +206,12 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     )
 
     # monthly active user limiting functionality
-    clock.looping_call(
+    hs.register_looping_call(clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
         ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
-    )
-    hs.get_datastores().main.reap_monthly_active_users()
+    ))
+    # TODO: (devon) how does this hold onto a DB pool reference?
+    #hs.register_background_process(hs.get_datastores().main.reap_monthly_active_users())
 
     @wrap_as_background_process("generate_monthly_active_users")
     async def generate_monthly_active_users() -> None:
@@ -234,7 +235,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000)
+        hs.register_looping_call(clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000))
     # End of monthly active user settings
 
     if hs.config.metrics.report_stats:

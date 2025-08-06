@@ -523,7 +523,7 @@ class _Recoverer:
         if self.scheduled_recovery:
             self.clock.cancel_call_later(self.scheduled_recovery)
         # Run a retry, which will resechedule a recovery if it fails.
-        run_as_background_process(
+        deferred = run_as_background_process(
             "retry",
             self.retry,
         )

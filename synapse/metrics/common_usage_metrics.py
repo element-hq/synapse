@@ -19,6 +19,7 @@
 #
 #
 from typing import TYPE_CHECKING
+import weakref
 
 import attr
 
@@ -49,6 +50,7 @@ class CommonUsageMetricsManager:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
+        self.hs = weakref.proxy(hs)
 
     async def get_metrics(self) -> CommonUsageMetrics:
         """Get the CommonUsageMetrics object. If no collection has happened yet, do it
@@ -64,12 +66,12 @@ class CommonUsageMetricsManager:
         run_as_background_process(
             desc="common_usage_metrics_update_gauges", func=self._update_gauges
         )
-        self._clock.looping_call(
+        self.hs.register_looping_call(self._clock.looping_call(
             run_as_background_process,
             5 * 60 * 1000,
             desc="common_usage_metrics_update_gauges",
             func=self._update_gauges,
-        )
+        ))
 
     async def _collect(self) -> CommonUsageMetrics:
         """Collect the common metrics and either create the CommonUsageMetrics object to

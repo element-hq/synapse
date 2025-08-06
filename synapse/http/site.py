@@ -23,6 +23,7 @@ import logging
 import time
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generator, Optional, Tuple, Union
+import weakref
 
 import attr
 from zope.interface import implementer
@@ -701,10 +702,11 @@ class SynapseSite(ProxySite):
 
         request_id_header = config.http_options.request_id_header
 
+        self_ref = weakref.proxy(self)
         def request_factory(channel: HTTPChannel, queued: bool) -> Request:
             return request_class(
                 channel,
-                self,
+                self_ref,
                 max_request_body_size=max_request_body_size,
                 queued=queued,
                 request_id_header=request_id_header,

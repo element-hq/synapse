@@ -78,7 +78,7 @@ class WorkerLocksHandler:
             Tuple[str, str], WeakSet[Union[WaitingLock, WaitingMultiLock]]
         ] = {}
 
-        self._clock.looping_call(self._cleanup_locks, 30_000)
+        hs.register_looping_call(self._clock.looping_call(self._cleanup_locks, 30_000))
 
         self._notifier.add_lock_released_callback(self._on_lock_released)
 

@@ -196,6 +196,11 @@ class LaterGauge(Collector):
         REGISTRY.register(self)
         all_gauges[self.name] = self
 
+    def unregister(self) -> None:
+        if self.name in all_gauges.keys():
+            logger.warning("%s unregistering", self.name)
+            REGISTRY.unregister(all_gauges.pop(self.name))
+
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,
 # but `Protocol` can't be used as a `TypeVar` bound.

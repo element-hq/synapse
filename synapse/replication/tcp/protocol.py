@@ -105,6 +105,9 @@ class IReplicationConnection(Interface):
     def send_command(cmd: Command) -> None:
         """Send the command down the connection"""
 
+    def close(self) -> None:
+        """Close the connection"""
+
 
 @implementer(IReplicationConnection)
 class BaseReplicationStreamProtocol(LineOnlyReceiver):

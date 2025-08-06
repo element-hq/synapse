@@ -102,7 +102,7 @@ class TaskScheduler:
 
     def __init__(self, hs: "HomeServer"):
         self._hs = weakref.proxy(hs)
-        self._store = hs.get_datastores().main
+        self._store = weakref.proxy(hs.get_datastores().main)
         self._clock = hs.get_clock()
         self._running_tasks: Set[str] = set()
         # A map between action names and their registered function
@@ -119,21 +119,21 @@ class TaskScheduler:
         self._launching_new_tasks = False
 
         if self._run_background_tasks:
-            self._clock.looping_call(
+            hs.register_looping_call(self._clock.looping_call(
                 self._launch_scheduled_tasks,
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
-            )
-            self._clock.looping_call(
+            ))
+            hs.register_looping_call(self._clock.looping_call(
                 self._clean_scheduled_tasks,
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
-            )
+            ))
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_scheduler_running_tasks",
             "The number of concurrent running tasks handled by the TaskScheduler",
             labels=None,
             caller=lambda: len(self._running_tasks),
-        )
+        ))
 
     def register_action(
         self,
@@ -436,6 +436,7 @@ class TaskScheduler:
                     log_context,
                     start_time,
                 )
+                self._hs.register_looping_call(occasional_status_call)
                 try:
                     (status, result, error) = await function(task)
                 except Exception:

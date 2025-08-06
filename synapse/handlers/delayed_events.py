@@ -67,6 +67,7 @@ class DelayedEventsHandler:
         # Ratelimiter for management of existing delayed events,
         # keyed by the sending user ID & device ID.
         self._delayed_event_mgmt_ratelimiter = Ratelimiter(
+            hs=hs,
             store=self._store,
             clock=self._clock,
             cfg=self._config.ratelimiting.rc_delayed_event_mgmt,

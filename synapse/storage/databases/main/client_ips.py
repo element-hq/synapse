@@ -441,7 +441,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         )
 
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:
-            self._clock.looping_call(self._prune_old_user_ips, 5 * 1000)
+            hs.register_looping_call(self._clock.looping_call(self._prune_old_user_ips, 5 * 1000))
 
         if self._update_on_this_worker:
             # This is the designated worker that can write to the client IP
@@ -452,9 +452,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
                 Tuple[str, str, str], Tuple[str, Optional[str], int]
             ] = {}
 
-            self._client_ip_looper = self._clock.looping_call(
+            hs.register_looping_call(self._clock.looping_call(
                 self._update_client_ips_batch, 5 * 1000
-            )
+            ))
             self.hs.get_reactor().addSystemEventTrigger(
                 "before", "shutdown", self._update_client_ips_batch
             )

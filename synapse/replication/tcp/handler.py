@@ -35,6 +35,7 @@ from typing import (
     TypeVar,
     Union,
 )
+import weakref
 
 from prometheus_client import Counter
 
@@ -229,12 +230,12 @@ class ReplicationCommandHandler:
         # outgoing replication commands to.)
         self._connections: List[IReplicationConnection] = []
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_replication_tcp_resource_total_connections",
             "",
             [],
             lambda: len(self._connections),
-        )
+        ))
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
         # them in order in a separate background process.
@@ -252,7 +253,7 @@ class ReplicationCommandHandler:
         # from that connection.
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_replication_tcp_command_queue",
             "Number of inbound RDATA/POSITION commands queued for processing",
             ["stream_name"],
@@ -260,7 +261,7 @@ class ReplicationCommandHandler:
                 (stream_name,): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
             },
-        )
+        ))
 
         self._is_master = hs.config.worker.worker_app is None
 
@@ -400,7 +401,7 @@ class ReplicationCommandHandler:
         reactor = hs.get_reactor()
         redis_config = hs.config.redis
         if redis_config.redis_path is not None:
-            reactor.connectUNIX(
+            self._connection = reactor.connectUNIX(
                 redis_config.redis_path,
                 self._factory,
                 timeout=30,
@@ -409,7 +410,7 @@ class ReplicationCommandHandler:
 
         elif hs.config.redis.redis_use_tls:
             ssl_context_factory = ClientContextFactory(hs.config.redis)
-            reactor.connectSSL(
+            self._connection = reactor.connectSSL(
                 redis_config.redis_host,
                 redis_config.redis_port,
                 self._factory,
@@ -418,7 +419,7 @@ class ReplicationCommandHandler:
                 bindAddress=None,
             )
         else:
-            reactor.connectTCP(
+            self._connection = reactor.connectTCP(
                 redis_config.redis_host,
                 redis_config.redis_port,
                 self._factory,

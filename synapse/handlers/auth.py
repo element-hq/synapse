@@ -227,6 +227,7 @@ class AuthHandler:
         # Ratelimiter for failed auth during UIA. Uses same ratelimit config
         # as per `rc_login.failed_attempts`.
         self._failed_uia_attempts_ratelimiter = Ratelimiter(
+            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=self.hs.config.ratelimiting.rc_login_failed_attempts,
@@ -237,6 +238,7 @@ class AuthHandler:
 
         # Ratelimiter for failed /login attempts
         self._failed_login_attempts_ratelimiter = Ratelimiter(
+            hs=hs,
             store=self.store,
             clock=hs.get_clock(),
             cfg=self.hs.config.ratelimiting.rc_login_failed_attempts,
@@ -246,12 +248,12 @@ class AuthHandler:
 
         # Expire old UI auth sessions after a period of time.
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            hs.register_looping_call(self._clock.looping_call(
                 run_as_background_process,
                 5 * 60 * 1000,
                 "expire_old_sessions",
                 self._expire_old_sessions,
-            )
+            ))
 
         # Load the SSO HTML templates.
 

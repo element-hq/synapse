@@ -199,6 +199,7 @@ class UrlPreviewer:
         # memory cache mapping urls to an ObservableDeferred returning
         # JSON-encoded OG metadata
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
+            hs=hs,
             cache_name="url_previews",
             server_name=self.server_name,
             clock=self.clock,
@@ -207,9 +208,9 @@ class UrlPreviewer:
         )
 
         if self._worker_run_media_background_jobs:
-            self._cleaner_loop = self.clock.looping_call(
+            hs.register_looping_call(self.clock.looping_call(
                 self._start_expire_url_cache_data, 10 * 1000
-            )
+            ))
 
     async def preview(self, url: str, user: UserID, ts: int) -> bytes:
         # the in-memory cache:

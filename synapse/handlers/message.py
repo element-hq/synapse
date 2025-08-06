@@ -539,13 +539,13 @@ class EventCreationHandler:
             self.config.worker.run_background_tasks
             and self.config.server.cleanup_extremities_with_dummy_events
         ):
-            self.clock.looping_call(
+            hs.register_looping_call(self.clock.looping_call(
                 lambda: run_as_background_process(
                     "send_dummy_events_to_fill_extremities",
                     self._send_dummy_events_to_fill_extremities,
                 ),
                 5 * 60 * 1000,
-            )
+            ))
 
         self._message_handler = hs.get_message_handler()
 
@@ -559,6 +559,7 @@ class EventCreationHandler:
         self._external_cache_joined_hosts_updates: Optional[ExpiringCache] = None
         if self._external_cache.is_enabled():
             self._external_cache_joined_hosts_updates = ExpiringCache(
+                hs=hs,
                 cache_name="_external_cache_joined_hosts_updates",
                 server_name=self.server_name,
                 clock=self.clock,

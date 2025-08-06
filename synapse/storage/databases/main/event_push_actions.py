@@ -276,22 +276,22 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         self._find_stream_orderings_for_times_txn(cur)
         cur.close()
 
-        self.find_stream_orderings_looping_call = self._clock.looping_call(
+        hs.register_looping_call(self._clock.looping_call(
             self._find_stream_orderings_for_times, 10 * 60 * 1000
-        )
+        ))
 
         self._rotate_count = 10000
         self._doing_notif_rotation = False
         if hs.config.worker.run_background_tasks:
-            self._background_tasks.append(
+            hs.register_looping_call(
                 self._clock.looping_call(
                     self._rotate_notifs, 30 * 1000
                 )
             )
 
-            self._clear_old_staging_loop = self._clock.looping_call(
+            hs.register_looping_call(self._clock.looping_call(
                 self._clear_old_push_actions_staging, 30 * 60 * 1000
-            )
+            ))
 
         self.db_pool.updates.register_background_index_update(
             "event_push_summary_unique_index2",
@@ -329,11 +329,6 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             table="event_push_summary",
             columns=["room_id"],
         )
-
-    def __del__(self) -> None:
-        logger.warning("Stopping background tasks")
-        for task in self._background_tasks:
-            task.stop()
 
     async def _background_drop_null_thread_id_indexes(
         self, progress: JsonDict, batch_size: int
@@ -1926,9 +1921,6 @@ class EventPushActionsStore(EventPushActionsWorkerStore):
             columns=["highlight", "stream_ordering"],
             where_clause="highlight=0",
         )
-
-    def __del__(self) -> None:
-        logger.warning("Destructor")
 
 def _action_has_highlight(actions: Collection[Union[Mapping, str]]) -> bool:
     for action in actions:

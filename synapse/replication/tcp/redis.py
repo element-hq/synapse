@@ -127,6 +127,9 @@ class RedisSubscriber(SubscriberProtocol):
         super().connectionMade()
         run_as_background_process("subscribe-replication", self._send_subscribe)
 
+    def close(self) -> None:
+        pass
+
     async def _send_subscribe(self) -> None:
         # it's important to make sure that we only send the REPLICATE command once we
         # have successfully subscribed to the stream - otherwise we might miss the
@@ -275,7 +278,7 @@ class SynapseRedisFactory(RedisFactory):
             convertNumbers=convertNumbers,
         )
 
-        hs.get_clock().looping_call(self._send_ping, 30 * 1000)
+        hs.register_looping_call(hs.get_clock().looping_call(self._send_ping, 30 * 1000))
 
     @wrap_as_background_process("redis_ping")
     async def _send_ping(self) -> None:

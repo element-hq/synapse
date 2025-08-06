@@ -54,7 +54,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             hs.config.worker.run_background_tasks
             and self.hs.config.server.redaction_retention_period is not None
         ):
-            hs.get_clock().looping_call(self._censor_redactions, 5 * 60 * 1000)
+            hs.register_looping_call(hs.get_clock().looping_call(self._censor_redactions, 5 * 60 * 1000))
 
     @wrap_as_background_process("_censor_redactions")
     async def _censor_redactions(self) -> None:

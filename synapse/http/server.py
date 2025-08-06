@@ -503,11 +503,8 @@ class JsonResource(DirectServeJsonResource):
         for path_pattern in path_patterns:
             logger.debug("Registering for %s %s", method, path_pattern.pattern)
             self._routes.setdefault(path_pattern, {})[method_bytes] = _PathEntry(
-                callback, servlet_classname
+                weakref.proxy(callback), servlet_classname
             )
-
-    def unregister_paths(self) -> None:
-        self._routes.clear()
 
     def _get_handler_for_request(
         self, request: "SynapseRequest"

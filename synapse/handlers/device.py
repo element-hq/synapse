@@ -127,7 +127,7 @@ class DeviceHandler:
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.hs = weakref.proxy(hs)
-        self.store = cast("GenericWorkerStore", hs.get_datastores().main)
+        self.store = weakref.proxy(cast("GenericWorkerStore", hs.get_datastores().main))
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()
         self._appservice_handler = hs.get_application_service_handler()
@@ -191,12 +191,12 @@ class DeviceHandler:
             hs.config.worker.run_background_tasks
             and self._delete_stale_devices_after is not None
         ):
-            self.clock.looping_call(
+            hs.register_looping_call(self.clock.looping_call(
                 run_as_background_process,
                 DELETE_STALE_DEVICES_INTERVAL_MS,
                 "delete_stale_devices",
                 self._delete_stale_devices,
-            )
+            ))
 
     async def _delete_stale_devices(self) -> None:
         """Background task that deletes devices which haven't been accessed for more than
@@ -1327,7 +1327,7 @@ class DeviceListWorkerUpdater:
     "Handles incoming device list updates from federation and contacts the main device list writer over replication"
 
     def __init__(self, hs: "HomeServer"):
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         self._notifier = hs.get_notifier()
         # On which instance the DeviceListUpdater is running
         # Must be kept in sync with DeviceHandler
@@ -1458,6 +1458,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         # but they're useful to have them about to reduce the number of spurious
         # resyncs.
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
+            hs=hs,
             cache_name="device_update_edu",
             server_name=self.server_name,
             clock=self.clock,
@@ -1468,12 +1469,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
 
         # Attempt to resync out of sync device lists every 30s.
         self._resync_retry_lock = Lock()
-        self.clock.looping_call(
+        hs.register_looping_call(self.clock.looping_call(
             run_as_background_process,
             30 * 1000,
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
-        )
+        ))
 
     @trace
     async def incoming_device_list_update(

@@ -111,28 +111,21 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         ):
             self._known_servers_count = 1
             self._count_known_servers_task: Optional[LoopingCall] = (
-                self.hs.get_clock().looping_call(
+                hs.register_looping_call(self.hs.get_clock().looping_call(
                     self._count_known_servers,
                     6 * 1000,
-                )
+                ))
             )
             self.hs.get_clock().call_later(
                 1,
                 self._count_known_servers,
             )
-            LaterGauge(
+            hs.register_later_gauge(LaterGauge(
                 "synapse_federation_known_servers",
                 "",
                 [],
                 lambda: self._known_servers_count,
-            )
-
-    def shutdown(self) -> None:
-        logger.info("Shutting down RoomMemberWorkerStore")
-        # print(self.hs.get_reactor().getDelayedCalls())
-        if self._count_known_servers_task is not None:
-            self._count_known_servers_task.stop()
-            self._count_known_servers_task = None
+            ))
 
     @wrap_as_background_process("_count_known_servers")
     async def _count_known_servers(self) -> int:

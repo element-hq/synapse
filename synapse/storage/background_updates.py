@@ -248,7 +248,7 @@ class BackgroundUpdater:
 
     def __init__(self, hs: "HomeServer", database: "DatabasePool"):
         self._clock = hs.get_clock()
-        self.db_pool = database
+        self.db_pool = weakref.proxy(database)
         self.hs = weakref.proxy(hs)
 
         self._database_name = database.name()
@@ -395,9 +395,9 @@ class BackgroundUpdater:
             # if we start a new background update, not all updates are done.
             self._all_done = False
             sleep = self.sleep_enabled
-            run_as_background_process(
+            self.hs.register_background_process(run_as_background_process(
                 "background_updates", self.run_background_updates, sleep
-            )
+            ))
 
     async def run_background_updates(self, sleep: bool) -> None:
         if self._running or not self.enabled:

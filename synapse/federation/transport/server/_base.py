@@ -66,7 +66,7 @@ class Authenticator:
         self.keyring = hs.get_keyring()
         self.server_name = hs.hostname
         self.hs = weakref.proxy(hs)
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         self.federation_domain_whitelist = (
             hs.config.federation.federation_domain_whitelist
         )

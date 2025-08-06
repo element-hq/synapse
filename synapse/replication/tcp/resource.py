@@ -23,6 +23,7 @@
 import logging
 import random
 from typing import TYPE_CHECKING, List, Optional, Tuple
+import weakref
 
 from prometheus_client import Counter
 
@@ -79,7 +80,7 @@ class ReplicationStreamer:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
         self._instance_name = hs.get_instance_name()
@@ -112,7 +113,7 @@ class ReplicationStreamer:
         #
         # Note that if the position hasn't advanced then we won't send anything.
         if any(EventsStream.NAME == s.NAME for s in self.streams):
-            self.clock.looping_call(self.on_notifier_poke, 1000)
+            hs.register_looping_call(self.clock.looping_call(self.on_notifier_poke, 1000))
 
     def on_notifier_poke(self) -> None:
         """Checks if there is actually any new data and sends it to the

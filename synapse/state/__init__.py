@@ -641,6 +641,7 @@ class StateResolutionHandler:
         # dict of set of event_ids -> _StateCacheEntry.
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
             ExpiringCache(
+                hs=hs,
                 cache_name="state_cache",
                 server_name=self.server_name,
                 clock=self.clock,
@@ -660,7 +661,7 @@ class StateResolutionHandler:
             _StateResMetrics
         )
 
-        self.clock.looping_call(self._report_metrics, 120 * 1000)
+        hs.register_looping_call(self.clock.looping_call(self._report_metrics, 120 * 1000))
 
     async def resolve_state_groups(
         self,

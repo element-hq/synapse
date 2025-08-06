@@ -38,6 +38,7 @@ from typing import (
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
+from synapse.http import proxy
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.roommember import ProfileInfo
@@ -72,9 +73,9 @@ class StateStorageController:
         self.server_name = hs.hostname  # nb must be called this for @cached
         self.hs = weakref.proxy(hs)
         self._clock = hs.get_clock()
-        self.stores = stores
-        self._partial_state_events_tracker = PartialStateEventsTracker(stores.main)
-        self._partial_state_room_tracker = PartialCurrentStateTracker(stores.main)
+        self.stores = weakref.proxy(stores)
+        self._partial_state_events_tracker = weakref.proxy(PartialStateEventsTracker(stores.main))
+        self._partial_state_room_tracker = weakref.proxy(PartialCurrentStateTracker(stores.main))
 
         # Used by `_get_joined_hosts` to ensure only one thing mutates the cache
         # at a time. Keyed by room_id.

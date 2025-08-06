@@ -77,7 +77,7 @@ class ReplicationDataHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
         self._clock = hs.get_clock()

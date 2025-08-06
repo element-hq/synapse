@@ -195,7 +195,7 @@ class BasePresenceHandler(abc.ABC):
     def __init__(self, hs: "HomeServer"):
         self.hs = weakref.proxy(hs)
         self.clock = hs.get_clock()
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         self._storage_controllers = hs.get_storage_controllers()
         self.presence_router = hs.get_presence_router()
         self.state = hs.get_state_handler()
@@ -508,9 +508,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self._send_stop_syncing_loop = self.clock.looping_call(
+        hs.register_looping_call(self.clock.looping_call(
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
-        )
+        ))
 
         hs.get_reactor().addSystemEventTrigger(
             "before",
@@ -757,12 +757,12 @@ class PresenceHandler(BasePresenceHandler):
             EduTypes.PRESENCE, self.incoming_presence
         )
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_handlers_presence_user_to_current_state_size",
             "",
             [],
             lambda: len(self.user_to_current_state),
-        )
+        ))
 
         # The per-device presence state, maps user to devices to per-device presence state.
         self._user_to_device_to_current_state: Dict[
@@ -810,6 +810,7 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
+        # TODO: (devon) how do I remove this binding?
         hs.get_reactor().addSystemEventTrigger(
             "before",
             "shutdown",
@@ -859,12 +860,12 @@ class PresenceHandler(BasePresenceHandler):
                 60 * 1000,
             )
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_handlers_presence_wheel_timer_size",
             "",
             [],
             lambda: len(self.wheel_timer),
-        )
+        ))
 
         # Used to handle sending of presence to newly joined users/servers
         if self._track_presence:
@@ -2376,7 +2377,7 @@ class PresenceFederationQueue:
         self._clock = hs.get_clock()
         self._notifier = hs.get_notifier()
         self._instance_name = hs.get_instance_name()
-        self._presence_handler = presence_handler
+        self._presence_handler = weakref.proxy(presence_handler)
         self._repl_client = ReplicationGetStreamUpdates.make_client(hs)
 
         # Should we keep a queue of recent presence updates? We only bother if
@@ -2411,7 +2412,7 @@ class PresenceFederationQueue:
         self._current_tokens: Dict[str, int] = {}
 
         if self._queue_presence_updates:
-            self._clock.looping_call(self._clear_queue, self._CLEAR_ITEMS_EVERY_MS)
+            hs.register_looping_call(self._clock.looping_call(self._clear_queue, self._CLEAR_ITEMS_EVERY_MS))
 
     def _clear_queue(self) -> None:
         """Clear out older entries from the queue."""

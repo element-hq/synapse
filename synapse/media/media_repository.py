@@ -120,6 +120,7 @@ class MediaRepository:
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
 
         self.download_ratelimiter = Ratelimiter(
+            hs=hs,
             store=hs.get_storage_controllers().main,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.remote_media_downloads,
@@ -147,9 +148,9 @@ class MediaRepository:
             hs, self.primary_base_path, self.filepaths, storage_providers
         )
 
-        self.clock.looping_call(
+        hs.register_looping_call(self.clock.looping_call(
             self._start_update_recently_accessed, UPDATE_RECENTLY_ACCESSED_TS
-        )
+        ))
 
         # Media retention configuration options
         self._media_retention_local_media_lifetime_ms = (
@@ -166,10 +167,10 @@ class MediaRepository:
         ):
             # Run the background job to apply media retention rules routinely,
             # with the duration between runs dictated by the homeserver config.
-            self.clock.looping_call(
+            hs.register_looping_call(self.clock.looping_call(
                 self._start_apply_media_retention_rules,
                 MEDIA_RETENTION_CHECK_PERIOD_MS,
-            )
+            ))
 
         if hs.config.media.url_preview_enabled:
             self.url_previewer: Optional[UrlPreviewer] = UrlPreviewer(

@@ -389,7 +389,7 @@ class FederationSender(AbstractFederationSender):
         # map from destination to PerDestinationQueue
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_federation_transaction_queue_pending_destinations",
             "",
             [],
@@ -398,24 +398,24 @@ class FederationSender(AbstractFederationSender):
                 for d in self._per_destination_queues.values()
                 if d.transmission_loop_running
             ),
-        )
+        ))
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_federation_transaction_queue_pending_pdus",
             "",
             [],
             lambda: sum(
                 d.pending_pdu_count() for d in self._per_destination_queues.values()
             ),
-        )
-        LaterGauge(
+        ))
+        hs.register_later_gauge(LaterGauge(
             "synapse_federation_transaction_queue_pending_edus",
             "",
             [],
             lambda: sum(
                 d.pending_edu_count() for d in self._per_destination_queues.values()
             ),
-        )
+        ))
 
         self._is_processing = False
         self._last_poked_id = -1
@@ -426,16 +426,16 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            weakref.proxy(self), self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
-        self.clock.looping_call_now(
+        hs.register_looping_call(self.clock.looping_call_now(
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
             self._wake_destinations_needing_catchup,
-        )
+        ))
 
     def _get_per_destination_queue(
         self, destination: str

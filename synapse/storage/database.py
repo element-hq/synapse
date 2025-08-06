@@ -568,12 +568,12 @@ class DatabasePool:
         self._db_pool = make_pool(hs.get_reactor(), database_config, engine)
 
         self.updates = BackgroundUpdater(hs, self)
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_background_update_status",
             "Background update status",
             [],
             self.updates.get_status,
-        )
+        ))
 
         self._previous_txn_total_time = 0.0
         self._current_txn_total_time = 0.0
@@ -605,6 +605,10 @@ class DatabasePool:
             "upsert_safety_check",
             self._check_safe_to_upsert,
         )
+
+    def stop_background_updates(self) -> None:
+        self.updates.enabled = False
+        self.updates._background_update_handlers.clear()
 
     def name(self) -> str:
         "Return the name of this database"
@@ -669,7 +673,7 @@ class DatabasePool:
                 "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
             )
 
-        self._clock.looping_call(loop, 10000)
+        self.hs.register_looping_call(self._clock.looping_call(loop, 10000))
 
     def new_transaction(
         self,

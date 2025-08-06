@@ -28,6 +28,7 @@ These actions are mostly only used by the :py:mod:`.replication` module.
 
 import logging
 from typing import Optional, Tuple
+import weakref
 
 from synapse.federation.units import Transaction
 from synapse.storage.databases.main import DataStore
@@ -40,7 +41,7 @@ class TransactionActions:
     """Defines persistence actions that relate to handling Transactions."""
 
     def __init__(self, datastore: DataStore):
-        self.store = datastore
+        self.store = weakref.proxy(datastore)
 
     async def have_responded(
         self, origin: str, transaction: Transaction

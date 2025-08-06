@@ -21,7 +21,7 @@
 
 import logging
 from collections import OrderedDict
-from typing import Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
+from typing import TYPE_CHECKING, Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
 
 import attr
 
@@ -31,6 +31,9 @@ from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util import Clock
 from synapse.util.caches import EvictionReason, register_cache
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +50,7 @@ class ExpiringCache(Generic[KT, VT]):
     def __init__(
         self,
         *,
+        hs: "HomeServer",
         cache_name: str,
         server_name: str,
         clock: Clock,
@@ -101,7 +105,7 @@ class ExpiringCache(Generic[KT, VT]):
         def f() -> "defer.Deferred[None]":
             return run_as_background_process("prune_cache", self._prune_cache)
 
-        self._clock.looping_call(f, self._expiry_ms / 2)
+        hs.register_looping_call(self._clock.looping_call(f, self._expiry_ms / 2))
 
     def __setitem__(self, key: KT, value: VT) -> None:
         now = self._clock.time_msec()

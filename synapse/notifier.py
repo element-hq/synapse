@@ -247,13 +247,14 @@ class Notifier:
 
         self.federation_sender = None
         if hs.should_send_federation():
+            # TODO: (devon) why is this one already a weakref proxy?
             self.federation_sender = hs.get_federation_sender()
 
         self.state_handler = hs.get_state_handler()
 
-        self.clock.looping_call(
+        hs.register_looping_call(self.clock.looping_call(
             self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY_MS
-        )
+        ))
 
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
@@ -268,17 +269,17 @@ class Notifier:
 
             return sum(stream.count_listeners() for stream in all_user_streams)
 
-        LaterGauge("synapse_notifier_listeners", "", [], count_listeners)
+        hs.register_later_gauge(LaterGauge("synapse_notifier_listeners", "", [], count_listeners))
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             "synapse_notifier_rooms",
             "",
             [],
             lambda: count(bool, list(self.room_to_user_streams.values())),
-        )
-        LaterGauge(
+        ))
+        hs.register_later_gauge(LaterGauge(
             "synapse_notifier_users", "", [], lambda: len(self.user_to_user_stream)
-        )
+        ))
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
         """Add a callback that will be called when some new data is available.

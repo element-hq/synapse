@@ -173,12 +173,9 @@ class DataStore(
     ):
         self.hs = weakref.proxy(hs)
         self._clock = hs.get_clock()
-        self.database_engine = database.engine
+        self.database_engine = weakref.proxy(database.engine)
 
         super().__init__(database, db_conn, hs)
-
-    def shutdown(self) -> None:
-        super().shutdown()
 
     async def get_users_paginate(
         self,

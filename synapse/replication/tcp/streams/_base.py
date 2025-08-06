@@ -31,6 +31,7 @@ from typing import (
     Tuple,
     TypeVar,
 )
+import weakref
 
 import attr
 
@@ -128,7 +129,7 @@ class Stream:
             update_function: callback go get stream updates, as above
         """
         self.local_instance_name = local_instance_name
-        self.update_function = update_function
+        self.update_function = weakref.proxy(update_function)
 
         # The token from which we last asked for updates
         self.last_token = self.current_token(self.local_instance_name)
@@ -561,7 +562,7 @@ class DeviceListsStream(_StreamFromIdGen):
     ROW_TYPE = DeviceListsStreamRow
 
     def __init__(self, hs: "HomeServer"):
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         super().__init__(
             hs.get_instance_name(),
             self._update_function,
@@ -648,7 +649,7 @@ class AccountDataStream(_StreamFromIdGen):
     ROW_TYPE = AccountDataStreamRow
 
     def __init__(self, hs: "HomeServer"):
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         super().__init__(
             hs.get_instance_name(),
             self._update_function,
@@ -740,7 +741,7 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
     ROW_TYPE = ThreadSubscriptionsStreamRow
 
     def __init__(self, hs: Any):
-        self.store = hs.get_datastores().main
+        self.store = weakref.proxy(hs.get_datastores().main)
         super().__init__(
             hs.get_instance_name(),
             self._update_function,

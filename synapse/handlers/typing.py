@@ -106,8 +106,8 @@ class FollowerTypingHandler:
 
         self._rooms_updated: Set[str] = set()
 
-        self.clock.looping_call(self._handle_timeouts, 5000)
-        self.clock.looping_call(self._prune_old_typing, FORGET_TIMEOUT)
+        hs.register_looping_call(self.clock.looping_call(self._handle_timeouts, 5000))
+        hs.register_looping_call(self.clock.looping_call(self._prune_old_typing, FORGET_TIMEOUT))
 
     def _reset(self) -> None:
         """Reset the typing handler's data caches."""

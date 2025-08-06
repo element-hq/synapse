@@ -1,6 +1,7 @@
 from typing import Callable, Collection, List, Optional, Tuple
 from unittest import mock
 from unittest.mock import AsyncMock, Mock
+import weakref
 
 from twisted.test.proto_helpers import MemoryReactor
 

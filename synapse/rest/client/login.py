@@ -127,11 +127,13 @@ class LoginRestServlet(RestServlet):
 
         self._well_known_builder = WellKnownBuilder(hs)
         self._address_ratelimiter = Ratelimiter(
+            hs=hs,
             store=self._main_store,
             clock=hs.get_clock(),
             cfg=self.hs.config.ratelimiting.rc_login_address,
         )
         self._account_ratelimiter = Ratelimiter(
+            hs=hs,
             store=self._main_store,
             clock=hs.get_clock(),
             cfg=self.hs.config.ratelimiting.rc_login_account,

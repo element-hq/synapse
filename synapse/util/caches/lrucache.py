@@ -235,13 +235,13 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
     USE_GLOBAL_LIST = True
 
     clock = hs.get_clock()
-    clock.looping_call(
+    hs.register_looping_call(clock.looping_call(
         _expire_old_entries,
         30 * 1000,
         clock,
         expiry_time,
         hs.config.caches.cache_autotuning,
-    )
+    ))
 
 
 class _Node(Generic[KT, VT]):
