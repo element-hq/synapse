@@ -426,7 +426,22 @@ jobs:
         if: ${{ matrix.job.postgres-version }}
         timeout-minutes: 2
         run: until pg_isready -h localhost; do sleep 1; done
-      - run: poetry run trial tests
+      - run: |
+          (
+            while true; do
+              date
+              df -h
+              sleep 10
+            done
+          ) &
+          MONITOR_PID=$!
+
+          poetry run trial tests
+          STATUS=$?
+
+          kill $MONITOR_PID
+          exit $STATUS
+
         env:
           SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
