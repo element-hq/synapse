@@ -26,7 +26,7 @@ import hashlib
 import hmac
 import logging
 import sys
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Iterable, Optional, TextIO
 
 import requests
 import yaml
@@ -233,6 +233,7 @@ def main() -> None:
     group.add_argument(
         "-c",
         "--config",
+        action="append",
         type=argparse.FileType("r"),
         help="Path to server config file. Used to read in shared secret.",
     )
@@ -252,8 +253,8 @@ def main() -> None:
     args = parser.parse_args()
 
     config: Optional[Dict[str, Any]] = None
-    if "config" in args and args.config:
-        config = yaml.safe_load(args.config)
+    if "config" in args:
+        config = _read_config_files(args.config)
 
     if args.shared_secret:
         secret = args.shared_secret
@@ -308,6 +309,33 @@ def main() -> None:
         args.user_type,
         exists_ok=args.exists_ok,
     )
+
+
+# Adapted from synapse.config._base.
+def _read_config_files(config_files: Iterable[TextIO]) -> dict[str, Any]:
+    """Read the config files and shallowly merge them into a dict.
+
+    Successive configurations are shallowly merged into ones provided earlier,
+    i.e., entirely replacing top-level sections of the configuration.
+
+    Args:
+        config_files: A list of the config files to read
+
+    Returns:
+        The configuration dictionary.
+    """
+    specified_config = {}
+    for config_file in config_files:
+        yaml_config = yaml.safe_load(config_file)
+
+        if not isinstance(yaml_config, dict):
+            err = "File %r is empty or doesn't parse into a key-value map. IGNORING."
+            print(err % (config_file,))
+            continue
+
+        specified_config.update(yaml_config)
+
+    return specified_config
 
 
 def _read_file(file_path: Any, config_path: str) -> str:
