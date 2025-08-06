@@ -430,8 +430,10 @@ jobs:
       - run: |
           (
             while true; do
+              echo "......."
               date
-              df -h
+              df -h | grep root
+              free -m
               sleep 10
             done
           ) &
