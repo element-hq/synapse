@@ -27,6 +27,7 @@ from synapse.api.errors import (
     SynapseError,
     UnrecognizedRequestError,
 )
+from synapse.config.homeserver import HomeServerConfig
 from synapse.handlers.push_rules import InvalidRuleException, RuleSpec, check_actions
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -64,6 +65,7 @@ class PushRuleRestServlet(RestServlet):
         )
         self._push_rules_handler = hs.get_push_rules_handler()
         self._push_rule_linearizer = Linearizer(name="push_rules")
+        self._config = hs.config
 
     async def on_PUT(self, request: SynapseRequest, path: str) -> Tuple[int, JsonDict]:
         if not self._is_push_worker:
@@ -105,7 +107,7 @@ class PushRuleRestServlet(RestServlet):
 
         try:
             (conditions, actions) = _rule_tuple_from_request_object(
-                spec.template, spec.rule_id, content
+                spec.template, spec.rule_id, content, self._config
             )
         except InvalidRuleException as e:
             raise SynapseError(400, str(e))
@@ -237,7 +239,7 @@ def _rule_spec_from_path(path: List[str]) -> RuleSpec:
 
 
 def _rule_tuple_from_request_object(
-    rule_template: str, rule_id: str, req_obj: JsonDict
+    rule_template: str, rule_id: str, req_obj: JsonDict, config: HomeServerConfig
 ) -> Tuple[List[JsonDict], List[Union[str, JsonDict]]]:
     if rule_template in ["override", "underride"]:
         if "conditions" not in req_obj:
@@ -263,7 +265,7 @@ def _rule_tuple_from_request_object(
         raise InvalidRuleException("No actions found")
     actions = req_obj["actions"]
 
-    check_actions(actions)
+    check_actions(actions, config)
 
     return conditions, actions
 

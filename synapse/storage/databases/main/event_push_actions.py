@@ -95,7 +95,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
+from synapse.api.constants import MAIN_TIMELINE, PushRuleActions, ReceiptTypes
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -1181,7 +1181,13 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             user_id: str, actions: Collection[Union[Mapping, str]]
         ) -> Tuple[str, str, str, int, int, int, str, int]:
             is_highlight = 1 if _action_has_highlight(actions) else 0
-            notif = 1 if "notify" in actions else 0
+            notif = (
+                1
+                if "notify" in actions
+                or self.hs.config.experimental.msc3768_enabled
+                and PushRuleActions.MSC3768_NOTIFY_IN_APP in actions
+                else 0
+            )
             return (
                 event_id,  # event_id column
                 user_id,  # user_id column
