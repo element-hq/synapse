@@ -86,24 +86,6 @@ users_woken_by_stream_counter = Counter(
     labelnames=["stream", SERVER_NAME_LABEL],
 )
 
-
-notifier_listeners_gauge = LaterGauge(
-    name="synapse_notifier_listeners",
-    desc="",
-    labelnames=[SERVER_NAME_LABEL],
-)
-
-notifier_rooms_gauge = LaterGauge(
-    name="synapse_notifier_rooms",
-    desc="",
-    labelnames=[SERVER_NAME_LABEL],
-)
-notifier_users_gauge = LaterGauge(
-    name="synapse_notifier_users",
-    desc="",
-    labelnames=[SERVER_NAME_LABEL],
-)
-
 T = TypeVar("T")
 
 
@@ -299,16 +281,28 @@ class Notifier:
                 )
             }
 
-        notifier_listeners_gauge.register_hook(count_listeners)
-        notifier_rooms_gauge.register_hook(
-            lambda: {
+        LaterGauge(
+            name="synapse_notifier_listeners",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=count_listeners,
+        )
+
+        LaterGauge(
+            name="synapse_notifier_rooms",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
                 (self.server_name,): count(
                     bool, list(self.room_to_user_streams.values())
                 )
-            }
+            },
         )
-        notifier_users_gauge.register_hook(
-            lambda: {(self.server_name,): len(self.user_to_user_stream)}
+        LaterGauge(
+            name="synapse_notifier_users",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:

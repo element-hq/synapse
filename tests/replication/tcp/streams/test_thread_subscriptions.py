@@ -62,7 +62,7 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
                     "@test_user:example.org",
                     room_id,
                     thread_root_id,
-                    automatic=True,
+                    automatic_event_orderings=None,
                 )
             )
             updates.append(thread_root_id)
@@ -75,7 +75,7 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
                 "@test_user:example.org",
                 other_room_id,
                 other_thread_root_id,
-                automatic=False,
+                automatic_event_orderings=None,
             )
         )
 
@@ -124,7 +124,7 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
         for user_id in users:
             self.get_success(
                 store.subscribe_user_to_thread(
-                    user_id, room_id, thread_root_id, automatic=True
+                    user_id, room_id, thread_root_id, automatic_event_orderings=None
                 )
             )
 
