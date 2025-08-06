@@ -373,7 +373,7 @@ jobs:
 
   calculate-test-jobs:
     if: ${{ !cancelled() && !failure() }} # Allow previous steps to be skipped, but not fail
-    needs: linting-done
+    # needs: linting-done
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
