@@ -161,15 +161,19 @@ class LaterGauge(Collector):
     name: str
     desc: str
     labelnames: Optional[StrSequence] = attr.ib(hash=False)
-    _server_name_to_hook_map: Dict[
-        Optional[str],  # server_name
+    _instance_id_to_hook_map: Dict[
+        Optional[str],  # instance_id
         Callable[
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
     ] = attr.ib(factory=dict, hash=False)
     """
-    Map from server_name to a callback. Each callback should either return a value (if
-    there are no labels for this metric), or dict mapping from a label tuple to a value
+    Map from homeserver instance_id to a callback. Each callback should either return a
+    value (if there are no labels for this metric), or dict mapping from a label tuple
+    to a value.
+
+    We use `instance_id` instead of `server_name` because it's possible to have multiple
+    workers running in the same process with the same `server_name`.
     """
 
     def collect(self) -> Iterable[Metric]:
@@ -177,7 +181,7 @@ class LaterGauge(Collector):
         # (we don't enforce it here, one level up).
         g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
-        for hook in self._server_name_to_hook_map.values():
+        for hook in self._instance_id_to_hook_map.values():
             try:
                 hook_result = hook()
             except Exception:
@@ -198,7 +202,7 @@ class LaterGauge(Collector):
     def register_hook(
         self,
         *,
-        server_name: Optional[str],
+        homeserver_instance_id: Optional[str],
         hook: Callable[
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
@@ -208,32 +212,36 @@ class LaterGauge(Collector):
         the gauge.
 
         Args:
-            server_name: The homeserver name (`hs.hostname`) this hook is associated
-                with. This can be used later to lookup all hooks associated with a given
-                server name in order to unregister them. This should only be omitted
-                for global hooks that work across all homeservers.
+            homeserver_instance_id: The unique ID for this Synapse process instance
+                (`hs.get_instance_id()`) that this hook is associated with. This can be used
+                later to lookup all hooks associated with a given server name in order to
+                unregister them. This should only be omitted for global hooks that work
+                across all homeservers.
             hook: A callback that should either return a value (if there are no
                 labels for this metric), or dict mapping from a label tuple to a value
         """
-        # We shouldn't have multiple hooks registered for the same `server_name`.
-        existing_hook = self._server_name_to_hook_map.get(server_name)
+        # We shouldn't have multiple hooks registered for the same homeserver `instance_id`.
+        existing_hook = self._instance_id_to_hook_map.get(homeserver_instance_id)
         assert existing_hook is None, (
-            f"LaterGauge(name={self.name}) hook already registered for server_name={server_name}. "
+            f"LaterGauge(name={self.name}) hook already registered for homeserver_instance_id={homeserver_instance_id}. "
             "This is likely a Synapse bug and you forgot to unregister the previous hooks for "
             "the server (especially in tests)."
         )
 
-        self._server_name_to_hook_map[server_name] = hook
+        self._instance_id_to_hook_map[homeserver_instance_id] = hook
 
-    def unregister_hooks_for_server_name(self, server_name: str) -> None:
+    def unregister_hooks_for_homeserver_instance_id(
+        self, homeserver_instance_id: str
+    ) -> None:
         """
-        Unregister all hooks associated with the given `server_name`. This should be
+        Unregister all hooks associated with the given homeserver `instance_id`. This should be
         called when a homeserver is shutdown to avoid extra hooks sitting around.
 
         Args:
-            server_name: The homeserver name to unregister hooks for (`hs.hostname`).
+            homeserver_instance_id: The unique ID for this Synapse process instance to
+                unregister hooks for (`hs.get_instance_id()`).
         """
-        self._server_name_to_hook_map.pop(server_name, None)
+        self._instance_id_to_hook_map.pop(homeserver_instance_id, None)
 
     def __attrs_post_init__(self) -> None:
         REGISTRY.register(self)

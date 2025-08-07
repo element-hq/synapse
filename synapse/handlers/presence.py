@@ -792,7 +792,7 @@ class PresenceHandler(BasePresenceHandler):
         )
 
         presence_user_to_current_state_size_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
@@ -893,7 +893,7 @@ class PresenceHandler(BasePresenceHandler):
             )
 
         presence_wheel_timer_size_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 

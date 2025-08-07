@@ -133,7 +133,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # changes. ARGH.
         def register(queue_name: QueueNames, queue: Sized) -> None:
             queue_name_to_gauge_map[queue_name].register_hook(
-                server_name=self.server_name,
+                homeserver_instance_id=hs.get_instance_id(),
                 hook=lambda: {(self.server_name,): len(queue)},
             )
 

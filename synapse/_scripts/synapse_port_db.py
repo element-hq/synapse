@@ -99,6 +99,7 @@ from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
 from synapse.util import SYNAPSE_VERSION, Clock
+from synapse.util.stringutils import random_string
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -330,6 +331,9 @@ class MockHomeserver:
     def get_reactor(self) -> ISynapseReactor:
         return reactor
 
+    def get_instance_id(self) -> Optional[str]:
+        return random_string(5)
+
     def get_instance_name(self) -> str:
         return "master"
 
@@ -352,8 +356,6 @@ class Porter:
         self.progress = progress
         self.batch_size = batch_size
         self.hs_config = hs_config
-
-        self.mock_hs = MockHomeserver(self.hs_config)
 
     async def setup_table(self, table: str) -> Tuple[str, int, int, int, int]:
         if table in APPEND_ONLY_TABLES:
@@ -673,7 +675,8 @@ class Porter:
 
         engine = create_engine(db_config.config)
 
-        server_name = self.mock_hs.hostname
+        hs = MockHomeserver(self.hs_config)
+        server_name = hs.hostname
 
         with make_conn(
             db_config=db_config,
@@ -688,12 +691,12 @@ class Porter:
             # Type safety: ignore that we're using Mock homeservers here.
             store = Store(
                 DatabasePool(
-                    self.mock_hs,  # type: ignore[arg-type]
+                    hs,  # type: ignore[arg-type]
                     db_config,
                     engine,
                 ),
                 db_conn,
-                self.mock_hs,  # type: ignore[arg-type]
+                hs,  # type: ignore[arg-type]
             )
             db_conn.commit()
 

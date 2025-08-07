@@ -256,7 +256,7 @@ class ReplicationCommandHandler:
         self._connections: List[IReplicationConnection] = []
 
         tcp_resource_total_connections_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self._connections)},
         )
 
@@ -277,7 +277,7 @@ class ReplicationCommandHandler:
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
         tcp_command_queue_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {
                 (stream_name, self.server_name): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()

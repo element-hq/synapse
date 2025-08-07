@@ -124,7 +124,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 self._count_known_servers,
             )
             federation_known_servers_gauge.register_hook(
-                server_name=self.server_name,
+                homeserver_instance_id=hs.get_instance_id(),
                 hook=lambda: {(self.server_name,): self._known_servers_count},
             )
 

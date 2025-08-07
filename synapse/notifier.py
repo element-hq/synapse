@@ -300,10 +300,10 @@ class Notifier:
             }
 
         notifier_listeners_gauge.register_hook(
-            server_name=self.server_name, hook=count_listeners
+            homeserver_instance_id=hs.get_instance_id(), hook=count_listeners
         )
         notifier_rooms_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {
                 (self.server_name,): count(
                     bool, list(self.room_to_user_streams.values())
@@ -311,7 +311,7 @@ class Notifier:
             },
         )
         notifier_users_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 

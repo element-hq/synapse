@@ -138,7 +138,7 @@ class TaskScheduler:
             )
 
         running_tasks_gauge.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 

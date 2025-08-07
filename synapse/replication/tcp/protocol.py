@@ -529,7 +529,7 @@ pending_commands = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 pending_commands.register_hook(
-    server_name=None,
+    homeserver_instance_id=None,
     hook=lambda: {
         (p.name, p.server_name): len(p.pending_commands) for p in connected_connections
     },
@@ -549,7 +549,7 @@ transport_send_buffer = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 transport_send_buffer.register_hook(
-    server_name=None,
+    homeserver_instance_id=None,
     hook=lambda: {
         (p.name, p.server_name): transport_buffer_size(p) for p in connected_connections
     },
@@ -579,7 +579,7 @@ tcp_transport_kernel_send_buffer = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 tcp_transport_kernel_send_buffer.register_hook(
-    server_name=None,
+    homeserver_instance_id=None,
     hook=lambda: {
         (p.name, p.server_name): transport_kernel_read_buffer_size(p, False)
         for p in connected_connections
@@ -593,7 +593,7 @@ tcp_transport_kernel_read_buffer = LaterGauge(
     labelnames=["name", SERVER_NAME_LABEL],
 )
 tcp_transport_kernel_read_buffer.register_hook(
-    server_name=None,
+    homeserver_instance_id=None,
     hook=lambda: {
         (p.name, p.server_name): transport_kernel_read_buffer_size(p, True)
         for p in connected_connections

@@ -383,7 +383,9 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # Cleanup metrics associated with the homeserver
         for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
-            later_gauge.unregister_hooks_for_server_name(self.config.server.server_name)
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
 
         logger.info("Cleanup complete for %s.", self.hostname)
 

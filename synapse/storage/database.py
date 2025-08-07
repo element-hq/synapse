@@ -618,7 +618,7 @@ class DatabasePool:
 
         self.updates = BackgroundUpdater(hs, self)
         background_update_status.register_hook(
-            server_name=self.server_name,
+            homeserver_instance_id=hs.get_instance_id(),
             hook=lambda: {(self.server_name,): self.updates.get_status()},
         )
 

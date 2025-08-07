@@ -137,7 +137,7 @@ sleep_affected_hosts_gauge = LaterGauge(
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
 sleep_affected_hosts_gauge.register_hook(
-    server_name=None,
+    homeserver_instance_id=None,
     hook=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_sleep()
@@ -151,7 +151,7 @@ reject_affected_hosts_gauge = LaterGauge(
     labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
 reject_affected_hosts_gauge.register_hook(
-    server_name=None,
+    homeserver_instance_id=None,
     hook=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_reject()
