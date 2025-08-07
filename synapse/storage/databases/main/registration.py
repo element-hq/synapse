@@ -674,7 +674,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         )
 
     @cached(max_entries=100000)
-    async def is_server_admin(self, user: UserID) -> bool:
+    async def is_server_admin(self, user: str) -> bool:
         """Determines if a user is an admin of this homeserver.
 
         Args:
@@ -685,7 +685,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         """
         res = await self.db_pool.simple_select_one_onecol(
             table="users",
-            keyvalues={"name": user.to_string()},
+            keyvalues={"name": user},
             retcol="admin",
             allow_none=True,
             desc="is_server_admin",
