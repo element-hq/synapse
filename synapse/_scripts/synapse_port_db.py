@@ -353,6 +353,8 @@ class Porter:
         self.batch_size = batch_size
         self.hs_config = hs_config
 
+        self.mock_hs = MockHomeserver(self.hs_config)
+
     async def setup_table(self, table: str) -> Tuple[str, int, int, int, int]:
         if table in APPEND_ONLY_TABLES:
             # It's safe to just carry on inserting.
@@ -671,8 +673,7 @@ class Porter:
 
         engine = create_engine(db_config.config)
 
-        hs = MockHomeserver(self.hs_config)
-        server_name = hs.hostname
+        server_name = self.mock_hs.hostname
 
         with make_conn(
             db_config=db_config,
@@ -685,7 +686,9 @@ class Porter:
             )
             prepare_database(db_conn, engine, config=self.hs_config)
             # Type safety: ignore that we're using Mock homeservers here.
-            store = Store(DatabasePool(hs, db_config, engine), db_conn, hs)  # type: ignore[arg-type]
+            store = Store(
+                DatabasePool(self.mock_hs, db_config, engine), db_conn, self.mock_hs
+            )  # type: ignore[arg-type]
             db_conn.commit()
 
         return store
