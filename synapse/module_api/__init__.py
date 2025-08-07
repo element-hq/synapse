@@ -694,7 +694,7 @@ class ModuleApi:
         Returns:
             True if the user is a server admin, False otherwise.
         """
-        return await self._store.is_server_admin(UserID.from_string(user_id))
+        return await self._store.is_server_admin(user_id)
 
     async def set_user_admin(self, user_id: str, admin: bool) -> None:
         """Sets if a user is a server admin.

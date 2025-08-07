@@ -52,7 +52,6 @@ from synapse.types import (
     RetentionPolicy,
     StateMap,
     StrCollection,
-    UserID,
     get_domain_from_id,
 )
 from synapse.types.state import StateFilter
@@ -121,7 +120,7 @@ async def filter_events_for_client(
     if not (
         filter_send_to_client
         and client_config.return_soft_failed_events
-        and await storage.main.is_server_admin(UserID.from_string(user_id))
+        and await storage.main.is_server_admin(user_id)
     ):
         events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     if len(events_before_filtering) != len(events):
