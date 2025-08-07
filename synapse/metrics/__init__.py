@@ -31,7 +31,6 @@ from typing import (
     Dict,
     Generic,
     Iterable,
-    List,
     Mapping,
     Optional,
     Sequence,
@@ -162,20 +161,23 @@ class LaterGauge(Collector):
     name: str
     desc: str
     labelnames: Optional[StrSequence] = attr.ib(hash=False)
-    # List of callbacks: each callback should either return a value (if there are no
-    # labels for this metric), or dict mapping from a label tuple to a value
-    _hooks: List[
+    _server_name_to_hook_map: Dict[
+        str,  # server_name
         Callable[
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
-        ]
-    ] = attr.ib(factory=list, hash=False)
+        ],
+    ] = attr.ib(factory=dict, hash=False)
+    """
+    Map from server_name to a callback. Each callback should either return a value (if
+    there are no labels for this metric), or dict mapping from a label tuple to a value
+    """
 
     def collect(self) -> Iterable[Metric]:
         # The decision to add `SERVER_NAME_LABEL` is from the `LaterGauge` usage itself
         # (we don't enforce it here, one level up).
         g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
-        for hook in self._hooks:
+        for hook in self._server_name_to_hook_map.values():
             try:
                 hook_result = hook()
             except Exception:
@@ -195,14 +197,59 @@ class LaterGauge(Collector):
 
     def register_hook(
         self,
+        server_name: str,
         hook: Callable[
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
     ) -> None:
-        self._hooks.append(hook)
+        """
+        Register a callback/hook that will be called to generate a metric samples for
+        the gauge.
+
+        Args:
+            server_name: The homeserver name (`hs.hostname`) this hook is associated
+                with. This can be used later to lookup all hooks associated with a given
+                server name in order to unregister them.
+            hook: A callback that should either return a value (if there are no
+                labels for this metric), or dict mapping from a label tuple to a value
+        """
+        # We shouldn't have multiple hooks registered for the same `server_name`.
+        existing_hook = self._server_name_to_hook_map.get(server_name)
+        assert existing_hook is None, (
+            f"LaterGauge(name={self.name}) hook already registered for server_name={server_name}. "
+            "This is likely a Synapse bug and you forgot to unregister the previous hooks for "
+            "the server (especially in tests)."
+        )
+
+        self._server_name_to_hook_map[server_name] = hook
+
+    def unregister_hooks_for_server_name(self, server_name: str) -> None:
+        """
+        Unregister all hooks associated with the given `server_name`. This should be
+        called when a homeserver is shutdown to avoid extra hooks sitting around.
+
+        Args:
+            server_name: The homeserver name to unregister hooks for (`hs.hostname`).
+        """
+        if server_name in self._server_name_to_hook_map:
+            del self._server_name_to_hook_map[server_name]
 
     def __attrs_post_init__(self) -> None:
         REGISTRY.register(self)
+
+        # We shouldn't have multiple metrics with the same name. Typically, metrics
+        # should be created globally so you shouldn't be running into this.
+        existing_gauge = all_later_gauges_to_clean_up_on_shutdown.get(self.name)
+        assert existing_gauge is None, f"LaterGauge(name={self.name}) already exists. "
+
+        # Keep track of the gauge so we can clean it up later.
+        all_later_gauges_to_clean_up_on_shutdown[self.name] = self
+
+
+all_later_gauges_to_clean_up_on_shutdown: Dict[str, LaterGauge] = {}
+"""
+Keep track of all `LaterGauge` that we should look through when we shutdown a homeserver.
+"""
 
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,

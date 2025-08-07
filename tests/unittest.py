@@ -77,6 +77,7 @@ from synapse.logging.context import (
     current_context,
     set_current_context,
 )
+from synapse.metrics import all_later_gauges_to_clean_up_on_shutdown
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
@@ -471,6 +472,11 @@ class HomeserverTestCase(TestCase):
             self.prepare(self.reactor, self.clock, self.hs)
 
     def tearDown(self) -> None:
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown:
+            later_gauge.unregister_hooks_for_server_name(
+                self.hs.config.server.server_name
+            )
+
         # Reset to not use frozen dicts.
         events.USE_FROZEN_DICTS = False
 
