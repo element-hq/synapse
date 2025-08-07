@@ -89,6 +89,7 @@ from synapse.handlers.presence import (
     PresenceHandler,
     WorkerPresenceHandler,
 )
+from synapse.metrics import all_later_gauges_to_clean_up_on_shutdown
 from synapse.handlers.profile import ProfileHandler
 from synapse.handlers.push_rules import PushRulesHandler
 from synapse.handlers.read_marker import ReadMarkerHandler
@@ -368,6 +369,21 @@ class HomeServer(metaclass=abc.ABCMeta):
         # unless handlers are instantiated.
         if self.config.worker.run_background_tasks:
             self.setup_background_tasks()
+
+    def cleanup(self) -> None:
+        """
+        WIP: Clean-up any references to the homeserver and stop any running related
+        processes, timers, loops, replication stream, etc.
+        """
+        logger.info("Received cleanup request for %s.", self.hostname)
+
+        # TODO: Stop background processes, timers, loops, replication stream, etc.
+
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_server_name(self.config.server.server_name)
+
+        logger.info("Cleanup complete for %s.", self.hostname)
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners

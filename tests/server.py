@@ -92,7 +92,6 @@ from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import ContextResourceUsage
-from synapse.metrics import all_later_gauges_to_clean_up_on_shutdown
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
@@ -1146,6 +1145,9 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
+    # Register the cleanup hook
+    cleanup_func(hs.cleanup)
+
     # Install @cache_in_self attributes
     for key, val in kwargs.items():
         setattr(hs, "_" + key, val)
@@ -1215,13 +1217,6 @@ def setup_test_homeserver(
         if not LEAVE_DB:
             # Register the cleanup hook
             cleanup_func(cleanup)
-
-    def cleanup_metrics() -> None:
-        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
-            later_gauge.unregister_hooks_for_server_name(hs.config.server.server_name)
-
-    # Register the cleanup hook for metrics
-    cleanup_func(cleanup_metrics)
 
     # bcrypt is far too slow to be doing in unit tests
     # Need to let the HS build an auth handler and then mess with it
