@@ -1,1 +1,0 @@
-Reduce database usage in Sliding Sync by not querying for background update completion after the update is known to be complete.

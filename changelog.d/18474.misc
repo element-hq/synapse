@@ -1,1 +1,0 @@
-Add debug logging for HMAC digest verification failures when using the admin API to register users.

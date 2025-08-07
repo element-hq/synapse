@@ -1921,7 +1921,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
             check_complexity
             and self.hs.config.server.limit_remote_rooms.admins_can_join
         ):
-            check_complexity = not await self.store.is_server_admin(user)
+            check_complexity = not await self.store.is_server_admin(user.to_string())
 
         if check_complexity:
             # Fetch the room complexity

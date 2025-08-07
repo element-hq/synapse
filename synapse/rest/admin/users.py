@@ -1000,7 +1000,7 @@ class UserAdminServlet(RestServlet):
                 "Only local users can be admins of this homeserver",
             )
 
-        is_admin = await self.store.is_server_admin(target_user)
+        is_admin = await self.store.is_server_admin(target_user.to_string())
 
         return HTTPStatus.OK, {"admin": is_admin}
 

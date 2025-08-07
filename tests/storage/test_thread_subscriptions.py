@@ -327,3 +327,42 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self.assertFalse(
             func(autosub=EventOrderings(-50, 2), unsubscribed_at=EventOrderings(2, 1))
         )
+
+    def test_get_subscribers_to_thread(self) -> None:
+        """
+        Test getting all subscribers to a thread at once.
+
+        To check cache invalidations are correct, we do multiple
+        step-by-step rounds of subscription changes and assertions.
+        """
+        other_user_id = "@other_user:test"
+
+        subscribers = self.get_success(
+            self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
+        )
+        self.assertEqual(subscribers, frozenset())
+
+        self._subscribe(
+            self.thread_root_id, automatic_event_orderings=None, user_id=self.user_id
+        )
+
+        subscribers = self.get_success(
+            self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
+        )
+        self.assertEqual(subscribers, frozenset((self.user_id,)))
+
+        self._subscribe(
+            self.thread_root_id, automatic_event_orderings=None, user_id=other_user_id
+        )
+
+        subscribers = self.get_success(
+            self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
+        )
+        self.assertEqual(subscribers, frozenset((self.user_id, other_user_id)))
+
+        self._unsubscribe(self.thread_root_id, user_id=self.user_id)
+
+        subscribers = self.get_success(
+            self.store.get_subscribers_to_thread(self.room_id, self.thread_root_id)
+        )
+        self.assertEqual(subscribers, frozenset((other_user_id,)))
