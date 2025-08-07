@@ -97,7 +97,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         self.test_handler = self._build_replication_data_handler()
         self.worker_hs._replication_data_handler = self.test_handler  # type: ignore[attr-defined]
 
-        repl_handler = ReplicationCommandHandler(self.worker_hs)
+        repl_handler = self.worker_hs.get_replication_command_handler()
         self.client = ClientReplicationStreamProtocol(
             self.worker_hs,
             "client",
