@@ -89,7 +89,6 @@ from synapse.handlers.presence import (
     PresenceHandler,
     WorkerPresenceHandler,
 )
-from synapse.metrics import all_later_gauges_to_clean_up_on_shutdown
 from synapse.handlers.profile import ProfileHandler
 from synapse.handlers.push_rules import PushRulesHandler
 from synapse.handlers.read_marker import ReadMarkerHandler
@@ -130,7 +129,10 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import (
+    all_later_gauges_to_clean_up_on_shutdown,
+    register_threadpool,
+)
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks

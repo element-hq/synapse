@@ -687,8 +687,14 @@ class Porter:
             prepare_database(db_conn, engine, config=self.hs_config)
             # Type safety: ignore that we're using Mock homeservers here.
             store = Store(
-                DatabasePool(self.mock_hs, db_config, engine), db_conn, self.mock_hs
-            )  # type: ignore[arg-type]
+                DatabasePool(
+                    self.mock_hs,  # type: ignore[arg-type]
+                    db_config,
+                    engine,
+                ),
+                db_conn,
+                self.mock_hs,  # type: ignore[arg-type]
+            )
             db_conn.commit()
 
         return store
