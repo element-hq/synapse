@@ -1,0 +1,1 @@
+Fix a bug which could corrupt auth chains making it impossible to perform state resolution.
