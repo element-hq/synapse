@@ -618,7 +618,8 @@ class DatabasePool:
 
         self.updates = BackgroundUpdater(hs, self)
         background_update_status.register_hook(
-            lambda: {(self.server_name,): self.updates.get_status()},
+            server_name=self.server_name,
+            hook=lambda: {(self.server_name,): self.updates.get_status()},
         )
 
         self._previous_txn_total_time = 0.0

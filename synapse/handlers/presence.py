@@ -792,7 +792,8 @@ class PresenceHandler(BasePresenceHandler):
         )
 
         presence_user_to_current_state_size_gauge.register_hook(
-            lambda: {(self.server_name,): len(self.user_to_current_state)}
+            server_name=self.server_name,
+            hook=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -892,7 +893,8 @@ class PresenceHandler(BasePresenceHandler):
             )
 
         presence_wheel_timer_size_gauge.register_hook(
-            lambda: {(self.server_name,): len(self.wheel_timer)}
+            server_name=self.server_name,
+            hook=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 
         # Used to handle sending of presence to newly joined users/servers

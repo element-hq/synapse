@@ -124,7 +124,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 self._count_known_servers,
             )
             federation_known_servers_gauge.register_hook(
-                lambda: {(self.server_name,): self._known_servers_count}
+                server_name=self.server_name,
+                hook=lambda: {(self.server_name,): self._known_servers_count},
             )
 
     @wrap_as_background_process("_count_known_servers")

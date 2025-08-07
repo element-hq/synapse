@@ -138,7 +138,8 @@ class TaskScheduler:
             )
 
         running_tasks_gauge.register_hook(
-            lambda: {(self.server_name,): len(self._running_tasks)}
+            server_name=self.server_name,
+            hook=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 
     def register_action(

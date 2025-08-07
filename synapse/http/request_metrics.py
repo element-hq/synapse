@@ -169,7 +169,7 @@ in_flight_requests = LaterGauge(
     desc="",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
 )
-in_flight_requests.register_hook(_get_in_flight_counts)
+in_flight_requests.register_hook(server_name=None, hook=_get_in_flight_counts)
 
 
 class RequestMetrics:

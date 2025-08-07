@@ -417,27 +417,30 @@ class FederationSender(AbstractFederationSender):
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
         transaction_queue_pending_destinations_gauge.register_hook(
-            lambda: {
+            server_name=self.server_name,
+            hook=lambda: {
                 (self.server_name,): sum(
                     1
                     for d in self._per_destination_queues.values()
                     if d.transmission_loop_running
                 )
-            }
+            },
         )
         transaction_queue_pending_pdus_gauge.register_hook(
-            lambda: {
+            server_name=self.server_name,
+            hook=lambda: {
                 (self.server_name,): sum(
                     d.pending_pdu_count() for d in self._per_destination_queues.values()
                 )
-            }
+            },
         )
         transaction_queue_pending_edus_gauge.register_hook(
-            lambda: {
+            server_name=self.server_name,
+            hook=lambda: {
                 (self.server_name,): sum(
                     d.pending_edu_count() for d in self._per_destination_queues.values()
                 )
-            }
+            },
         )
 
         self._is_processing = False

@@ -256,7 +256,8 @@ class ReplicationCommandHandler:
         self._connections: List[IReplicationConnection] = []
 
         tcp_resource_total_connections_gauge.register_hook(
-            lambda: {(self.server_name,): len(self._connections)}
+            server_name=self.server_name,
+            hook=lambda: {(self.server_name,): len(self._connections)},
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -276,10 +277,11 @@ class ReplicationCommandHandler:
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
         tcp_command_queue_gauge.register_hook(
-            lambda: {
+            server_name=self.server_name,
+            hook=lambda: {
                 (stream_name, self.server_name): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
-            }
+            },
         )
 
         self._is_master = hs.config.worker.worker_app is None

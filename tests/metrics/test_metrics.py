@@ -303,8 +303,8 @@ class LaterGaugeTests(unittest.HomeserverTestCase):
             desc="",
             labelnames=[SERVER_NAME_LABEL],
         )
-        later_gauge.register_hook(lambda: {("hs1",): 1})
-        later_gauge.register_hook(lambda: {("hs2",): 2})
+        later_gauge.register_hook(server_name="hs1", hook=lambda: {("hs1",): 1})
+        later_gauge.register_hook(server_name="hs2", hook=lambda: {("hs2",): 2})
 
         metrics_map = get_latest_metrics()
 
