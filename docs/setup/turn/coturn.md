@@ -88,7 +88,7 @@ This will install and start a systemd service called `coturn`.
     denied-peer-ip=172.16.0.0-172.31.255.255
 
     # recommended additional local peers to block, to mitigate external access to internal services.
-    # https://www.rtcsec.com/article/slack-webrtc-turn-compromise-and-bug-bounty/#how-to-fix-an-open-turn-relay-to-address-this-vulnerability
+    # https://www.enablesecurity.com/blog/slack-webrtc-turn-compromise-and-bug-bounty/#how-to-fix-an-open-turn-relay-to-address-this-vulnerability
     # https://www.enablesecurity.com/blog/cve-2020-26262-bypass-of-coturns-access-control-protection/#further-concerns-what-else
     no-multicast-peers
     denied-peer-ip=0.0.0.0-0.255.255.255
