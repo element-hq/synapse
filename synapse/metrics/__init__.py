@@ -162,7 +162,7 @@ class LaterGauge(Collector):
     desc: str
     labelnames: Optional[StrSequence] = attr.ib(hash=False)
     _server_name_to_hook_map: Dict[
-        str,  # server_name
+        Optional[str],  # server_name
         Callable[
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
@@ -197,7 +197,8 @@ class LaterGauge(Collector):
 
     def register_hook(
         self,
-        server_name: str,
+        *,
+        server_name: Optional[str],
         hook: Callable[
             [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
         ],
@@ -209,7 +210,8 @@ class LaterGauge(Collector):
         Args:
             server_name: The homeserver name (`hs.hostname`) this hook is associated
                 with. This can be used later to lookup all hooks associated with a given
-                server name in order to unregister them.
+                server name in order to unregister them. This should only be omitted
+                for global hooks that work across all homeservers.
             hook: A callback that should either return a value (if there are no
                 labels for this metric), or dict mapping from a label tuple to a value
         """
@@ -231,14 +233,16 @@ class LaterGauge(Collector):
         Args:
             server_name: The homeserver name to unregister hooks for (`hs.hostname`).
         """
-        if server_name in self._server_name_to_hook_map:
-            del self._server_name_to_hook_map[server_name]
+        self._server_name_to_hook_map.pop(server_name, None)
 
     def __attrs_post_init__(self) -> None:
         REGISTRY.register(self)
 
         # We shouldn't have multiple metrics with the same name. Typically, metrics
-        # should be created globally so you shouldn't be running into this.
+        # should be created globally so you shouldn't be running into this and this will
+        # catch any stupid mistakes. The `REGISTRY.register(self)` call above will also
+        # raise an error if the metric already exists but to make things explicit, we'll
+        # also check here.
         existing_gauge = all_later_gauges_to_clean_up_on_shutdown.get(self.name)
         assert existing_gauge is None, f"LaterGauge(name={self.name}) already exists. "
 
@@ -248,7 +252,8 @@ class LaterGauge(Collector):
 
 all_later_gauges_to_clean_up_on_shutdown: Dict[str, LaterGauge] = {}
 """
-Keep track of all `LaterGauge` that we should look through when we shutdown a homeserver.
+Track all `LaterGauge` instances so we can remove any associated hooks during homeserver
+shutdown.
 """
 
 

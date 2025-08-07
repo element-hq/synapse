@@ -472,7 +472,7 @@ class HomeserverTestCase(TestCase):
             self.prepare(self.reactor, self.clock, self.hs)
 
     def tearDown(self) -> None:
-        for later_gauge in all_later_gauges_to_clean_up_on_shutdown:
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
             later_gauge.unregister_hooks_for_server_name(
                 self.hs.config.server.server_name
             )
