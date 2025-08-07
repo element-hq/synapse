@@ -1,1 +1,0 @@
-Fix a long-standing bug where suspended users could not have server notices sent to them (a 403 was returned to the admin).

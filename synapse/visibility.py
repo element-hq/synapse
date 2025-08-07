@@ -52,7 +52,6 @@ from synapse.types import (
     RetentionPolicy,
     StateMap,
     StrCollection,
-    UserID,
     get_domain_from_id,
 )
 from synapse.types.state import StateFilter
@@ -120,9 +119,7 @@ async def filter_events_for_client(
     # Default case is to *exclude* soft-failed events
     events = [e for e in events if not e.internal_metadata.is_soft_failed()]
     client_config = await storage.main.get_admin_client_config_for_user(user_id)
-    if filter_send_to_client and await storage.main.is_server_admin(
-        UserID.from_string(user_id)
-    ):
+    if filter_send_to_client and await storage.main.is_server_admin(user_id):
         if client_config.return_soft_failed_events:
             # The user has requested that all events be included, so do that.
             # We copy the list for mutation safety.

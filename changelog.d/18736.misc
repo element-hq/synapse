@@ -1,1 +1,0 @@
-Work around `twisted.protocols.amp.TooLong` error by reducing logging in some tests.
