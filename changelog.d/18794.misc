@@ -1,0 +1,1 @@
+Update tests to ensure all database tables are emptied when purging a room.
