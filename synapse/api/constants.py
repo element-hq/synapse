@@ -28,6 +28,7 @@ from typing import Final
 
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
+MAX_EDU_SIZE = 65536
 
 # Max/min size of ints in canonical JSON
 CANONICALJSON_MAX_INT = (2**53) - 1
