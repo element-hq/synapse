@@ -281,12 +281,12 @@ def main() -> None:
 
         if not secret and not secret_file:
             bail(_NO_SHARED_SECRET_OPTS_ERROR)
-        if secret_file:
-            if secret:
-                bail(_CONFLICTING_SHARED_SECRET_OPTS_ERROR)
+        elif secret and secret_file:
+            bail(_CONFLICTING_SHARED_SECRET_OPTS_ERROR)
+        elif not secret and secret_file:
             secret = _read_file(secret_file, "registration_shared_secret_path").strip()
-        if not secret:
-            bail(_EMPTY_SHARED_SECRET_OPTS_ERROR)
+            if not secret:
+                bail(_EMPTY_SHARED_SECRET_OPTS_ERROR)
 
     if args.password_file:
         password = _read_file(args.password_file, "password-file").strip()
