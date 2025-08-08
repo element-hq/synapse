@@ -5,19 +5,65 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Group patch updates to packages together into a single PR, as they rarely
+    # if ever contain breaking changes that need to be reviewed separately.
+    # 
+    # Less PRs means a streamlined review process.
+    #
+    # Python packages follow semantic versioning, and tend to only introduce
+    # breaking changes in major version bumps. Thus, we'll group minor and patch
+    # versions together.
+    groups:
+      minor-and-patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "weekly"
+    # For container versions, breaking changes are also typically only introduced in major
+    # package bumps.
+    groups:
+      minor-and-patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    # Similarly for GitHub Actions, breaking changes are typically only introduced in major
+    # package bumps.
+    groups:
+      minor-and-patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "cargo"
     directory: "/"
     versioning-strategy: "lockfile-only"
     schedule:
       interval: "weekly"
+    # The Rust ecosystem is special in that breaking changes are often introduced
+    # in minor version bumps, as packages typically stay pre-1.0 for a long time.
+    # Thus we specifically keep minor version bumps separate in their own PRs.
+    groups:
+      patches:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
