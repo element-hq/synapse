@@ -3131,6 +3131,7 @@ PURGE_TABLES = [
     "events",
     "receipts_graph",
     "receipts_linearized",
+    "local_current_membership",
     "room_aliases",
     "room_depth",
     "room_memberships",
