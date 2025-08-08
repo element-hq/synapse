@@ -61,7 +61,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, register_threadpool
+from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
@@ -98,12 +98,6 @@ sql_txn_duration = Counter(
     "synapse_storage_transaction_time_sum",
     "sec",
     labelnames=["desc", SERVER_NAME_LABEL],
-)
-
-background_update_status = LaterGauge(
-    name="synapse_background_update_status",
-    desc="Background update status",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -617,10 +611,6 @@ class DatabasePool:
         )
 
         self.updates = BackgroundUpdater(hs, self)
-        background_update_status.register_hook(
-            homeserver_instance_id=hs.get_instance_id(),
-            hook=lambda: {(self.server_name,): self.updates.get_status()},
-        )
 
         self._previous_txn_total_time = 0.0
         self._current_txn_total_time = 0.0
