@@ -273,7 +273,12 @@ def main() -> None:
         assert config is not None
 
         secret = config.get("registration_shared_secret")
+        if not isinstance(secret, (str, type(None))):
+            bail("registration_shared_secret is not a string.")
         secret_file = config.get("registration_shared_secret_path")
+        if not isinstance(secret_file, (str, type(None))):
+            bail("registration_shared_secret_path is not a string.")
+
         if not secret and not secret_file:
             bail(_NO_SHARED_SECRET_OPTS_ERROR)
         if secret_file:
