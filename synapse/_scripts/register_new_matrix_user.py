@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 import yaml
+from typing_extensions import Never
 
 _CONFLICTING_SHARED_SECRET_OPTS_ERROR = """\
 Conflicting options 'registration_shared_secret' and 'registration_shared_secret_path'
@@ -174,6 +175,12 @@ def register_new_user(
     )
 
 
+def bail(err_msg: str) -> Never:
+    """Prints the given message to stderr and exits."""
+    print(err_msg, file=sys.stderr)
+    sys.exit(1)
+
+
 def main() -> None:
     logging.captureWarnings(True)
 
@@ -268,16 +275,13 @@ def main() -> None:
         secret = config.get("registration_shared_secret")
         secret_file = config.get("registration_shared_secret_path")
         if not secret and not secret_file:
-            print(_NO_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-            sys.exit(1)
+            bail(_NO_SHARED_SECRET_OPTS_ERROR)
         if secret_file:
             if secret:
-                print(_CONFLICTING_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-                sys.exit(1)
+                bail(_CONFLICTING_SHARED_SECRET_OPTS_ERROR)
             secret = _read_file(secret_file, "registration_shared_secret_path").strip()
         if not secret:
-            print(_EMPTY_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-            sys.exit(1)
+            bail(_EMPTY_SHARED_SECRET_OPTS_ERROR)
 
     if args.password_file:
         password = _read_file(args.password_file, "password-file").strip()
