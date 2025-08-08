@@ -50,7 +50,7 @@ purge_room_tables_with_event_id_index = (
 Tables which lack an index on `room_id` but have one on `event_id`
 """
 
-purge_room_tables_remaining = (
+purge_room_tables_with_room_id_column = (
     "current_state_events",
     "destination_rooms",
     "event_backward_extremities",
@@ -95,7 +95,8 @@ purge_room_tables_remaining = (
     "rooms",
 )
 """
-The tables with an index on `room_id` (or no useful index)
+The tables with a `room_id` column regardless of whether they have a useful index on
+`room_id`.
 """
 
 
@@ -464,7 +465,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             referenced_chain_id_tuples,
         )
 
-        # Now we delete tables which lack an index on room_id but have one on event_id
+        # Now we delete tables which lack an index on `room_id` but have one on `event_id`
         for table in purge_room_tables_with_event_id_index:
             logger.info("[purge] removing from %s", table)
 
@@ -478,8 +479,9 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
                 (room_id,),
             )
 
-        # next, the tables with an index on room_id (or no useful index)
-        for table in purge_room_tables_remaining:
+        # next, the tables with a `room_id` column regardless of whether they have a
+        # useful index on `room_id`
+        for table in purge_room_tables_with_room_id_column:
             logger.info("[purge] removing from %s", table)
             txn.execute("DELETE FROM %s WHERE room_id=?" % (table,), (room_id,))
 

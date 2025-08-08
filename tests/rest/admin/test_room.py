@@ -40,7 +40,7 @@ from synapse.handlers.pagination import (
 from synapse.rest.client import directory, events, knock, login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.databases.main.purge_events import (
-    purge_room_tables_remaining,
+    purge_room_tables_with_room_id_column,
     purge_room_tables_with_event_id_index,
 )
 from synapse.types import UserID
@@ -550,7 +550,7 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in purge_room_tables_remaining:
+        for table in purge_room_tables_with_room_id_column:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -1246,7 +1246,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in purge_room_tables_remaining:
+        for table in purge_room_tables_with_room_id_column:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
