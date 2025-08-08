@@ -39,6 +39,10 @@ from synapse.handlers.pagination import (
 )
 from synapse.rest.client import directory, events, knock, login, room, sync
 from synapse.server import HomeServer
+from synapse.storage.databases.main.purge_events import (
+    purge_room_tables_remaining,
+    purge_room_tables_with_event_id_index,
+)
 from synapse.types import UserID
 from synapse.util import Clock
 from synapse.util.task_scheduler import TaskScheduler
@@ -546,7 +550,7 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in PURGE_TABLES:
+        for table in purge_room_tables_remaining:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -555,7 +559,21 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
                     desc="test_purge_room",
                 )
             )
+            self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
+        for table in purge_room_tables_with_event_id_index:
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "find_event_count_for_table",
+                    f"""
+                    SELECT COUNT(*) FROM {table} WHERE event_id IN (
+                        SELECT event_id FROM events WHERE room_id=?
+                    )
+                    """,
+                    room_id,
+                )
+            )
+            count = rows[0][0]
             self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
     def _assert_peek(self, room_id: str, expect_code: int) -> None:
@@ -1228,7 +1246,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in PURGE_TABLES:
+        for table in purge_room_tables_remaining:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -1237,7 +1255,21 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
                     desc="test_purge_room",
                 )
             )
+            self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
+        for table in purge_room_tables_with_event_id_index:
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "find_event_count_for_table",
+                    f"""
+                    SELECT COUNT(*) FROM {table} WHERE event_id IN (
+                        SELECT event_id FROM events WHERE room_id=?
+                    )
+                    """,
+                    room_id,
+                )
+            )
+            count = rows[0][0]
             self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
     def _assert_peek(self, room_id: str, expect_code: int) -> None:
@@ -3119,36 +3151,3 @@ class BlockRoomTestCase(unittest.HomeserverTestCase):
         """Block a room in database"""
         self.get_success(self._store.block_room(room_id, self.other_user))
         self._is_blocked(room_id, expect=True)
-
-
-PURGE_TABLES = [
-    "current_state_events",
-    "event_backward_extremities",
-    "event_forward_extremities",
-    "event_json",
-    "event_push_actions",
-    "event_search",
-    "events",
-    "receipts_graph",
-    "receipts_linearized",
-    "local_current_membership",
-    "room_aliases",
-    "room_depth",
-    "room_memberships",
-    "room_stats_state",
-    "room_stats_current",
-    "room_stats_earliest_token",
-    "rooms",
-    "stream_ordering_to_exterm",
-    "users_in_public_rooms",
-    "users_who_share_private_rooms",
-    "appservice_room_list",
-    "e2e_room_keys",
-    "event_push_summary",
-    "pusher_throttle",
-    "room_account_data",
-    "room_tags",
-    "state_groups",
-    "state_groups_state",
-    "federation_inbound_events_staging",
-]
