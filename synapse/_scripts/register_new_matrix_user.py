@@ -41,7 +41,7 @@ _NO_SHARED_SECRET_OPTS_ERROR = """\
 No 'registration_shared_secret' or 'registration_shared_secret_path' defined in config.
 """
 
-_EMPTY_SHARED_SECRET_OPTS_ERROR = """\
+_EMPTY_SHARED_SECRET_PATH_OPTS_ERROR = """\
 The secret given via `registration_shared_secret_path` must not be empty.
 """
 
@@ -286,7 +286,7 @@ def main() -> None:
         elif not secret and secret_file:
             secret = _read_file(secret_file, "registration_shared_secret_path").strip()
             if not secret:
-                bail(_EMPTY_SHARED_SECRET_OPTS_ERROR)
+                bail(_EMPTY_SHARED_SECRET_PATH_OPTS_ERROR)
 
     if args.password_file:
         password = _read_file(args.password_file, "password-file").strip()
