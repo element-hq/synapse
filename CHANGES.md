@@ -1,8 +1,10 @@
-# Synapse 1.135.1 (2025-08-11)
+# Synapse 1.135.2 (2025-08-11)
 
 This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
 
 The default room version is not changed. Not all clients will support room version 12 immediately, and not all users will be using the latest version of their clients. Large, public rooms are advised to wait a few weeks before upgrading to room version 12 to allow users throughout the Matrix ecosystem to update their clients.
+
+Note: release 1.135.0+pro.2 was skipped due to issues discovered during the release process.
 
 Two patched Synapse releases are now available:
 
