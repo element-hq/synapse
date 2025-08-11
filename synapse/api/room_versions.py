@@ -493,6 +493,7 @@ KNOWN_ROOM_VERSIONS: Dict[str, RoomVersion] = {
         RoomVersions.V12,
         RoomVersions.MSC3757v10,
         RoomVersions.MSC3757v11,
+        RoomVersions.HydraV11,
     )
 }
 
