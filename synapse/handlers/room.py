@@ -595,6 +595,7 @@ class RoomCreationHandler:
                 old_room_create_event,
                 tombstone_event_id,
                 new_room_version,
+                additional_creators=additional_creators,
             )
         initial_state = {}
 
