@@ -244,7 +244,6 @@ class RedactionTestCase(unittest.HomeserverTestCase):
             def __init__(self, base_builder: EventBuilder, event_id: str):
                 self._base_builder = base_builder
                 self._event_id = event_id
-                self.room_version = base_builder.room_version
 
             async def build(
                 self,
