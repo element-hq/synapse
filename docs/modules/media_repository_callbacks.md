@@ -94,3 +94,25 @@ callback that does not return `None` will be used. If this happens, Synapse will
 any of the subsequent implementations of this callback.
 
 If no module returns a non-`None` value then the default [media upload limits config](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits) will be used.
+
+### `on_media_upload_limit_exceeded`
+
+_First introduced in Synapse v1.137.0_
+
+```python
+async def on_media_upload_limit_exceeded(user_id: str, limit: MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -> None
+```
+
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
+
+Called when a user attempts to upload media that would exceed a configured media upload limit.
+
+The arguments passed to this callback are:
+
+* `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`) making the request.
+* `limit`: The `MediaUploadLimit` that was reached.
+* `sent_bytes`: The number of bytes already sent during the period of the limit.
+* `attempted_bytes`: The number of bytes that the user attempted to send.
