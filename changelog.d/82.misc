@@ -1,0 +1,1 @@
+Add a parameter to `upgrade_rooms(..)` to allow auto join local users.
