@@ -15,6 +15,7 @@
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
 
+from synapse.config.repository import MediaUploadLimit
 from synapse.types import JsonDict
 from synapse.util.async_helpers import delay_cancellation
 from synapse.util.metrics import Measure
@@ -28,6 +29,10 @@ GET_MEDIA_CONFIG_FOR_USER_CALLBACK = Callable[[str], Awaitable[Optional[JsonDict
 
 IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK = Callable[[str, int], Awaitable[bool]]
 
+GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK = Callable[
+    [str], Awaitable[Optional[List[MediaUploadLimit]]]
+]
+
 
 class MediaRepositoryModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
@@ -39,12 +44,18 @@ class MediaRepositoryModuleApiCallbacks:
         self._is_user_allowed_to_upload_media_of_size_callbacks: List[
             IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
         ] = []
+        self._get_media_upload_limits_for_user_callbacks: List[
+            GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
+        ] = []
 
     def register_callbacks(
         self,
         get_media_config_for_user: Optional[GET_MEDIA_CONFIG_FOR_USER_CALLBACK] = None,
         is_user_allowed_to_upload_media_of_size: Optional[
             IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
+        ] = None,
+        get_media_upload_limits_for_user: Optional[
+            GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
         ] = None,
     ) -> None:
         """Register callbacks from module for each hook."""
@@ -54,6 +65,11 @@ class MediaRepositoryModuleApiCallbacks:
         if is_user_allowed_to_upload_media_of_size is not None:
             self._is_user_allowed_to_upload_media_of_size_callbacks.append(
                 is_user_allowed_to_upload_media_of_size
+            )
+
+        if get_media_upload_limits_for_user is not None:
+            self._get_media_upload_limits_for_user_callbacks.append(
+                get_media_upload_limits_for_user
             )
 
     async def get_media_config_for_user(self, user_id: str) -> Optional[JsonDict]:
@@ -83,3 +99,20 @@ class MediaRepositoryModuleApiCallbacks:
                 return res
 
         return True
+
+    async def get_media_upload_limits_for_user(
+        self, user_id: str
+    ) -> Optional[List[MediaUploadLimit]]:
+        for callback in self._get_media_upload_limits_for_user_callbacks:
+            with Measure(
+                self.clock,
+                name=f"{callback.__module__}.{callback.__qualname__}",
+                server_name=self.server_name,
+            ):
+                res: Optional[List[MediaUploadLimit]] = await delay_cancellation(
+                    callback(user_id)
+                )
+            if res is not None:  # to allow [] to be returned meaning no limit
+                return res
+
+        return None

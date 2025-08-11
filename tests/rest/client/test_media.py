@@ -46,6 +46,7 @@ from twisted.web.resource import Resource
 
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
+from synapse.config._base import Config
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
@@ -53,6 +54,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
+from synapse.module_api import MediaUploadLimit
 from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
@@ -2967,3 +2969,133 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         # This will succeed as the weekly limit has reset
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
+
+
+class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
+    """
+    This test case simulates a homeserver with media upload limits being overridden by the module API.
+    """
+
+    servlets = [
+        media.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        # default limits to use  are the limits that we are testing
+        config["media_upload_limits"] = [
+            {"time_period": "1d", "max_size": "1K"},
+            {"time_period": "1w", "max_size": "3K"},
+        ]
+
+        return self.setup_test_homeserver(config=config)
+
+    async def _get_media_upload_limits_for_user(
+        self,
+        user_id: str,
+    ) -> Optional[List[MediaUploadLimit]]:
+        # user1 has custom limits
+        if user_id == self.user1:
+            return [
+                MediaUploadLimit(
+                    time_period_ms=Config.parse_duration("1d"), max_bytes=5000
+                ),
+                MediaUploadLimit(
+                    time_period_ms=Config.parse_duration("1w"), max_bytes=15000
+                ),
+            ]
+        # user2 has no limits
+        if user_id == self.user2:
+            return []
+        # otherwise use default
+        return None
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+        self.user1 = self.register_user("user1", "pass")
+        self.tok1 = self.login("user1", "pass")
+        self.user2 = self.register_user("user2", "pass")
+        self.tok2 = self.login("user2", "pass")
+        self.register_user("user3", "pass")
+        self.tok3 = self.login("user3", "pass")
+        self.hs.get_module_api().register_media_repository_callbacks(
+            get_media_upload_limits_for_user=self._get_media_upload_limits_for_user
+        )
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        resources = super().create_resource_dict()
+        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+        return resources
+
+    def upload_media(self, size: int, tok: str) -> FakeChannel:
+        """Helper to upload media of a given size with a given token."""
+        return self.make_request(
+            "POST",
+            "/_matrix/media/v3/upload",
+            content=b"0" * size,
+            access_token=tok,
+            shorthand=False,
+            content_type=b"text/plain",
+            custom_headers=[("Content-Length", str(size))],
+        )
+
+    def test_upload_under_limit(self) -> None:
+        """Test that uploading media under the limit works."""
+
+        # User 1 uploads 100 bytes
+        channel = self.upload_media(100, self.tok1)
+        self.assertEqual(channel.code, 200)
+
+        # User 2 (unlimited) uploads 100 bytes
+        channel = self.upload_media(100, self.tok2)
+        self.assertEqual(channel.code, 200)
+
+        # User 3 (default) uploads 100 bytes
+        channel = self.upload_media(100, self.tok3)
+        self.assertEqual(channel.code, 200)
+
+    def test_uses_custom_limit(self) -> None:
+        """Test that uploading media over the module provided daily limit fails."""
+
+        # User 1 uploads 3000 bytes
+        channel = self.upload_media(3000, self.tok1)
+        self.assertEqual(channel.code, 200)
+        # User 1 attempts to upload 4000 bytes taking it over the limit
+        channel = self.upload_media(4000, self.tok1)
+        self.assertEqual(channel.code, 400)
+
+    def test_uses_unlimited(self) -> None:
+        """Test that unlimited user is not limited when module returns []."""
+        # User 2 uploads 10000 bytes which is over the default limit
+        channel = self.upload_media(10000, self.tok2)
+        self.assertEqual(channel.code, 200)
+
+    def test_uses_defaults(self) -> None:
+        """Test that the default limits are applied when module returned None."""
+        # User 3 uploads 500 bytes
+        channel = self.upload_media(500, self.tok3)
+        self.assertEqual(channel.code, 200)
+        # User 3 uploads 800 bytes which is over the limit
+        channel = self.upload_media(800, self.tok3)
+        self.assertEqual(channel.code, 400)
