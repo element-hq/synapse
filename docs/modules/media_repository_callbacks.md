@@ -64,3 +64,33 @@ If multiple modules implement this callback, they will be considered in order. I
 returns `True`, Synapse falls through to the next one. The value of the first callback that
 returns `False` will be used. If this happens, Synapse will not call any of the subsequent
 implementations of this callback.
+
+### `get_media_upload_limits_for_user`
+
+_First introduced in Synapse v1.137.0_
+
+```python
+async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[List[MediaUploadLimit]]
+```
+
+**<span style="color:red">
+Caution: This callback is currently experimental . The method signature or behaviour
+may change without notice.
+</span>**
+
+Called when processing a request to store content in the media repository.
+
+The arguments passed to this callback are:
+
+* `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`) making the request.
+
+If the callback returns a list then it will be used as the limits to be applied to the request.
+
+If an empty list is returned then no limits are applied.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns `None`, Synapse falls through to the next one. The value of the first
+callback that does not return `None` will be used. If this happens, Synapse will not call
+any of the subsequent implementations of this callback.
+
+If no module returns a non-`None` value then the default [media upload limits config](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits) will be used.
