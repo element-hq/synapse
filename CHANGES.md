@@ -24,6 +24,35 @@ Two patched Synapse releases are now available:
 
 
 
+
+# Synapse 1.135.2 (2025-08-11)
+
+This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
+
+The default room version is not changed. Not all clients will support room version 12 immediately, and not all users will be using the latest version of their clients. Large, public rooms are advised to wait a few weeks before upgrading to room version 12 to allow users throughout the Matrix ecosystem to update their clients.
+
+Note: release 1.135.1 was skipped due to issues discovered during the release process.
+
+Two patched Synapse releases are now available:
+
+* `1.135.2`: stable release comprised of `1.135.0` + security patches
+    * Upgrade to this release **if you are currently running 1.135.0 or below**.
+* `1.136.0rc2`: unstable release candidate comprised of `1.136.0rc1` + security patches.
+    * Upgrade to this release **only if you are on 1.136.0rc1**.
+
+### Bugfixes
+
+- Fix invalidation of storage cache that was broken in 1.135.0. ([\#18786](https://github.com/element-hq/synapse/issues/18786))
+
+### Internal Changes
+
+- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#82](https://github.com/element-hq/synapse/issues/82))
+- Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
+
+
+
+
+
 # Synapse 1.136.0rc1 (2025-08-05)
 
 Please check [the relevant section in the upgrade notes](https://github.com/element-hq/synapse/blob/develop/docs/upgrade.md#upgrading-to-v11360) as this release contains changes to MAS support, metrics labels and the module API which may require your attention when upgrading.
@@ -86,6 +115,11 @@ Please check [the relevant section in the upgrade notes](https://github.com/elem
 * Bump tokio from 1.46.1 to 1.47.0. ([\#18740](https://github.com/element-hq/synapse/issues/18740))
 * Bump types-jsonschema from 4.24.0.20250708 to 4.25.0.20250720. ([\#18703](https://github.com/element-hq/synapse/issues/18703))
 * Bump types-psycopg2 from 2.9.21.20250516 to 2.9.21.20250718. ([\#18706](https://github.com/element-hq/synapse/issues/18706))
+
+
+
+
+
 
 # Synapse 1.135.0 (2025-08-01)
 
