@@ -3029,6 +3029,20 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # otherwise use default
         return None
 
+    async def _on_media_upload_limit_exceeded(
+        self,
+        user_id: str,
+        limit: MediaUploadLimit,
+        sent_bytes: int,
+        attempted_bytes: int
+    ) -> None:
+        self.last_media_upload_limit_exceeded = {
+            "user_id": user_id,
+            "limit": limit,
+            "sent_bytes": sent_bytes,
+            "attempted_bytes": attempted_bytes
+        }
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.repo = hs.get_media_repository()
         self.client = hs.get_federation_http_client()
@@ -3037,10 +3051,12 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         self.tok1 = self.login("user1", "pass")
         self.user2 = self.register_user("user2", "pass")
         self.tok2 = self.login("user2", "pass")
-        self.register_user("user3", "pass")
+        self.user3 = self.register_user("user3", "pass")
         self.tok3 = self.login("user3", "pass")
+        self.last_media_upload_limit_exceeded = None
         self.hs.get_module_api().register_media_repository_callbacks(
-            get_media_upload_limits_for_user=self._get_media_upload_limits_for_user
+            get_media_upload_limits_for_user=self._get_media_upload_limits_for_user,
+            on_media_upload_limit_exceeded=self._on_media_upload_limit_exceeded
         )
 
     def create_resource_dict(self) -> Dict[str, Resource]:
@@ -3075,27 +3091,40 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         channel = self.upload_media(100, self.tok3)
         self.assertEqual(channel.code, 200)
 
+        self.assertEqual(self.last_media_upload_limit_exceeded, None)
+
     def test_uses_custom_limit(self) -> None:
         """Test that uploading media over the module provided daily limit fails."""
 
         # User 1 uploads 3000 bytes
         channel = self.upload_media(3000, self.tok1)
         self.assertEqual(channel.code, 200)
+
         # User 1 attempts to upload 4000 bytes taking it over the limit
         channel = self.upload_media(4000, self.tok1)
         self.assertEqual(channel.code, 400)
+        self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
+        self.assertEqual(self.last_media_upload_limit_exceeded["limit"], MediaUploadLimit(max_bytes=5000, time_period_ms=Config.parse_duration("1d")))
+        self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
+        self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 4000)
 
     def test_uses_unlimited(self) -> None:
         """Test that unlimited user is not limited when module returns []."""
         # User 2 uploads 10000 bytes which is over the default limit
         channel = self.upload_media(10000, self.tok2)
         self.assertEqual(channel.code, 200)
+        self.assertEqual(self.last_media_upload_limit_exceeded, None)
 
     def test_uses_defaults(self) -> None:
         """Test that the default limits are applied when module returned None."""
         # User 3 uploads 500 bytes
         channel = self.upload_media(500, self.tok3)
         self.assertEqual(channel.code, 200)
+
         # User 3 uploads 800 bytes which is over the limit
         channel = self.upload_media(800, self.tok3)
         self.assertEqual(channel.code, 400)
+        self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user3)
+        self.assertEqual(self.last_media_upload_limit_exceeded["limit"], MediaUploadLimit(max_bytes=1024, time_period_ms=Config.parse_duration("1d")))
+        self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
+        self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)
