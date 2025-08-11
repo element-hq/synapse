@@ -519,6 +519,7 @@ class RoomCreationHandler:
         old_room_create_event: EventBase,
         tombstone_event_id: Optional[str],
         new_room_version: RoomVersion,
+        additional_creators: Optional[List[str]],
     ) -> JsonDict:
         creation_content: JsonDict = {
             "room_version": new_room_version.identifier,
@@ -528,6 +529,11 @@ class RoomCreationHandler:
         }
         if tombstone_event_id is not None:
             creation_content["predecessor"]["event_id"] = tombstone_event_id
+        if (
+            additional_creators is not None
+            and new_room_version.msc4289_creator_power_enabled
+        ):
+            creation_content["additional_creators"] = additional_creators
         # Check if old room was non-federatable
         if not old_room_create_event.content.get(EventContentFields.FEDERATE, True):
             # If so, mark the new room as non-federatable as well
