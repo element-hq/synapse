@@ -1560,7 +1560,7 @@ class EventCreationHandler:
         self,
         requester: Requester,
         room_id: str,
-        prev_event_id: str,
+        prev_event_id: Optional[str],
         event_dicts: Sequence[JsonDict],
         ratelimit: bool = True,
         ignore_shadow_ban: bool = False,
@@ -1590,6 +1590,12 @@ class EventCreationHandler:
         if not event_dicts:
             # Nothing to do.
             return
+
+        if prev_event_id is None:
+            # Pick the latest forward extremity as the previous event ID.
+            prev_event_ids = await self.store.get_forward_extremities_for_room(room_id)
+            prev_event_ids.sort(key=lambda x: x[2])  # Sort by depth.
+            prev_event_id = prev_event_ids[-1][0]
 
         state_groups = await self._storage_controllers.state.get_state_group_for_events(
             [prev_event_id]
