@@ -25,7 +25,7 @@ from canonicaljson import json
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
@@ -263,11 +263,16 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
             @property
             def room_id(self) -> str:
+                assert self._base_builder.room_id is not None
                 return self._base_builder.room_id
 
             @property
             def type(self) -> str:
                 return self._base_builder.type
+
+            @property
+            def room_version(self) -> RoomVersion:
+                return self._base_builder.room_version
 
             @property
             def internal_metadata(self) -> EventInternalMetadata:

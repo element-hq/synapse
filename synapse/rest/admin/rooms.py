@@ -627,6 +627,15 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
             ]
             admin_users.sort(key=lambda user: user_power[user])
 
+            if create_event.room_version.msc4289_creator_power_enabled:
+                creators = create_event.content.get("additional_creators", []) + [
+                    create_event.sender
+                ]
+                for creator in creators:
+                    if self.is_mine_id(creator):
+                        # include the creator as they won't be in the PL users map.
+                        admin_users.append(creator)
+
             if not admin_users:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST, "No local admin user in room"
@@ -666,7 +675,11 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         # updated power level event.
         new_pl_content = dict(pl_content)
         new_pl_content["users"] = dict(pl_content.get("users", {}))
-        new_pl_content["users"][user_to_add] = new_pl_content["users"][admin_user_id]
+        # give the new user the same PL as the admin, default to 100 in case there is no PL event.
+        # This means in v12+ rooms we get PL100 if the creator promotes us.
+        new_pl_content["users"][user_to_add] = new_pl_content["users"].get(
+            admin_user_id, 100
+        )
 
         fake_requester = create_requester(
             admin_user_id,

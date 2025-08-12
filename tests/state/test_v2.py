@@ -45,6 +45,7 @@ from synapse.state.v2 import (
     lexicographical_topological_sort,
     resolve_events_with_store,
 )
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
 
 from tests import unittest
@@ -734,7 +735,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -791,7 +796,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -858,7 +867,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -1070,9 +1083,18 @@ class TestStateResolutionStore:
         return list(result)
 
     def get_auth_chain_difference(
-        self, room_id: str, auth_sets: List[Set[str]]
-    ) -> "defer.Deferred[Set[str]]":
+        self,
+        room_id: str,
+        auth_sets: List[Set[str]],
+        conflicted_state: Optional[Set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+    ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 
         common = set(chains[0]).intersection(*chains[1:])
-        return defer.succeed(set(chains[0]).union(*chains[1:]) - common)
+        return defer.succeed(
+            StateDifference(
+                auth_difference=set(chains[0]).union(*chains[1:]) - common,
+                conflicted_subgraph=set(),
+            ),
+        )
