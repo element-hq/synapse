@@ -2433,6 +2433,44 @@ properties:
           max_size: 100M
         - time_period: 1w
           max_size: 500M
+  media_redirect:
+    type: object
+    description: >-
+      When enabled, Synapse will use HTTP redirect responses to serve media
+      instead of directly serving the media from the media store. This can help
+      with caching, but requires /_synapse/media/* to be routed to the media
+      worker.
+    properties:
+      enabled:
+        type: boolean
+        description: >-
+          Enables the media redirect feature. If enabled, you must specify a
+          `media_redirect.secret` or `media_redirect.secret_path`.
+        default: false
+      secret:
+        type: string
+        description: >-
+          Secret used to sign media redirect URLs. This must be set if
+          `media_redirect.enabled` is set.
+        default: null
+      secret_path:
+        type: string
+        description: >-
+          An alternative to `media_redirect.secret` that specifies a file
+          containing the secret.
+        default: null
+      ttl:
+        $ref: "#/$defs/duration"
+        description: >-
+          How long the redirect URLs should be valid for.
+        default: 10m
+    default:
+      enabled: false
+    examples:
+      - enabled: true
+        secret: aiCh9gu4Zahvueveisooquu7chaiw9Ee
+      - enabled: true
+        secret_path: /path/to/secrets/file
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.

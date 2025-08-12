@@ -126,9 +126,7 @@ class MediaRepository:
             cfg=hs.config.ratelimiting.remote_media_downloads,
         )
 
-        self._media_request_signature_secret = (
-            b"supersecret"  # TODO: make this configurable
-        )
+        self._media_request_signature_secret = hs.config.media.redirect_secret
 
         # List of StorageProviders where we should search for media and
         # potentially upload to.
@@ -1562,6 +1560,10 @@ class MediaRepository:
         This currently uses a HMAC-SHA256 signature encoded as hex, but this could
         be swapped to an asymmetric signature.
         """
+        assert self._media_request_signature_secret is not None, (
+            "media request signature secret not set"
+        )
+
         # XXX: alternatively, we could do multiple rounds of HMAC with the
         # different segments, like AWS SigV4 does
         bytes_payload = "|".join(payload).encode("utf-8")
@@ -1581,6 +1583,10 @@ class MediaRepository:
 
         Returns True if the signature is valid, False otherwise.
         """
+        # In case there is no secret, we can't verify the signature
+        if self._media_request_signature_secret is None:
+            return False
+
         bytes_payload = "|".join(payload).encode("utf-8")
         decoded_signature = bytes.fromhex(signature)
         computed_signature = hmac.digest(
