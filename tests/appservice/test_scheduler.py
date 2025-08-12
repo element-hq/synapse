@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, Mock
 from typing_extensions import TypeAlias
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import (
     ApplicationService,
@@ -53,11 +53,24 @@ class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
         self.clock = MockClock()
         self.store = Mock()
         self.as_api = Mock()
+
+        self.hs = Mock(
+            spec_set=[
+                "get_datastores",
+                "get_clock",
+                "get_application_service_api",
+                "hostname",
+            ]
+        )
+        self.hs.get_clock.return_value = self.clock
+        self.hs.get_datastores.return_value = Mock(
+            main=self.store,
+        )
+        self.hs.get_application_service_api.return_value = self.as_api
+
         self.recoverer = Mock()
         self.recoverer_fn = Mock(return_value=self.recoverer)
-        self.txnctrl = _TransactionController(
-            clock=cast(Clock, self.clock), store=self.store, as_api=self.as_api
-        )
+        self.txnctrl = _TransactionController(self.hs)
         self.txnctrl.RECOVERER_CLASS = self.recoverer_fn
 
     def test_single_service_up_txn_sent(self) -> None:
@@ -163,6 +176,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
         self.service = Mock()
         self.callback = AsyncMock()
         self.recoverer = _Recoverer(
+            server_name="test_server",
             clock=cast(Clock, self.clock),
             as_api=self.as_api,
             store=self.store,

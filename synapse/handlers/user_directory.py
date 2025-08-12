@@ -35,6 +35,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
@@ -192,7 +193,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_processing = False
 
         self._is_processing = True
-        run_as_background_process("user_directory.notify_new_event", process)
+        run_as_background_process(
+            "user_directory.notify_new_event", self.server_name, process
+        )
 
     async def handle_local_profile_change(
         self, user_id: str, profile: ProfileInfo
@@ -260,9 +263,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self.pos = max_pos
 
                 # Expose current event processing position to prometheus
-                synapse.metrics.event_processing_positions.labels("user_dir").set(
-                    max_pos
-                )
+                synapse.metrics.event_processing_positions.labels(
+                    name="user_dir", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
                 await self.store.update_user_directory_stream_pos(max_pos)
 
@@ -606,7 +609,9 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles = False
 
         self._is_refreshing_remote_profiles = True
-        run_as_background_process("user_directory.refresh_remote_profiles", process)
+        run_as_background_process(
+            "user_directory.refresh_remote_profiles", self.server_name, process
+        )
 
     async def _unsafe_refresh_remote_profiles(self) -> None:
         limit = MAX_SERVERS_TO_REFRESH_PROFILES_FOR_IN_ONE_GO - len(
@@ -688,7 +693,9 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         self._is_refreshing_remote_profiles_for_servers.add(server_name)
         run_as_background_process(
-            "user_directory.refresh_remote_profiles_for_remote_server", process
+            "user_directory.refresh_remote_profiles_for_remote_server",
+            self.server_name,
+            process,
         )
 
     async def _unsafe_refresh_remote_profiles_for_remote_server(

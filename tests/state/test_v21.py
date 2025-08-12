@@ -66,8 +66,8 @@ def monotonic_timestamp() -> int:
 
 
 class FakeClock:
-    def sleep(self, msec: float) -> "defer.Deferred[None]":
-        return defer.succeed(None)
+    async def sleep(self, duration_ms: float) -> None:
+        defer.succeed(None)
 
 
 class StateResV21TestCase(unittest.HomeserverTestCase):

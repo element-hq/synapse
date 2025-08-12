@@ -21,7 +21,7 @@
 import logging
 from typing import Tuple
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import SynapseError

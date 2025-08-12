@@ -37,7 +37,7 @@ from typing import (
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import (

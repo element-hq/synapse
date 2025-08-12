@@ -40,6 +40,7 @@ from twisted.web.resource import Resource
 
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
@@ -423,7 +424,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor()
+        return Distributor(server_name=self.hostname)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
@@ -451,6 +452,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_auth(self) -> Auth:
+        if self.config.mas.enabled:
+            return MasDelegatedAuth(self)
         if self.config.experimental.msc3861.enabled:
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
@@ -849,7 +852,8 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_ratelimiter(self) -> FederationRateLimiter:
         return FederationRateLimiter(
-            self.get_clock(),
+            our_server_name=self.hostname,
+            clock=self.get_clock(),
             config=self.config.ratelimiting.rc_federation,
             metrics_name="federation_servlets",
         )
@@ -980,7 +984,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         # Register the threadpool with our metrics.
-        register_threadpool("media", media_threadpool)
+        server_name = self.hostname
+        register_threadpool(
+            name="media", server_name=server_name, threadpool=media_threadpool
+        )
 
         return media_threadpool
 

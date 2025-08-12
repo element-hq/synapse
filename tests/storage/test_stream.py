@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, patch
 
 from immutabledict import immutabledict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     Direction,

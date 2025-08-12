@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
+import json
 import logging
 import threading
 import weakref
@@ -68,6 +68,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -138,6 +139,7 @@ EVENT_QUEUE_TIMEOUT_S = 0.1  # Timeout when waiting for requests for events
 event_fetch_ongoing_gauge = Gauge(
     "synapse_event_fetch_ongoing",
     "The number of event fetchers that are running",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -235,6 +237,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="events",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[
                 ("events", "instance_name", "stream_ordering"),
@@ -249,6 +252,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="backfill",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[
                 ("events", "instance_name", "stream_ordering"),
@@ -310,7 +314,9 @@ class EventsWorkerStore(SQLBaseStore):
             Tuple[Iterable[str], "defer.Deferred[Dict[str, _EventRow]]"]
         ] = []
         self._event_fetch_ongoing = 0
-        event_fetch_ongoing_gauge.set(self._event_fetch_ongoing)
+        event_fetch_ongoing_gauge.labels(**{SERVER_NAME_LABEL: self.server_name}).set(
+            self._event_fetch_ongoing
+        )
 
         # We define this sequence here so that it can be referenced from both
         # the DataStore and PersistEventStore.
@@ -334,6 +340,7 @@ class EventsWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="un_partial_stated_event_stream",
+            server_name=self.server_name,
             instance_name=hs.get_instance_name(),
             tables=[("un_partial_stated_event_stream", "instance_name", "stream_id")],
             sequence_name="un_partial_stated_event_stream_sequence",
@@ -363,6 +370,12 @@ class EventsWorkerStore(SQLBaseStore):
             unique=True,
             replaces_index="event_txn_id_device_id_txn_id",
         )
+
+        self._has_finished_sliding_sync_background_jobs = False
+        """
+        Flag to track when the sliding sync background jobs have
+        finished (so we don't have to keep querying it every time)
+        """
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
@@ -976,6 +989,13 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.clear()
         self._current_event_fetches.clear()
 
+    def _invalidate_async_get_event_cache_room_id(self, room_id: str) -> None:
+        """
+        Clears the async get_event cache for a room. Currently a no-op until
+        an async get_event cache is implemented - see https://github.com/matrix-org/synapse/pull/13242
+        for preliminary work.
+        """
+
     async def _get_events_from_cache(
         self, events: Iterable[str], update_metrics: bool = True
     ) -> Dict[str, EventCacheEntry]:
@@ -1124,14 +1144,18 @@ class EventsWorkerStore(SQLBaseStore):
                 and self._event_fetch_ongoing < EVENT_QUEUE_THREADS
             ):
                 self._event_fetch_ongoing += 1
-                event_fetch_ongoing_gauge.set(self._event_fetch_ongoing)
+                event_fetch_ongoing_gauge.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).set(self._event_fetch_ongoing)
                 # `_event_fetch_ongoing` is decremented in `_fetch_thread`.
                 should_start = True
             else:
                 should_start = False
 
         if should_start:
-            run_as_background_process("fetch_events", self._fetch_thread)
+            run_as_background_process(
+                "fetch_events", self.server_name, self._fetch_thread
+            )
 
     async def _fetch_thread(self) -> None:
         """Services requests for events from `_event_fetch_list`."""
@@ -1146,7 +1170,9 @@ class EventsWorkerStore(SQLBaseStore):
             event_fetches_to_fail = []
             with self._event_fetch_lock:
                 self._event_fetch_ongoing -= 1
-                event_fetch_ongoing_gauge.set(self._event_fetch_ongoing)
+                event_fetch_ongoing_gauge.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).set(self._event_fetch_ongoing)
 
                 # There may still be work remaining in `_event_fetch_list` if we
                 # failed, or it was added in between us deciding to exit and
@@ -1575,6 +1601,44 @@ class EventsWorkerStore(SQLBaseStore):
                 if d:
                     d.redactions.append(redacter)
 
+            # check for MSC4932 redactions
+            to_check = []
+            events: List[_EventRow] = []
+            for e in evs:
+                event = event_dict.get(e)
+                if not event:
+                    continue
+                events.append(event)
+                event_json = json.loads(event.json)
+                room_id = event_json.get("room_id")
+                user_id = event_json.get("sender")
+                to_check.append((room_id, user_id))
+
+            # likely that some of these events may be for the same room/user combo, in
+            # which case we don't need to do redundant queries
+            to_check_set = set(to_check)
+            for room_and_user in to_check_set:
+                room_redactions_sql = "SELECT redacting_event_id, redact_end_ordering FROM room_ban_redactions WHERE room_id = ? and user_id = ?"
+                txn.execute(room_redactions_sql, room_and_user)
+
+                res = txn.fetchone()
+                # we have a redaction for a room, user_id combo - apply it to matching events
+                if not res:
+                    continue
+                for e_row in events:
+                    e_json = json.loads(e_row.json)
+                    room_id = e_json.get("room_id")
+                    user_id = e_json.get("sender")
+                    if room_and_user != (room_id, user_id):
+                        continue
+                    redacting_event_id, redact_end_ordering = res
+                    if redact_end_ordering:
+                        # Avoid redacting any events arriving *after* the membership event which
+                        # ends an active redaction - note that this will always redact
+                        # backfilled events, as they have a negative stream ordering
+                        if e_row.stream_ordering >= redact_end_ordering:
+                            continue
+                    e_row.redactions.append(redacting_event_id)
         return event_dict
 
     def _maybe_redact_event_row(
@@ -2608,13 +2672,19 @@ class EventsWorkerStore(SQLBaseStore):
     async def have_finished_sliding_sync_background_jobs(self) -> bool:
         """Return if it's safe to use the sliding sync membership tables."""
 
-        return await self.db_pool.updates.have_completed_background_updates(
+        if self._has_finished_sliding_sync_background_jobs:
+            # as an optimisation, once the job finishes, don't issue another
+            # database transaction to check it, since it won't 'un-finish'
+            return True
+
+        self._has_finished_sliding_sync_background_jobs = await self.db_pool.updates.have_completed_background_updates(
             (
                 _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             )
         )
+        return self._has_finished_sliding_sync_background_jobs
 
     async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
         """

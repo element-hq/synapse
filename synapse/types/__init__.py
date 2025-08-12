@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from synapse.appservice.api import ApplicationService
+    from synapse.events import EventBase
     from synapse.storage.databases.main import DataStore, PurgeEventsStore
     from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
     from synapse.storage.util.id_generators import MultiWriterIdGenerator
@@ -1530,3 +1531,31 @@ class ScheduledTask:
     result: Optional[JsonMapping]
     # Optional error that should be assigned a value when the status is FAILED
     error: Optional[str]
+
+
+@attr.s(auto_attribs=True, frozen=True, slots=True)
+class EventOrderings:
+    stream: int
+    """
+    The stream_ordering of the event.
+    Negative numbers mean the event was backfilled.
+    """
+
+    topological: int
+    """
+    The topological_ordering of the event.
+    Currently this is equivalent to the `depth` attributes of
+    the PDU.
+    """
+
+    @staticmethod
+    def from_event(event: "EventBase") -> "EventOrderings":
+        """
+        Get the orderings from an event.
+
+        Preconditions:
+        - the event must have been persisted (otherwise it won't have a stream ordering)
+        """
+        stream = event.internal_metadata.stream_ordering
+        assert stream is not None
+        return EventOrderings(stream, event.depth)

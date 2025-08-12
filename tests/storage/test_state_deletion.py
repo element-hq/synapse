@@ -15,7 +15,7 @@
 
 import logging
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, room
