@@ -26,6 +26,7 @@ from twisted.internet.defer import CancelledError
 from synapse.api.errors import ModuleFailedException, SynapseError
 from synapse.events import EventBase
 from synapse.events.snapshot import UnpersistedEventContextBase
+from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import Requester, StateMap
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
@@ -54,6 +55,7 @@ ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK = Callable[[str, bool, bool], Await
 ON_THREEPID_BIND_CALLBACK = Callable[[str, str, str], Awaitable]
 ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK = Callable[[str, str, str], Awaitable]
 ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK = Callable[[str, str, str], Awaitable]
+ON_USER_SEARCH_CALLBACK = Callable[[Requester, SearchResult], Awaitable]
 
 
 def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
@@ -75,6 +77,7 @@ def load_legacy_third_party_event_rules(hs: "HomeServer") -> None:
         "on_create_room",
         "check_threepid_can_be_invited",
         "check_visibility_can_be_modified",
+        "on_user_search",
     }
 
     def async_wrapper(f: Optional[Callable]) -> Optional[Callable[..., Awaitable]]:
@@ -185,6 +188,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self._on_remove_user_third_party_identifier_callbacks: List[
             ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = []
+        self._on_user_search_callbacks: List[ON_USER_SEARCH_CALLBACK] = []
 
     def register_third_party_rules_callbacks(
         self,
@@ -210,6 +214,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         on_remove_user_third_party_identifier: Optional[
             ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = None,
+        on_user_search: Optional[ON_USER_SEARCH_CALLBACK] = None,
     ) -> None:
         """Register callbacks from modules for each hook."""
         if check_event_allowed is not None:
@@ -256,6 +261,9 @@ class ThirdPartyEventRulesModuleApiCallbacks:
             self._on_remove_user_third_party_identifier_callbacks.append(
                 on_remove_user_third_party_identifier
             )
+
+        if on_user_search is not None:
+            self._on_user_search_callbacks.append(on_user_search)
 
     async def check_event_allowed(
         self,
@@ -597,3 +605,23 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                 logger.exception(
                     "Failed to run module API callback %s: %s", callback, e
                 )
+
+    async def on_user_search(self, requester: Requester, results: SearchResult) -> None:
+        """Intercept requests to search the user directory to maybe deny it (via an exception) or
+        update the result list, e.g. with a filtered version.
+
+        Args:
+            requester
+            results: The results of the search in the user directory.
+        """
+        for callback in self._on_user_search_callbacks:
+            try:
+                await callback(requester, results)
+            except Exception as e:
+                # Don't silence the errors raised by this callback since we expect it to
+                # raise an exception to deny the search of users; instead make sure
+                # it's a SynapseError we can send to clients.
+                if not isinstance(e, SynapseError):
+                    e = SynapseError(403, "User search is forbidden")
+
+                raise e
