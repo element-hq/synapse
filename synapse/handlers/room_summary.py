@@ -214,6 +214,10 @@ class RoomSummaryHandler:
                 errcode=Codes.NOT_JOINED,
             )
 
+        # When dealing with a hierarchy, it is useful to infer via servers by looking
+        # at hosts already in one of the rooms of the hierarchy
+        gathered_via = set()
+
         if not local_room:
             room_hierarchy = await self._summarize_remote_room_hierarchy(
                 _RoomQueueEntry(requested_room_id, remote_room_hosts or ()),
@@ -302,6 +306,9 @@ class RoomSummaryHandler:
                     room_id,
                     suggested_only,
                 )
+                if room_entry:
+                    hosts = await self._store.get_current_hosts_in_room(room_id)
+                    gathered_via.update(hosts)
 
             # Otherwise, attempt to use information for federation.
             else:
@@ -354,17 +361,21 @@ class RoomSummaryHandler:
                     # The children get added in reverse order so that the next
                     # room to process, according to the ordering, is the last
                     # item in the list.
-                    room_queue.extend(
-                        _RoomQueueEntry(
-                            ev["state_key"],
-                            ev["content"]["via"],
-                            current_depth + 1,
-                            children_room_entries.get(ev["state_key"]),
-                        )
-                        for ev in reversed(room_entry.children_state_events)
-                        if ev["type"] == EventTypes.SpaceChild
-                        and ev["state_key"] not in inaccessible_children
-                    )
+
+                    for ev in reversed(room_entry.children_state_events):
+                        if ev["type"] == EventTypes.SpaceChild and ev["state_key"] not in inaccessible_children:
+                            # We use a dict here instead of a set to keep the insertion order
+                            via = {}
+                            via.update({host: None for host in ev["content"]["via"]})
+                            via.update({v: None for v in gathered_via})
+                            room_queue.append(
+                                _RoomQueueEntry(
+                                    ev["state_key"],
+                                    via.keys(),
+                                    current_depth + 1,
+                                    children_room_entries.get(ev["state_key"]),
+                                )
+                            )
 
         result: JsonDict = {"rooms": rooms_result}
 
