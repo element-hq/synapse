@@ -972,6 +972,25 @@ def set_corp_headers(request: Request) -> None:
     request.setHeader(b"Cross-Origin-Resource-Policy", b"cross-origin")
 
 
+def set_headers_for_media_response(request: "SynapseRequest") -> None:
+    """Set the appropriate headers when serving media responses to clients"""
+    set_cors_headers(request)
+    set_corp_headers(request)
+    request.setHeader(
+        b"Content-Security-Policy",
+        b"sandbox;"
+        b" default-src 'none';"
+        b" script-src 'none';"
+        b" plugin-types application/pdf;"
+        b" style-src 'unsafe-inline';"
+        b" media-src 'self';"
+        b" object-src 'self';",
+    )
+    # Limited non-standard form of CSP for IE11
+    request.setHeader(b"X-Content-Security-Policy", b"sandbox;")
+    request.setHeader(b"Referrer-Policy", b"no-referrer")
+
+
 def respond_with_html(request: Request, code: int, html: str) -> None:
     """
     Wraps `respond_with_html_bytes` by first encoding HTML from a str to UTF-8 bytes.

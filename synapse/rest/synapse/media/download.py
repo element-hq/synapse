@@ -17,7 +17,10 @@ import logging
 from typing import TYPE_CHECKING
 
 from synapse.api.errors import NotFoundError
-from synapse.http.server import DirectServeJsonResource
+from synapse.http.server import (
+    DirectServeJsonResource,
+    set_headers_for_media_response,
+)
 from synapse.http.servlet import parse_integer, parse_string
 
 if TYPE_CHECKING:
@@ -54,6 +57,8 @@ class DownloadResource(DirectServeJsonResource):
         self._media_repository = hs.get_media_repository()
 
     async def _async_render_GET(self, request: "SynapseRequest") -> None:
+        set_headers_for_media_response(request)
+
         # Extract the media ID from the path
         if request.postpath is None or len(request.postpath) != 1:
             raise NotFoundError()
