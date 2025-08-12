@@ -75,6 +75,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+USER_REGISTRATION_LOCK_NAME = "user_registration"
+
 
 class EmailRegisterRequestTokenRestServlet(RestServlet):
     PATTERNS = client_patterns("/register/email/requestToken$")
@@ -433,6 +435,7 @@ class RegisterRestServlet(RestServlet):
         self.macaroon_gen = hs.get_macaroon_generator()
         self.ratelimiter = hs.get_registration_ratelimiter()
         self.password_policy_handler = hs.get_password_policy_handler()
+        self._worker_lock_handler = hs.get_worker_locks_handler()
         self.clock = hs.get_clock()
         self.password_auth_provider = hs.get_password_auth_provider()
         self._registration_enabled = self.hs.config.registration.enable_registration
@@ -524,6 +527,23 @@ class RegisterRestServlet(RestServlet):
                 "An access token should not be provided on requests to /register (except if type is m.login.application_service)",
             )
 
+        # Take a global lock when doing user registration to avoid races,
+        # for example when doing 3pid email binding.
+        async with self._worker_lock_handler.acquire_lock(
+            USER_REGISTRATION_LOCK_NAME, ""
+        ):
+            return await self._do_user_register(
+                desired_username, client_addr, body, should_issue_refresh_token, request
+            )
+
+    async def _do_user_register(
+        self,
+        desired_username: Optional[str],
+        address: str,
+        body: JsonDict,
+        should_issue_refresh_token: bool,
+        request: SynapseRequest,
+    ) -> Tuple[int, JsonDict]:
         # == Normal User Registration == (everyone else)
         if not self._registration_enabled:
             raise SynapseError(403, "Registration has been disabled", Codes.FORBIDDEN)
@@ -714,7 +734,7 @@ class RegisterRestServlet(RestServlet):
                 guest_access_token=guest_access_token,
                 threepid=threepid,
                 default_display_name=display_name,
-                address=client_addr,
+                address=address,
                 user_agent_ips=entries,
             )
             # Necessary due to auth checks prior to the threepid being
