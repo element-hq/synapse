@@ -1149,8 +1149,20 @@ this is necessary is in corporate environments behind a DMZ (demilitarized zone)
 Synapse supports routing outbound HTTP(S) requests via a proxy. Only HTTP(S)
 proxy is supported, not SOCKS proxy or anything else.</p>
 <h2 id="configure"><a class="header" href="#configure">Configure</a></h2>
-<p>The <code>http_proxy</code>, <code>https_proxy</code>, <code>no_proxy</code> environment variables are used to
-specify proxy settings. The environment variable is not case sensitive.</p>
+<p>The proxy settings can be configured in the homeserver configuration file via
+<a href="setup/../usage/configuration/config_documentation.html#http_proxy"><code>http_proxy</code></a>,
+<a href="setup/../usage/configuration/config_documentation.html#https_proxy"><code>https_proxy</code></a>, and
+<a href="setup/../usage/configuration/config_documentation.html#no_proxy_hosts"><code>no_proxy_hosts</code></a>.</p>
+<p><code>homeserver.yaml</code> example:</p>
+<pre><code class="language-yaml">http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+no_proxy_hosts:
+  - master.hostname.example.com
+  - 10.1.0.0/16
+  - 172.30.0.0/16
+</code></pre>
+<p>The proxy settings can also be configured via the <code>http_proxy</code>, <code>https_proxy</code>,
+<code>no_proxy</code> environment variables. The environment variable is not case sensitive.</p>
 <ul>
 <li><code>http_proxy</code>: Proxy server to use for HTTP requests.</li>
 <li><code>https_proxy</code>: Proxy server to use for HTTPS requests.</li>
@@ -1192,7 +1204,7 @@ will apply blacklisting of IP addresses.</p>
 <li>phone-home stats</li>
 <li>recaptcha validation</li>
 <li>CAS auth validation</li>
-<li>OpenID Connect</li>
+<li>OpenID Connect (OIDC)</li>
 <li>Outbound federation</li>
 <li>Federation (checking public key revocation)</li>
 <li>Fetching public keys of other servers</li>
@@ -1201,7 +1213,7 @@ will apply blacklisting of IP addresses.</p>
 <p>It will <strong>not be used</strong> for:</p>
 <ul>
 <li>Application Services</li>
-<li>Identity servers</li>
+<li>Matrix Identity servers</li>
 <li>In worker configurations
 <ul>
 <li>connections between workers</li>
@@ -1878,6 +1890,57 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11360"><a class="header" href="#upgrading-to-v11360">Upgrading to v1.136.0</a></h1>
+<h2 id="deprecate-run_as_background_process-exported-as-part-of-the-module-api-interface-in-favor-of-moduleapirun_as_background_process"><a class="header" href="#deprecate-run_as_background_process-exported-as-part-of-the-module-api-interface-in-favor-of-moduleapirun_as_background_process">Deprecate <code>run_as_background_process</code> exported as part of the module API interface in favor of <code>ModuleApi.run_as_background_process</code></a></h2>
+<p>The <code>run_as_background_process</code> function is now a method of the <code>ModuleApi</code> class. If
+you were using the function directly from the module API, it will continue to work fine
+but the background process metrics will not include an accurate <code>server_name</code> label.
+This kind of metric labeling isn't relevant for many use cases and is used to
+differentiate Synapse instances running in the same Python process (relevant to Synapse
+Pro: Small Hosts). We recommend updating your usage to use the new
+<code>ModuleApi.run_as_background_process</code> method to stay on top of future changes.</p>
+<details>
+<summary>Example <code>run_as_background_process</code> upgrade</summary>
+<p>Before:</p>
+<pre><code class="language-python">class MyModule:
+    def __init__(self, module_api: ModuleApi) -&gt; None:
+        run_as_background_process(__name__ + &quot;:setup_database&quot;, self.setup_database)
+</code></pre>
+<p>After:</p>
+<pre><code class="language-python">class MyModule:
+    def __init__(self, module_api: ModuleApi) -&gt; None:
+        module_api.run_as_background_process(__name__ + &quot;:setup_database&quot;, self.setup_database)
+</code></pre>
+</details>
+<h2 id="metric-labels-have-changed-on-synapse_federation_last_received_pdu_time-and-synapse_federation_last_sent_pdu_time"><a class="header" href="#metric-labels-have-changed-on-synapse_federation_last_received_pdu_time-and-synapse_federation_last_sent_pdu_time">Metric labels have changed on <code>synapse_federation_last_received_pdu_time</code> and <code>synapse_federation_last_sent_pdu_time</code></a></h2>
+<p>Previously, the <code>synapse_federation_last_received_pdu_time</code> and
+<code>synapse_federation_last_sent_pdu_time</code> metrics both used the <code>server_name</code> label to
+differentiate between different servers that we send and receive events from.</p>
+<p>Since we're now using the <code>server_name</code> label to differentiate between different Synapse
+homeserver instances running in the same process, these metrics have been changed as follows:</p>
+<ul>
+<li><code>synapse_federation_last_received_pdu_time</code> now uses the <code>origin_server_name</code> label</li>
+<li><code>synapse_federation_last_sent_pdu_time</code> now uses the <code>destination_server_name</code> label</li>
+</ul>
+<p>The Grafana dashboard JSON in <code>contrib/grafana/synapse.json</code> has been updated to reflect
+this change but you will need to manually update your own existing Grafana dashboards
+using these metrics.</p>
+<h2 id="stable-integration-with-matrix-authentication-service"><a class="header" href="#stable-integration-with-matrix-authentication-service">Stable integration with Matrix Authentication Service</a></h2>
+<p>Support for <a href="https://github.com/element-hq/matrix-authentication-service">Matrix Authentication Service (MAS)</a> is now stable, with a simplified configuration.
+This stable integration requires MAS 0.20.0 or later.</p>
+<p>The existing <code>experimental_features.msc3861</code> configuration option is now deprecated and will be removed in Synapse v1.137.0.</p>
+<p>Synapse deployments already using MAS should now use the new configuration options:</p>
+<pre><code class="language-yaml">matrix_authentication_service:
+  # Enable the MAS integration
+  enabled: true
+  # The base URL where Synapse will contact MAS
+  endpoint: http://localhost:8080
+  # The shared secret used to authenticate MAS requests, must be the same as `matrix.secret` in the MAS configuration
+  # See https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#matrix
+  secret: &quot;asecurerandomsecretstring&quot;
+</code></pre>
+<p>They must remove the <code>experimental_features.msc3861</code> configuration option from their configuration.</p>
+<p>They can also remove the client previously used by Synapse <a href="https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#clients">in the MAS configuration</a> as it is no longer in use.</p>
 <h1 id="upgrading-to-v11350"><a class="header" href="#upgrading-to-v11350">Upgrading to v1.135.0</a></h1>
 <h2 id="on_user_registration-module-api-callback-may-now-run-on-any-worker"><a class="header" href="#on_user_registration-module-api-callback-may-now-run-on-any-worker"><code>on_user_registration</code> module API callback may now run on any worker</a></h2>
 <p>Previously, the <code>on_user_registration</code> callback would only run on the main
@@ -1890,10 +1953,10 @@ native ICU library on your system is no longer required.</p>
 <h1 id="upgrading-to-v11300"><a class="header" href="#upgrading-to-v11300">Upgrading to v1.130.0</a></h1>
 <h2 id="documented-endpoint-which-can-be-delegated-to-a-federation-worker"><a class="header" href="#documented-endpoint-which-can-be-delegated-to-a-federation-worker">Documented endpoint which can be delegated to a federation worker</a></h2>
 <p>The endpoint <code>^/_matrix/federation/v1/version$</code> can be delegated to a federation
-worker. This is not new behaviour, but had not been documented yet. The 
-<a href="workers.html#synapseappgeneric_worker">list of delegatable endpoints</a> has 
+worker. This is not new behaviour, but had not been documented yet. The
+<a href="workers.html#synapseappgeneric_worker">list of delegatable endpoints</a> has
 been updated to include it. Make sure to check your reverse proxy rules if you
-are using workers. </p>
+are using workers.</p>
 <h1 id="upgrading-to-v11260"><a class="header" href="#upgrading-to-v11260">Upgrading to v1.126.0</a></h1>
 <h2 id="room-list-publication-rules-change"><a class="header" href="#room-list-publication-rules-change">Room list publication rules change</a></h2>
 <p>The default <a href="usage/configuration/config_documentation.html#room_list_publication_rules"><code>room_list_publication_rules</code></a> setting was changed to disallow
@@ -4375,6 +4438,54 @@ shown.</p>
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 </code></pre>
 <hr />
+<h3 id="http_proxy"><a class="header" href="#http_proxy"><code>http_proxy</code></a></h3>
+<p><em>(string|null)</em> Proxy server to use for HTTP requests.
+For more details, see the <a href="usage/configuration/../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+</code></pre>
+<hr />
+<h3 id="https_proxy"><a class="header" href="#https_proxy"><code>https_proxy</code></a></h3>
+<p><em>(string|null)</em> Proxy server to use for HTTPS requests.
+For more details, see the <a href="usage/configuration/../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+</code></pre>
+<hr />
+<h3 id="no_proxy_hosts"><a class="header" href="#no_proxy_hosts"><code>no_proxy_hosts</code></a></h3>
+<p><em>(array)</em> List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the <a href="usage/configuration/../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+</code></pre>
+<hr />
+<h3 id="matrix_authentication_service"><a class="header" href="#matrix_authentication_service"><code>matrix_authentication_service</code></a></h3>
+<p><em>(object)</em> The <code>matrix_authentication_service</code> setting configures integration with <a href="https://github.com/element-hq/matrix-authentication-service">Matrix Authentication Service (MAS)</a>.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>enabled</code> (boolean): Whether or not to enable the MAS integration. If this is set to <code>false</code>, Synapse will use its legacy internal authentication API. Defaults to <code>false</code>.</p>
+</li>
+<li>
+<p><code>endpoint</code> (string): The URL where Synapse can reach MAS. This <em>must</em> have the <code>discovery</code> and <code>oauth</code> resources mounted. Defaults to <code>&quot;http://localhost:8080&quot;</code>.</p>
+</li>
+<li>
+<p><code>secret</code> (string|null): A shared secret that will be used to authenticate requests from and to MAS.</p>
+</li>
+<li>
+<p><code>secret_path</code> (string|null): Alternative to <code>secret</code>, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.</p>
+</li>
+</ul>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">matrix_authentication_service:
+  enabled: true
+  secret: someverysecuresecret
+  endpoint: http://localhost:8080
+</code></pre>
+<hr />
 <h3 id="dummy_events_threshold"><a class="header" href="#dummy_events_threshold"><code>dummy_events_threshold</code></a></h3>
 <p><em>(integer)</em> Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an <code>org.matrix.dummy_event</code> event, which will reduce the forward extremities in the room.</p>
 <p>This setting defines the threshold (i.e. number of forward extremities in the room) at which dummy events are sent.</p>
@@ -5589,6 +5700,29 @@ Setting this to a high value allows users to report content quickly, possibly in
 <pre><code class="language-yaml">rc_reports:
   per_second: 2.0
   burst_count: 20.0
+</code></pre>
+<hr />
+<h3 id="rc_room_creation"><a class="header" href="#rc_room_creation"><code>rc_room_creation</code></a></h3>
+<p><em>(object)</em> Sets rate limits for how often users are able to create rooms.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>per_second</code> (number): Maximum number of requests a client can send per second.</p>
+</li>
+<li>
+<p><code>burst_count</code> (number): Maximum number of requests a client can send before being throttled.</p>
+</li>
+</ul>
+<p>Default configuration:</p>
+<pre><code class="language-yaml">rc_room_creation:
+  per_user:
+    per_second: 0.016
+    burst_count: 10.0
+</code></pre>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">rc_room_creation:
+  per_second: 1.0
+  burst_count: 5.0
 </code></pre>
 <hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
@@ -11842,7 +11976,7 @@ information.</p>
 ^/_matrix/client/(r0|v3|unstable)/keys/claim$
 ^/_matrix/client/(r0|v3|unstable)/room_keys/
 ^/_matrix/client/(r0|v3|unstable)/keys/upload
-^/_matrix/client/(api/v1|r0|v3|unstable/keys/device_signing/upload$
+^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
 # Registration/login requests
@@ -12094,8 +12228,9 @@ the stream writer for the <code>account_data</code> stream:</p>
 ^/_matrix/client/(r0|v3|unstable)/.*/account_data
 </code></pre>
 <h5 id="the-receipts-stream"><a class="header" href="#the-receipts-stream">The <code>receipts</code> stream</a></h5>
-<p>The following endpoints should be routed directly to the worker configured as
-the stream writer for the <code>receipts</code> stream:</p>
+<p>The <code>receipts</code> stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the <code>receipts</code> stream:</p>
 <pre><code>^/_matrix/client/(r0|v3|unstable)/rooms/.*/receipt
 ^/_matrix/client/(r0|v3|unstable)/rooms/.*/read_markers
 </code></pre>
@@ -12111,12 +12246,12 @@ the stream writer for the <code>push_rules</code> stream:</p>
 </code></pre>
 <h5 id="the-device_lists-stream"><a class="header" href="#the-device_lists-stream">The <code>device_lists</code> stream</a></h5>
 <p>The <code>device_lists</code> stream supports multiple writers. The following endpoints
-can be handled by any worker, but should be routed directly one of the workers
+can be handled by any worker, but should be routed directly to one of the workers
 configured as stream writer for the <code>device_lists</code> stream:</p>
 <pre><code>^/_matrix/client/(r0|v3)/delete_devices$
-^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
+^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
 ^/_matrix/client/(r0|v3|unstable)/keys/upload
-^/_matrix/client/(api/v1|r0|v3|unstable/keys/device_signing/upload$
+^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
 ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
@@ -16228,7 +16363,38 @@ account data on the admin's user account. </p>
 <p>To receive soft failed events in APIs like <code>/sync</code> and <code>/messages</code>, set <code>return_soft_failed_events</code>
 to <code>true</code> in the admin client config. When <code>false</code>, the normal behaviour of these endpoints is to
 exclude soft failed events.</p>
+<p><strong>Note</strong>: If the policy server flagged the event as spam and that caused soft failure, that will be indicated
+in the event's <code>unsigned</code> content like so:</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;m.room.message&quot;,
+  &quot;other&quot;: &quot;event_fields_go_here&quot;,
+  &quot;unsigned&quot;: {
+    &quot;io.element.synapse.soft_failed&quot;: true,
+    &quot;io.element.synapse.policy_server_spammy&quot;: true
+  }
+}
+</code></pre>
 <p>Default: <code>false</code></p>
+<h2 id="see-events-marked-spammy-by-policy-servers"><a class="header" href="#see-events-marked-spammy-by-policy-servers">See events marked spammy by policy servers</a></h2>
+<p>Learn more about policy servers from <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4284">MSC4284</a>.</p>
+<p>Similar to <code>return_soft_failed_events</code>, clients logged in with admin accounts can see events which were
+flagged by the policy server as spammy (and thus soft failed) by setting <code>return_policy_server_spammy_events</code>
+to <code>true</code>.</p>
+<p><code>return_policy_server_spammy_events</code> may be <code>true</code> while <code>return_soft_failed_events</code> is <code>false</code> to only see
+policy server-flagged events. When <code>return_soft_failed_events</code> is <code>true</code> however, <code>return_policy_server_spammy_events</code>
+is always <code>true</code>.</p>
+<p>Events which were flagged by the policy will be flagged as <code>io.element.synapse.policy_server_spammy</code> in the
+event's <code>unsigned</code> content, like so:</p>
+<pre><code class="language-json">{
+  &quot;type&quot;: &quot;m.room.message&quot;,
+  &quot;other&quot;: &quot;event_fields_go_here&quot;,
+  &quot;unsigned&quot;: {
+    &quot;io.element.synapse.soft_failed&quot;: true,
+    &quot;io.element.synapse.policy_server_spammy&quot;: true
+  }
+}
+</code></pre>
+<p>Default: <code>true</code> if <code>return_soft_failed_events</code> is <code>true</code>, otherwise <code>false</code></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="using-the-synapse-manhole"><a class="header" href="#using-the-synapse-manhole">Using the synapse manhole</a></h1>
 <p>The &quot;manhole&quot; allows server administrators to access a Python shell on a running
 Synapse installation. This is a very powerful mechanism for administration and

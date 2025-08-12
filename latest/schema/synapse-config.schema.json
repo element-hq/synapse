@@ -1,6 +1,6 @@
 {
   "$schema": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
-  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.135/synapse-config.schema.json",
+  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.136/synapse-config.schema.json",
   "type": "object",
   "properties": {
     "modules": {
@@ -544,6 +544,75 @@
           "password": "mypassword",
           "ssh_priv_key_path": "CONFDIR/id_rsa",
           "ssh_pub_key_path": "CONFDIR/id_rsa.pub"
+        }
+      ]
+    },
+    "http_proxy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Proxy server to use for HTTP requests.\nFor more details, see the [forward proxy documentation](../../setup/forward_proxy.md).",
+      "examples": [
+        "http://USERNAME:PASSWORD@10.0.1.1:8080/"
+      ]
+    },
+    "https_proxy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Proxy server to use for HTTPS requests.\nFor more details, see the [forward proxy documentation](../../setup/forward_proxy.md).",
+      "examples": [
+        "http://USERNAME:PASSWORD@proxy.example.com:8080/"
+      ]
+    },
+    "no_proxy_hosts": {
+      "type": "array",
+      "description": "List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.\nFor more details, see the [forward proxy documentation](../../setup/forward_proxy.md).",
+      "examples": [
+        [
+          "master.hostname.example.com",
+          "10.1.0.0/16",
+          "172.30.0.0/16"
+        ]
+      ]
+    },
+    "matrix_authentication_service": {
+      "type": "object",
+      "description": "The `matrix_authentication_service` setting configures integration with [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its legacy internal authentication API.",
+          "default": false
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted.",
+          "default": "http://localhost:8080"
+        },
+        "secret": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A shared secret that will be used to authenticate requests from and to MAS."
+        },
+        "secret_path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup."
+        }
+      },
+      "examples": [
+        {
+          "enabled": true,
+          "secret": "someverysecuresecret",
+          "endpoint": "http://localhost:8080"
         }
       ]
     },
@@ -1894,6 +1963,22 @@
         {
           "per_second": 2.0,
           "burst_count": 20.0
+        }
+      ]
+    },
+    "rc_room_creation": {
+      "$ref": "#/$defs/rc",
+      "description": "Sets rate limits for how often users are able to create rooms.",
+      "default": {
+        "per_user": {
+          "per_second": 0.016,
+          "burst_count": 10.0
+        }
+      },
+      "examples": [
+        {
+          "per_second": 1.0,
+          "burst_count": 5.0
         }
       ]
     },
