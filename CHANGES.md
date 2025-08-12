@@ -1,8 +1,10 @@
 # Synapse 1.136.0 (2025-08-12)
 
+Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, detailed below.
+
 ### Bugfixes
 
-- Fix bug where the [Make Room Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#make-room-admin-api) would not treat a room v12's creator power level as the highest in room. ([\#18805](https://github.com/element-hq/synapse/issues/18805))
+- Fix bug introduced in 1.135.2 and 1.136.0rc2 where the [Make Room Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#make-room-admin-api) would not treat a room v12's creator power level as the highest in room. ([\#18805](https://github.com/element-hq/synapse/issues/18805))
 
 
 
