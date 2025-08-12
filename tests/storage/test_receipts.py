@@ -21,7 +21,7 @@
 
 from typing import Collection, Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
 from synapse.server import HomeServer

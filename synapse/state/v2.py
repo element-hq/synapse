@@ -53,7 +53,7 @@ class Clock(Protocol):
     # This is usually synapse.util.Clock, but it's replaced with a FakeClock in tests.
     # We only ever sleep(0) though, so that other async functions can make forward
     # progress without waiting for stateres to complete.
-    def sleep(self, duration_ms: float) -> Awaitable[None]: ...
+    async def sleep(self, duration_ms: float) -> None: ...
 
 
 class StateResolutionStore(Protocol):

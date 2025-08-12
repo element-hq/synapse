@@ -21,7 +21,7 @@ from typing import Any, Tuple
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import UserTypes

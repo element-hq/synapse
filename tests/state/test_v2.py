@@ -66,8 +66,8 @@ ORIGIN_SERVER_TS = 0
 
 
 class FakeClock:
-    def sleep(self, msec: float) -> "defer.Deferred[None]":
-        return defer.succeed(None)
+    async def sleep(self, msec: float) -> None:
+        return None
 
 
 class FakeEvent:

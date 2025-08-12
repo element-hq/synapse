@@ -21,7 +21,7 @@
 from typing import Optional
 from unittest import mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, StoreError
 from synapse.api.room_versions import RoomVersion
