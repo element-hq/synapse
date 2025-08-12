@@ -20,6 +20,8 @@
 #
 #
 import errno
+import hashlib
+import hmac
 import logging
 import os
 import shutil
@@ -69,7 +71,7 @@ from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import UserID
+from synapse.types import StrSequence, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
@@ -122,6 +124,10 @@ class MediaRepository:
             store=hs.get_storage_controllers().main,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.remote_media_downloads,
+        )
+
+        self._media_request_signature_secret = (
+            b"supersecret"  # TODO: make this configurable
         )
 
         # List of StorageProviders where we should search for media and
@@ -1545,3 +1551,45 @@ class MediaRepository:
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+    def download_media_key(self, media_id: str, exp: int) -> StrSequence:
+        """Get the key used for the download media signature"""
+        return ("download", media_id, str(exp))
+
+    def compute_media_request_signature(self, payload: StrSequence) -> str:
+        """Compute the signature for a signed media request
+
+        This currently uses a HMAC-SHA256 signature encoded as hex, but this could
+        be swapped to an asymmetric signature.
+        """
+        # XXX: alternatively, we could do multiple rounds of HMAC with the
+        # different segments, like AWS SigV4 does
+        bytes_payload = "|".join(payload).encode("utf-8")
+
+        digest = hmac.digest(
+            key=self._media_request_signature_secret,
+            msg=bytes_payload,
+            digest=hashlib.sha256,
+        )
+        signature = digest.hex()
+        return signature
+
+    def verify_media_request_signature(
+        self, payload: StrSequence, signature: str
+    ) -> bool:
+        """Verify the signature for a signed media request
+
+        Returns True if the signature is valid, False otherwise.
+        """
+        bytes_payload = "|".join(payload).encode("utf-8")
+        decoded_signature = bytes.fromhex(signature)
+        computed_signature = hmac.digest(
+            key=self._media_request_signature_secret,
+            msg=bytes_payload,
+            digest=hashlib.sha256,
+        )
+
+        if len(computed_signature) != len(decoded_signature):
+            return False
+
+        return hmac.compare_digest(computed_signature, decoded_signature)
