@@ -18,7 +18,7 @@
 #
 #
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.rest.client import room

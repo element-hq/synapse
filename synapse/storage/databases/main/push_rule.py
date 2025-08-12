@@ -110,7 +110,6 @@ def _load_rules(
         msc3381_polls_enabled=experimental_config.msc3381_polls_enabled,
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
         msc4210_enabled=experimental_config.msc4210_enabled,
-        msc4306_enabled=experimental_config.msc4306_enabled,
     )
 
     return filtered_rules
@@ -147,7 +146,6 @@ class PushRulesWorkerStore(
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="push_rules_stream",
-            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("push_rules_stream", "instance_name", "stream_id"),

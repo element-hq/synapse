@@ -634,7 +634,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
                 for creator in creators:
                     if self.is_mine_id(creator):
                         # include the creator as they won't be in the PL users map.
-                        admin_users.append(creator)
+                        admin_users.insert(0, creator)
 
             if not admin_users:
                 raise SynapseError(

@@ -19,7 +19,7 @@
 #
 #
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.room_versions import RoomVersions
 from synapse.server import HomeServer

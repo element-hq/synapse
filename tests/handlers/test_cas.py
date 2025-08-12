@@ -21,7 +21,7 @@
 from typing import Any, Dict
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.handlers.cas import CasResponse
 from synapse.server import HomeServer

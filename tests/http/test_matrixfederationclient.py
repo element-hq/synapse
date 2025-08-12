@@ -27,7 +27,7 @@ from parameterized import parameterized
 from twisted.internet import defer
 from twisted.internet.defer import Deferred, TimeoutError
 from twisted.internet.error import ConnectingCancelledError, DNSLookupError
-from twisted.internet.testing import MemoryReactor, StringTransport
+from twisted.test.proto_helpers import MemoryReactor, StringTransport
 from twisted.web.client import Agent, ResponseNeverReceived
 from twisted.web.http import HTTPChannel
 from twisted.web.http_headers import Headers

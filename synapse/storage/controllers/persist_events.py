@@ -61,7 +61,6 @@ from synapse.logging.opentracing import (
     start_active_span_follows_from,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
@@ -83,30 +82,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The number of times we are recalculating the current state
-state_delta_counter = Counter(
-    "synapse_storage_events_state_delta", "", labelnames=[SERVER_NAME_LABEL]
-)
+state_delta_counter = Counter("synapse_storage_events_state_delta", "")
 
 # The number of times we are recalculating state when there is only a
 # single forward extremity
 state_delta_single_event_counter = Counter(
-    "synapse_storage_events_state_delta_single_event",
-    "",
-    labelnames=[SERVER_NAME_LABEL],
+    "synapse_storage_events_state_delta_single_event", ""
 )
 
 # The number of times we are reculating state when we could have resonably
 # calculated the delta when we calculated the state for an event we were
 # persisting.
 state_delta_reuse_delta_counter = Counter(
-    "synapse_storage_events_state_delta_reuse_delta", "", labelnames=[SERVER_NAME_LABEL]
+    "synapse_storage_events_state_delta_reuse_delta", ""
 )
 
 # The number of forward extremities for each new event.
 forward_extremities_counter = Histogram(
     "synapse_storage_events_forward_extremities_persisted",
     "Number of forward extremities for each new event",
-    labelnames=[SERVER_NAME_LABEL],
     buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
@@ -115,26 +109,22 @@ forward_extremities_counter = Histogram(
 stale_forward_extremities_counter = Histogram(
     "synapse_storage_events_stale_forward_extremities_persisted",
     "Number of unchanged forward extremities for each new event",
-    labelnames=[SERVER_NAME_LABEL],
     buckets=(0, 1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
 state_resolutions_during_persistence = Counter(
     "synapse_storage_events_state_resolutions_during_persistence",
     "Number of times we had to do state res to calculate new current state",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 potential_times_prune_extremities = Counter(
     "synapse_storage_events_potential_times_prune_extremities",
     "Number of times we might be able to prune extremities",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 times_pruned_extremities = Counter(
     "synapse_storage_events_times_pruned_extremities",
     "Number of times we were actually be able to prune extremities",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -195,7 +185,6 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
 
     def __init__(
         self,
-        server_name: str,
         per_item_callback: Callable[
             [str, _EventPersistQueueTask],
             Awaitable[_PersistResult],
@@ -206,7 +195,6 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         The per_item_callback will be called for each item added via add_to_queue,
         and its result will be returned via the Deferreds returned from add_to_queue.
         """
-        self.server_name = server_name
         self._event_persist_queues: Dict[str, Deque[_EventPersistQueueItem]] = {}
         self._currently_persisting_rooms: Set[str] = set()
         self._per_item_callback = per_item_callback
@@ -311,7 +299,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
                 self._currently_persisting_rooms.discard(room_id)
 
         # set handle_queue_loop off in the background
-        run_as_background_process("persist_events", self.server_name, handle_queue_loop)
+        run_as_background_process("persist_events", handle_queue_loop)
 
     def _get_drainining_queue(
         self, room_id: str
@@ -354,7 +342,7 @@ class EventsPersistenceStorageController:
         self._instance_name = hs.get_instance_name()
         self.is_mine_id = hs.is_mine_id
         self._event_persist_queue = _EventPeristenceQueue(
-            self.server_name, self._process_event_persist_queue_task
+            self._process_event_persist_queue_task
         )
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._state_controller = state_controller
@@ -719,11 +707,9 @@ class EventsPersistenceStorageController:
             if all_single_prev_not_state:
                 return (new_forward_extremities, None)
 
-        state_delta_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        state_delta_counter.inc()
         if len(new_latest_event_ids) == 1:
-            state_delta_single_event_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).inc()
+            state_delta_single_event_counter.inc()
 
             # This is a fairly handwavey check to see if we could
             # have guessed what the delta would have been when
@@ -738,9 +724,7 @@ class EventsPersistenceStorageController:
             for ev, _ in ev_ctx_rm:
                 prev_event_ids = set(ev.prev_event_ids())
                 if latest_event_ids == prev_event_ids:
-                    state_delta_reuse_delta_counter.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).inc()
+                    state_delta_reuse_delta_counter.inc()
                     break
 
         logger.debug("Calculating state delta for room %s", room_id)
@@ -849,13 +833,9 @@ class EventsPersistenceStorageController:
         # We only update metrics for events that change forward extremities
         # (e.g. we ignore backfill/outliers/etc)
         if result != latest_event_ids:
-            forward_extremities_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(len(result))
+            forward_extremities_counter.observe(len(result))
             stale = latest_event_ids & result
-            stale_forward_extremities_counter.labels(
-                **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(len(stale))
+            stale_forward_extremities_counter.observe(len(stale))
 
         return result
 
@@ -1014,9 +994,7 @@ class EventsPersistenceStorageController:
             ),
         )
 
-        state_resolutions_during_persistence.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        state_resolutions_during_persistence.inc()
 
         # If the returned state matches the state group of one of the new
         # forward extremities then we check if we are able to prune some state
@@ -1044,9 +1022,7 @@ class EventsPersistenceStorageController:
         """See if we can prune any of the extremities after calculating the
         resolved state.
         """
-        potential_times_prune_extremities.labels(
-            **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        potential_times_prune_extremities.inc()
 
         # We keep all the extremities that have the same state group, and
         # see if we can drop the others.
@@ -1144,7 +1120,7 @@ class EventsPersistenceStorageController:
 
             return new_latest_event_ids
 
-        times_pruned_extremities.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        times_pruned_extremities.inc()
 
         logger.info(
             "Pruning forward extremities in room %s: from %s -> %s",

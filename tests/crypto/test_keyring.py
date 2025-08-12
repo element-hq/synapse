@@ -31,7 +31,7 @@ from signedjson.types import SigningKey, VerifyKey
 
 from twisted.internet import defer
 from twisted.internet.defer import Deferred, ensureDeferred
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import SynapseError
 from synapse.crypto import keyring

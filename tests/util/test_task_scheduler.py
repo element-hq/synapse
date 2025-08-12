@@ -21,7 +21,7 @@
 from typing import List, Optional, Tuple
 
 from twisted.internet.task import deferLater
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus

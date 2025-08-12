@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, cast
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService

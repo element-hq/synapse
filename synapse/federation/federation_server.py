@@ -82,7 +82,6 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -105,30 +104,23 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter(
-    "synapse_federation_server_received_pdus", "", labelnames=[SERVER_NAME_LABEL]
-)
+received_pdus_counter = Counter("synapse_federation_server_received_pdus", "")
 
-received_edus_counter = Counter(
-    "synapse_federation_server_received_edus", "", labelnames=[SERVER_NAME_LABEL]
-)
+received_edus_counter = Counter("synapse_federation_server_received_edus", "")
 
 received_queries_counter = Counter(
-    "synapse_federation_server_received_queries",
-    "",
-    labelnames=["type", SERVER_NAME_LABEL],
+    "synapse_federation_server_received_queries", "", ["type"]
 )
 
 pdu_process_time = Histogram(
     "synapse_federation_server_pdu_process_time",
     "Time taken to process an event",
-    labelnames=[SERVER_NAME_LABEL],
 )
 
 last_pdu_ts_metric = Gauge(
     "synapse_federation_last_received_pdu_time",
     "The timestamp of the last PDU which was successfully received from the given domain",
-    labelnames=("origin_server_name", SERVER_NAME_LABEL),
+    labelnames=("server_name",),
 )
 
 
@@ -442,9 +434,7 @@ class FederationServer(FederationBase):
             report back to the sending server.
         """
 
-        received_pdus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-            len(transaction.pdus)
-        )
+        received_pdus_counter.inc(len(transaction.pdus))
 
         origin_host, _ = parse_server_name(origin)
 
@@ -555,9 +545,7 @@ class FederationServer(FederationBase):
         )
 
         if newest_pdu_ts and origin in self._federation_metrics_domains:
-            last_pdu_ts_metric.labels(
-                origin_server_name=origin, **{SERVER_NAME_LABEL: self.server_name}
-            ).set(newest_pdu_ts / 1000)
+            last_pdu_ts_metric.labels(server_name=origin).set(newest_pdu_ts / 1000)
 
         return pdu_results
 
@@ -565,7 +553,7 @@ class FederationServer(FederationBase):
         """Process the EDUs in a received transaction."""
 
         async def _process_edu(edu_dict: JsonDict) -> None:
-            received_edus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+            received_edus_counter.inc()
 
             edu = Edu(
                 origin=origin,
@@ -680,10 +668,7 @@ class FederationServer(FederationBase):
     async def on_query_request(
         self, query_type: str, args: Dict[str, str]
     ) -> Tuple[int, Dict[str, Any]]:
-        received_queries_counter.labels(
-            type=query_type,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        received_queries_counter.labels(query_type).inc()
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
 
@@ -1325,9 +1310,9 @@ class FederationServer(FederationBase):
                     origin, event.event_id
                 )
                 if received_ts is not None:
-                    pdu_process_time.labels(
-                        **{SERVER_NAME_LABEL: self.server_name}
-                    ).observe((self._clock.time_msec() - received_ts) / 1000)
+                    pdu_process_time.observe(
+                        (self._clock.time_msec() - received_ts) / 1000
+                    )
 
             next = await self._get_next_nonspam_staged_event_for_room(
                 room_id, room_version

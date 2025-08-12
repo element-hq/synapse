@@ -106,11 +106,8 @@ pub struct PushRuleEvaluator {
     /// flag as MSC1767 (extensible events core).
     msc3931_enabled: bool,
 
-    /// If MSC4210 (remove legacy mentions) is enabled.
+    // If MSC4210 (remove legacy mentions) is enabled.
     msc4210_enabled: bool,
-
-    /// If MSC4306 (thread subscriptions) is enabled.
-    msc4306_enabled: bool,
 }
 
 #[pymethods]
@@ -129,7 +126,6 @@ impl PushRuleEvaluator {
         room_version_feature_flags,
         msc3931_enabled,
         msc4210_enabled,
-        msc4306_enabled,
     ))]
     pub fn py_new(
         flattened_keys: BTreeMap<String, JsonValue>,
@@ -142,7 +138,6 @@ impl PushRuleEvaluator {
         room_version_feature_flags: Vec<String>,
         msc3931_enabled: bool,
         msc4210_enabled: bool,
-        msc4306_enabled: bool,
     ) -> Result<Self, Error> {
         let body = match flattened_keys.get("content.body") {
             Some(JsonValue::Value(SimpleJsonValue::Str(s))) => s.clone().into_owned(),
@@ -161,7 +156,6 @@ impl PushRuleEvaluator {
             room_version_feature_flags,
             msc3931_enabled,
             msc4210_enabled,
-            msc4306_enabled,
         })
     }
 
@@ -173,19 +167,12 @@ impl PushRuleEvaluator {
     ///
     /// Returns the set of actions, if any, that match (filtering out any
     /// `dont_notify` and `coalesce` actions).
-    ///
-    /// msc4306_thread_subscription_state: (Only populated if MSC4306 is enabled)
-    /// The thread subscription state corresponding to the thread containing this event.
-    /// - `None` if the event is not in a thread, or if MSC4306 is disabled.
-    /// - `Some(true)` if the event is in a thread and the user has a subscription for that thread
-    /// - `Some(false)` if the event is in a thread and the user does NOT have a subscription for that thread
-    #[pyo3(signature = (push_rules, user_id=None, display_name=None, msc4306_thread_subscription_state=None))]
+    #[pyo3(signature = (push_rules, user_id=None, display_name=None))]
     pub fn run(
         &self,
         push_rules: &FilteredPushRules,
         user_id: Option<&str>,
         display_name: Option<&str>,
-        msc4306_thread_subscription_state: Option<bool>,
     ) -> Vec<Action> {
         'outer: for (push_rule, enabled) in push_rules.iter() {
             if !enabled {
@@ -217,12 +204,7 @@ impl PushRuleEvaluator {
                     Condition::Known(KnownCondition::RoomVersionSupports { feature: _ }),
                 );
 
-                match self.match_condition(
-                    condition,
-                    user_id,
-                    display_name,
-                    msc4306_thread_subscription_state,
-                ) {
+                match self.match_condition(condition, user_id, display_name) {
                     Ok(true) => {}
                     Ok(false) => continue 'outer,
                     Err(err) => {
@@ -255,20 +237,14 @@ impl PushRuleEvaluator {
     }
 
     /// Check if the given condition matches.
-    #[pyo3(signature = (condition, user_id=None, display_name=None, msc4306_thread_subscription_state=None))]
+    #[pyo3(signature = (condition, user_id=None, display_name=None))]
     fn matches(
         &self,
         condition: Condition,
         user_id: Option<&str>,
         display_name: Option<&str>,
-        msc4306_thread_subscription_state: Option<bool>,
     ) -> bool {
-        match self.match_condition(
-            &condition,
-            user_id,
-            display_name,
-            msc4306_thread_subscription_state,
-        ) {
+        match self.match_condition(&condition, user_id, display_name) {
             Ok(true) => true,
             Ok(false) => false,
             Err(err) => {
@@ -286,7 +262,6 @@ impl PushRuleEvaluator {
         condition: &Condition,
         user_id: Option<&str>,
         display_name: Option<&str>,
-        msc4306_thread_subscription_state: Option<bool>,
     ) -> Result<bool, Error> {
         let known_condition = match condition {
             Condition::Known(known) => known,
@@ -416,13 +391,6 @@ impl PushRuleEvaluator {
                     let flag = feature.to_string();
                     KNOWN_RVER_FLAGS.contains(&flag)
                         && self.room_version_feature_flags.contains(&flag)
-                }
-            }
-            KnownCondition::Msc4306ThreadSubscription { subscribed } => {
-                if !self.msc4306_enabled {
-                    false
-                } else {
-                    msc4306_thread_subscription_state == Some(*subscribed)
                 }
             }
         };
@@ -568,11 +536,10 @@ fn push_rule_evaluator() {
         vec![],
         true,
         false,
-        false,
     )
     .unwrap();
 
-    let result = evaluator.run(&FilteredPushRules::default(), None, Some("bob"), None);
+    let result = evaluator.run(&FilteredPushRules::default(), None, Some("bob"));
     assert_eq!(result.len(), 3);
 }
 
@@ -599,7 +566,6 @@ fn test_requires_room_version_supports_condition() {
         flags,
         true,
         false,
-        false,
     )
     .unwrap();
 
@@ -608,7 +574,6 @@ fn test_requires_room_version_supports_condition() {
     let mut result = evaluator.run(
         &FilteredPushRules::default(),
         Some("@bob:example.org"),
-        None,
         None,
     );
     assert_eq!(result.len(), 3);
@@ -628,17 +593,7 @@ fn test_requires_room_version_supports_condition() {
     };
     let rules = PushRules::new(vec![custom_rule]);
     result = evaluator.run(
-        &FilteredPushRules::py_new(
-            rules,
-            BTreeMap::new(),
-            true,
-            false,
-            true,
-            false,
-            false,
-            false,
-        ),
-        None,
+        &FilteredPushRules::py_new(rules, BTreeMap::new(), true, false, true, false, false),
         None,
         None,
     );

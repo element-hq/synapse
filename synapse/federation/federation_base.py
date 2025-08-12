@@ -174,7 +174,6 @@ class FederationBase:
                 "Event not allowed by policy server, soft-failing %s", pdu.event_id
             )
             pdu.internal_metadata.soft_failed = True
-            pdu.internal_metadata.policy_server_spammy = True
             # Note: we don't redact the event so admins can inspect the event after the
             # fact. Other processes may redact the event, but that won't be applied to
             # the database copy of the event until the server's config requires it.

@@ -63,7 +63,6 @@ from synapse.rest.client import (
     sync,
     tags,
     thirdparty,
-    thread_subscriptions,
     tokenrefresh,
     user_directory,
     versions,
@@ -123,7 +122,6 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     login_token_request.register_servlets,
     rendezvous.register_servlets,
     auth_metadata.register_servlets,
-    thread_subscriptions.register_servlets,
 )
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {

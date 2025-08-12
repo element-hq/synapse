@@ -21,7 +21,7 @@
 from typing import List
 from unittest import mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.server import HomeServer
@@ -69,10 +69,9 @@ class WorkerSchemaTests(HomeserverTestCase):
 
         db_pool = self.hs.get_datastores().main.db_pool
         db_conn = LoggingDatabaseConnection(
-            conn=db_pool._db_pool.connect(),
-            engine=db_pool.engine,
-            default_txn_name="tests",
-            server_name="test_server",
+            db_pool._db_pool.connect(),
+            db_pool.engine,
+            "tests",
         )
 
         cur = db_conn.cursor()
@@ -86,10 +85,9 @@ class WorkerSchemaTests(HomeserverTestCase):
         """Test that workers don't start if the DB has an older schema version"""
         db_pool = self.hs.get_datastores().main.db_pool
         db_conn = LoggingDatabaseConnection(
-            conn=db_pool._db_pool.connect(),
-            engine=db_pool.engine,
-            default_txn_name="tests",
-            server_name="test_server",
+            db_pool._db_pool.connect(),
+            db_pool.engine,
+            "tests",
         )
 
         cur = db_conn.cursor()
@@ -107,10 +105,9 @@ class WorkerSchemaTests(HomeserverTestCase):
         """
         db_pool = self.hs.get_datastores().main.db_pool
         db_conn = LoggingDatabaseConnection(
-            conn=db_pool._db_pool.connect(),
-            engine=db_pool.engine,
-            default_txn_name="tests",
-            server_name="test_server",
+            db_pool._db_pool.connect(),
+            db_pool.engine,
+            "tests",
         )
 
         # Set the schema version of the database to the current version

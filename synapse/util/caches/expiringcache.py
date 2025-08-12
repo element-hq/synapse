@@ -99,9 +99,7 @@ class ExpiringCache(Generic[KT, VT]):
             return
 
         def f() -> "defer.Deferred[None]":
-            return run_as_background_process(
-                "prune_cache", server_name, self._prune_cache
-            )
+            return run_as_background_process("prune_cache", self._prune_cache)
 
         self._clock.looping_call(f, self._expiry_ms / 2)
 

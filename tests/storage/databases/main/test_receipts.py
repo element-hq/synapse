@@ -21,7 +21,7 @@
 
 from typing import Any, Dict, Optional, Sequence, Tuple
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, room

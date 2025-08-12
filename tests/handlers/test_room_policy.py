@@ -15,7 +15,7 @@
 from typing import Optional
 from unittest import mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.events import EventBase, make_event_from_dict
 from synapse.rest import admin

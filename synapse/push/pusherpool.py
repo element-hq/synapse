@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Dict, Iterable, Optional
 from prometheus_client import Gauge
 
 from synapse.api.errors import Codes, SynapseError
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -48,9 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 synapse_pushers = Gauge(
-    "synapse_pushers",
-    "Number of active synapse pushers",
-    labelnames=["kind", "app_id", SERVER_NAME_LABEL],
+    "synapse_pushers", "Number of active synapse pushers", ["kind", "app_id"]
 )
 
 
@@ -71,9 +68,6 @@ class PusherPool:
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
         self.pusher_factory = PusherFactory(hs)
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
@@ -112,9 +106,7 @@ class PusherPool:
         if not self._should_start_pushers:
             logger.info("Not starting pushers because they are disabled in the config")
             return
-        run_as_background_process(
-            "start_pushers", self.server_name, self._start_pushers
-        )
+        run_as_background_process("start_pushers", self._start_pushers)
 
     async def add_or_update_pusher(
         self,
@@ -430,17 +422,11 @@ class PusherPool:
             previous_pusher.on_stop()
 
             synapse_pushers.labels(
-                kind=type(previous_pusher).__name__,
-                app_id=previous_pusher.app_id,
-                **{SERVER_NAME_LABEL: self.server_name},
+                type(previous_pusher).__name__, previous_pusher.app_id
             ).dec()
         byuser[appid_pushkey] = pusher
 
-        synapse_pushers.labels(
-            kind=type(pusher).__name__,
-            app_id=pusher.app_id,
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).inc()
+        synapse_pushers.labels(type(pusher).__name__, pusher.app_id).inc()
 
         logger.info("Starting pusher %s / %s", pusher.user_id, appid_pushkey)
 
@@ -499,8 +485,4 @@ class PusherPool:
             pusher = byuser.pop(appid_pushkey)
             pusher.on_stop()
 
-            synapse_pushers.labels(
-                kind=type(pusher).__name__,
-                app_id=pusher.app_id,
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).dec()
+            synapse_pushers.labels(type(pusher).__name__, pusher.app_id).dec()

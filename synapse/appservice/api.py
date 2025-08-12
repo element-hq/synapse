@@ -48,7 +48,6 @@ from synapse.events import EventBase
 from synapse.events.utils import SerializeEventConfig, serialize_event
 from synapse.http.client import SimpleHttpClient, is_unknown_endpoint
 from synapse.logging import opentracing
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import DeviceListUpdates, JsonDict, JsonMapping, ThirdPartyInstanceID
 from synapse.util.caches.response_cache import ResponseCache
 
@@ -60,31 +59,29 @@ logger = logging.getLogger(__name__)
 sent_transactions_counter = Counter(
     "synapse_appservice_api_sent_transactions",
     "Number of /transactions/ requests sent",
-    labelnames=["service", SERVER_NAME_LABEL],
+    ["service"],
 )
 
 failed_transactions_counter = Counter(
     "synapse_appservice_api_failed_transactions",
     "Number of /transactions/ requests that failed to send",
-    labelnames=["service", SERVER_NAME_LABEL],
+    ["service"],
 )
 
 sent_events_counter = Counter(
-    "synapse_appservice_api_sent_events",
-    "Number of events sent to the AS",
-    labelnames=["service", SERVER_NAME_LABEL],
+    "synapse_appservice_api_sent_events", "Number of events sent to the AS", ["service"]
 )
 
 sent_ephemeral_counter = Counter(
     "synapse_appservice_api_sent_ephemeral",
     "Number of ephemeral events sent to the AS",
-    labelnames=["service", SERVER_NAME_LABEL],
+    ["service"],
 )
 
 sent_todevice_counter = Counter(
     "synapse_appservice_api_sent_todevice",
     "Number of todevice messages sent to the AS",
-    labelnames=["service", SERVER_NAME_LABEL],
+    ["service"],
 )
 
 HOUR_IN_MS = 60 * 60 * 1000
@@ -385,7 +382,6 @@ class ApplicationServiceApi(SimpleHttpClient):
                     "left": list(device_list_summary.left),
                 }
 
-        labels = {"service": service.id, SERVER_NAME_LABEL: self.server_name}
         try:
             args = None
             if self.config.use_appservice_legacy_authorization:
@@ -403,10 +399,10 @@ class ApplicationServiceApi(SimpleHttpClient):
                     service.url,
                     [event.get("event_id") for event in events],
                 )
-            sent_transactions_counter.labels(**labels).inc()
-            sent_events_counter.labels(**labels).inc(len(serialized_events))
-            sent_ephemeral_counter.labels(**labels).inc(len(ephemeral))
-            sent_todevice_counter.labels(**labels).inc(len(to_device_messages))
+            sent_transactions_counter.labels(service.id).inc()
+            sent_events_counter.labels(service.id).inc(len(serialized_events))
+            sent_ephemeral_counter.labels(service.id).inc(len(ephemeral))
+            sent_todevice_counter.labels(service.id).inc(len(to_device_messages))
             return True
         except CodeMessageException as e:
             logger.warning(
@@ -425,7 +421,7 @@ class ApplicationServiceApi(SimpleHttpClient):
                 ex.args,
                 exc_info=logger.isEnabledFor(logging.DEBUG),
             )
-        failed_transactions_counter.labels(**labels).inc()
+        failed_transactions_counter.labels(service.id).inc()
         return False
 
     async def claim_client_keys(

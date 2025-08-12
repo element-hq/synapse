@@ -19,7 +19,7 @@
 #
 #
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.rest.client import filter

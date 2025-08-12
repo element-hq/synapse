@@ -91,7 +91,6 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="presence_stream",
-            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[("presence_stream", "instance_name", "stream_id")],
             sequence_name="presence_stream_sequence",

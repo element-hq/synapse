@@ -68,7 +68,6 @@ class EmailPusher(Pusher):
         super().__init__(hs, pusher_config)
         self.mailer = mailer
 
-        self.server_name = hs.hostname
         self.store = self.hs.get_datastores().main
         self.email = pusher_config.pushkey
         self.timed_call: Optional[IDelayedCall] = None
@@ -118,7 +117,7 @@ class EmailPusher(Pusher):
         if self._is_processing:
             return
 
-        run_as_background_process("emailpush.process", self.server_name, self._process)
+        run_as_background_process("emailpush.process", self._process)
 
     def _pause_processing(self) -> None:
         """Used by tests to temporarily pause processing of events.

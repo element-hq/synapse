@@ -36,7 +36,6 @@ from synapse.config import (  # noqa: F401
     jwt,
     key,
     logger,
-    mas,
     metrics,
     modules,
     oembed,
@@ -125,7 +124,6 @@ class RootConfig:
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
     user_types: user_types.UserTypesConfig
-    mas: mas.MasConfig
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]

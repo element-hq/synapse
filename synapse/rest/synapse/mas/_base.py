@@ -16,7 +16,6 @@
 
 from typing import TYPE_CHECKING, cast
 
-from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import SynapseError
 from synapse.http.server import DirectServeJsonResource
 
@@ -28,21 +27,14 @@ if TYPE_CHECKING:
 
 class MasBaseResource(DirectServeJsonResource):
     def __init__(self, hs: "HomeServer"):
-        auth = hs.get_auth()
-        if hs.config.mas.enabled:
-            assert isinstance(auth, MasDelegatedAuth)
-
-            self._is_request_from_mas = auth.is_request_using_the_shared_secret
-        else:
-            # Importing this module requires authlib, which is an optional
-            # dependency but required if msc3861 is enabled
-            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-            assert isinstance(auth, MSC3861DelegatedAuth)
-
-            self._is_request_from_mas = auth.is_request_using_the_admin_token
+        # Importing this module requires authlib, which is an optional
+        # dependency but required if msc3861 is enabled
+        from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
         DirectServeJsonResource.__init__(self, extract_context=True)
+        auth = hs.get_auth()
+        assert isinstance(auth, MSC3861DelegatedAuth)
+        self.msc3861_auth = auth
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.hostname = hs.hostname
 
@@ -51,5 +43,5 @@ class MasBaseResource(DirectServeJsonResource):
 
         Throws a 403 if the request is not coming from MAS.
         """
-        if not self._is_request_from_mas(request):
+        if not self.msc3861_auth.is_request_using_the_admin_token(request):
             raise SynapseError(403, "This endpoint must only be called by MAS")

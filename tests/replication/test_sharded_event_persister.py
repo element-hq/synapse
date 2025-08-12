@@ -21,7 +21,7 @@
 import logging
 from unittest.mock import patch
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync

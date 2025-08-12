@@ -88,7 +88,6 @@ class PusherWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="pushers",
-            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("pushers", "instance_name", "id"),

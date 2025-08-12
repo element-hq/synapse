@@ -90,7 +90,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[Any]", object, None]:
         @defer.inlineCallbacks
         def cb() -> Generator["defer.Deferred[object]", object, Tuple[int, JsonDict]]:
-            yield defer.ensureDeferred(Clock(reactor).sleep(0))
+            yield Clock(reactor).sleep(0)
             return 1, {}
 
         @defer.inlineCallbacks

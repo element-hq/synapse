@@ -29,7 +29,6 @@ from prometheus_client import Counter
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
@@ -41,9 +40,7 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 stream_updates_counter = Counter(
-    "synapse_replication_tcp_resource_stream_updates",
-    "",
-    labelnames=["stream_name", SERVER_NAME_LABEL],
+    "synapse_replication_tcp_resource_stream_updates", "", ["stream_name"]
 )
 
 logger = logging.getLogger(__name__)
@@ -147,9 +144,7 @@ class ReplicationStreamer:
             logger.debug("Notifier poke loop already running")
             return
 
-        run_as_background_process(
-            "replication_notifier", self.server_name, self._run_notifier_loop
-        )
+        run_as_background_process("replication_notifier", self._run_notifier_loop)
 
     async def _run_notifier_loop(self) -> None:
         self.is_looping = True
@@ -229,10 +224,7 @@ class ReplicationStreamer:
                                 len(updates),
                                 current_token,
                             )
-                            stream_updates_counter.labels(
-                                stream_name=stream.NAME,
-                                **{SERVER_NAME_LABEL: self.server_name},
-                            ).inc(len(updates))
+                            stream_updates_counter.labels(stream.NAME).inc(len(updates))
 
                         else:
                             # The token has advanced but there is no data to

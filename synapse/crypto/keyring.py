@@ -152,8 +152,6 @@ class Keyring:
     def __init__(
         self, hs: "HomeServer", key_fetchers: "Optional[Iterable[KeyFetcher]]" = None
     ):
-        self.server_name = hs.hostname
-
         if key_fetchers is None:
             # Always fetch keys from the database.
             mutable_key_fetchers: List[KeyFetcher] = [StoreKeyFetcher(hs)]
@@ -171,8 +169,7 @@ class Keyring:
         self._fetch_keys_queue: BatchingQueue[
             _FetchKeyRequest, Dict[str, Dict[str, FetchKeyResult]]
         ] = BatchingQueue(
-            name="keyring_server",
-            server_name=self.server_name,
+            "keyring_server",
             clock=hs.get_clock(),
             # The method called to fetch each key
             process_batch_callback=self._inner_fetch_key_requests,
@@ -476,12 +473,8 @@ class Keyring:
 
 class KeyFetcher(metaclass=abc.ABCMeta):
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
         self._queue = BatchingQueue(
-            name=self.__class__.__name__,
-            server_name=self.server_name,
-            clock=hs.get_clock(),
-            process_batch_callback=self._fetch_keys,
+            self.__class__.__name__, hs.get_clock(), self._fetch_keys
         )
 
     async def get_keys(

@@ -40,7 +40,7 @@ from prometheus_client import Counter
 
 from twisted.internet.protocol import ReconnectingClientFactory
 
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
+from synapse.metrics import LaterGauge
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
@@ -85,26 +85,13 @@ logger = logging.getLogger(__name__)
 
 # number of updates received for each RDATA stream
 inbound_rdata_count = Counter(
-    "synapse_replication_tcp_protocol_inbound_rdata_count",
-    "",
-    labelnames=["stream_name", SERVER_NAME_LABEL],
+    "synapse_replication_tcp_protocol_inbound_rdata_count", "", ["stream_name"]
 )
-user_sync_counter = Counter(
-    "synapse_replication_tcp_resource_user_sync", "", labelnames=[SERVER_NAME_LABEL]
-)
-federation_ack_counter = Counter(
-    "synapse_replication_tcp_resource_federation_ack",
-    "",
-    labelnames=[SERVER_NAME_LABEL],
-)
-# FIXME: Unused metric, remove if not needed.
-remove_pusher_counter = Counter(
-    "synapse_replication_tcp_resource_remove_pusher", "", labelnames=[SERVER_NAME_LABEL]
-)
+user_sync_counter = Counter("synapse_replication_tcp_resource_user_sync", "")
+federation_ack_counter = Counter("synapse_replication_tcp_resource_federation_ack", "")
+remove_pusher_counter = Counter("synapse_replication_tcp_resource_remove_pusher", "")
 
-user_ip_cache_counter = Counter(
-    "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
-)
+user_ip_cache_counter = Counter("synapse_replication_tcp_resource_user_ip_cache", "")
 
 
 # the type of the entries in _command_queues_by_stream
@@ -119,7 +106,6 @@ class ReplicationCommandHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -244,10 +230,10 @@ class ReplicationCommandHandler:
         self._connections: List[IReplicationConnection] = []
 
         LaterGauge(
-            name="synapse_replication_tcp_resource_total_connections",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self._connections)},
+            "synapse_replication_tcp_resource_total_connections",
+            "",
+            [],
+            lambda: len(self._connections),
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -267,11 +253,11 @@ class ReplicationCommandHandler:
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
         LaterGauge(
-            name="synapse_replication_tcp_command_queue",
-            desc="Number of inbound RDATA/POSITION commands queued for processing",
-            labelnames=["stream_name", SERVER_NAME_LABEL],
-            caller=lambda: {
-                (stream_name, self.server_name): len(queue)
+            "synapse_replication_tcp_command_queue",
+            "Number of inbound RDATA/POSITION commands queued for processing",
+            ["stream_name"],
+            lambda: {
+                (stream_name,): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
             },
         )
@@ -354,10 +340,7 @@ class ReplicationCommandHandler:
 
         # fire off a background process to start processing the queue.
         run_as_background_process(
-            "process-replication-data",
-            self.server_name,
-            self._unsafe_process_queue,
-            stream_name,
+            "process-replication-data", self._unsafe_process_queue, stream_name
         )
 
     async def _unsafe_process_queue(self, stream_name: str) -> None:
@@ -473,7 +456,7 @@ class ReplicationCommandHandler:
     def on_USER_SYNC(
         self, conn: IReplicationConnection, cmd: UserSyncCommand
     ) -> Optional[Awaitable[None]]:
-        user_sync_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        user_sync_counter.inc()
 
         if self._is_presence_writer:
             return self._presence_handler.update_external_syncs_row(
@@ -497,7 +480,7 @@ class ReplicationCommandHandler:
     def on_FEDERATION_ACK(
         self, conn: IReplicationConnection, cmd: FederationAckCommand
     ) -> None:
-        federation_ack_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        federation_ack_counter.inc()
 
         if self._federation_sender:
             self._federation_sender.federation_ack(cmd.instance_name, cmd.token)
@@ -505,7 +488,7 @@ class ReplicationCommandHandler:
     def on_USER_IP(
         self, conn: IReplicationConnection, cmd: UserIpCommand
     ) -> Optional[Awaitable[None]]:
-        user_ip_cache_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
+        user_ip_cache_counter.inc()
 
         if self._is_master or self._should_insert_client_ips:
             # We make a point of only returning an awaitable if there's actually
@@ -545,9 +528,7 @@ class ReplicationCommandHandler:
             return
 
         stream_name = cmd.stream_name
-        inbound_rdata_count.labels(
-            stream_name=stream_name, **{SERVER_NAME_LABEL: self.server_name}
-        ).inc()
+        inbound_rdata_count.labels(stream_name).inc()
 
         # We put the received command into a queue here for two reasons:
         #   1. so we don't try and concurrently handle multiple rows for the

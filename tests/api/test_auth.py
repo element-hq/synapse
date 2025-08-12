@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pymacaroons
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth_blocking import AuthBlocking

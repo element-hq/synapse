@@ -10,19 +10,17 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Mapping
-
-from twisted.internet.defer import Deferred
+from typing import Awaitable, Mapping
 
 from synapse.types import ISynapseReactor
 
 class HttpClient:
     def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None: ...
-    def get(self, url: str, response_limit: int) -> Deferred[bytes]: ...
+    def get(self, url: str, response_limit: int) -> Awaitable[bytes]: ...
     def post(
         self,
         url: str,
         response_limit: int,
         headers: Mapping[str, str],
         request_body: str,
-    ) -> Deferred[bytes]: ...
+    ) -> Awaitable[bytes]: ...

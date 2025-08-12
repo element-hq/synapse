@@ -21,7 +21,7 @@
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions

@@ -15,7 +15,7 @@ import logging
 
 from parameterized import parameterized_class
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EduTypes

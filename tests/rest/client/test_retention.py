@@ -20,7 +20,7 @@
 from typing import Any, Dict
 from unittest.mock import Mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.rest import admin

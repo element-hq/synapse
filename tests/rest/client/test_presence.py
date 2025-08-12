@@ -20,7 +20,7 @@
 from http import HTTPStatus
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.handlers.presence import PresenceHandler
 from synapse.rest.client import presence

@@ -23,7 +23,7 @@ from typing import Dict, List, Set, Tuple, cast
 
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 from twisted.trial import unittest
 
 from synapse.api.constants import EventTypes

@@ -36,7 +36,6 @@ from .federation import FederationConfig
 from .jwt import JWTConfig
 from .key import KeyConfig
 from .logger import LoggingConfig
-from .mas import MasConfig
 from .metrics import MetricsConfig
 from .modules import ModulesConfig
 from .oembed import OembedConfig
@@ -110,6 +109,4 @@ class HomeServerConfig(RootConfig):
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
         UserTypesConfig,
-        # This must be last, as it checks for conflicts with other config options.
-        MasConfig,
     ]

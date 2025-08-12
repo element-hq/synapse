@@ -69,18 +69,11 @@ class Databases(Generic[DataStoreT]):
         state_deletion: Optional[StateDeletionDataStore] = None
         persist_events: Optional[PersistEventsStore] = None
 
-        server_name = hs.hostname
-
         for database_config in hs.config.database.databases:
             db_name = database_config.name
             engine = create_engine(database_config.config)
 
-            with make_conn(
-                db_config=database_config,
-                engine=engine,
-                default_txn_name="startup",
-                server_name=server_name,
-            ) as db_conn:
+            with make_conn(database_config, engine, "startup") as db_conn:
                 logger.info("[database config %r]: Checking database server", db_name)
                 engine.check_database(db_conn)
 

@@ -7,23 +7,8 @@ proxy is supported, not SOCKS proxy or anything else.
 
 ## Configure
 
-The proxy settings can be configured in the homeserver configuration file via
-[`http_proxy`](../usage/configuration/config_documentation.md#http_proxy),
-[`https_proxy`](../usage/configuration/config_documentation.md#https_proxy), and
-[`no_proxy_hosts`](../usage/configuration/config_documentation.md#no_proxy_hosts).
-
-`homeserver.yaml` example:
-```yaml
-http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
-https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
-no_proxy_hosts:
-  - master.hostname.example.com
-  - 10.1.0.0/16
-  - 172.30.0.0/16
-```
-
-The proxy settings can also be configured via the `http_proxy`, `https_proxy`,
-`no_proxy` environment variables. The environment variable is not case sensitive.
+The `http_proxy`, `https_proxy`, `no_proxy` environment variables are used to
+specify proxy settings. The environment variable is not case sensitive.
 - `http_proxy`: Proxy server to use for HTTP requests.
 - `https_proxy`: Proxy server to use for HTTPS requests.
 - `no_proxy`: Comma-separated list of hosts, IP addresses, or IP ranges in CIDR
@@ -59,7 +44,7 @@ The proxy will be **used** for:
 - phone-home stats
 - recaptcha validation
 - CAS auth validation
-- OpenID Connect (OIDC)
+- OpenID Connect
 - Outbound federation
 - Federation (checking public key revocation)
 - Fetching public keys of other servers
@@ -68,7 +53,7 @@ The proxy will be **used** for:
 It will **not be used** for:
 
 - Application Services
-- Matrix Identity servers
+- Identity servers
 - In worker configurations
   - connections between workers
   - connections from workers to Redis

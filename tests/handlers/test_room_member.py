@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.login

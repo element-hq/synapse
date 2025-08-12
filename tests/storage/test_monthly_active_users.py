@@ -20,7 +20,7 @@
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import UserTypes
 from synapse.server import HomeServer

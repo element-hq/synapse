@@ -59,9 +59,7 @@ class NotRetryingDestination(Exception):
 
 
 async def get_retry_limiter(
-    *,
     destination: str,
-    our_server_name: str,
     clock: Clock,
     store: DataStore,
     ignore_backoff: bool = False,
@@ -76,7 +74,6 @@ async def get_retry_limiter(
 
     Args:
         destination: name of homeserver
-        our_server_name: Our homeserver name (used to label metrics) (`hs.hostname`)
         clock: timing source
         store: datastore
         ignore_backoff: true to ignore the historical backoff data and
@@ -85,12 +82,7 @@ async def get_retry_limiter(
     Example usage:
 
         try:
-            limiter = await get_retry_limiter(
-                destination=destination,
-                our_server_name=self.server_name,
-                clock=clock,
-                store=store,
-            )
+            limiter = await get_retry_limiter(destination, clock, store)
             with limiter:
                 response = await do_request()
         except NotRetryingDestination:
@@ -122,12 +114,11 @@ async def get_retry_limiter(
     backoff_on_failure = not ignore_backoff
 
     return RetryDestinationLimiter(
-        destination=destination,
-        our_server_name=our_server_name,
-        clock=clock,
-        store=store,
-        failure_ts=failure_ts,
-        retry_interval=retry_interval,
+        destination,
+        clock,
+        store,
+        failure_ts,
+        retry_interval,
         backoff_on_failure=backoff_on_failure,
         **kwargs,
     )
@@ -160,9 +151,7 @@ async def filter_destinations_by_retry_limiter(
 class RetryDestinationLimiter:
     def __init__(
         self,
-        *,
         destination: str,
-        our_server_name: str,
         clock: Clock,
         store: DataStore,
         failure_ts: Optional[int],
@@ -180,7 +169,6 @@ class RetryDestinationLimiter:
 
         Args:
             destination
-            our_server_name: Our homeserver name (used to label metrics) (`hs.hostname`)
             clock
             store
             failure_ts: when this destination started failing (in ms since
@@ -196,7 +184,6 @@ class RetryDestinationLimiter:
             backoff_on_all_error_codes: Whether we should back off on any
                 error code.
         """
-        self.our_server_name = our_server_name
         self.clock = clock
         self.store = store
         self.destination = destination
@@ -331,6 +318,4 @@ class RetryDestinationLimiter:
                 logger.exception("Failed to store destination_retry_timings")
 
         # we deliberately do this in the background.
-        run_as_background_process(
-            "store_retry_timings", self.our_server_name, store_retry_timings
-        )
+        run_as_background_process("store_retry_timings", store_retry_timings)

@@ -24,13 +24,9 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Collection, Optional, Set, Tuple, Type
 from weakref import WeakValueDictionary
 
-from twisted.internet import defer
 from twisted.internet.task import LoopingCall
 
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-    wrap_as_background_process,
-)
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -200,7 +196,6 @@ class LockStore(SQLBaseStore):
             return None
 
         lock = Lock(
-            self.server_name,
             self._reactor,
             self._clock,
             self,
@@ -268,7 +263,6 @@ class LockStore(SQLBaseStore):
         )
 
         lock = Lock(
-            self.server_name,
             self._reactor,
             self._clock,
             self,
@@ -372,7 +366,6 @@ class Lock:
 
     def __init__(
         self,
-        server_name: str,
         reactor: ISynapseReactor,
         clock: Clock,
         store: LockStore,
@@ -381,11 +374,6 @@ class Lock:
         lock_key: str,
         token: str,
     ) -> None:
-        """
-        Args:
-            server_name: The homeserver name (used to label metrics) (this should be `hs.hostname`).
-        """
-        self._server_name = server_name
         self._reactor = reactor
         self._clock = clock
         self._store = store
@@ -408,7 +396,6 @@ class Lock:
         self._looping_call = self._clock.looping_call(
             self._renew,
             _RENEWAL_INTERVAL_MS,
-            self._server_name,
             self._store,
             self._clock,
             self._read_write,
@@ -418,55 +405,31 @@ class Lock:
         )
 
     @staticmethod
-    def _renew(
-        server_name: str,
+    @wrap_as_background_process("Lock._renew")
+    async def _renew(
         store: LockStore,
         clock: Clock,
         read_write: bool,
         lock_name: str,
         lock_key: str,
         token: str,
-    ) -> "defer.Deferred[None]":
+    ) -> None:
         """Renew the lock.
 
         Note: this is a static method, rather than using self.*, so that we
         don't end up with a reference to `self` in the reactor, which would stop
         this from being cleaned up if we dropped the context manager.
-
-        Args:
-            server_name: The homeserver name (used to label metrics) (this should be `hs.hostname`).
         """
-
-        async def _internal_renew(
-            store: LockStore,
-            clock: Clock,
-            read_write: bool,
-            lock_name: str,
-            lock_key: str,
-            token: str,
-        ) -> None:
-            table = "worker_read_write_locks" if read_write else "worker_locks"
-            await store.db_pool.simple_update(
-                table=table,
-                keyvalues={
-                    "lock_name": lock_name,
-                    "lock_key": lock_key,
-                    "token": token,
-                },
-                updatevalues={"last_renewed_ts": clock.time_msec()},
-                desc="renew_lock",
-            )
-
-        return run_as_background_process(
-            "Lock._renew",
-            server_name,
-            _internal_renew,
-            store,
-            clock,
-            read_write,
-            lock_name,
-            lock_key,
-            token,
+        table = "worker_read_write_locks" if read_write else "worker_locks"
+        await store.db_pool.simple_update(
+            table=table,
+            keyvalues={
+                "lock_name": lock_name,
+                "lock_key": lock_key,
+                "token": token,
+            },
+            updatevalues={"last_renewed_ts": clock.time_msec()},
+            desc="renew_lock",
         )
 
     async def is_still_valid(self) -> bool:

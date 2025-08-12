@@ -46,9 +46,6 @@ class PurgeEventsStorageController:
     """High level interface for purging rooms and event history."""
 
     def __init__(self, hs: "HomeServer", stores: Databases):
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
         self.stores = stores
 
         if hs.config.worker.run_background_tasks:

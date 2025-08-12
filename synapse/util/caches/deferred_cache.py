@@ -43,7 +43,6 @@ from prometheus_client import Gauge
 from twisted.internet import defer
 from twisted.python.failure import Failure
 
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
@@ -51,7 +50,7 @@ from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
 cache_pending_metric = Gauge(
     "synapse_util_caches_cache_pending",
     "Number of lookups currently pending for this cache",
-    labelnames=["name", SERVER_NAME_LABEL],
+    ["name"],
 )
 
 T = TypeVar("T")
@@ -112,9 +111,7 @@ class DeferredCache(Generic[KT, VT]):
         ] = cache_type()
 
         def metrics_cb() -> None:
-            cache_pending_metric.labels(
-                name=name, **{SERVER_NAME_LABEL: server_name}
-            ).set(len(self._pending_deferred_cache))
+            cache_pending_metric.labels(name).set(len(self._pending_deferred_cache))
 
         # cache is used for completed results and maps to the result itself, rather than
         # a Deferred.

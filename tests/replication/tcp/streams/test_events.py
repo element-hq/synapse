@@ -22,7 +22,7 @@ from typing import Any, List, Optional
 
 from parameterized import parameterized
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase

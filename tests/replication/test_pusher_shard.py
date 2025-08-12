@@ -22,7 +22,7 @@ import logging
 from unittest.mock import Mock
 
 from twisted.internet import defer
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, room

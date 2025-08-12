@@ -23,7 +23,7 @@ import urllib.parse
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock, patch
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, RelationTypes
 from synapse.rest import admin

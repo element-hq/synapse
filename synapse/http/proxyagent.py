@@ -24,6 +24,7 @@ import re
 from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union, cast
 from urllib.parse import urlparse
 from urllib.request import (  # type: ignore[attr-defined]
+    getproxies_environment,
     proxy_bypass_environment,
 )
 
@@ -53,7 +54,6 @@ from twisted.web.error import SchemeNotSupported
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IAgent, IBodyProducer, IPolicyForHTTPS, IResponse
 
-from synapse.config.server import ProxyConfig
 from synapse.config.workers import (
     InstanceLocationConfig,
     InstanceTcpLocationConfig,
@@ -99,7 +99,8 @@ class ProxyAgent(_AgentBase):
         pool: connection pool to be used. If None, a
             non-persistent pool instance will be created.
 
-        proxy_config: Proxy configuration to use for this agent.
+        use_proxy: Whether proxy settings should be discovered and used
+            from conventional environment variables.
 
         federation_proxy_locations: An optional list of locations to proxy outbound federation
             traffic through (only requests that use the `matrix-federation://` scheme
@@ -117,14 +118,13 @@ class ProxyAgent(_AgentBase):
 
     def __init__(
         self,
-        *,
         reactor: IReactorCore,
         proxy_reactor: Optional[IReactorCore] = None,
         contextFactory: Optional[IPolicyForHTTPS] = None,
         connectTimeout: Optional[float] = None,
         bindAddress: Optional[bytes] = None,
         pool: Optional[HTTPConnectionPool] = None,
-        proxy_config: Optional[ProxyConfig] = None,
+        use_proxy: bool = False,
         federation_proxy_locations: Collection[InstanceLocationConfig] = (),
         federation_proxy_credentials: Optional[ProxyCredentials] = None,
     ):
@@ -145,32 +145,30 @@ class ProxyAgent(_AgentBase):
         if bindAddress is not None:
             self._endpoint_kwargs["bindAddress"] = bindAddress
 
-        self.proxy_config = proxy_config
-        if self.proxy_config is not None:
+        http_proxy = None
+        https_proxy = None
+        no_proxy = None
+        if use_proxy:
+            proxies = getproxies_environment()
+            http_proxy = proxies["http"].encode() if "http" in proxies else None
+            https_proxy = proxies["https"].encode() if "https" in proxies else None
+            no_proxy = proxies["no"] if "no" in proxies else None
             logger.debug(
                 "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
-                self.proxy_config.http_proxy,
-                self.proxy_config.https_proxy,
-                self.proxy_config.no_proxy_hosts,
+                http_proxy,
+                https_proxy,
+                no_proxy,
             )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
-            self.proxy_config.http_proxy.encode()
-            if self.proxy_config and self.proxy_config.http_proxy
-            else None,
-            self.proxy_reactor,
-            contextFactory,
-            **self._endpoint_kwargs,
+            http_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
         )
 
         self.https_proxy_endpoint, self.https_proxy_creds = http_proxy_endpoint(
-            self.proxy_config.https_proxy.encode()
-            if self.proxy_config and self.proxy_config.https_proxy
-            else None,
-            self.proxy_reactor,
-            contextFactory,
-            **self._endpoint_kwargs,
+            https_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
         )
+
+        self.no_proxy = no_proxy
 
         self._policy_for_https = contextFactory
         self._reactor = cast(IReactorTime, reactor)
@@ -270,10 +268,10 @@ class ProxyAgent(_AgentBase):
         request_path = parsed_uri.originForm
 
         should_skip_proxy = False
-        if self.proxy_config is not None:
+        if self.no_proxy is not None:
             should_skip_proxy = proxy_bypass_environment(
                 parsed_uri.host.decode(),
-                proxies=self.proxy_config.get_proxies_dictionary(),
+                proxies={"no": self.no_proxy},
             )
 
         if (

@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.replication.tcp.streams._base import (
     _STREAM_UPDATE_TARGET_ROW_COUNT,
@@ -62,7 +62,7 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
                     "@test_user:example.org",
                     room_id,
                     thread_root_id,
-                    automatic_event_orderings=None,
+                    automatic=True,
                 )
             )
             updates.append(thread_root_id)
@@ -75,7 +75,7 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
                 "@test_user:example.org",
                 other_room_id,
                 other_thread_root_id,
-                automatic_event_orderings=None,
+                automatic=False,
             )
         )
 
@@ -124,7 +124,7 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
         for user_id in users:
             self.get_success(
                 store.subscribe_user_to_thread(
-                    user_id, room_id, thread_root_id, automatic_event_orderings=None
+                    user_id, room_id, thread_root_id, automatic=True
                 )
             )
 

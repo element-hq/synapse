@@ -22,7 +22,7 @@ from typing import Any, Dict, Optional
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet import defer
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EduTypes, EventTypes
 from synapse.api.errors import NotFoundError

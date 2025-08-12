@@ -21,7 +21,7 @@
 from typing import Tuple
 
 from twisted.internet.protocol import Protocol
-from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
+from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactorClock
 
 from synapse.logging import RemoteHandler
 

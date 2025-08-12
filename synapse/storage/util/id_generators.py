@@ -195,8 +195,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         db
         stream_name: A name for the stream, for use in the `stream_positions`
             table. (Does not need to be the same as the replication stream name)
-        server_name: The homeserver name of the server (used to label metrics)
-            (this should be `hs.hostname`).
         instance_name: The name of this instance.
         tables: List of tables associated with the stream. Tuple of table
             name, column name that stores the writer's instance name, and
@@ -212,12 +210,10 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
     def __init__(
         self,
-        *,
         db_conn: LoggingDatabaseConnection,
         db: DatabasePool,
         notifier: "ReplicationNotifier",
         stream_name: str,
-        server_name: str,
         instance_name: str,
         tables: List[Tuple[str, str, str]],
         sequence_name: str,
@@ -227,7 +223,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._db = db
         self._notifier = notifier
         self._stream_name = stream_name
-        self.server_name = server_name
         self._instance_name = instance_name
         self._positive = positive
         self._writers = writers
@@ -566,7 +561,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             txn.call_after(
                 run_as_background_process,
                 "MultiWriterIdGenerator._update_table",
-                self.server_name,
                 self._db.runInteraction,
                 "MultiWriterIdGenerator._update_table",
                 self._update_stream_positions_table_txn,
@@ -603,7 +597,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             txn.call_after(
                 run_as_background_process,
                 "MultiWriterIdGenerator._update_table",
-                self.server_name,
                 self._db.runInteraction,
                 "MultiWriterIdGenerator._update_table",
                 self._update_stream_positions_table_txn,

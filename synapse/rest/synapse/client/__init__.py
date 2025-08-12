@@ -56,9 +56,8 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
         "/_synapse/client/unsubscribe": UnsubscribeResource(hs),
     }
 
-    if hs.config.mas.enabled:
-        resources["/_synapse/mas"] = MasResource(hs)
-    elif hs.config.experimental.msc3861.enabled:
+    # Expose the JWKS endpoint if OAuth2 delegation is enabled
+    if hs.config.experimental.msc3861.enabled:
         from synapse.rest.synapse.client.jwks import JwksResource
 
         resources["/_synapse/jwks"] = JwksResource(hs)

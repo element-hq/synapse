@@ -22,7 +22,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, LoginType, Membership
 from synapse.api.errors import SynapseError

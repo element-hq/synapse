@@ -51,16 +51,10 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import (
-    EventBase,
-    StrippedStateEvent,
-    is_creator,
-    relation_from_event,
-)
+from synapse.events import EventBase, StrippedStateEvent, relation_from_event
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -95,13 +89,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter(
-    "synapse_storage_events_persisted_events", "", labelnames=[SERVER_NAME_LABEL]
-)
+persist_event_counter = Counter("synapse_storage_events_persisted_events", "")
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],
+    ["type", "origin_type", "origin_entity"],
 )
 
 # State event type/key pairs that we need to gather to fill in the
@@ -245,7 +237,6 @@ class PersistEventsStore:
         db_conn: LoggingDatabaseConnection,
     ):
         self.hs = hs
-        self.server_name = hs.hostname
         self.db_pool = db
         self.store = main_data_store
         self.database_engine = db.engine
@@ -366,16 +357,12 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
             )
-            persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
-                len(events_and_contexts)
-            )
+            persist_event_counter.inc(len(events_and_contexts))
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
-                synapse.metrics.event_persisted_position.labels(
-                    **{SERVER_NAME_LABEL: self.server_name}
-                ).set(stream)
+                synapse.metrics.event_persisted_position.set(stream)
 
             for event, context in events_and_contexts:
                 if context.app_service:
@@ -388,146 +375,12 @@ class PersistEventsStore:
                     origin_type = "remote"
                     origin_entity = get_domain_from_id(event.sender)
 
-                event_counter.labels(
-                    type=event.type,
-                    origin_type=origin_type,
-                    origin_entity=origin_entity,
-                    **{SERVER_NAME_LABEL: self.server_name},
-                ).inc()
-
-                if (
-                    not self.hs.config.experimental.msc4293_enabled
-                    or event.type != EventTypes.Member
-                    or event.state_key is None
-                ):
-                    continue
-
-                # check if this is an unban/join that will undo a ban/kick redaction for
-                # a user in the room
-                if event.membership in [Membership.LEAVE, Membership.JOIN]:
-                    if (
-                        event.membership == Membership.LEAVE
-                        and event.sender == event.state_key
-                    ):
-                        # self-leave, ignore
-                        continue
-
-                    # if there is an existing ban/leave causing redactions for
-                    # this user/room combination update the entry with the stream
-                    # ordering when the redactions should stop - in the case of a backfilled
-                    # event where the stream ordering is negative, use the current max stream
-                    # ordering
-                    stream_ordering = event.internal_metadata.stream_ordering
-                    assert stream_ordering is not None
-                    if stream_ordering < 0:
-                        stream_ordering = self._stream_id_gen.get_current_token()
-                    await self.db_pool.simple_update(
-                        "room_ban_redactions",
-                        {"room_id": event.room_id, "user_id": event.state_key},
-                        {"redact_end_ordering": stream_ordering},
-                        desc="room_ban_redactions update redact_end_ordering",
-                    )
-
-                # check for msc4293 redact_events flag and apply if found
-                if event.membership not in [Membership.LEAVE, Membership.BAN]:
-                    continue
-                redact = event.content.get("org.matrix.msc4293.redact_events", False)
-                if not redact or not isinstance(redact, bool):
-                    continue
-                # self-bans currently are not authorized so we don't check for that
-                # case
-                if (
-                    event.membership == Membership.BAN
-                    and event.sender == event.state_key
-                ):
-                    continue
-
-                # check that sender can redact
-                redact_allowed = await self._can_sender_redact(event)
-
-                # Signal that this user's past events in this room
-                # should be redacted by adding an entry to
-                # `room_ban_redactions`.
-                if redact_allowed:
-                    await self.db_pool.simple_upsert(
-                        "room_ban_redactions",
-                        {"room_id": event.room_id, "user_id": event.state_key},
-                        {
-                            "redacting_event_id": event.event_id,
-                            "redact_end_ordering": None,
-                        },
-                        {
-                            "room_id": event.room_id,
-                            "user_id": event.state_key,
-                            "redacting_event_id": event.event_id,
-                            "redact_end_ordering": None,
-                        },
-                    )
-
-                    # normally the cache entry for a redacted event would be invalidated
-                    # by an arriving redaction event, but since we are not creating redaction
-                    # events we invalidate manually
-                    self.store._invalidate_local_get_event_cache_room_id(event.room_id)
-
-                    self.store._invalidate_async_get_event_cache_room_id(event.room_id)
+                event_counter.labels(event.type, origin_type, origin_entity).inc()
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
                     (room_id,), frozenset(new_forward_extremities)
                 )
-
-    async def _can_sender_redact(self, event: EventBase) -> bool:
-        state_filter = StateFilter.from_types(
-            [(EventTypes.PowerLevels, ""), (EventTypes.Create, "")]
-        )
-        state = await self.store.get_partial_filtered_current_state_ids(
-            event.room_id, state_filter
-        )
-        pl_id = state[(EventTypes.PowerLevels, "")]
-        pl_event = await self.store.get_event(pl_id, allow_none=True)
-
-        create_id = state[(EventTypes.Create, "")]
-        create_event = await self.store.get_event(create_id, allow_none=True)
-
-        if create_event is None:
-            # not sure how this would happen but if it does then just deny the redaction
-            logger.warning("No create event found for room %s", event.room_id)
-            return False
-
-        if create_event.room_version.msc4289_creator_power_enabled:
-            # per the spec, grant the creator infinite power level and all other users 0
-            if is_creator(create_event, event.sender):
-                return True
-            if pl_event is None:
-                # per the spec, users other than the room creator have power level
-                # 0, which is less than the default to redact events (50).
-                return False
-        else:
-            # per the spec, if a power level event isn't in the room, grant the creator
-            # level 100 (the default redaction level is 50) and all other users 0
-            if pl_event is None:
-                return create_event.sender == event.sender
-
-        assert pl_event is not None
-        sender_level = pl_event.content.get("users", {}).get(event.sender)
-        if sender_level is None:
-            sender_level = pl_event.content.get("users_default", 0)
-
-        redact_level = pl_event.content.get("redact")
-        if redact_level is None:
-            redact_level = pl_event.content.get("events_default", 0)
-
-        room_redaction_level = pl_event.content.get("events", {}).get(
-            "m.room.redaction"
-        )
-        if room_redaction_level is not None:
-            if sender_level < room_redaction_level:
-                return False
-
-        if sender_level >= redact_level:
-            return True
-
-        return False
 
     async def _calculate_sliding_sync_table_changes(
         self,
@@ -2867,7 +2720,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         events_and_contexts: List[Tuple[EventBase, EventContext]],
     ) -> None:
-        to_prefill: List[EventCacheEntry] = []
+        to_prefill = []
 
         ev_map = {e.event_id: e for e, _ in events_and_contexts}
         if not ev_map:

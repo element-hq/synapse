@@ -28,6 +28,7 @@ from authlib.oauth2.auth import encode_client_secret_basic, encode_client_secret
 from authlib.oauth2.rfc7523 import ClientSecretJWT, PrivateKeyJWT, private_key_jwt_sign
 from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
+from prometheus_client import Histogram
 
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
@@ -46,20 +47,24 @@ from synapse.logging.opentracing import (
     inject_request_headers,
     start_active_span,
 )
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
 
-from . import introspection_response_timer
-
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+introspection_response_timer = Histogram(
+    "synapse_api_auth_delegated_introspection_response",
+    "Time taken to get a response for an introspection request",
+    ["code"],
+)
+
 
 # Scope as defined by MSC2967
 # https://github.com/matrix-org/matrix-spec-proposals/pull/2967
@@ -336,23 +341,17 @@ class MSC3861DelegatedAuth(BaseAuth):
                     )
         except HttpResponseException as e:
             end_time = self._clock.time()
-            introspection_response_timer.labels(
-                code=e.code, **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(end_time - start_time)
+            introspection_response_timer.labels(e.code).observe(end_time - start_time)
             raise
         except Exception:
             end_time = self._clock.time()
-            introspection_response_timer.labels(
-                code="ERR", **{SERVER_NAME_LABEL: self.server_name}
-            ).observe(end_time - start_time)
+            introspection_response_timer.labels("ERR").observe(end_time - start_time)
             raise
 
         logger.debug("Fetched token from MAS")
 
         end_time = self._clock.time()
-        introspection_response_timer.labels(
-            code=200, **{SERVER_NAME_LABEL: self.server_name}
-        ).observe(end_time - start_time)
+        introspection_response_timer.labels(200).observe(end_time - start_time)
 
         resp = json_decoder.decode(resp_body.decode("utf-8"))
 

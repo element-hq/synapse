@@ -27,7 +27,7 @@ from canonicaljson import encode_canonical_json
 from signedjson.sign import sign_json
 from signedjson.types import SigningKey
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import NoResource, Resource
 
 from synapse.crypto.keyring import PerspectivesKeyFetcher
@@ -99,7 +99,7 @@ class RemoteKeyResourceTestCase(BaseRemoteKeyResourceTestCase):
         """
         channel = FakeChannel(self.site, self.reactor)
         # channel is a `FakeChannel` but `HTTPChannel` is expected
-        req = SynapseRequest(channel, self.site, self.hs.hostname)  # type: ignore[arg-type]
+        req = SynapseRequest(channel, self.site)  # type: ignore[arg-type]
         req.content = BytesIO(b"")
         req.requestReceived(
             b"GET",
@@ -201,7 +201,7 @@ class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
 
             channel = FakeChannel(self.site, self.reactor)
             # channel is a `FakeChannel` but `HTTPChannel` is expected
-            req = SynapseRequest(channel, self.site, self.hs.hostname)  # type: ignore[arg-type]
+            req = SynapseRequest(channel, self.site)  # type: ignore[arg-type]
             req.content = BytesIO(encode_canonical_json(data))
 
             req.requestReceived(

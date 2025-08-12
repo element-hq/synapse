@@ -29,7 +29,7 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, PresenceState
 from synapse.api.presence import UserDevicePresenceState, UserPresenceState
@@ -90,7 +90,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -138,7 +137,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -189,7 +187,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -238,7 +235,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -279,7 +275,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=False,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -319,7 +314,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -347,7 +341,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,
@@ -438,7 +431,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=True,
@@ -502,7 +494,6 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
             prev_state,
             new_state,
             is_mine=True,
-            our_server_name=self.hs.hostname,
             wheel_timer=wheel_timer,
             now=now,
             persist=False,

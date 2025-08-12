@@ -20,7 +20,7 @@
 #
 from typing import Dict, List, Optional
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.database import (
@@ -80,11 +80,10 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
             return MultiWriterIdGenerator(
-                db_conn=conn,
-                db=self.db_pool,
+                conn,
+                self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
                 stream_name="test_stream",
-                server_name=self.hs.hostname,
                 instance_name=instance_name,
                 tables=[(table, "instance_name", "stream_id") for table in self.tables],
                 sequence_name="foobar_seq",

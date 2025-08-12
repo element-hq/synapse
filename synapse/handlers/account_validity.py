@@ -38,9 +38,6 @@ logger = logging.getLogger(__name__)
 class AccountValidityHandler:
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
         self.config = hs.config
         self.store = hs.get_datastores().main
         self.send_email_handler = hs.get_send_email_handler()

@@ -21,14 +21,13 @@
 
 """Tests REST events for /profile paths."""
 
-import logging
 import urllib.parse
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
 from canonicaljson import encode_canonical_json
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
@@ -649,99 +648,87 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """
         Attempts to set a custom field that would push the overall profile too large.
         """
-        # FIXME: Because we emit huge SQL log lines and trial can't handle these,
-        # sometimes (flakily) failing the test run,
-        # disable SQL logging for this test.
-        # ref: https://github.com/twisted/twisted/issues/12482
-        # To remove this, we would need to fix the above issue and
-        # update, including in olddeps (so several years' wait).
-        sql_logger = logging.getLogger("synapse.storage.SQL")
-        sql_logger_was_disabled = sql_logger.disabled
-        sql_logger.disabled = True
-        try:
-            # Get right to the boundary:
-            #   len("displayname") + len("owner") + 5 = 21 for the displayname
-            #   1 + 65498 + 5 for key "a" = 65504
-            #   2 braces, 1 comma
-            # 3 + 21 + 65498 = 65522 < 65536.
-            key = "a"
-            channel = self.make_request(
-                "PUT",
-                f"/_matrix/client/v3/profile/{self.owner}/{key}",
-                content={key: "a" * 65498},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
+        # Get right to the boundary:
+        #   len("displayname") + len("owner") + 5 = 21 for the displayname
+        #   1 + 65498 + 5 for key "a" = 65504
+        #   2 braces, 1 comma
+        # 3 + 21 + 65498 = 65522 < 65536.
+        key = "a"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
+            content={key: "a" * 65498},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
-            # Get the entire profile.
-            channel = self.make_request(
-                "GET",
-                f"/_matrix/client/v3/profile/{self.owner}",
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
-            canonical_json = encode_canonical_json(channel.json_body)
-            # 6 is the minimum bytes to store a value: 4 quotes, 1 colon, 1 comma, an empty key.
-            # Be one below that so we can prove we're at the boundary.
-            self.assertEqual(len(canonical_json), MAX_PROFILE_SIZE - 8)
+        # Get the entire profile.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/profile/{self.owner}",
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        canonical_json = encode_canonical_json(channel.json_body)
+        # 6 is the minimum bytes to store a value: 4 quotes, 1 colon, 1 comma, an empty key.
+        # Be one below that so we can prove we're at the boundary.
+        self.assertEqual(len(canonical_json), MAX_PROFILE_SIZE - 8)
 
-            # Postgres stores JSONB with whitespace, while SQLite doesn't.
-            if USE_POSTGRES_FOR_TESTS:
-                ADDITIONAL_CHARS = 0
-            else:
-                ADDITIONAL_CHARS = 1
+        # Postgres stores JSONB with whitespace, while SQLite doesn't.
+        if USE_POSTGRES_FOR_TESTS:
+            ADDITIONAL_CHARS = 0
+        else:
+            ADDITIONAL_CHARS = 1
 
-            # The next one should fail, note the value has a (JSON) length of 2.
-            key = "b"
-            channel = self.make_request(
-                "PUT",
-                f"/_matrix/client/v3/profile/{self.owner}/{key}",
-                content={key: "1" + "a" * ADDITIONAL_CHARS},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 400, channel.result)
-            self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
+        # The next one should fail, note the value has a (JSON) length of 2.
+        key = "b"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
+            content={key: "1" + "a" * ADDITIONAL_CHARS},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
-            # Setting an avatar or (longer) display name should not work.
-            channel = self.make_request(
-                "PUT",
-                f"/profile/{self.owner}/displayname",
-                content={"displayname": "owner12345678" + "a" * ADDITIONAL_CHARS},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 400, channel.result)
-            self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
+        # Setting an avatar or (longer) display name should not work.
+        channel = self.make_request(
+            "PUT",
+            f"/profile/{self.owner}/displayname",
+            content={"displayname": "owner12345678" + "a" * ADDITIONAL_CHARS},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
-            channel = self.make_request(
-                "PUT",
-                f"/profile/{self.owner}/avatar_url",
-                content={"avatar_url": "mxc://foo/bar"},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 400, channel.result)
-            self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
+        channel = self.make_request(
+            "PUT",
+            f"/profile/{self.owner}/avatar_url",
+            content={"avatar_url": "mxc://foo/bar"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
-            # Removing a single byte should work.
-            key = "b"
-            channel = self.make_request(
-                "PUT",
-                f"/_matrix/client/v3/profile/{self.owner}/{key}",
-                content={key: "" + "a" * ADDITIONAL_CHARS},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
+        # Removing a single byte should work.
+        key = "b"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
+            content={key: "" + "a" * ADDITIONAL_CHARS},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
-            # Finally, setting a field that already exists to a value that is <= in length should work.
-            key = "a"
-            channel = self.make_request(
-                "PUT",
-                f"/_matrix/client/v3/profile/{self.owner}/{key}",
-                content={key: ""},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
-        finally:
-            sql_logger.disabled = sql_logger_was_disabled
+        # Finally, setting a field that already exists to a value that is <= in length should work.
+        key = "a"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.owner}/{key}",
+            content={key: ""},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
     def test_set_custom_field_displayname(self) -> None:
         channel = self.make_request(

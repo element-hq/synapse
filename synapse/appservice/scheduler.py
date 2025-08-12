@@ -103,16 +103,18 @@ MAX_TO_DEVICE_MESSAGES_PER_TRANSACTION = 100
 
 
 class ApplicationServiceScheduler:
-    """
-    Public facing API for this module. Does the required dependency injection (DI) to
-    tie the components together. This also serves as the "event_pool", which in this
+    """Public facing API for this module. Does the required DI to tie the
+    components together. This also serves as the "event_pool", which in this
     case is a simple array.
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.txn_ctrl = _TransactionController(hs)
+        self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
-        self.queuer = _ServiceQueuer(self.txn_ctrl, hs)
+        self.as_api = hs.get_application_service_api()
+
+        self.txn_ctrl = _TransactionController(self.clock, self.store, self.as_api)
+        self.queuer = _ServiceQueuer(self.txn_ctrl, self.clock, hs)
 
     async def start(self) -> None:
         logger.info("Starting appservice scheduler")
@@ -182,7 +184,9 @@ class _ServiceQueuer:
     appservice at a given time.
     """
 
-    def __init__(self, txn_ctrl: "_TransactionController", hs: "HomeServer"):
+    def __init__(
+        self, txn_ctrl: "_TransactionController", clock: Clock, hs: "HomeServer"
+    ):
         # dict of {service_id: [events]}
         self.queued_events: Dict[str, List[EventBase]] = {}
         # dict of {service_id: [events]}
@@ -195,11 +199,10 @@ class _ServiceQueuer:
         # the appservices which currently have a transaction in flight
         self.requests_in_flight: Set[str] = set()
         self.txn_ctrl = txn_ctrl
+        self.clock = clock
         self._msc3202_transaction_extensions_enabled: bool = (
             hs.config.experimental.msc3202_transaction_extensions
         )
-        self.server_name = hs.hostname
-        self.clock = hs.get_clock()
         self._store = hs.get_datastores().main
 
     def start_background_request(self, service: ApplicationService) -> None:
@@ -207,9 +210,7 @@ class _ServiceQueuer:
         if service.id in self.requests_in_flight:
             return
 
-        run_as_background_process(
-            "as-sender", self.server_name, self._send_request, service
-        )
+        run_as_background_process("as-sender", self._send_request, service)
 
     async def _send_request(self, service: ApplicationService) -> None:
         # sanity-check: we shouldn't get here if this service already has a sender
@@ -358,11 +359,10 @@ class _TransactionController:
     (Note we have only have one of these in the homeserver.)
     """
 
-    def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
-        self.clock = hs.get_clock()
-        self.store = hs.get_datastores().main
-        self.as_api = hs.get_application_service_api()
+    def __init__(self, clock: Clock, store: DataStore, as_api: ApplicationServiceApi):
+        self.clock = clock
+        self.store = store
+        self.as_api = as_api
 
         # map from service id to recoverer instance
         self.recoverers: Dict[str, "_Recoverer"] = {}
@@ -446,12 +446,7 @@ class _TransactionController:
         logger.info("Starting recoverer for AS ID %s", service.id)
         assert service.id not in self.recoverers
         recoverer = self.RECOVERER_CLASS(
-            self.server_name,
-            self.clock,
-            self.store,
-            self.as_api,
-            service,
-            self.on_recovered,
+            self.clock, self.store, self.as_api, service, self.on_recovered
         )
         self.recoverers[service.id] = recoverer
         recoverer.recover()
@@ -482,24 +477,21 @@ class _Recoverer:
     We have one of these for each appservice which is currently considered DOWN.
 
     Args:
-        server_name: the homeserver name (used to label metrics) (this should be `hs.hostname`).
-        clock:
-        store:
-        as_api:
-        service: the service we are managing
-        callback: called once the service recovers.
+        clock (synapse.util.Clock):
+        store (synapse.storage.DataStore):
+        as_api (synapse.appservice.api.ApplicationServiceApi):
+        service (synapse.appservice.ApplicationService): the service we are managing
+        callback (callable[_Recoverer]): called once the service recovers.
     """
 
     def __init__(
         self,
-        server_name: str,
         clock: Clock,
         store: DataStore,
         as_api: ApplicationServiceApi,
         service: ApplicationService,
         callback: Callable[["_Recoverer"], Awaitable[None]],
     ):
-        self.server_name = server_name
         self.clock = clock
         self.store = store
         self.as_api = as_api
@@ -512,11 +504,7 @@ class _Recoverer:
         delay = 2**self.backoff_counter
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
         self.scheduled_recovery = self.clock.call_later(
-            delay,
-            run_as_background_process,
-            "as-recoverer",
-            self.server_name,
-            self.retry,
+            delay, run_as_background_process, "as-recoverer", self.retry
         )
 
     def _backoff(self) -> None:
@@ -537,7 +525,6 @@ class _Recoverer:
         # Run a retry, which will resechedule a recovery if it fails.
         run_as_background_process(
             "retry",
-            self.server_name,
             self.retry,
         )
 

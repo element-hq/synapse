@@ -37,7 +37,7 @@ from urllib.parse import urlencode
 
 import pymacaroons
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin

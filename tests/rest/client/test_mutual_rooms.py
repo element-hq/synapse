@@ -20,7 +20,7 @@
 #
 from urllib.parse import quote
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.rest.client import login, mutual_rooms, room

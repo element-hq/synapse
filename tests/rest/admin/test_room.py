@@ -28,7 +28,7 @@ from unittest.mock import AsyncMock, Mock
 from parameterized import parameterized
 
 from twisted.internet.task import deferLater
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, Membership, RoomTypes
@@ -2912,39 +2912,6 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
 
         # Now we test that we can join the room and that the admin user has PL 100.
         self.helper.join(room_id, self.admin_user, tok=self.admin_user_tok)
-        pl = self.helper.get_state(
-            room_id, EventTypes.PowerLevels, tok=self.creator_tok
-        )
-        self.assertEquals(pl["users"][self.admin_user], 100)
-
-    def test_v12_room_with_many_user_pls(self) -> None:
-        """Test that you can be promoted to the admin user's PL in v12 rooms that contain a range of user PLs."""
-        room_id = self.helper.create_room_as(
-            self.creator,
-            tok=self.creator_tok,
-            room_version=RoomVersions.V12.identifier,
-            is_public=True,
-            extra_content={
-                "power_level_content_override": {
-                    "users": {
-                        self.second_user_id: 50,
-                    },
-                },
-            },
-        )
-
-        self.helper.join(room_id, self.admin_user, tok=self.admin_user_tok)
-        self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
-
-        channel = self.make_request(
-            "POST",
-            f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
-            content={},
-            access_token=self.admin_user_tok,
-        )
-
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-
         pl = self.helper.get_state(
             room_id, EventTypes.PowerLevels, tok=self.creator_tok
         )

@@ -56,7 +56,7 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.metrics import SERVER_NAME_LABEL, threepid_send_requests
+from synapse.metrics import threepid_send_requests
 from synapse.push.mailer import Mailer
 from synapse.types import JsonDict
 from synapse.util.msisdn import phone_number_to_msisdn
@@ -82,7 +82,6 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
-        self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
         self.config = hs.config
 
@@ -164,11 +163,9 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             next_link,
         )
 
-        threepid_send_requests.labels(
-            type="email",
-            reason="register",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(send_attempt)
+        threepid_send_requests.labels(type="email", reason="register").observe(
+            send_attempt
+        )
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -180,7 +177,6 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
-        self.server_name = hs.hostname
         self.identity_handler = hs.get_identity_handler()
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -244,11 +240,9 @@ class MsisdnRegisterRequestTokenRestServlet(RestServlet):
             next_link,
         )
 
-        threepid_send_requests.labels(
-            type="msisdn",
-            reason="register",
-            **{SERVER_NAME_LABEL: self.server_name},
-        ).observe(send_attempt)
+        threepid_send_requests.labels(type="msisdn", reason="register").observe(
+            send_attempt
+        )
 
         return 200, ret
 
@@ -329,12 +323,10 @@ class UsernameAvailabilityRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
-        self.server_name = hs.hostname
         self.registration_handler = hs.get_registration_handler()
         self.ratelimiter = FederationRateLimiter(
-            our_server_name=self.server_name,
-            clock=hs.get_clock(),
-            config=FederationRatelimitSettings(
+            hs.get_clock(),
+            FederationRatelimitSettings(
                 # Time window of 2s
                 window_size=2000,
                 # Artificially delay requests if rate > sleep_limit/window_size
@@ -1044,7 +1036,7 @@ def _calculate_registration_flows(
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    if hs.config.experimental.msc3861.enabled:
         RegisterAppServiceOnlyRestServlet(hs).register(http_server)
         return
 

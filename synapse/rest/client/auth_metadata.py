@@ -15,7 +15,6 @@ import logging
 import typing
 from typing import Tuple, cast
 
-from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
@@ -49,18 +48,13 @@ class AuthIssuerServlet(RestServlet):
         self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        if self._config.mas.enabled:
-            assert isinstance(self._auth, MasDelegatedAuth)
-            return 200, {"issuer": await self._auth.issuer()}
-
-        elif self._config.experimental.msc3861.enabled:
+        if self._config.experimental.msc3861.enabled:
             # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
             # We import lazily here because of the authlib requirement
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
-            assert isinstance(self._auth, MSC3861DelegatedAuth)
-            return 200, {"issuer": await self._auth.issuer()}
-
+            auth = cast(MSC3861DelegatedAuth, self._auth)
+            return 200, {"issuer": await auth.issuer()}
         else:
             # Wouldn't expect this to be reached: the servelet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
@@ -88,18 +82,13 @@ class AuthMetadataServlet(RestServlet):
         self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        if self._config.mas.enabled:
-            assert isinstance(self._auth, MasDelegatedAuth)
-            return 200, await self._auth.auth_metadata()
-
-        elif self._config.experimental.msc3861.enabled:
+        if self._config.experimental.msc3861.enabled:
             # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
             # We import lazily here because of the authlib requirement
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
             auth = cast(MSC3861DelegatedAuth, self._auth)
             return 200, await auth.auth_metadata()
-
         else:
             # Wouldn't expect this to be reached: the servlet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
@@ -111,6 +100,7 @@ class AuthMetadataServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+    # We use the MSC3861 values as they are used by multiple MSCs
+    if hs.config.experimental.msc3861.enabled:
         AuthIssuerServlet(hs).register(http_server)
         AuthMetadataServlet(hs).register(http_server)

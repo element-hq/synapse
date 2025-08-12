@@ -32,7 +32,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin

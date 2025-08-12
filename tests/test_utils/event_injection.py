@@ -105,13 +105,6 @@ async def create_event(
         builder, prev_event_ids=prev_event_ids
     )
 
-    # Copy over writable internal_metadata, if set
-    # Dev note: This isn't everything that's writable. `for k,v` doesn't work here :(
-    if kwargs.get("internal_metadata", {}).get("soft_failed", False):
-        event.internal_metadata.soft_failed = True
-    if kwargs.get("internal_metadata", {}).get("policy_server_spammy", False):
-        event.internal_metadata.policy_server_spammy = True
-
     context = await unpersisted_context.persist(event)
 
     return event, context

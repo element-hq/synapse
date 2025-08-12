@@ -28,7 +28,7 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersion
@@ -74,7 +74,6 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
-            proxy_config=None,
         )
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

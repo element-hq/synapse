@@ -58,13 +58,7 @@ class Distributor:
       model will do for today.
     """
 
-    def __init__(self, server_name: str) -> None:
-        """
-        Args:
-            server_name: The homeserver name of the server (used to label metrics)
-                (this should be `hs.hostname`).
-        """
-        self.server_name = server_name
+    def __init__(self) -> None:
         self.signals: Dict[str, Signal] = {}
         self.pre_registration: Dict[str, List[Callable]] = {}
 
@@ -97,9 +91,7 @@ class Distributor:
         if name not in self.signals:
             raise KeyError("%r does not have a signal named %s" % (self, name))
 
-        run_as_background_process(
-            name, self.server_name, self.signals[name].fire, *args, **kwargs
-        )
+        run_as_background_process(name, self.signals[name].fire, *args, **kwargs)
 
 
 P = ParamSpec("P")

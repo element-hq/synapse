@@ -171,9 +171,8 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         site.site_tag = "test-site"
         site.server_version_string = "Server v1"
         site.reactor = Mock()
-
         request = SynapseRequest(
-            cast(HTTPChannel, FakeChannel(site, self.reactor)), site, "test_server"
+            cast(HTTPChannel, FakeChannel(site, self.reactor)), site
         )
         # Call requestReceived to finish instantiating the object.
         request.content = BytesIO()

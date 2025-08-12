@@ -20,7 +20,7 @@
 #
 
 from twisted.internet.address import IPv6Address
-from twisted.internet.testing import MemoryReactor, StringTransport
+from twisted.test.proto_helpers import MemoryReactor, StringTransport
 
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.server import HomeServer

@@ -21,7 +21,7 @@
 
 from http import HTTPStatus
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import LoginType
 from synapse.api.errors import Codes

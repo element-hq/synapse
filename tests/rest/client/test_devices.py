@@ -21,7 +21,7 @@
 from http import HTTPStatus
 
 from twisted.internet.defer import ensureDeferred
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import NotFoundError
 from synapse.appservice import ApplicationService

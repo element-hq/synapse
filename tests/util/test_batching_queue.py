@@ -42,18 +42,15 @@ class BatchingQueueTestCase(TestCase):
 
         # We ensure that we remove any existing metrics for "test_queue".
         try:
-            number_queued.remove("test_queue", "test_server")
-            number_of_keys.remove("test_queue", "test_server")
-            number_in_flight.remove("test_queue", "test_server")
+            number_queued.remove("test_queue")
+            number_of_keys.remove("test_queue")
+            number_in_flight.remove("test_queue")
         except KeyError:
             pass
 
         self._pending_calls: List[Tuple[List[str], defer.Deferred]] = []
         self.queue: BatchingQueue[str, str] = BatchingQueue(
-            name="test_queue",
-            server_name="test_server",
-            clock=hs_clock,
-            process_batch_callback=self._process_queue,
+            "test_queue", hs_clock, self._process_queue
         )
 
     async def _process_queue(self, values: List[str]) -> str:

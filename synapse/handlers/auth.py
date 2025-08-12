@@ -70,7 +70,6 @@ from synapse.http import get_request_user_agent
 from synapse.http.server import finish_request, respond_with_html
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
-from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.registration import (
     LoginTokenExpired,
@@ -96,7 +95,7 @@ INVALID_USERNAME_OR_PASSWORD = "Invalid username or password"
 invalid_login_token_counter = Counter(
     "synapse_user_login_invalid_login_tokens",
     "Counts the number of rejected m.login.token on /login",
-    labelnames=["reason", SERVER_NAME_LABEL],
+    ["reason"],
 )
 
 
@@ -200,7 +199,6 @@ class AuthHandler:
     SESSION_EXPIRE_MS = 48 * 60 * 60 * 1000
 
     def __init__(self, hs: "HomeServer"):
-        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
@@ -250,7 +248,6 @@ class AuthHandler:
                 run_as_background_process,
                 5 * 60 * 1000,
                 "expire_old_sessions",
-                self.server_name,
                 self._expire_old_sessions,
             )
 
@@ -275,6 +272,8 @@ class AuthHandler:
             hs.config.sso.sso_account_deactivated_template
         )
 
+        self._server_name = hs.config.server.server_name
+
         # cast to tuple for use with str.startswith
         self._whitelisted_sso_clients = tuple(hs.config.sso.sso_client_whitelist)
 
@@ -282,9 +281,7 @@ class AuthHandler:
         # response.
         self._extra_attributes: Dict[str, SsoLoginExtraAttributes] = {}
 
-        self._auth_delegation_enabled = (
-            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
-        )
+        self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
 
     async def validate_user_via_ui_auth(
         self,
@@ -335,7 +332,7 @@ class AuthHandler:
             LimitExceededError if the ratelimiter's failed request count for this
                 user is too high to proceed
         """
-        if self._auth_delegation_enabled:
+        if self.msc3861_oauth_delegation_enabled:
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "UIA shouldn't be used with MSC3861"
             )
@@ -1482,20 +1479,11 @@ class AuthHandler:
         try:
             return await self.store.consume_login_token(login_token)
         except LoginTokenExpired:
-            invalid_login_token_counter.labels(
-                reason="expired",
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc()
+            invalid_login_token_counter.labels("expired").inc()
         except LoginTokenReused:
-            invalid_login_token_counter.labels(
-                reason="reused",
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc()
+            invalid_login_token_counter.labels("reused").inc()
         except NotFoundError:
-            invalid_login_token_counter.labels(
-                reason="not found",
-                **{SERVER_NAME_LABEL: self.server_name},
-            ).inc()
+            invalid_login_token_counter.labels("not found").inc()
 
         raise AuthError(403, "Invalid login token", errcode=Codes.FORBIDDEN)
 
@@ -1870,7 +1858,7 @@ class AuthHandler:
         html = self._sso_redirect_confirm_template.render(
             display_url=display_url,
             redirect_url=redirect_url,
-            server_name=self.server_name,
+            server_name=self._server_name,
             new_user=new_user,
             user_id=registered_user_id,
             user_profile=user_profile_data,

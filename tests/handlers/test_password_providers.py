@@ -25,7 +25,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Type, Union
 from unittest.mock import AsyncMock, Mock
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse
 from synapse.api.constants import LoginType

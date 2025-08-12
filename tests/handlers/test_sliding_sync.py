@@ -24,7 +24,7 @@ from unittest.mock import patch
 import attr
 from parameterized import parameterized, parameterized_class
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import (
     EventTypes,

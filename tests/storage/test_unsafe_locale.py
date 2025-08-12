@@ -36,14 +36,8 @@ class UnsafeLocaleTest(HomeserverTestCase):
     def test_unsafe_locale(self, mock_db_locale: MagicMock) -> None:
         mock_db_locale.return_value = ("B", "B")
         database = self.hs.get_datastores().databases[0]
-        server_name = self.hs.hostname
 
-        db_conn = make_conn(
-            db_config=database._database_config,
-            engine=database.engine,
-            default_txn_name="test_unsafe",
-            server_name=server_name,
-        )
+        db_conn = make_conn(database._database_config, database.engine, "test_unsafe")
         with self.assertRaises(IncorrectDatabaseSetup):
             database.engine.check_database(db_conn)
         with self.assertRaises(IncorrectDatabaseSetup):
@@ -53,14 +47,8 @@ class UnsafeLocaleTest(HomeserverTestCase):
     def test_safe_locale(self) -> None:
         database = self.hs.get_datastores().databases[0]
         assert isinstance(database.engine, PostgresEngine)
-        server_name = self.hs.hostname
 
-        db_conn = make_conn(
-            db_config=database._database_config,
-            engine=database.engine,
-            default_txn_name="test_unsafe",
-            server_name=server_name,
-        )
+        db_conn = make_conn(database._database_config, database.engine, "test_unsafe")
         with db_conn.cursor() as txn:
             res = database.engine.get_db_locale(txn)
         self.assertEqual(res, ("C", "C"))

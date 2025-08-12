@@ -27,7 +27,7 @@ import pkg_resources
 from parameterized import parameterized
 
 from twisted.internet.defer import Deferred
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes, SynapseError

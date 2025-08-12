@@ -17,7 +17,7 @@ from typing import Literal
 from parameterized import parameterized, parameterized_class
 from typing_extensions import assert_never
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import ReceiptTypes
