@@ -1,3 +1,12 @@
+# Synapse 1.136.0 (2025-08-12)
+
+### Bugfixes
+
+- Fix bug where the [Make Room Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#make-room-admin-api) would not treat a room v12's creator power level as the highest in room. ([\#18805](https://github.com/element-hq/synapse/issues/18805))
+
+
+
+
 # Synapse 1.136.0rc2 (2025-08-11)
 
 This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
