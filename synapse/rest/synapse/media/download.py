@@ -59,17 +59,27 @@ class DownloadResource(DirectServeJsonResource):
     async def _async_render_GET(self, request: "SynapseRequest") -> None:
         set_headers_for_media_response(request)
 
-        # Extract the media ID from the path
-        if request.postpath is None or len(request.postpath) != 1:
+        # Extract the media ID (and optional name) from the path
+        if request.postpath is None:
             raise NotFoundError()
-        media_id = request.postpath[0].decode("utf-8")
+
+        if len(request.postpath) == 1:
+            media_id = request.postpath[0].decode("utf-8")
+            name = None
+        elif len(request.postpath) == 2:
+            media_id = request.postpath[0].decode("utf-8")
+            name = request.postpath[1].decode("utf-8")
+        else:
+            raise NotFoundError()
 
         # Get the `exp` and `sig` query parameters
         exp = parse_integer(request=request, name="exp", required=True, negative=False)
         sig = parse_string(request=request, name="sig", required=True)
 
         # Check that the signature is valid
-        key = self._media_repository.download_media_key(media_id=media_id, exp=exp)
+        key = self._media_repository.download_media_key(
+            media_id=media_id, exp=exp, name=name
+        )
         if not self._media_repository.verify_media_request_signature(key, sig):
             logger.warning(
                 "Invalid URL signature serving media %s. key: %r, sig: %r",
@@ -88,7 +98,7 @@ class DownloadResource(DirectServeJsonResource):
         await self._media_repository.get_local_media(
             request=request,
             media_id=media_id,
-            name=None,
+            name=name,
             max_timeout_ms=0,  # If we got here, the media finished uploading
             federation=False,  # This changes the response to be multipart; we explicitly don't want that
         )

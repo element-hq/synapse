@@ -1550,8 +1550,24 @@ class MediaRepository:
 
         return removed_media, len(removed_media)
 
-    def download_media_key(self, media_id: str, exp: int) -> StrSequence:
-        """Get the key used for the download media signature"""
+    def download_media_key(
+        self,
+        media_id: str,
+        exp: int,
+        name: Optional[str] = None,
+    ) -> StrSequence:
+        """Get the key used for the download media signature
+
+        Args:
+            media_id: The media ID of the content. (This is the same as
+                the file_id for local content.)
+            exp: The expiration time of the signature, as a unix timestamp in ms.
+            name: Optional name that, if specified, will be used as
+                the filename in the Content-Disposition header of the response.
+        """
+        if name is not None:
+            return ("download", media_id, str(exp), name)
+
         return ("download", media_id, str(exp))
 
     def compute_media_request_signature(self, payload: StrSequence) -> str:
