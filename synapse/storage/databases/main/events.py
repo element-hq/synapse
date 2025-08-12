@@ -51,7 +51,12 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, relation_from_event
+from synapse.events import (
+    EventBase,
+    StrippedStateEvent,
+    is_creator,
+    relation_from_event,
+)
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
@@ -481,17 +486,27 @@ class PersistEventsStore:
         pl_id = state[(EventTypes.PowerLevels, "")]
         pl_event = await self.store.get_event(pl_id, allow_none=True)
 
-        if pl_event is None:
-            # per the spec, if a power level event isn't in the room, grant the creator
-            # level 100 and all other users 0
-            create_id = state[(EventTypes.Create, "")]
-            create_event = await self.store.get_event(create_id, allow_none=True)
-            if create_event is None:
-                # not sure how this would happen but if it does then just deny the redaction
-                logger.warning("No create event found for room %s", event.room_id)
-                return False
-            if create_event.sender == event.sender:
+        create_id = state[(EventTypes.Create, "")]
+        create_event = await self.store.get_event(create_id, allow_none=True)
+
+        if create_event is None:
+            # not sure how this would happen but if it does then just deny the redaction
+            logger.warning("No create event found for room %s", event.room_id)
+            return False
+
+        if create_event.room_version.msc4289_creator_power_enabled:
+            # per the spec, grant the creator infinite power level and all other users 0
+            if is_creator(create_event, event.sender):
                 return True
+            if pl_event is None:
+                # per the spec, users other than the room creator have power level
+                # 0, which is less than the default to redact events (50).
+                return False
+        else:
+            # per the spec, if a power level event isn't in the room, grant the creator
+            # level 100 (the default redaction level is 50) and all other users 0
+            if pl_event is None:
+                return create_event.sender == event.sender
 
         assert pl_event is not None
         sender_level = pl_event.content.get("users", {}).get(event.sender)

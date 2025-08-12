@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, Optional
 
 import requests
 import yaml
+from typing_extensions import Never
 
 _CONFLICTING_SHARED_SECRET_OPTS_ERROR = """\
 Conflicting options 'registration_shared_secret' and 'registration_shared_secret_path'
@@ -38,6 +39,10 @@ are both defined in config file.
 
 _NO_SHARED_SECRET_OPTS_ERROR = """\
 No 'registration_shared_secret' or 'registration_shared_secret_path' defined in config.
+"""
+
+_EMPTY_SHARED_SECRET_PATH_OPTS_ERROR = """\
+The secret given via `registration_shared_secret_path` must not be empty.
 """
 
 _DEFAULT_SERVER_URL = "http://localhost:8008"
@@ -170,6 +175,12 @@ def register_new_user(
     )
 
 
+def bail(err_msg: str) -> Never:
+    """Prints the given message to stderr and exits."""
+    print(err_msg, file=sys.stderr)
+    sys.exit(1)
+
+
 def main() -> None:
     logging.captureWarnings(True)
 
@@ -262,15 +273,20 @@ def main() -> None:
         assert config is not None
 
         secret = config.get("registration_shared_secret")
+        if not isinstance(secret, (str, type(None))):
+            bail("registration_shared_secret is not a string.")
         secret_file = config.get("registration_shared_secret_path")
-        if secret_file:
-            if secret:
-                print(_CONFLICTING_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-                sys.exit(1)
+        if not isinstance(secret_file, (str, type(None))):
+            bail("registration_shared_secret_path is not a string.")
+
+        if not secret and not secret_file:
+            bail(_NO_SHARED_SECRET_OPTS_ERROR)
+        elif secret and secret_file:
+            bail(_CONFLICTING_SHARED_SECRET_OPTS_ERROR)
+        elif not secret and secret_file:
             secret = _read_file(secret_file, "registration_shared_secret_path").strip()
-        if not secret:
-            print(_NO_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
-            sys.exit(1)
+            if not secret:
+                bail(_EMPTY_SHARED_SECRET_PATH_OPTS_ERROR)
 
     if args.password_file:
         password = _read_file(args.password_file, "password-file").strip()

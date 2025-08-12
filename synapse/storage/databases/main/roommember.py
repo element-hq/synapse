@@ -201,6 +201,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             retcol="state_key",
         )
 
+    async def get_invited_users_in_room(self, room_id: str) -> StrCollection:
+        """Returns a list of users invited to the room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "type": EventTypes.Member,
+                "room_id": room_id,
+                "membership": Membership.INVITE,
+            },
+            retcol="state_key",
+            desc="get_invited_users_in_room",
+        )
+
     @cached()
     def get_user_in_room_with_profile(self, room_id: str, user_id: str) -> ProfileInfo:
         raise NotImplementedError()
