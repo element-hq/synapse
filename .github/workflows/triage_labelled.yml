@@ -11,7 +11,7 @@ jobs:
     if: >
       contains(github.event.issue.labels.*.name, 'X-Needs-Info')
     steps:
-      - uses: actions/add-to-project@5b1a254a3546aef88e0a7724a77a623fa2e47c36 # main (v1.0.2 + 10 commits)
+      - uses: actions/add-to-project@c0c5949b017d0d4a39f7ba888255881bdac2a823 # main (v1.0.2 + 10 commits)
         id: add_project
         with:
           project-url: "https://github.com/orgs/matrix-org/projects/67"
