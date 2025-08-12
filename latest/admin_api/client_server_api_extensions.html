@@ -175,38 +175,7 @@ account data on the admin's user account. </p>
 <p>To receive soft failed events in APIs like <code>/sync</code> and <code>/messages</code>, set <code>return_soft_failed_events</code>
 to <code>true</code> in the admin client config. When <code>false</code>, the normal behaviour of these endpoints is to
 exclude soft failed events.</p>
-<p><strong>Note</strong>: If the policy server flagged the event as spam and that caused soft failure, that will be indicated
-in the event's <code>unsigned</code> content like so:</p>
-<pre><code class="language-json">{
-  &quot;type&quot;: &quot;m.room.message&quot;,
-  &quot;other&quot;: &quot;event_fields_go_here&quot;,
-  &quot;unsigned&quot;: {
-    &quot;io.element.synapse.soft_failed&quot;: true,
-    &quot;io.element.synapse.policy_server_spammy&quot;: true
-  }
-}
-</code></pre>
 <p>Default: <code>false</code></p>
-<h2 id="see-events-marked-spammy-by-policy-servers"><a class="header" href="#see-events-marked-spammy-by-policy-servers">See events marked spammy by policy servers</a></h2>
-<p>Learn more about policy servers from <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4284">MSC4284</a>.</p>
-<p>Similar to <code>return_soft_failed_events</code>, clients logged in with admin accounts can see events which were
-flagged by the policy server as spammy (and thus soft failed) by setting <code>return_policy_server_spammy_events</code>
-to <code>true</code>.</p>
-<p><code>return_policy_server_spammy_events</code> may be <code>true</code> while <code>return_soft_failed_events</code> is <code>false</code> to only see
-policy server-flagged events. When <code>return_soft_failed_events</code> is <code>true</code> however, <code>return_policy_server_spammy_events</code>
-is always <code>true</code>.</p>
-<p>Events which were flagged by the policy will be flagged as <code>io.element.synapse.policy_server_spammy</code> in the
-event's <code>unsigned</code> content, like so:</p>
-<pre><code class="language-json">{
-  &quot;type&quot;: &quot;m.room.message&quot;,
-  &quot;other&quot;: &quot;event_fields_go_here&quot;,
-  &quot;unsigned&quot;: {
-    &quot;io.element.synapse.soft_failed&quot;: true,
-    &quot;io.element.synapse.policy_server_spammy&quot;: true
-  }
-}
-</code></pre>
-<p>Default: <code>true</code> if <code>return_soft_failed_events</code> is <code>true</code>, otherwise <code>false</code></p>
 
                     </main>
 

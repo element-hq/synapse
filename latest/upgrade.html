@@ -285,57 +285,6 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
-<h1 id="upgrading-to-v11360"><a class="header" href="#upgrading-to-v11360">Upgrading to v1.136.0</a></h1>
-<h2 id="deprecate-run_as_background_process-exported-as-part-of-the-module-api-interface-in-favor-of-moduleapirun_as_background_process"><a class="header" href="#deprecate-run_as_background_process-exported-as-part-of-the-module-api-interface-in-favor-of-moduleapirun_as_background_process">Deprecate <code>run_as_background_process</code> exported as part of the module API interface in favor of <code>ModuleApi.run_as_background_process</code></a></h2>
-<p>The <code>run_as_background_process</code> function is now a method of the <code>ModuleApi</code> class. If
-you were using the function directly from the module API, it will continue to work fine
-but the background process metrics will not include an accurate <code>server_name</code> label.
-This kind of metric labeling isn't relevant for many use cases and is used to
-differentiate Synapse instances running in the same Python process (relevant to Synapse
-Pro: Small Hosts). We recommend updating your usage to use the new
-<code>ModuleApi.run_as_background_process</code> method to stay on top of future changes.</p>
-<details>
-<summary>Example <code>run_as_background_process</code> upgrade</summary>
-<p>Before:</p>
-<pre><code class="language-python">class MyModule:
-    def __init__(self, module_api: ModuleApi) -&gt; None:
-        run_as_background_process(__name__ + &quot;:setup_database&quot;, self.setup_database)
-</code></pre>
-<p>After:</p>
-<pre><code class="language-python">class MyModule:
-    def __init__(self, module_api: ModuleApi) -&gt; None:
-        module_api.run_as_background_process(__name__ + &quot;:setup_database&quot;, self.setup_database)
-</code></pre>
-</details>
-<h2 id="metric-labels-have-changed-on-synapse_federation_last_received_pdu_time-and-synapse_federation_last_sent_pdu_time"><a class="header" href="#metric-labels-have-changed-on-synapse_federation_last_received_pdu_time-and-synapse_federation_last_sent_pdu_time">Metric labels have changed on <code>synapse_federation_last_received_pdu_time</code> and <code>synapse_federation_last_sent_pdu_time</code></a></h2>
-<p>Previously, the <code>synapse_federation_last_received_pdu_time</code> and
-<code>synapse_federation_last_sent_pdu_time</code> metrics both used the <code>server_name</code> label to
-differentiate between different servers that we send and receive events from.</p>
-<p>Since we're now using the <code>server_name</code> label to differentiate between different Synapse
-homeserver instances running in the same process, these metrics have been changed as follows:</p>
-<ul>
-<li><code>synapse_federation_last_received_pdu_time</code> now uses the <code>origin_server_name</code> label</li>
-<li><code>synapse_federation_last_sent_pdu_time</code> now uses the <code>destination_server_name</code> label</li>
-</ul>
-<p>The Grafana dashboard JSON in <code>contrib/grafana/synapse.json</code> has been updated to reflect
-this change but you will need to manually update your own existing Grafana dashboards
-using these metrics.</p>
-<h2 id="stable-integration-with-matrix-authentication-service"><a class="header" href="#stable-integration-with-matrix-authentication-service">Stable integration with Matrix Authentication Service</a></h2>
-<p>Support for <a href="https://github.com/element-hq/matrix-authentication-service">Matrix Authentication Service (MAS)</a> is now stable, with a simplified configuration.
-This stable integration requires MAS 0.20.0 or later.</p>
-<p>The existing <code>experimental_features.msc3861</code> configuration option is now deprecated and will be removed in Synapse v1.137.0.</p>
-<p>Synapse deployments already using MAS should now use the new configuration options:</p>
-<pre><code class="language-yaml">matrix_authentication_service:
-  # Enable the MAS integration
-  enabled: true
-  # The base URL where Synapse will contact MAS
-  endpoint: http://localhost:8080
-  # The shared secret used to authenticate MAS requests, must be the same as `matrix.secret` in the MAS configuration
-  # See https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#matrix
-  secret: &quot;asecurerandomsecretstring&quot;
-</code></pre>
-<p>They must remove the <code>experimental_features.msc3861</code> configuration option from their configuration.</p>
-<p>They can also remove the client previously used by Synapse <a href="https://element-hq.github.io/matrix-authentication-service/reference/configuration.html#clients">in the MAS configuration</a> as it is no longer in use.</p>
 <h1 id="upgrading-to-v11350"><a class="header" href="#upgrading-to-v11350">Upgrading to v1.135.0</a></h1>
 <h2 id="on_user_registration-module-api-callback-may-now-run-on-any-worker"><a class="header" href="#on_user_registration-module-api-callback-may-now-run-on-any-worker"><code>on_user_registration</code> module API callback may now run on any worker</a></h2>
 <p>Previously, the <code>on_user_registration</code> callback would only run on the main
@@ -348,10 +297,10 @@ native ICU library on your system is no longer required.</p>
 <h1 id="upgrading-to-v11300"><a class="header" href="#upgrading-to-v11300">Upgrading to v1.130.0</a></h1>
 <h2 id="documented-endpoint-which-can-be-delegated-to-a-federation-worker"><a class="header" href="#documented-endpoint-which-can-be-delegated-to-a-federation-worker">Documented endpoint which can be delegated to a federation worker</a></h2>
 <p>The endpoint <code>^/_matrix/federation/v1/version$</code> can be delegated to a federation
-worker. This is not new behaviour, but had not been documented yet. The
-<a href="workers.html#synapseappgeneric_worker">list of delegatable endpoints</a> has
+worker. This is not new behaviour, but had not been documented yet. The 
+<a href="workers.html#synapseappgeneric_worker">list of delegatable endpoints</a> has 
 been updated to include it. Make sure to check your reverse proxy rules if you
-are using workers.</p>
+are using workers. </p>
 <h1 id="upgrading-to-v11260"><a class="header" href="#upgrading-to-v11260">Upgrading to v1.126.0</a></h1>
 <h2 id="room-list-publication-rules-change"><a class="header" href="#room-list-publication-rules-change">Room list publication rules change</a></h2>
 <p>The default <a href="usage/configuration/config_documentation.html#room_list_publication_rules"><code>room_list_publication_rules</code></a> setting was changed to disallow

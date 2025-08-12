@@ -659,54 +659,6 @@ shown.</p>
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 </code></pre>
 <hr />
-<h3 id="http_proxy"><a class="header" href="#http_proxy"><code>http_proxy</code></a></h3>
-<p><em>(string|null)</em> Proxy server to use for HTTP requests.
-For more details, see the <a href="../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
-<p>Example configuration:</p>
-<pre><code class="language-yaml">http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
-</code></pre>
-<hr />
-<h3 id="https_proxy"><a class="header" href="#https_proxy"><code>https_proxy</code></a></h3>
-<p><em>(string|null)</em> Proxy server to use for HTTPS requests.
-For more details, see the <a href="../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
-<p>Example configuration:</p>
-<pre><code class="language-yaml">https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
-</code></pre>
-<hr />
-<h3 id="no_proxy_hosts"><a class="header" href="#no_proxy_hosts"><code>no_proxy_hosts</code></a></h3>
-<p><em>(array)</em> List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
-For more details, see the <a href="../../setup/forward_proxy.html">forward proxy documentation</a>. There is no default for this option.</p>
-<p>Example configuration:</p>
-<pre><code class="language-yaml">no_proxy_hosts:
-- master.hostname.example.com
-- 10.1.0.0/16
-- 172.30.0.0/16
-</code></pre>
-<hr />
-<h3 id="matrix_authentication_service"><a class="header" href="#matrix_authentication_service"><code>matrix_authentication_service</code></a></h3>
-<p><em>(object)</em> The <code>matrix_authentication_service</code> setting configures integration with <a href="https://github.com/element-hq/matrix-authentication-service">Matrix Authentication Service (MAS)</a>.</p>
-<p>This setting has the following sub-options:</p>
-<ul>
-<li>
-<p><code>enabled</code> (boolean): Whether or not to enable the MAS integration. If this is set to <code>false</code>, Synapse will use its legacy internal authentication API. Defaults to <code>false</code>.</p>
-</li>
-<li>
-<p><code>endpoint</code> (string): The URL where Synapse can reach MAS. This <em>must</em> have the <code>discovery</code> and <code>oauth</code> resources mounted. Defaults to <code>&quot;http://localhost:8080&quot;</code>.</p>
-</li>
-<li>
-<p><code>secret</code> (string|null): A shared secret that will be used to authenticate requests from and to MAS.</p>
-</li>
-<li>
-<p><code>secret_path</code> (string|null): Alternative to <code>secret</code>, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.</p>
-</li>
-</ul>
-<p>Example configuration:</p>
-<pre><code class="language-yaml">matrix_authentication_service:
-  enabled: true
-  secret: someverysecuresecret
-  endpoint: http://localhost:8080
-</code></pre>
-<hr />
 <h3 id="dummy_events_threshold"><a class="header" href="#dummy_events_threshold"><code>dummy_events_threshold</code></a></h3>
 <p><em>(integer)</em> Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an <code>org.matrix.dummy_event</code> event, which will reduce the forward extremities in the room.</p>
 <p>This setting defines the threshold (i.e. number of forward extremities in the room) at which dummy events are sent.</p>
@@ -1921,29 +1873,6 @@ Setting this to a high value allows users to report content quickly, possibly in
 <pre><code class="language-yaml">rc_reports:
   per_second: 2.0
   burst_count: 20.0
-</code></pre>
-<hr />
-<h3 id="rc_room_creation"><a class="header" href="#rc_room_creation"><code>rc_room_creation</code></a></h3>
-<p><em>(object)</em> Sets rate limits for how often users are able to create rooms.</p>
-<p>This setting has the following sub-options:</p>
-<ul>
-<li>
-<p><code>per_second</code> (number): Maximum number of requests a client can send per second.</p>
-</li>
-<li>
-<p><code>burst_count</code> (number): Maximum number of requests a client can send before being throttled.</p>
-</li>
-</ul>
-<p>Default configuration:</p>
-<pre><code class="language-yaml">rc_room_creation:
-  per_user:
-    per_second: 0.016
-    burst_count: 10.0
-</code></pre>
-<p>Example configuration:</p>
-<pre><code class="language-yaml">rc_room_creation:
-  per_second: 1.0
-  burst_count: 5.0
 </code></pre>
 <hr />
 <h3 id="federation_rr_transactions_per_room_per_second"><a class="header" href="#federation_rr_transactions_per_room_per_second"><code>federation_rr_transactions_per_room_per_second</code></a></h3>
