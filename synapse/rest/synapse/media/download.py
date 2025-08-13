@@ -51,7 +51,12 @@ class DownloadResource(DirectServeJsonResource):
             "This resource should only be mounted on workers that can load the media repo"
         )
 
-        DirectServeJsonResource.__init__(self)
+        DirectServeJsonResource.__init__(
+            self,
+            # It is useful to have the tracing context on this endpoint as it
+            # can help debug federation issues
+            extract_context=True,
+        )
 
         self._clock = hs.get_clock()
         self._media_repository = hs.get_media_repository()
