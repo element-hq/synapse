@@ -735,7 +735,7 @@ class EventClientSerializer:
         """
         set_tag(
             SynapseTags.FUNC_ARG_PREFIX + "events.length",
-            len(events),
+            str(len(events)),
         )
 
         return [
