@@ -28,7 +28,7 @@ import shutil
 from http.client import TEMPORARY_REDIRECT
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
-from uuid import uuid4
+from urllib.parse import urlencode
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -48,7 +48,7 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.repository import ThumbnailRequirement
-from synapse.http.server import finish_request, respond_with_json, respond_with_redirect
+from synapse.http.server import respond_with_json, respond_with_redirect
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
 from synapse.logging.opentracing import trace
@@ -59,12 +59,12 @@ from synapse.media._base import (
     check_for_cached_entry_and_respond,
     get_filename_from_headers,
     respond_404,
+    respond_with_multipart_location,
     respond_with_multipart_responder,
     respond_with_responder,
 )
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import (
-    CRLF,
     MediaStorage,
     SHA256TransparentIOReader,
     SHA256TransparentIOWriter,
@@ -506,42 +506,10 @@ class MediaRepository:
         self.mark_recently_accessed(None, media_id)
 
         if self.hs.config.media.use_redirect and may_redirect:
-            # XXX: One potential improvement here would be to round the `exp` to
-            # the nearest 5 minutes, so that a CDN/cache can always cache the
-            # media for a little bit
-            exp = self.clock.time_msec() + self.hs.config.media.redirect_ttl_ms
-            key = self.download_media_key(media_id, exp, name)
-            signature = self.compute_media_request_signature(key)
-
-            # This *could* in theory be a relative redirect, but Synapse has a
-            # bug where it always treats it as absolute. Because this is used
-            # for federation request, we can't just fix the bug in Synapse and
-            # use a relative redirect, we have to wait for the fix to be rolled
-            # out across the federation.
-            location = f"{self.hs.config.server.public_baseurl}_synapse/media/download/{media_id}"
-            if name:
-                location = f"{location}/{name}"
-            location = f"{location}?exp={exp}&sig={signature}"
+            location = self.signed_location_for_media(media_id, name)
 
             if federation:
-                # In case of a federation request, we respond with the (empty)
-                # media metadata as a JSON object in the first part, and a
-                # `Location` header as the second part.
-                boundary = uuid4().hex.encode("ascii")  # Pick a random boundary
-                request.setResponseCode(200)
-                request.setHeader(
-                    b"Content-Type",
-                    b"multipart/mixed; boundary=" + boundary,
-                )
-                request.write(b"--" + boundary + CRLF)
-                request.write(b"Content-Type: application/json" + CRLF + CRLF)
-                # This is an empty JSON object for now, we don't have any
-                # metadata associated with media yet
-                request.write(b"{}")
-                request.write(CRLF + b"--" + boundary + CRLF)
-                request.write(b"Location: " + location.encode("ascii") + CRLF + CRLF)
-                request.write(CRLF + b"--" + boundary + b"--" + CRLF)
-                finish_request(request)
+                respond_with_multipart_location(request, location.encode("ascii"))
 
             else:
                 respond_with_redirect(
@@ -1622,6 +1590,36 @@ class MediaRepository:
             return ("download", media_id, str(exp), name)
 
         return ("download", media_id, str(exp))
+
+    def signed_location_for_media(
+        self,
+        media_id: str,
+        name: Optional[str] = None,
+    ) -> str:
+        """Get the signed location for a media download
+
+        That URL will serve the media with no extra authentication for a limited
+        time, allowing the media to be cached by a CDN more easily.
+        """
+
+        # XXX: One potential improvement here would be to round the `exp` to
+        # the nearest 5 minutes, so that a CDN/cache can always cache the
+        # media for a little bit
+        exp = self.clock.time_msec() + self.hs.config.media.redirect_ttl_ms
+        key = self.download_media_key(
+            media_id=media_id,
+            exp=exp,
+            name=name,
+        )
+        signature = self.compute_media_request_signature(key)
+
+        # This *could* in theory be a relative redirect, but Synapse has a
+        # bug where it always treats it as absolute. Because this is used
+        # for federation request, we can't just fix the bug in Synapse and
+        # use a relative redirect, we have to wait for the fix to be rolled
+        # out across the federation.
+        name_path = f"/{name}" if name else ""
+        return f"{self.hs.config.server.public_baseurl}_synapse/media/download/{media_id}{name_path}?exp={exp}&sig={signature}"
 
     def compute_media_request_signature(self, payload: StrSequence) -> str:
         """Compute the signature for a signed media request

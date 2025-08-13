@@ -37,6 +37,7 @@ class DownloadResource(DirectServeJsonResource):
     expires after a set amount of time.
 
         GET /_synapse/media/download/{media_id}?exp={exp}&sig={sig}
+        GET /_synapse/media/download/{media_id}/{name}?exp={exp}&sig={sig}
 
     The intent of this resource is to allow the federation and client media APIs
     to issue redirects to a signed URL that can then be cached by a CDN. This
