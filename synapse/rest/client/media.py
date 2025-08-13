@@ -247,7 +247,7 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request, media_id, file_name, max_timeout_ms, may_redirect=True
             )
         else:
             ip_address = request.getClientAddress().host

@@ -106,4 +106,5 @@ class DownloadResource(DirectServeJsonResource):
             name=name,
             max_timeout_ms=0,  # If we got here, the media finished uploading
             federation=False,  # This changes the response to be multipart; we explicitly don't want that
+            may_redirect=False,  # We're already on the redirected URL, we don't want to redirect again
         )

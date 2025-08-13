@@ -826,7 +826,12 @@ class FederationMediaDownloadServlet(BaseFederationServerServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
         await self.media_repo.get_local_media(
-            request, media_id, None, max_timeout_ms, federation=True
+            request,
+            media_id,
+            None,
+            max_timeout_ms,
+            federation=True,
+            may_redirect=True,
         )
 
 
