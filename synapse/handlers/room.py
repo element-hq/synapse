@@ -419,34 +419,27 @@ class RoomCreationHandler:
             old_room_id, new_room_id
         )
 
-        # finally, shut down the PLs in the old room, and update them in the new
-        # room.
-        await self._update_upgraded_room_pls(
+        # finally, shut down the PLs in the old room
+        await self._shutdown_power_levels_in_upgraded_room(
             requester,
             old_room_id,
-            new_room_id,
             old_room_state,
-            additional_creators,
         )
 
         return new_room_id
 
-    async def _update_upgraded_room_pls(
+    async def _shutdown_power_levels_in_upgraded_room(
         self,
         requester: Requester,
         old_room_id: str,
-        new_room_id: str,
         old_room_state: StateMap[str],
-        additional_creators: Optional[List[str]],
     ) -> None:
-        """Send updated power levels in both rooms after an upgrade
+        """Send updated power levels in the old room after it has been upgraded
 
         Args:
             requester: the user requesting the upgrade
             old_room_id: the id of the room to be replaced
-            new_room_id: the id of the replacement room
             old_room_state: the state map for the old room
-            additional_creators: Additional creators in the new room.
         Raises:
             ShadowBanError if the requester is shadow-banned.
         """
@@ -501,28 +494,6 @@ class RoomCreationHandler:
                 )
             except AuthError as e:
                 logger.warning("Unable to update PLs in old room: %s", e)
-
-        new_room_version = await self.store.get_room_version(new_room_id)
-        if new_room_version.msc4289_creator_power_enabled:
-            self._remove_creators_from_pl_users_map(
-                old_room_pl_state.content.get("users", {}),
-                requester.user.to_string(),
-                additional_creators,
-            )
-
-        await self.event_creation_handler.create_and_send_nonmember_event(
-            requester,
-            {
-                "type": EventTypes.PowerLevels,
-                "state_key": "",
-                "room_id": new_room_id,
-                "sender": requester.user.to_string(),
-                "content": copy_and_fixup_power_levels_contents(
-                    old_room_pl_state.content
-                ),
-            },
-            ratelimit=False,
-        )
 
     def _calculate_upgraded_room_creation_content(
         self,
@@ -686,7 +657,6 @@ class RoomCreationHandler:
             user_power_levels[user_id] = needed_power_level
 
         if new_room_version.msc4289_creator_power_enabled:
-            # the creator(s) cannot be in the users map
             self._remove_creators_from_pl_users_map(
                 user_power_levels,
                 user_id,
