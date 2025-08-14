@@ -415,10 +415,9 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
         # Part 2: Redirect URL
         self.assertEqual(lines[4], f"--{boundary}")  # Boundary for the next part
         # The Location header contains dynamic parts (exp, sig), so use regex
-        # Note: thumbnail URL includes width, height, method, and type as path parameters
         self.assertRegex(
             lines[5],
-            rf"^Location: https://test/_synapse/media/thumbnail/{content_uri.media_id}/width=32&height=32&method=scale&type=image%2Fpng\?exp=\d+&sig=\w+$",
+            rf"^Location: https://test/_synapse/media/thumbnail/{content_uri.media_id}/[^?]+\?exp=\d+&sig=\w+$",
         )
         self.assertEqual(lines[6], "")  # First empty line after Location header
         self.assertEqual(lines[7], "")  # Second empty line after Location header

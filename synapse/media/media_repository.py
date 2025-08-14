@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import base64
 import errno
 import hashlib
 import hmac
@@ -1650,7 +1651,9 @@ class MediaRepository:
         # the nearest 5 minutes, so that a CDN/cache can always cache the
         # media for a little bit
         exp = self.clock.time_msec() + self.hs.config.media.redirect_ttl_ms
-        parameters_str = urlencode(parameters)
+        parameters_str = base64.urlsafe_b64encode(
+            urlencode(sorted(parameters.items())).encode("utf-8")
+        ).decode("ascii")
         key = self.thumbnail_media_key(
             media_id=media_id,
             parameters=parameters_str,

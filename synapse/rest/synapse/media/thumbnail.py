@@ -13,6 +13,7 @@
 #
 #
 
+import base64
 import logging
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
@@ -43,16 +44,17 @@ class ThumbnailResource(DirectServeJsonResource):
     Serves thumbnails from the media repository, with a temporary signed URL
     which expires after a set amount of time.
 
-        GET /_synapse/media/thumbnail/{media_id}/height={height}&width={width}&...?exp={exp}&sig={sig}
+        GET /_synapse/media/thumbnail/{media_id}/{parameters}?exp={exp}&sig={sig}
 
     The intent of this resource is to allow the federation and client media APIs
     to issue redirects to a signed URL that can then be cached by a CDN. This
     endpoint doesn't require any extra header, and is authenticated using the
     signature in the URL parameters.
 
-    The reason the `height`, `width` and other parameters are not part of the
-    query string but instead part of the path is to ignoring the query string
-    when caching the URL, which is possible with some CDNs.
+    The parameters are encoded as a form-urlencoded then base64 encoded string.
+    This avoids any automatic url decoding Twisted might do. The reason they are
+    part of the URL and not the query string is to ignore the query string when
+    caching the URL, which is possible with some CDNs.
     """
 
     isLeaf = True
@@ -111,7 +113,7 @@ class ThumbnailResource(DirectServeJsonResource):
             raise NotFoundError()
 
         # Now parse and check the parameters
-        args = parse_qs(parameters)
+        args = parse_qs(base64.urlsafe_b64decode(parameters))
         width = parse_integer_from_args(args, "width", required=True)
         height = parse_integer_from_args(args, "height", required=True)
         method = parse_string_from_args(args, "method", "scale")
