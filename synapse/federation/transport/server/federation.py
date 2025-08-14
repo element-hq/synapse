@@ -878,11 +878,27 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
 
         if self.dynamic_thumbnails:
             await self.thumbnail_provider.select_or_generate_local_thumbnail(
-                request, media_id, width, height, method, m_type, max_timeout_ms, True
+                request,
+                media_id,
+                width,
+                height,
+                method,
+                m_type,
+                max_timeout_ms,
+                for_federation=True,
+                may_redirect=True,
             )
         else:
             await self.thumbnail_provider.respond_local_thumbnail(
-                request, media_id, width, height, method, m_type, max_timeout_ms, True
+                request,
+                media_id,
+                width,
+                height,
+                method,
+                m_type,
+                max_timeout_ms,
+                for_federation=True,
+                may_redirect=True,
             )
         self.media_repo.mark_recently_accessed(None, media_id)
 

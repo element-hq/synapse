@@ -1621,6 +1621,50 @@ class MediaRepository:
         name_path = f"/{name}" if name else ""
         return f"{self.hs.config.server.public_baseurl}_synapse/media/download/{media_id}{name_path}?exp={exp}&sig={signature}"
 
+    def thumbnail_media_key(
+        self, media_id: str, parameters: str, exp: int
+    ) -> StrSequence:
+        """Get the key used for the thumbnail media signature
+
+        Args:
+            media_id: The media ID of the content. (This is the same as
+                the file_id for local content.)
+            parameters: The parameters of the thumbnail request as a string,
+                e.g. "width=100&height=100"
+            exp: The expiration time of the signature, as a unix timestamp in ms.
+        """
+        return ("thumbnail", media_id, parameters, str(exp))
+
+    def signed_location_for_thumbnail(
+        self,
+        media_id: str,
+        parameters: dict[str, str],
+    ) -> str:
+        """Get the signed location for a thumbnail media
+
+        That URL will serve the media with no extra authentication for a limited
+        time, allowing the media to be cached by a CDN more easily.
+        """
+
+        # XXX: One potential improvement here would be to round the `exp` to
+        # the nearest 5 minutes, so that a CDN/cache can always cache the
+        # media for a little bit
+        exp = self.clock.time_msec() + self.hs.config.media.redirect_ttl_ms
+        parameters_str = urlencode(parameters)
+        key = self.thumbnail_media_key(
+            media_id=media_id,
+            parameters=parameters_str,
+            exp=exp,
+        )
+        signature = self.compute_media_request_signature(key)
+
+        # This *could* in theory be a relative redirect, but Synapse has a
+        # bug where it always treats it as absolute. Because this is used
+        # for federation request, we can't just fix the bug in Synapse and
+        # use a relative redirect, we have to wait for the fix to be rolled
+        # out across the federation.
+        return f"{self.hs.config.server.public_baseurl}_synapse/media/thumbnail/{media_id}/{parameters_str}?exp={exp}&sig={signature}"
+
     def compute_media_request_signature(self, payload: StrSequence) -> str:
         """Compute the signature for a signed media request
 

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from twisted.web.resource import Resource
 
 from .download import DownloadResource
+from .thumbnail import ThumbnailResource
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -42,3 +43,4 @@ class MediaResource(Resource):
 
         Resource.__init__(self)
         self.putChild(b"download", DownloadResource(hs))
+        self.putChild(b"thumbnail", ThumbnailResource(hs))

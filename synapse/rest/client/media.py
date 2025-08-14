@@ -170,7 +170,8 @@ class ThumbnailResource(RestServlet):
                     method,
                     m_type,
                     max_timeout_ms,
-                    False,
+                    for_federation=False,
+                    may_redirect=True,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -181,7 +182,8 @@ class ThumbnailResource(RestServlet):
                     method,
                     m_type,
                     max_timeout_ms,
-                    False,
+                    for_federation=False,
+                    may_redirect=True,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
