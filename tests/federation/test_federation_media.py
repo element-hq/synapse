@@ -186,6 +186,72 @@ class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
         self.assertEqual(channel.is_finished(), True)
         self.assertNotIn("body", channel.result)
 
+    @unittest.override_config(
+        {"media_redirect": {"enabled": True, "secret": "supersecret"}}
+    )
+    def test_signed_redirect(self) -> None:
+        """When media redirect are enabled, we should redirect to a signed URL"""
+        content = io.BytesIO(b"file_to_stream")
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "text/plain",
+                "test_upload",
+                content,
+                46,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+        # test with a text file
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
+        )
+        self.pump()
+        self.assertEqual(200, channel.code)
+
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        assert "multipart/mixed" in content_type[0]
+        assert "boundary" in content_type[0]
+
+        # extract boundary
+        boundary = content_type[0].split("boundary=")[1]
+        lines = channel.text_body.split("\r\n")
+
+        # Assert the structure of the multipart body line by line.
+        # Expected structure:
+        # --boundary_value
+        # Content-Type: application/json
+        #
+        # {}
+        # --boundary_value
+        # Location: signed_url
+        #
+        #
+        # --boundary_value--
+        # (potentially a final empty line if the body ends with \r\n)
+        self.assertEqual(len(lines), 10)
+
+        # Part 1: JSON metadata
+        self.assertEqual(lines[0], f"--{boundary}")
+        self.assertEqual(lines[1], "Content-Type: application/json")
+        self.assertEqual(lines[2], "")  # Empty line separating headers from body
+        self.assertEqual(lines[3], "{}")  # JSON body
+
+        # Part 2: Redirect URL
+        self.assertEqual(lines[4], f"--{boundary}")  # Boundary for the next part
+        # The Location header contains dynamic parts (exp, sig), so use regex
+        self.assertRegex(
+            lines[5],
+            rf"^Location: https://test/_synapse/media/download/{content_uri.media_id}\?exp=\d+&sig=\w+$",
+        )
+        self.assertEqual(lines[6], "")  # First empty line after Location header
+        self.assertEqual(lines[7], "")  # Second empty line after Location header
+
+        # Final boundary
+        self.assertEqual(lines[8], f"--{boundary}--")
+        self.assertEqual(lines[9], "")
+
 
 class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -293,3 +359,70 @@ class FederationThumbnailTest(unittest.FederatingHomeserverTestCase):
             small_png.expected_cropped in field for field in stripped_bytes
         )
         self.assertTrue(found_file)
+
+    @unittest.override_config(
+        {"media_redirect": {"enabled": True, "secret": "supersecret"}}
+    )
+    def test_thumbnail_signed_redirect(self) -> None:
+        """When media redirect are enabled, we should redirect to a signed URL for thumbnails"""
+        content = io.BytesIO(small_png.data)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_thumbnail",
+                content,
+                67,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+        # test with a thumbnail request
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/v1/media/thumbnail/{content_uri.media_id}?width=32&height=32&method=scale",
+        )
+        self.pump()
+        self.assertEqual(200, channel.code)
+
+        content_type = channel.headers.getRawHeaders("content-type")
+        assert content_type is not None
+        assert "multipart/mixed" in content_type[0]
+        assert "boundary" in content_type[0]
+
+        # extract boundary
+        boundary = content_type[0].split("boundary=")[1]
+        lines = channel.text_body.split("\r\n")
+
+        # Assert the structure of the multipart body line by line.
+        # Expected structure:
+        # --boundary_value
+        # Content-Type: application/json
+        #
+        # {}
+        # --boundary_value
+        # Location: signed_url
+        #
+        #
+        # --boundary_value--
+        # (potentially a final empty line if the body ends with \r\n)
+        self.assertEqual(len(lines), 10)
+
+        # Part 1: JSON metadata
+        self.assertEqual(lines[0], f"--{boundary}")
+        self.assertEqual(lines[1], "Content-Type: application/json")
+        self.assertEqual(lines[2], "")  # Empty line separating headers from body
+        self.assertEqual(lines[3], "{}")  # JSON body
+
+        # Part 2: Redirect URL
+        self.assertEqual(lines[4], f"--{boundary}")  # Boundary for the next part
+        # The Location header contains dynamic parts (exp, sig), so use regex
+        # Note: thumbnail URL includes width, height, method, and type as path parameters
+        self.assertRegex(
+            lines[5],
+            rf"^Location: https://test/_synapse/media/thumbnail/{content_uri.media_id}/width=32&height=32&method=scale&type=image%2Fpng\?exp=\d+&sig=\w+$",
+        )
+        self.assertEqual(lines[6], "")  # First empty line after Location header
+        self.assertEqual(lines[7], "")  # Second empty line after Location header
+
+        # Final boundary
+        self.assertEqual(lines[8], f"--{boundary}--")
+        self.assertEqual(lines[9], "")
