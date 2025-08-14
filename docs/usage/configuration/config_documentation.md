@@ -2190,9 +2190,9 @@ This setting has the following sub-options:
 
 * `enabled` (boolean): Enables the media redirect feature. If enabled, you must specify a `media_redirect.secret` or `media_redirect.secret_path`. Defaults to `false`.
 
-* `secret` (string): Secret used to sign media redirect URLs. This must be set if `media_redirect.enabled` is set. Defaults to `null`.
+* `secret` (string|null): Secret used to sign media redirect URLs. This must be set if `media_redirect.enabled` is set. Defaults to `null`.
 
-* `secret_path` (string): An alternative to `media_redirect.secret` that specifies a file containing the secret. Defaults to `null`.
+* `secret_path` (string|null): An alternative to `media_redirect.secret` that specifies a file containing the secret. Defaults to `null`.
 
 * `ttl` (duration): How long the redirect URLs should be valid for. Defaults to `"10m"`.
 
