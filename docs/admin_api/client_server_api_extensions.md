@@ -22,4 +22,46 @@ To receive soft failed events in APIs like `/sync` and `/messages`, set `return_
 to `true` in the admin client config. When `false`, the normal behaviour of these endpoints is to
 exclude soft failed events.
 
+**Note**: If the policy server flagged the event as spam and that caused soft failure, that will be indicated
+in the event's `unsigned` content like so:
+
+```json
+{
+  "type": "m.room.message",
+  "other": "event_fields_go_here",
+  "unsigned": {
+    "io.element.synapse.soft_failed": true,
+    "io.element.synapse.policy_server_spammy": true
+  }
+}
+```
+
 Default: `false`
+
+## See events marked spammy by policy servers
+
+Learn more about policy servers from [MSC4284](https://github.com/matrix-org/matrix-spec-proposals/pull/4284).
+
+Similar to `return_soft_failed_events`, clients logged in with admin accounts can see events which were
+flagged by the policy server as spammy (and thus soft failed) by setting `return_policy_server_spammy_events`
+to `true`.
+
+`return_policy_server_spammy_events` may be `true` while `return_soft_failed_events` is `false` to only see
+policy server-flagged events. When `return_soft_failed_events` is `true` however, `return_policy_server_spammy_events`
+is always `true`.
+
+Events which were flagged by the policy will be flagged as `io.element.synapse.policy_server_spammy` in the
+event's `unsigned` content, like so:
+
+```json
+{
+  "type": "m.room.message",
+  "other": "event_fields_go_here",
+  "unsigned": {
+    "io.element.synapse.soft_failed": true,
+    "io.element.synapse.policy_server_spammy": true
+  }
+}
+```
+
+Default: `true` if `return_soft_failed_events` is `true`, otherwise `false`

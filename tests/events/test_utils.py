@@ -822,6 +822,32 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
                 "unsigned": {"io.element.synapse.soft_failed": True},
             },
         )
+        self.assertEqual(
+            self.serialize(
+                MockEvent(
+                    type="foo",
+                    event_id="test",
+                    room_id="!foo:bar",
+                    content={"foo": "bar"},
+                    internal_metadata={
+                        "soft_failed": True,
+                        "policy_server_spammy": True,
+                    },
+                ),
+                [],
+                True,
+            ),
+            {
+                "type": "foo",
+                "event_id": "test",
+                "room_id": "!foo:bar",
+                "content": {"foo": "bar"},
+                "unsigned": {
+                    "io.element.synapse.soft_failed": True,
+                    "io.element.synapse.policy_server_spammy": True,
+                },
+            },
+        )
 
     def test_make_serialize_config_for_admin_retains_other_fields(self) -> None:
         non_default_config = SerializeEventConfig(

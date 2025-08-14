@@ -22,7 +22,7 @@
 import logging
 import random
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from canonicaljson import encode_canonical_json
 
@@ -55,7 +55,11 @@ from synapse.api.urls import ConsentURIBuilder
 from synapse.event_auth import validate_event_for_room_version
 from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
-from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    EventContext,
+    UnpersistedEventContext,
+    UnpersistedEventContextBase,
+)
 from synapse.events.utils import SerializeEventConfig, maybe_upsert_event_field
 from synapse.events.validator import EventValidator
 from synapse.handlers.directory import DirectoryHandler
@@ -63,10 +67,10 @@ from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.replication.http.send_event import ReplicationSendEventRestServlet
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
+    JsonDict,
     PersistedEventPosition,
     Requester,
     RoomAlias,
@@ -501,7 +505,6 @@ class EventCreationHandler:
 
         self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
 
-        self.send_event = ReplicationSendEventRestServlet.make_client(hs)
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
         self.request_ratelimiter = hs.get_request_ratelimiter()
@@ -644,40 +647,51 @@ class EventCreationHandler:
         """
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
-        requester_suspended = await self.store.get_user_suspended_status(
-            requester.user.to_string()
+        # The requester may be a regular user, but puppeted by the server.
+        request_by_server = (
+            requester.authenticated_entity == self.hs.config.server.server_name
         )
-        if requester_suspended:
-            # We want to allow suspended users to perform "corrective" actions
-            # asked of them by server admins, such as redact their messages and
-            # leave rooms.
-            if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
-                if event_dict["type"] == "m.room.redaction":
-                    event = await self.store.get_event(
-                        event_dict["content"]["redacts"], allow_none=True
-                    )
-                    if event:
-                        if event.sender != requester.user.to_string():
+
+        # If the request is initiated by the server, ignore whether the
+        # requester or target is suspended.
+        if not request_by_server:
+            requester_suspended = await self.store.get_user_suspended_status(
+                requester.user.to_string()
+            )
+            if requester_suspended:
+                # We want to allow suspended users to perform "corrective" actions
+                # asked of them by server admins, such as redact their messages and
+                # leave rooms.
+                if event_dict["type"] in ["m.room.redaction", "m.room.member"]:
+                    if event_dict["type"] == "m.room.redaction":
+                        event = await self.store.get_event(
+                            event_dict["content"]["redacts"], allow_none=True
+                        )
+                        if event:
+                            if event.sender != requester.user.to_string():
+                                raise SynapseError(
+                                    403,
+                                    "You can only redact your own events while account is suspended.",
+                                    Codes.USER_ACCOUNT_SUSPENDED,
+                                )
+                    if event_dict["type"] == "m.room.member":
+                        if event_dict["content"]["membership"] != "leave":
                             raise SynapseError(
                                 403,
-                                "You can only redact your own events while account is suspended.",
+                                "Changing membership while account is suspended is not allowed.",
                                 Codes.USER_ACCOUNT_SUSPENDED,
                             )
-                if event_dict["type"] == "m.room.member":
-                    if event_dict["content"]["membership"] != "leave":
-                        raise SynapseError(
-                            403,
-                            "Changing membership while account is suspended is not allowed.",
-                            Codes.USER_ACCOUNT_SUSPENDED,
-                        )
-            else:
-                raise SynapseError(
-                    403,
-                    "Sending messages while account is suspended is not allowed.",
-                    Codes.USER_ACCOUNT_SUSPENDED,
-                )
+                else:
+                    raise SynapseError(
+                        403,
+                        "Sending messages while account is suspended is not allowed.",
+                        Codes.USER_ACCOUNT_SUSPENDED,
+                    )
 
-        if event_dict["type"] == EventTypes.Create and event_dict["state_key"] == "":
+        is_create_event = (
+            event_dict["type"] == EventTypes.Create and event_dict["state_key"] == ""
+        )
+        if is_create_event:
             room_version_id = event_dict["content"]["room_version"]
             maybe_room_version_obj = KNOWN_ROOM_VERSIONS.get(room_version_id)
             if not maybe_room_version_obj:
@@ -783,6 +797,7 @@ class EventCreationHandler:
         """
         # the only thing the user can do is join the server notices room.
         if builder.type == EventTypes.Member:
+            assert builder.room_id is not None
             membership = builder.content.get("membership", None)
             if membership == Membership.JOIN:
                 return await self.store.is_server_notice_room(builder.room_id)
@@ -1101,6 +1116,9 @@ class EventCreationHandler:
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)
                 if not policy_allowed:
+                    # We shouldn't need to set the metadata because the raise should
+                    # cause the request to be denied, but just in case:
+                    event.internal_metadata.policy_server_spammy = True
                     logger.warning(
                         "Event not allowed by policy server, rejecting %s",
                         event.event_id,
@@ -1245,13 +1263,40 @@ class EventCreationHandler:
                 for_verification=False,
             )
 
+        if (
+            builder.room_version.msc4291_room_ids_as_hashes
+            and builder.type == EventTypes.Create
+            and builder.is_state()
+        ):
+            if builder.room_id is not None:
+                raise SynapseError(
+                    400,
+                    "Cannot resend m.room.create event",
+                    Codes.INVALID_PARAM,
+                )
+        else:
+            assert builder.room_id is not None
+
         if prev_event_ids is not None:
             assert len(prev_event_ids) <= 10, (
                 "Attempting to create an event with %i prev_events"
                 % (len(prev_event_ids),)
             )
         else:
-            prev_event_ids = await self.store.get_prev_events_for_room(builder.room_id)
+            if builder.room_id:
+                prev_event_ids = await self.store.get_prev_events_for_room(
+                    builder.room_id
+                )
+            else:
+                prev_event_ids = []  # can only happen for the create event in MSC4291 rooms
+
+        if builder.type == EventTypes.Create and builder.is_state():
+            if len(prev_event_ids) != 0:
+                raise SynapseError(
+                    400,
+                    "Cannot resend m.room.create event",
+                    Codes.INVALID_PARAM,
+                )
 
         # We now ought to have some `prev_events` (unless it's a create event).
         #
@@ -1510,6 +1555,98 @@ class EventCreationHandler:
         ).addErrback(unwrapFirstError)
 
         return result
+
+    async def create_and_send_new_client_events(
+        self,
+        requester: Requester,
+        room_id: str,
+        prev_event_id: Optional[str],
+        event_dicts: Sequence[JsonDict],
+        ratelimit: bool = True,
+        ignore_shadow_ban: bool = False,
+    ) -> None:
+        """Helper to create and send a batch of new client events.
+
+        This supports sending membership events in very limited circumstances
+        (namely that the event is valid as is and doesn't need federation
+        requests or anything). Callers should prefer to use `update_membership`,
+        which correctly handles membership events in all cases. We allow
+        sending membership events here as its useful when copying e.g. bans
+        between rooms.
+
+        All other events and state events are supported.
+
+        Args:
+            requester: The requester sending the events.
+            room_id: The room ID to send the events in.
+            prev_event_id: The event ID to use as the previous event for the first
+                of the events, must have already been persisted.
+            event_dicts: A sequence of event dictionaries to create and send.
+            ratelimit: Whether to rate limit this send.
+            ignore_shadow_ban: True if shadow-banned users should be allowed to
+                send these events.
+        """
+
+        if not event_dicts:
+            # Nothing to do.
+            return
+
+        if prev_event_id is None:
+            # Pick the latest forward extremity as the previous event ID.
+            prev_event_ids = await self.store.get_forward_extremities_for_room(room_id)
+            prev_event_ids.sort(key=lambda x: x[2])  # Sort by depth.
+            prev_event_id = prev_event_ids[-1][0]
+
+        state_groups = await self._storage_controllers.state.get_state_group_for_events(
+            [prev_event_id]
+        )
+        if prev_event_id not in state_groups:
+            # This should only happen if we got passed a prev event ID that
+            # hasn't been persisted yet.
+            raise Exception("Previous event ID not found ")
+
+        current_state_group = state_groups[prev_event_id]
+        state_map = await self._storage_controllers.state.get_state_ids_for_group(
+            current_state_group
+        )
+
+        events_and_contexts_to_send = []
+        state_map = dict(state_map)
+        depth = None
+
+        for event_dict in event_dicts:
+            event, context = await self.create_event(
+                requester=requester,
+                event_dict=event_dict,
+                prev_event_ids=[prev_event_id],
+                depth=depth,
+                # Take a copy to ensure each event gets a unique copy of
+                # state_map since it is modified below.
+                state_map=dict(state_map),
+                for_batch=True,
+            )
+            events_and_contexts_to_send.append((event, context))
+
+            prev_event_id = event.event_id
+            depth = event.depth + 1
+            if event.is_state():
+                # If this is a state event, we need to update the state map
+                # so that it can be used for the next event.
+                state_map[(event.type, event.state_key)] = event.event_id
+
+        datastore = self.hs.get_datastores().state
+        events_and_context = (
+            await UnpersistedEventContext.batch_persist_unpersisted_contexts(
+                events_and_contexts_to_send, room_id, current_state_group, datastore
+            )
+        )
+
+        await self.handle_new_client_event(
+            requester,
+            events_and_context,
+            ignore_shadow_ban=ignore_shadow_ban,
+            ratelimit=ratelimit,
+        )
 
     async def _persist_events(
         self,
@@ -2128,6 +2265,7 @@ class EventCreationHandler:
                 original_event.room_version, third_party_result
             )
             self.validator.validate_builder(builder)
+            assert builder.room_id is not None
         except SynapseError as e:
             raise Exception(
                 "Third party rules module created an invalid event: " + e.msg,

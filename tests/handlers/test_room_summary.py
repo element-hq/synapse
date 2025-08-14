@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     EventContentFields,

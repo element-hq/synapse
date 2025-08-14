@@ -29,6 +29,7 @@ from typing import (
     Iterable,
     List,
     Literal,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -263,7 +264,10 @@ class Notifier:
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
         # most when scraping it.
-        def count_listeners() -> int:
+        #
+        # Ideally, we'd use `Mapping[Tuple[str], int]` here but mypy doesn't like it.
+        # This is close enough and better than a type ignore.
+        def count_listeners() -> Mapping[Tuple[str, ...], int]:
             all_user_streams: Set[_NotifierUserStream] = set()
 
             for streams in list(self.room_to_user_streams.values()):
@@ -271,18 +275,34 @@ class Notifier:
             for stream in list(self.user_to_user_stream.values()):
                 all_user_streams.add(stream)
 
-            return sum(stream.count_listeners() for stream in all_user_streams)
-
-        LaterGauge("synapse_notifier_listeners", "", [], count_listeners)
+            return {
+                (self.server_name,): sum(
+                    stream.count_listeners() for stream in all_user_streams
+                )
+            }
 
         LaterGauge(
-            "synapse_notifier_rooms",
-            "",
-            [],
-            lambda: count(bool, list(self.room_to_user_streams.values())),
+            name="synapse_notifier_listeners",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=count_listeners,
+        )
+
+        LaterGauge(
+            name="synapse_notifier_rooms",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): count(
+                    bool, list(self.room_to_user_streams.values())
+                )
+            },
         )
         LaterGauge(
-            "synapse_notifier_users", "", [], lambda: len(self.user_to_user_stream)
+            name="synapse_notifier_users",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:

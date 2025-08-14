@@ -24,7 +24,7 @@ from typing import Any
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.media.oembed import OEmbedProvider, OEmbedResult
 from synapse.server import HomeServer

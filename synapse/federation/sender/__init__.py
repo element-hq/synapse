@@ -399,31 +399,37 @@ class FederationSender(AbstractFederationSender):
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_destinations",
-            "",
-            [],
-            lambda: sum(
-                1
-                for d in self._per_destination_queues.values()
-                if d.transmission_loop_running
-            ),
+            name="synapse_federation_transaction_queue_pending_destinations",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    1
+                    for d in self._per_destination_queues.values()
+                    if d.transmission_loop_running
+                )
+            },
         )
 
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_pdus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_pdu_count() for d in self._per_destination_queues.values()
-            ),
+            name="synapse_federation_transaction_queue_pending_pdus",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    d.pending_pdu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_edus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_edu_count() for d in self._per_destination_queues.values()
-            ),
+            name="synapse_federation_transaction_queue_pending_edus",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    d.pending_edu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
 
         self._is_processing = False
@@ -661,7 +667,8 @@ class FederationSender(AbstractFederationSender):
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "federation_sender"
+                            name="federation_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                 async def handle_room_events(events: List[EventBase]) -> None:
@@ -705,10 +712,12 @@ class FederationSender(AbstractFederationSender):
                     assert ts is not None
 
                     synapse.metrics.event_processing_lag.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(now - ts)
                     synapse.metrics.event_processing_last_ts.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(ts)
 
                     events_processed_counter.labels(
@@ -726,7 +735,7 @@ class FederationSender(AbstractFederationSender):
                 ).inc()
 
                 synapse.metrics.event_processing_positions.labels(
-                    "federation_sender"
+                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
                 ).set(next_token)
 
         finally:

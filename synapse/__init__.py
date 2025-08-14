@@ -45,16 +45,6 @@ if py_version < (3, 9):
 
 # Allow using the asyncio reactor via env var.
 if strtobool(os.environ.get("SYNAPSE_ASYNC_IO_REACTOR", "0")):
-    from incremental import Version
-
-    import twisted
-
-    # We need a bugfix that is included in Twisted 21.2.0:
-    # https://twistedmatrix.com/trac/ticket/9787
-    if twisted.version < Version("Twisted", 21, 2, 0):
-        print("Using asyncio reactor requires Twisted>=21.2.0")
-        sys.exit(1)
-
     import asyncio
 
     from twisted.internet import asyncioreactor

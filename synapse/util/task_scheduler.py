@@ -30,7 +30,7 @@ from synapse.logging.context import (
     nested_logging_context,
     set_current_context,
 )
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -131,10 +131,10 @@ class TaskScheduler:
             )
 
         LaterGauge(
-            "synapse_scheduler_running_tasks",
-            "The number of concurrent running tasks handled by the TaskScheduler",
-            labels=None,
-            caller=lambda: len(self._running_tasks),
+            name="synapse_scheduler_running_tasks",
+            desc="The number of concurrent running tasks handled by the TaskScheduler",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 
     def register_action(

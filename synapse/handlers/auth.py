@@ -222,6 +222,7 @@ class AuthHandler:
         self._password_localdb_enabled = hs.config.auth.password_localdb_enabled
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
         self._account_validity_handler = hs.get_account_validity_handler()
+        self._pusher_pool = hs.get_pusherpool()
 
         # Ratelimiter for failed auth during UIA. Uses same ratelimit config
         # as per `rc_login.failed_attempts`.
@@ -281,7 +282,9 @@ class AuthHandler:
         # response.
         self._extra_attributes: Dict[str, SsoLoginExtraAttributes] = {}
 
-        self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
 
     async def validate_user_via_ui_auth(
         self,
@@ -332,7 +335,7 @@ class AuthHandler:
             LimitExceededError if the ratelimiter's failed request count for this
                 user is too high to proceed
         """
-        if self.msc3861_oauth_delegation_enabled:
+        if self._auth_delegation_enabled:
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "UIA shouldn't be used with MSC3861"
             )
@@ -1662,7 +1665,7 @@ class AuthHandler:
         )
 
         if medium == "email":
-            await self.store.delete_pusher_by_app_id_pushkey_user_id(
+            await self._pusher_pool.remove_pusher(
                 app_id="m.email", pushkey=address, user_id=user_id
             )
 

@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from parameterized import parameterized, parameterized_class
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
 from synapse.api.errors import Codes, ResourceLimitError

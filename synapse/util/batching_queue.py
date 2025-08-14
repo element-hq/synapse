@@ -37,6 +37,7 @@ from prometheus_client import Gauge
 from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util import Clock
 
@@ -49,19 +50,19 @@ R = TypeVar("R")
 number_queued = Gauge(
     "synapse_util_batching_queue_number_queued",
     "The number of items waiting in the queue across all keys",
-    labelnames=("name",),
+    labelnames=("name", SERVER_NAME_LABEL),
 )
 
 number_in_flight = Gauge(
     "synapse_util_batching_queue_number_pending",
     "The number of items across all keys either being processed or waiting in a queue",
-    labelnames=("name",),
+    labelnames=("name", SERVER_NAME_LABEL),
 )
 
 number_of_keys = Gauge(
     "synapse_util_batching_queue_number_of_keys",
     "The number of distinct keys that have items queued",
-    labelnames=("name",),
+    labelnames=("name", SERVER_NAME_LABEL),
 )
 
 
@@ -114,13 +115,17 @@ class BatchingQueue(Generic[V, R]):
         # The function to call with batches of values.
         self._process_batch_callback = process_batch_callback
 
-        number_queued.labels(self._name).set_function(
-            lambda: sum(len(q) for q in self._next_values.values())
+        number_queued.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        ).set_function(lambda: sum(len(q) for q in self._next_values.values()))
+
+        number_of_keys.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        ).set_function(lambda: len(self._next_values))
+
+        self._number_in_flight_metric: Gauge = number_in_flight.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
-
-        number_of_keys.labels(self._name).set_function(lambda: len(self._next_values))
-
-        self._number_in_flight_metric: Gauge = number_in_flight.labels(self._name)
 
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result

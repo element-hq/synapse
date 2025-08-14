@@ -296,4 +296,4 @@ class InternalAuth(BaseAuth):
         Returns:
             True if the user is an admin
         """
-        return await self.store.is_server_admin(requester.user)
+        return await self.store.is_server_admin(requester.user.to_string())
