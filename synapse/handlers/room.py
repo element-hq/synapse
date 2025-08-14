@@ -656,6 +656,27 @@ class RoomCreationHandler:
         if current_power_level_int < needed_power_level:
             user_power_levels[user_id] = needed_power_level
 
+        # If downgrading from a room that supports MSC4289 to one that doesn't...
+        if (
+            old_room_create_event.room_version.msc4289_creator_power_enabled
+            and not new_room_version.msc4289_creator_power_enabled
+        ):
+            # Additionally raise the power levels of all `additional_creators` in the old
+            # room to the `needed_power_level` in the new room.
+            old_room_additional_creators = old_room_create_event.content.get(
+                "additional_creators", []
+            )
+            for user_id in old_room_additional_creators:
+                old_power_level = user_power_levels.get(user_id, users_default)
+                try:
+                    old_power_level = int(old_power_level)  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    old_power_level = 0
+
+                # Raise the requester's power level in the new room if necessary
+                if old_power_level < needed_power_level:
+                    user_power_levels[user_id] = needed_power_level
+
         if new_room_version.msc4289_creator_power_enabled:
             self._remove_creators_from_pl_users_map(
                 user_power_levels,
