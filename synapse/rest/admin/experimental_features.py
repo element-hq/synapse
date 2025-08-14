@@ -20,7 +20,6 @@
 #
 
 
-import weakref
 from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Dict, Tuple
@@ -69,7 +68,7 @@ class ExperimentalFeaturesRestServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self,

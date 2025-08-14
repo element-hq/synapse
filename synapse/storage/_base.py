@@ -20,7 +20,6 @@
 #
 #
 import logging
-import weakref
 from abc import ABCMeta
 from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, Optional, Union
 
@@ -55,7 +54,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.server_name = hs.hostname  # nb must be called this for @cached
         self._clock = hs.get_clock()
         self.database_engine = database.engine

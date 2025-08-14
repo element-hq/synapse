@@ -24,7 +24,6 @@ import json
 import logging
 import os
 import shutil
-import weakref
 from contextlib import closing
 from io import BytesIO
 from types import TracebackType
@@ -171,7 +170,7 @@ class MediaStorage:
         filepaths: MediaFilePaths,
         storage_providers: Sequence["StorageProvider"],
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.reactor = hs.get_reactor()
         self.local_media_directory = local_media_directory
         self.filepaths = filepaths
@@ -416,7 +415,7 @@ class FileResponder(Responder):
     """
 
     def __init__(self, hs: "HomeServer", open_file: BinaryIO):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.open_file = open_file
 
     def write_to_consumer(self, consumer: IConsumer) -> Deferred:

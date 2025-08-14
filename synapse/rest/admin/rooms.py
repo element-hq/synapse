@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
@@ -495,7 +494,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, RestServlet):
         self.admin_handler = hs.get_admin_handler()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_POST(
         self, request: SynapseRequest, room_identifier: str
@@ -588,7 +587,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         self._state_storage_controller = hs.get_storage_controllers().state
         self.event_creation_handler = hs.get_event_creation_handler()
         self.state_handler = hs.get_state_handler()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_POST(
         self, request: SynapseRequest, room_identifier: str
@@ -785,7 +784,7 @@ class RoomEventContextServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self.clock = hs.get_clock()
         self.room_context_handler = hs.get_room_context_handler()
         self._event_serializer = hs.get_event_client_serializer()
@@ -915,7 +914,7 @@ class RoomMessagesRestServlet(RestServlet):
     PATTERNS = admin_patterns("/rooms/(?P<room_id>[^/]*)/messages$")
 
     def __init__(self, hs: "HomeServer"):
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self._clock = hs.get_clock()
         self._pagination_handler = hs.get_pagination_handler()
         self._auth = hs.get_auth()

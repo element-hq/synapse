@@ -21,7 +21,6 @@
 import email.mime.multipart
 import email.utils
 import logging
-import weakref
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from synapse.api.errors import AuthError, StoreError, SynapseError
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 class AccountValidityHandler:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.config = hs.config
         self.store = hs.get_datastores().main
         self.send_email_handler = hs.get_send_email_handler()

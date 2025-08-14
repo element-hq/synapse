@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from typing import (
     TYPE_CHECKING,
     Awaitable,
@@ -224,7 +223,7 @@ class Notifier:
         self.user_to_user_stream: Dict[str, _NotifierUserStream] = {}
         self.room_to_user_streams: Dict[str, Set[_NotifierUserStream]] = {}
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._storage_controllers = hs.get_storage_controllers()
         self.event_sources = hs.get_event_sources()
         self.store = hs.get_datastores().main

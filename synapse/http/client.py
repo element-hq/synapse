@@ -20,7 +20,6 @@
 #
 import logging
 import urllib.parse
-import weakref
 from http import HTTPStatus
 from io import BytesIO
 from typing import (
@@ -346,7 +345,7 @@ class BaseHttpClient:
         hs: "HomeServer",
         treq_args: Optional[Dict[str, Any]] = None,
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.reactor = hs.get_reactor()
 
         self._extra_treq_args = treq_args or {}

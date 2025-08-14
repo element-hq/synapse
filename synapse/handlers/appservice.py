@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from typing import (
     TYPE_CHECKING,
     Collection,
@@ -76,7 +75,7 @@ class ApplicationServicesHandler:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.appservice_api = hs.get_application_service_api()
         self.scheduler = hs.get_application_service_scheduler()
         self.started_scheduler = False

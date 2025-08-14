@@ -76,7 +76,6 @@ import abc
 import contextlib
 import itertools
 import logging
-import weakref
 from bisect import bisect
 from contextlib import contextmanager
 from types import TracebackType
@@ -193,9 +192,9 @@ class BasePresenceHandler(abc.ABC):
     writer"""
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.clock = hs.get_clock()
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.presence_router = hs.get_presence_router()
         self.state = hs.get_state_handler()
@@ -512,14 +511,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
         ))
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "generic_presence.on_shutdown",
-            self._on_shutdown,
-        )
+        hs.register_shutdown_handler("generic_presence.on_shutdown", self._on_shutdown)
 
+    @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_command(
@@ -810,14 +804,7 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        # TODO: (devon) how do I remove this binding?
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "presence.on_shutdown",
-            self._on_shutdown,
-        )
+        hs.register_shutdown_handler("presence.on_shutdown", self._on_shutdown)
 
         # Keeps track of the number of *ongoing* syncs on this process. While
         # this is non zero a user will never go offline.
@@ -1766,7 +1753,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         #
         #   AuthHandler -> Notifier -> PresenceEventSource -> ModuleApi -> AuthHandler
         self.server_name = hs.hostname
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
 
@@ -2377,7 +2364,7 @@ class PresenceFederationQueue:
         self._clock = hs.get_clock()
         self._notifier = hs.get_notifier()
         self._instance_name = hs.get_instance_name()
-        self._presence_handler = weakref.proxy(presence_handler)
+        self._presence_handler = presence_handler
         self._repl_client = ReplicationGetStreamUpdates.make_client(hs)
 
         # Should we keep a queue of recent presence updates? We only bother if

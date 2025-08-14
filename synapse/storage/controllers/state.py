@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -71,11 +70,11 @@ class StateStorageController:
 
     def __init__(self, hs: "HomeServer", stores: "Databases"):
         self.server_name = hs.hostname  # nb must be called this for @cached
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._clock = hs.get_clock()
-        self.stores = weakref.proxy(stores)
-        self._partial_state_events_tracker = weakref.proxy(PartialStateEventsTracker(stores.main))
-        self._partial_state_room_tracker = weakref.proxy(PartialCurrentStateTracker(stores.main))
+        self.stores = stores
+        self._partial_state_events_tracker = PartialStateEventsTracker(stores.main)
+        self._partial_state_room_tracker = PartialCurrentStateTracker(stores.main)
 
         # Used by `_get_joined_hosts` to ensure only one thing mutates the cache
         # at a time. Keyed by room_id.

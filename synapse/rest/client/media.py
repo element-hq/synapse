@@ -22,7 +22,6 @@
 
 import logging
 import re
-import weakref
 from typing import Optional
 
 from synapse.http.server import (
@@ -135,7 +134,7 @@ class ThumbnailResource(RestServlet):
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._server_name = hs.hostname
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
         self.thumbnailer = ThumbnailProvider(hs, media_repo, media_storage)
@@ -224,7 +223,7 @@ class DownloadResource(RestServlet):
     def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
         super().__init__()
         self.media_repo = media_repo
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
 
     async def on_GET(

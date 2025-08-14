@@ -15,7 +15,6 @@
 #
 
 import logging
-import weakref
 from typing import TYPE_CHECKING
 
 from synapse.events import EventBase
@@ -30,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 class RoomPolicyHandler:
     def __init__(self, hs: "HomeServer"):
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._event_auth_handler = hs.get_event_auth_handler()

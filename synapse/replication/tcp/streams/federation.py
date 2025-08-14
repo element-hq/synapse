@@ -19,7 +19,6 @@
 #
 #
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Tuple
-import weakref
 
 import attr
 

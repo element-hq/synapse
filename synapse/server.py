@@ -26,8 +26,8 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
-import weakref
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Type, TypeVar, cast
+from attr import dataclass
 
 from twisted.internet import defer
 from typing_extensions import TypeAlias
@@ -130,6 +130,7 @@ from synapse.http.client import (
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
 from synapse.metrics import LaterGauge, register_threadpool
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -139,6 +140,7 @@ from synapse.push.pusherpool import PusherPool
 from synapse.replication.tcp.client import ReplicationDataHandler
 from synapse.replication.tcp.external_cache import ExternalCache
 from synapse.replication.tcp.handler import ReplicationCommandHandler
+from synapse.replication.tcp.protocol import connected_connections
 from synapse.replication.tcp.resource import ReplicationStreamer
 from synapse.replication.tcp.streams import STREAMS_MAP, Stream
 from synapse.rest.media.media_repository_resource import MediaRepositoryResource
@@ -217,14 +219,7 @@ def cache_in_self(builder: F) -> F:
     def _get(self: "HomeServer") -> T:
         try:
             dep = getattr(self, depname)
-            try:
-                return_dep = weakref.proxy(dep)
-            except:
-                if isinstance(dep, dict):
-                    return_dep = {k: weakref.proxy(v) for k, v in dep.items()}
-                else:
-                    logger.warning("Failed creating proxy for %s", depname)
-            return return_dep
+            return dep
         except AttributeError:
             pass
 
@@ -239,18 +234,16 @@ def cache_in_self(builder: F) -> F:
         finally:
             building[0] = False
     
-        return_dep = dep
-        try:
-            return_dep = weakref.proxy(dep)
-        except:
-            if isinstance(dep, dict):
-                return_dep = {k: weakref.proxy(v) for k, v in dep.items()}
-            else:
-                logger.warning("Failed creating proxy for %s", depname)
-
-        return return_dep
+        return dep
 
     return cast(F, _get)
+
+
+@dataclass
+class ShutdownInfo:
+    desc: str
+    func: Callable[..., Any]
+    trigger_id: Any
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -333,6 +326,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._looping_calls: List[LoopingCall] = []
         self._later_gauges: List[LaterGauge] = []
         self._background_processes: List[defer.Deferred] = []
+        self._shutdown_handlers: List[ShutdownInfo] = []
 
     def shutdown(self) -> None:
         logger.info("Received shutdown request")
@@ -344,6 +338,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         for connection in self.get_replication_command_handler()._connections:
             connection.close()
         self.get_replication_command_handler()._connections.clear()
+        # NOTE: Dont trample on other tenants
+        # for connection in connected_connections:
+        #     logger.info("Closing replication connection...")
+        #     connection.close()
+        # connected_connections.clear()
 
         logger.info("Stopping replication streams")
         # self.get_replication_command_handler()._factory.continueTrying = False
@@ -354,6 +353,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         # self.get_replication_command_handler()._factory = None
         self.get_replication_command_handler()._streams.clear()
         self.get_replication_command_handler()._streams_to_replicate.clear()
+        # XXX: Does this trample on other tenants?
         STREAMS_MAP.clear()
 
         from synapse.util.batching_queue import number_of_keys
@@ -383,8 +383,31 @@ class HomeServer(metaclass=abc.ABCMeta):
             process.cancel()
         self._background_processes.clear()
 
+        from synapse.util.caches import CACHE_METRIC_REGISTRY
+        logger.info("Clearing cache metrics: %d", len(CACHE_METRIC_REGISTRY._pre_update_hooks))
+        # TODO: Do this better, ie. don't clear metrics for other tenants
+        # only clear them for this server
+        CACHE_METRIC_REGISTRY.clear()
+
+        for shutdown_handler in self._shutdown_handlers:
+            logger.info("Shutting down %s", shutdown_handler.desc)
+            self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+            # TODO: we should probably run these
+            #yield defer.ensureDeferred(shutdown_handler.func())
+        self._shutdown_handlers.clear()
+
         for call in self.get_reactor().getDelayedCalls():
             call.cancel()
+
+    def register_shutdown_handler(self, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+        id = self.get_reactor().addSystemEventTrigger(
+            "before",
+            "shutdown",
+            run_as_background_process,
+            desc,
+            shutdown_func,
+        )
+        self._shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
 
     def register_looping_call(self, looping_call: LoopingCall) -> None:
         self._looping_calls.append(looping_call)
@@ -1061,6 +1084,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
+        # TODO: what do. it's different since it uses during instead of before
         self.get_reactor().addSystemEventTrigger(
             "during", "shutdown", media_threadpool.stop
         )

@@ -19,7 +19,6 @@
 #
 #
 
-import weakref
 from typing import Dict, Iterable, List, Optional
 from unittest.mock import AsyncMock, Mock
 
@@ -415,7 +414,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         # Mock the ApplicationServiceScheduler's _TransactionController's send method so that
         # we can track any outgoing ephemeral events
         self.send_mock = AsyncMock()

@@ -552,6 +552,7 @@ async def start(hs: "HomeServer") -> None:
 
         signal.signal(signal.SIGHUP, run_sighup)
 
+        # TODO: FIXME, weakref needed here
         register_sighup(refresh_certificate, weakref.proxy(hs))
         register_sighup(reload_cache_config, hs.config)
 
@@ -608,13 +609,13 @@ async def start(hs: "HomeServer") -> None:
     # rest of time. Doing so means less work each GC (hopefully).
     #
     # PyPy does not (yet?) implement gc.freeze()
-    if hasattr(gc, "freeze"):
-        gc.collect()
-        gc.freeze()
-
-        # Speed up shutdowns by freezing all allocated objects. This moves everything
-        # into the permanent generation and excludes them from the final GC.
-        atexit.register(gc.freeze)
+    # if hasattr(gc, "freeze"):
+    #     gc.collect()
+    #     gc.freeze()
+    #
+    #     # Speed up shutdowns by freezing all allocated objects. This moves everything
+    #     # into the permanent generation and excludes them from the final GC.
+    #     atexit.register(gc.freeze)
 
 
 def reload_cache_config(config: HomeServerConfig) -> None:

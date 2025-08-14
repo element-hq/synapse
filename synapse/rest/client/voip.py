@@ -22,7 +22,6 @@
 import base64
 import hashlib
 import hmac
-import weakref
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.http.server import HttpServer
@@ -41,7 +40,7 @@ class VoipRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:

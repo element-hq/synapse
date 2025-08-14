@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
@@ -50,7 +49,7 @@ class ReportEventRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
@@ -129,7 +128,7 @@ class ReportRoomRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
@@ -181,7 +180,7 @@ class ReportUserRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main

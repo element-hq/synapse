@@ -20,7 +20,6 @@
 #
 import email.utils
 import logging
-import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -259,7 +258,7 @@ class ModuleApi:
     """
 
     def __init__(self, hs: "HomeServer", auth_handler: AuthHandler) -> None:
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
 
         # TODO: Fix this type hint once the types for the data stores have been ironed
         #       out.
@@ -1944,7 +1943,7 @@ class AccountDataManager:
     """
 
     def __init__(self, hs: "HomeServer") -> None:
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self._store = hs.get_datastores().main
         self._handler = hs.get_account_data_handler()
 

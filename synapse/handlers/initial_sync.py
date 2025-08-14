@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from synapse.api.constants import (
@@ -65,7 +64,7 @@ class InitialSyncHandler:
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.state_handler = hs.get_state_handler()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.state = hs.get_state_handler()
         self.clock = hs.get_clock()
         self.validator = EventValidator()

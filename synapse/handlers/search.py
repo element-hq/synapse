@@ -21,7 +21,6 @@
 
 import itertools
 import logging
-import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
 
 import attr
@@ -61,7 +60,7 @@ class SearchHandler:
         self.store = hs.get_datastores().main
         self.state_handler = hs.get_state_handler()
         self.clock = hs.get_clock()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._event_serializer = hs.get_event_client_serializer()
         self._relations_handler = hs.get_relations_handler()
         self._storage_controllers = hs.get_storage_controllers()

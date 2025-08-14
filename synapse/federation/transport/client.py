@@ -22,7 +22,6 @@
 
 import logging
 import urllib
-import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -69,7 +68,7 @@ class TransportLayerClient:
 
     def __init__(self, hs: "HomeServer"):
         self.client = hs.get_federation_http_client()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def get_room_state_ids(
         self, destination: str, room_id: str, event_id: str

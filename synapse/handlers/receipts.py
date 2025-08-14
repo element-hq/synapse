@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, Iterable, List, Optional, Sequence, Tuple
 
 from synapse.api.constants import EduTypes, ReceiptTypes
@@ -50,7 +49,7 @@ class ReceiptsHandler:
         self.event_handler = hs.get_event_handler()
         self._storage_controllers = hs.get_storage_controllers()
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by

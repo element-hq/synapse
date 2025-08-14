@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
@@ -113,7 +112,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         )
         self.show_locked_users = hs.config.userdirectory.show_locked_users
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
 
         # The current position in the current_state_delta stream
         self.pos: Optional[int] = None

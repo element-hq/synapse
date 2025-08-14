@@ -20,7 +20,6 @@
 #
 #
 import logging
-import weakref
 from collections import Counter
 from typing import (
     TYPE_CHECKING,
@@ -54,7 +53,7 @@ class StatsHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.state = hs.get_state_handler()

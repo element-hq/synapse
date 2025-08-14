@@ -22,7 +22,6 @@ import abc
 import hashlib
 import io
 import logging
-import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -204,7 +203,7 @@ class SsoHandler:
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._server_name = hs.hostname
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._registration_handler = hs.get_registration_handler()
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()

@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Sequence, Type
 
@@ -160,7 +159,7 @@ class RecaptchaAuthChecker(UserInteractiveAuthChecker):
 
 class _BaseThreepidAuthChecker:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
 
     async def _check_threepid(self, medium: str, authdict: dict) -> dict:
@@ -261,7 +260,7 @@ class RegistrationTokenAuthChecker(UserInteractiveAuthChecker):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._enabled = bool(
             hs.config.registration.registration_requires_token
         ) or bool(hs.config.registration.enable_registration_token_3pid_bypass)

@@ -20,7 +20,6 @@
 
 import logging
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
-import weakref
 
 from twisted.web.server import Request
 
@@ -162,7 +161,7 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
 
         self.device_list_updater = hs.get_device_handler().device_list_updater
 
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
 
     @staticmethod

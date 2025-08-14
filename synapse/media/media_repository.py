@@ -23,7 +23,6 @@ import errno
 import logging
 import os
 import shutil
-import weakref
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
 
@@ -90,7 +89,7 @@ MEDIA_RETENTION_CHECK_PERIOD_MS = 60 * 60 * 1000  # 1 hour
 
 class MediaRepository:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.client = hs.get_federation_client()
         self.clock = hs.get_clock()

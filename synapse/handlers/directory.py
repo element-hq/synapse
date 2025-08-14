@@ -21,7 +21,6 @@
 
 import logging
 import string
-import weakref
 from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Sequence
 
 from synapse.api.constants import MAX_ALIAS_LENGTH, EventTypes
@@ -48,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 class DirectoryHandler:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.hostname = hs.hostname
         self.state = hs.get_state_handler()

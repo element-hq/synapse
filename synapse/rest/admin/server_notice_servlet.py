@@ -17,7 +17,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Tuple
 
@@ -63,7 +62,7 @@ class SendServerNoticeServlet(RestServlet):
         self.server_notices_manager = hs.get_server_notices_manager()
         self.admin_handler = hs.get_admin_handler()
         self.txns = HttpTransactionCache(hs)
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     def register(self, json_resource: HttpServer) -> None:
         PATTERN = "/send_server_notice"

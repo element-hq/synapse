@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, List, Mapping, Optional, Union
 
 from synapse import event_auth
@@ -55,7 +54,7 @@ class EventAuthHandler:
         self._store = hs.get_datastores().main
         self._state_storage_controller = hs.get_storage_controllers().state
         self._server_name = hs.hostname
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def check_auth_rules_from_context(
         self,

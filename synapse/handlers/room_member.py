@@ -22,7 +22,6 @@
 import abc
 import logging
 import random
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Tuple
 
@@ -90,7 +89,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
     #   ought to be separated out a lot better.
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.auth = hs.get_auth()
@@ -2171,7 +2170,7 @@ class RoomForgetterHandler(StateDeltasHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._clock = hs.get_clock()

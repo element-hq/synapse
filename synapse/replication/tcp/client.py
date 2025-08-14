@@ -21,7 +21,6 @@
 """A replication client for use by synapse workers."""
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, Optional, Set, Tuple
 
 from sortedcontainers import SortedList
@@ -77,7 +76,7 @@ class ReplicationDataHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
         self._clock = hs.get_clock()
@@ -415,7 +414,7 @@ class FederationSenderHandler:
         assert hs.should_send_federation()
 
         self.store = hs.get_datastores().main
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
 
         # We need to make a temporary value to ensure that mypy picks up the
         # right type. We know we should have a federation sender instance since

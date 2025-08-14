@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Set, Tuple
 
 from twisted.python.failure import Failure
@@ -101,8 +100,8 @@ class TaskScheduler:
     OCCASIONAL_REPORT_INTERVAL_MS = 5 * 60 * 1000  # 5 minutes
 
     def __init__(self, hs: "HomeServer"):
-        self._hs = weakref.proxy(hs)
-        self._store = weakref.proxy(hs.get_datastores().main)
+        self._hs = hs
+        self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._running_tasks: Set[str] = set()
         # A map between action names and their registered function

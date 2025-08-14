@@ -22,7 +22,6 @@
 """This module contains REST servlets to do with presence: /presence/<paths>"""
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import AuthError, Codes, LimitExceededError, SynapseError
@@ -46,7 +45,7 @@ class PresenceStatusRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.presence_handler = hs.get_presence_handler()
         self.clock = hs.get_clock()
         self.auth = hs.get_auth()

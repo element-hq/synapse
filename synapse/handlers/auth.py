@@ -24,7 +24,6 @@ import logging
 import time
 import unicodedata
 import urllib.parse
-import weakref
 from binascii import crc32
 from http import HTTPStatus
 from typing import (
@@ -214,9 +213,7 @@ class AuthHandler:
 
         self.password_auth_provider = hs.get_password_auth_provider()
 
-        self.hs = weakref.proxy(
-            hs
-        )  # FIXME better possibility to access registrationHandler later?
+        self.hs = hs # FIXME better possibility to access registrationHandler later?
         self.macaroon_gen = hs.get_macaroon_generator()
         self._password_enabled_for_login = hs.config.auth.password_enabled_for_login
         self._password_enabled_for_reauth = hs.config.auth.password_enabled_for_reauth

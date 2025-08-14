@@ -22,7 +22,6 @@
 import collections
 import itertools
 import logging
-import weakref
 from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
@@ -237,9 +236,9 @@ class PersistEventsStore:
         main_data_store: "DataStore",
         db_conn: LoggingDatabaseConnection,
     ):
-        self.hs = weakref.proxy(hs)
-        self.db_pool = weakref.proxy(db)
-        self.store = weakref.proxy(main_data_store)
+        self.hs = hs
+        self.db_pool = db
+        self.store = main_data_store
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()

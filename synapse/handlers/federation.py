@@ -25,7 +25,6 @@
 import enum
 import itertools
 import logging
-import weakref
 from enum import Enum
 from http import HTTPStatus
 from typing import (
@@ -134,7 +133,7 @@ class FederationHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main

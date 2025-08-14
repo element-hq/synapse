@@ -21,7 +21,6 @@
 import heapq
 from collections import defaultdict
 from typing import TYPE_CHECKING, Iterable, Optional, Tuple, Type, TypeVar, cast
-import weakref
 
 import attr
 
@@ -152,7 +151,7 @@ class EventsStream(_StreamFromIdGen):
     NAME = "events"
 
     def __init__(self, hs: "HomeServer"):
-        self._store = weakref.proxy(hs.get_datastores().main)
+        self._store = hs.get_datastores().main
         super().__init__(
             hs.get_instance_name(), self._update_function, self._store._stream_id_gen
         )

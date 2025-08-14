@@ -22,7 +22,6 @@ import hashlib
 import hmac
 import logging
 import secrets
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
@@ -240,7 +239,7 @@ class UserRestServletV2(RestServlet):
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
         self.store = hs.get_datastores().main
@@ -545,7 +544,7 @@ class UserRegisterServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
         self.reactor = hs.get_reactor()
         self.nonces: Dict[str, int] = {}
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._all_user_types = hs.config.user_types.all_user_types
 
     def _clear_old_nonces(self) -> None:
@@ -725,7 +724,7 @@ class WhoisRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -750,7 +749,7 @@ class DeactivateAccountRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._deactivate_account_handler = hs.get_deactivate_account_handler()
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
 
     async def on_POST(
@@ -792,7 +791,7 @@ class SuspendAccountRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
 
     class PutBody(RequestBodyModel):
@@ -915,7 +914,7 @@ class SearchUsersRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, target_user_id: str
@@ -984,7 +983,7 @@ class UserAdminServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -1040,7 +1039,7 @@ class UserMembershipRestServlet(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/joined_rooms$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
@@ -1072,7 +1071,7 @@ class PushersRestServlet(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/pushers$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
 
@@ -1117,7 +1116,7 @@ class UserTokenRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1185,7 +1184,7 @@ class ShadowBanRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1237,7 +1236,7 @@ class RateLimitRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -1344,7 +1343,7 @@ class AccountDataRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str

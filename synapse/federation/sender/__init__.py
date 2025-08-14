@@ -131,7 +131,6 @@ EDUs).
 
 import abc
 import logging
-import weakref
 from collections import OrderedDict
 from typing import (
     TYPE_CHECKING,
@@ -370,7 +369,7 @@ class _DestinationWakeupQueue:
 
 class FederationSender(AbstractFederationSender):
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.server_name = hs.hostname
 
         self.store = hs.get_datastores().main
@@ -426,7 +425,7 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            weakref.proxy(self), self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up

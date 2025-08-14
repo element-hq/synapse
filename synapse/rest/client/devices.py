@@ -21,7 +21,6 @@
 #
 
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
@@ -52,7 +51,7 @@ class DevicesRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.device_handler = hs.get_device_handler()
         self._msc3852_enabled = hs.config.experimental.msc3852_enabled
@@ -88,7 +87,7 @@ class DeleteDevicesRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
         self.device_handler = handler
@@ -139,7 +138,7 @@ class DeviceRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
         self.device_handler = handler
@@ -296,7 +295,7 @@ class DehydratedDeviceServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
         self.device_handler = handler
@@ -355,7 +354,7 @@ class ClaimDehydratedDeviceServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
         self.device_handler = handler
@@ -494,7 +493,7 @@ class DehydratedDeviceV2Servlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         handler = hs.get_device_handler()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()

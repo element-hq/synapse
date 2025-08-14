@@ -21,7 +21,6 @@
 
 import email.utils
 import logging
-import weakref
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from io import BytesIO
@@ -159,7 +158,7 @@ async def _sendmail(
 
 class SendEmailHandler:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         self._reactor = hs.get_reactor()
 

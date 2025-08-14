@@ -90,7 +90,7 @@ class SynapseHomeServer(HomeServer):
             listener.loseConnection()
         self._listening_services.clear()
 
-        self._reactor.stop()
+        #self._reactor.stop()
 
     def _listener_http(
         self,

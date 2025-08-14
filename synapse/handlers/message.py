@@ -21,7 +21,6 @@
 #
 import logging
 import random
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
@@ -476,7 +475,7 @@ _DUMMY_EVENT_ROOM_EXCLUSION_EXPIRY = 7 * 24 * 60 * 60 * 1000
 
 class EventCreationHandler:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.validator = EventValidator()
         self.event_builder_factory = hs.get_event_builder_factory()
         self.server_name = hs.hostname  # nb must be called this for @measure_func

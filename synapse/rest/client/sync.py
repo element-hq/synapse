@@ -20,7 +20,6 @@
 #
 import itertools
 import logging
-import weakref
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
@@ -111,7 +110,7 @@ class SyncRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
@@ -684,7 +683,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.sync_handler = hs.get_sync_handler()

@@ -24,7 +24,6 @@ import logging
 import random
 import sys
 import urllib.parse
-import weakref
 from http import HTTPStatus
 from io import BytesIO, StringIO
 from typing import (
@@ -402,7 +401,7 @@ class MatrixFederationHttpClient:
         hs: "HomeServer",
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.signing_key = hs.signing_key
         self.server_name = hs.hostname
 

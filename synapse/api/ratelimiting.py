@@ -21,7 +21,6 @@
 #
 
 from typing import TYPE_CHECKING, Dict, Hashable, Optional, Tuple
-import weakref
 
 from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import RatelimitSettings
@@ -86,7 +85,7 @@ class Ratelimiter:
         self.clock = clock
         self.rate_hz = cfg.per_second
         self.burst_count = cfg.burst_count
-        self.store = weakref.proxy(store)
+        self.store = store
         self._limiter_name = cfg.key
         self._ratelimit_callbacks = ratelimit_callbacks
 

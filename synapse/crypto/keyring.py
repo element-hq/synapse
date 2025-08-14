@@ -21,7 +21,6 @@
 
 import abc
 import logging
-import weakref
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
 import attr
@@ -176,7 +175,7 @@ class Keyring:
             process_batch_callback=self._inner_fetch_key_requests,
         )
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         # build a FetchKeyResult for each of our own keys, to shortcircuit the
         # fetcher.

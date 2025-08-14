@@ -22,7 +22,6 @@
 
 import logging
 import re
-import weakref
 from typing import TYPE_CHECKING
 
 from synapse.http.server import set_corp_headers, set_cors_headers
@@ -62,7 +61,7 @@ class ThumbnailResource(RestServlet):
         self.store = hs.get_datastores().main
         self.media_repo = media_repo
         self.media_storage = media_storage
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._server_name = hs.hostname
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails

@@ -20,7 +20,6 @@
 
 import hmac
 import logging
-import weakref
 from hashlib import sha256
 from http import HTTPStatus
 from os import path
@@ -84,7 +83,7 @@ class ConsentResource(DirectServeHtmlResource):
     def __init__(self, hs: "HomeServer"):
         super().__init__(clock=hs.get_clock())
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
         self.registration_handler = hs.get_registration_handler()
 

@@ -15,7 +15,6 @@
 
 import enum
 import logging
-import weakref
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
@@ -188,7 +187,7 @@ class SlidingSyncRoomLists:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def compute_interested_rooms(
         self,

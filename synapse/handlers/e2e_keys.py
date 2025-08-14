@@ -20,7 +20,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple
 
 import attr
@@ -69,7 +68,7 @@ class E2eKeysHandler:
         self.federation = hs.get_federation_client()
         self.device_handler = hs.get_device_handler()
         self._appservice_handler = hs.get_application_service_handler()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.clock = hs.get_clock()
         self._worker_lock_handler = hs.get_worker_locks_handler()
         self._task_scheduler = hs.get_task_scheduler()

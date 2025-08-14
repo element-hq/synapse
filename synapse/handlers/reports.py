@@ -14,7 +14,6 @@
 #
 #
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -32,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 class ReportsHandler:
     def __init__(self, hs: "HomeServer"):
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
 

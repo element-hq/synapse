@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Tuple
 
@@ -267,7 +266,7 @@ class DeleteMediaByID(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.media_repository = hs.get_media_repository()
 
     async def on_DELETE(
@@ -360,7 +359,7 @@ class UserMediaRestServlet(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/media$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.media_repository = hs.get_media_repository()

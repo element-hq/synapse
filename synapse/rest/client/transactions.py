@@ -23,7 +23,6 @@
 to ensure idempotency when performing PUTs using the REST API."""
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Hashable, Tuple
 
 from typing_extensions import ParamSpec
@@ -49,7 +48,7 @@ P = ParamSpec("P")
 
 class HttpTransactionCache:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.clock = self.hs.get_clock()
         # $txn_key: (ObservableDeferred<(res_code, res_json_body)>, timestamp)
         self.transactions: Dict[

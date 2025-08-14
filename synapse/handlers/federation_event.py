@@ -22,7 +22,6 @@
 import collections
 import itertools
 import logging
-import weakref
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -167,7 +166,7 @@ class FederationEventHandler:
         )
         self._notifier = hs.get_notifier()
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 

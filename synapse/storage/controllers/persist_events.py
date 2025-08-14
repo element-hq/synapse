@@ -22,7 +22,6 @@
 
 import itertools
 import logging
-import weakref
 from collections import deque
 from typing import (
     TYPE_CHECKING,
@@ -198,7 +197,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         """
         self._event_persist_queues: Dict[str, Deque[_EventPersistQueueItem]] = {}
         self._currently_persisting_rooms: Set[str] = set()
-        self._per_item_callback = weakref.proxy(per_item_callback)
+        self._per_item_callback = per_item_callback
 
     async def add_to_queue(
         self,
@@ -346,7 +345,7 @@ class EventsPersistenceStorageController:
         )
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._state_controller = state_controller
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def _process_event_persist_queue_task(
         self,

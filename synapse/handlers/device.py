@@ -21,7 +21,6 @@
 #
 import logging
 import random
-import weakref
 from threading import Lock
 from typing import (
     TYPE_CHECKING,
@@ -126,8 +125,8 @@ class DeviceHandler:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
-        self.hs = weakref.proxy(hs)
-        self.store = weakref.proxy(cast("GenericWorkerStore", hs.get_datastores().main))
+        self.hs = hs
+        self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()
         self._appservice_handler = hs.get_application_service_handler()
@@ -1327,7 +1326,7 @@ class DeviceListWorkerUpdater:
     "Handles incoming device list updates from federation and contacts the main device list writer over replication"
 
     def __init__(self, hs: "HomeServer"):
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.store = hs.get_datastores().main
         self._notifier = hs.get_notifier()
         # On which instance the DeviceListUpdater is running
         # Must be kept in sync with DeviceHandler

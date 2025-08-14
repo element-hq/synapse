@@ -20,7 +20,6 @@
 #
 import logging
 import random
-import weakref
 from typing import TYPE_CHECKING, List, Optional, Union
 
 from synapse.api.constants import ProfileFields
@@ -59,7 +58,7 @@ class ProfileHandler:
         self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         self.federation = hs.get_federation_client()
         hs.get_federation_registry().register_query_handler(

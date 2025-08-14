@@ -18,7 +18,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import EventTypes, Membership, RoomCreationPreset
@@ -45,7 +44,7 @@ class ServerNoticesManager:
         self._event_creation_handler = hs.get_event_creation_handler()
         self._message_handler = hs.get_message_handler()
         self._storage_controllers = hs.get_storage_controllers()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         self._notifier = hs.get_notifier()
         self.server_notices_mxid = self._config.servernotices.server_notices_mxid

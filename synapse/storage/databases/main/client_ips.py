@@ -455,9 +455,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
             hs.register_looping_call(self._clock.looping_call(
                 self._update_client_ips_batch, 5 * 1000
             ))
-            self.hs.get_reactor().addSystemEventTrigger(
-                "before", "shutdown", self._update_client_ips_batch
-            )
+            hs.register_shutdown_handler("ClientIpWorkerStore _update_client_ips_batch", self._on_shutdown)
 
     @wrap_as_background_process("prune_old_user_ips")
     async def _prune_old_user_ips(self) -> None:

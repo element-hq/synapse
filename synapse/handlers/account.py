@@ -19,7 +19,6 @@
 #
 #
 
-import weakref
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from synapse.api.errors import Codes, SynapseError
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
 class AccountHandler:
     def __init__(self, hs: "HomeServer"):
         self._main_store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._federation_client = hs.get_federation_client()
         self._use_account_validity_in_account_status = (
             hs.config.server.use_account_validity_in_account_status

@@ -23,7 +23,6 @@ import functools
 import logging
 import re
 import time
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional, Tuple, cast
 
@@ -65,8 +64,8 @@ class Authenticator:
         self._clock = hs.get_clock()
         self.keyring = hs.get_keyring()
         self.server_name = hs.hostname
-        self.hs = weakref.proxy(hs)
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.hs = hs
+        self.store = hs.get_datastores().main
         self.federation_domain_whitelist = (
             hs.config.federation.federation_domain_whitelist
         )
@@ -278,7 +277,7 @@ class BaseFederationServlet:
         ratelimiter: FederationRateLimiter,
         server_name: str,
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.authenticator = authenticator
         self.ratelimiter = ratelimiter
         self.server_name = server_name

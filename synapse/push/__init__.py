@@ -94,7 +94,6 @@ The Pusher instance also calls out to various utilities for generating payloads
 """
 
 import abc
-import weakref
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 import attr
@@ -158,7 +157,7 @@ class ThrottleParams:
 
 class Pusher(metaclass=abc.ABCMeta):
     def __init__(self, hs: "HomeServer", pusher_config: PusherConfig):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()
 

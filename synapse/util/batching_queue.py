@@ -31,7 +31,6 @@ from typing import (
     Tuple,
     TypeVar,
 )
-import weakref
 
 from prometheus_client import Gauge
 
@@ -108,7 +107,7 @@ class BatchingQueue(Generic[V, R]):
         self._next_values: Dict[Hashable, List[Tuple[V, defer.Deferred]]] = {}
 
         # The function to call with batches of values.
-        self._process_batch_callback = weakref.proxy(process_batch_callback)
+        self._process_batch_callback = process_batch_callback
 
         number_queued.labels(self._name).set_function(
             lambda: sum(len(q) for q in self._next_values.values())

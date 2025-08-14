@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
@@ -53,7 +52,7 @@ class DeviceRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, device_id: str
@@ -125,7 +124,7 @@ class DevicesRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.device_worker_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -198,7 +197,7 @@ class DeleteDevicesRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str

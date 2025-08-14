@@ -20,7 +20,6 @@
 #
 import logging
 import random
-import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Set, Tuple
 
 import attr
@@ -83,7 +82,7 @@ class FollowerTypingHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self.server_name = hs.config.server.server_name
         self.clock = hs.get_clock()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         self.federation = None
         if hs.should_send_federation():
@@ -268,7 +267,7 @@ class TypingWriterHandler(FollowerTypingHandler):
         self.notifier = hs.get_notifier()
         self.event_auth_handler = hs.get_event_auth_handler()
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         hs.get_federation_registry().register_edu_handler(
             EduTypes.TYPING, self._recv_edu
@@ -509,7 +508,7 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         self.server_name = hs.hostname
         self._main_store = hs.get_datastores().main
         self.clock = hs.get_clock()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     def _make_event_for(self, room_id: str) -> JsonMapping:
         typing = self.hs.get_typing_handler()._room_typing[room_id]

@@ -21,7 +21,6 @@
 
 import abc
 import logging
-import weakref
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -74,7 +73,7 @@ class AdminHandler:
             self._redact_all_events, REDACT_ALL_EVENTS_ACTION_NAME
         )
 
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
         """Get the current status of an active redaction process

@@ -23,7 +23,6 @@
 """Contains functions for registering clients."""
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
 
 from prometheus_client import Counter
@@ -98,10 +97,10 @@ class LoginDict(TypedDict):
 
 class RegistrationHandler:
     def __init__(self, hs: "HomeServer"):
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
         self._auth_handler = hs.get_auth_handler()
@@ -127,7 +126,6 @@ class RegistrationHandler:
             )
         else:
             self.device_handler = hs.get_device_handler()
-            self_ref = weakref.proxy(self)
             async def do_it(
                 user_id: str,
                 device_id: Optional[str],
@@ -138,7 +136,7 @@ class RegistrationHandler:
                 auth_provider_id: Optional[str] = None,
                 auth_provider_session_id: Optional[str] = None,
             ):
-                return RegistrationHandler.register_device_inner(self_ref, user_id, device_id,initial_display_name, is_guest,is_appservice_ghost,should_issue_refresh_token, auth_provider_id,auth_provider_session_id)
+                return RegistrationHandler.register_device_inner(self, user_id, device_id,initial_display_name, is_guest,is_appservice_ghost,should_issue_refresh_token, auth_provider_id,auth_provider_session_id)
             self._register_device_client = do_it
             self.pusher_pool = hs.get_pusherpool()
 

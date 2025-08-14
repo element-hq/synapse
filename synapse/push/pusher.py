@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Callable, Dict, Optional
 
 from synapse.push import Pusher, PusherConfig
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 class PusherFactory:
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.config = hs.config
 
         self.pusher_types: Dict[str, Callable[[HomeServer, PusherConfig], Pusher]] = {

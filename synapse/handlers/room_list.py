@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 import attr
@@ -65,7 +64,7 @@ class RoomListHandler:
         self.server_name = hs.hostname  # nb must be called this for @cached
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.enable_room_list_search = hs.config.roomdirectory.enable_room_list_search
         self.response_cache: ResponseCache[
             Tuple[Optional[int], Optional[str], Optional[ThirdPartyInstanceID]]

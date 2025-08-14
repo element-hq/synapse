@@ -41,7 +41,6 @@ from typing import (
     Union,
     cast,
 )
-import weakref
 
 import attr
 from sortedcontainers import SortedList, SortedSet
@@ -221,7 +220,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         writers: List[str],
         positive: bool = True,
     ) -> None:
-        self._db = weakref.proxy(db)
+        self._db = db
         self._notifier = notifier
         self._stream_name = stream_name
         self._instance_name = instance_name

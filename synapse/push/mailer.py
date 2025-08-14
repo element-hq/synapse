@@ -21,7 +21,6 @@
 
 import logging
 import urllib.parse
-import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, TypeVar
 
 import bleach
@@ -123,7 +122,7 @@ class Mailer:
         template_html: jinja2.Template,
         template_text: jinja2.Template,
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.template_html = template_html
         self.template_text = template_text
 

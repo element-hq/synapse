@@ -12,7 +12,6 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 #
-import weakref
 from typing import Optional
 from unittest import mock
 
@@ -52,7 +51,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         )
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.handler = hs.get_room_policy_handler()
         main_store = self.hs.get_datastores().main
 

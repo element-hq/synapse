@@ -19,7 +19,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from netaddr import IPAddress
@@ -53,7 +52,7 @@ class BaseAuth:
     """Common base class for all auth implementations."""
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
 

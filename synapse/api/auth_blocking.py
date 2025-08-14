@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import LimitBlockingTypes, UserTypes
@@ -36,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 class AuthBlocking:
     def __init__(self, hs: "HomeServer"):
-        self.store = weakref.proxy(hs.get_datastores().main)
+        self.store = hs.get_datastores().main
 
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
         self._hs_disabled = hs.config.server.hs_disabled
@@ -47,7 +46,7 @@ class AuthBlocking:
         self._mau_limits_reserved_threepids = (
             hs.config.server.mau_limits_reserved_threepids
         )
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._track_appservice_user_ips = hs.config.appservice.track_appservice_user_ips
 
     async def check_auth_blocking(

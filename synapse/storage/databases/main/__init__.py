@@ -20,7 +20,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union, cast
 
 import attr
@@ -171,9 +170,9 @@ class DataStore(
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
     ):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self._clock = hs.get_clock()
-        self.database_engine = weakref.proxy(database.engine)
+        self.database_engine = database.engine
 
         super().__init__(database, db_conn, hs)
 

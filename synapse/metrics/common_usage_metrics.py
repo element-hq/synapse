@@ -19,7 +19,6 @@
 #
 #
 from typing import TYPE_CHECKING
-import weakref
 
 import attr
 
@@ -50,7 +49,7 @@ class CommonUsageMetricsManager:
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
     async def get_metrics(self) -> CommonUsageMetrics:
         """Get the CommonUsageMetrics object. If no collection has happened yet, do it

@@ -24,7 +24,6 @@ import re
 import urllib.parse
 from inspect import signature
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, ClassVar, Dict, List, Tuple
-import weakref
 
 from prometheus_client import Counter, Gauge
 
@@ -206,7 +205,7 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
         parameter to specify which instance to hit (the instance must be in
         the `instance_map` config).
         """
-        _hs = weakref.proxy(hs)
+        _hs = hs
         clock = hs.get_clock()
         client = hs.get_replication_client()
         local_instance_name = hs.get_instance_name()

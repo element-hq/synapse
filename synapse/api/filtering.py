@@ -21,7 +21,6 @@
 #
 #
 import json
-import weakref
 from typing import (
     TYPE_CHECKING,
     Awaitable,
@@ -153,7 +152,7 @@ def matrix_user_id_validator(user_id: object) -> bool:
 
 class Filtering:
     def __init__(self, hs: "HomeServer"):
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self.store = hs.get_datastores().main
 
         self.DEFAULT_FILTER_COLLECTION = FilterCollection(hs, {})
@@ -321,7 +320,7 @@ class FilterCollection:
 
 class Filter:
     def __init__(self, hs: "HomeServer", filter_json: JsonMapping):
-        self._hs = weakref.proxy(hs)
+        self._hs = hs
         self._store = hs.get_datastores().main
         self.filter_json = filter_json
 

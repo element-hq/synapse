@@ -20,7 +20,6 @@
 #
 #
 import logging
-import weakref
 from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Tuple, Type
 
 from synapse.api.errors import FederationDeniedError, SynapseError
@@ -64,7 +63,7 @@ class TransportLayerServer(JsonResource):
             servlet_groups: List of servlet groups to register.
                 Defaults to ``DEFAULT_SERVLET_GROUPS``.
         """
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.clock = hs.get_clock()
         self.servlet_groups = servlet_groups
 

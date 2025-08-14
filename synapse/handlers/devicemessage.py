@@ -20,7 +20,6 @@
 #
 
 import logging
-import weakref
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -53,7 +52,7 @@ class DeviceMessageHandler:
         """
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.device_handler = hs.get_device_handler()
         if hs.config.experimental.msc3814_enabled:
             self.event_sources = hs.get_event_sources()

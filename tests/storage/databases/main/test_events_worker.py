@@ -19,7 +19,6 @@
 #
 #
 import json
-import weakref
 from contextlib import contextmanager
 from typing import Generator, List, Set, Tuple
 from unittest import mock
@@ -54,7 +53,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.store: EventsWorkerStore = hs.get_datastores().main
 
         self.user = self.register_user("user", "pass")

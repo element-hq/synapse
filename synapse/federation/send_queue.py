@@ -37,7 +37,6 @@ Events are replicated via a separate events stream.
 """
 
 import logging
-import weakref
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -75,7 +74,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
 
         # We may have multiple federation sender instances, so we need to track
         # their positions separately.

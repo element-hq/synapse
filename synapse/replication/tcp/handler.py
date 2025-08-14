@@ -35,7 +35,6 @@ from typing import (
     TypeVar,
     Union,
 )
-import weakref
 
 from prometheus_client import Counter
 

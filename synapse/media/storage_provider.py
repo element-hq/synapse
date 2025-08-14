@@ -23,7 +23,6 @@ import abc
 import logging
 import os
 import shutil
-import weakref
 from typing import TYPE_CHECKING, Callable, Optional
 
 from synapse.config._base import Config
@@ -145,7 +144,7 @@ class FileStorageProviderBackend(StorageProvider):
     """
 
     def __init__(self, hs: "HomeServer", config: str):
-        self.hs = weakref.proxy(hs)
+        self.hs = hs
         self.reactor = hs.get_reactor()
         self.cache_directory = hs.config.media.media_store_path
         self.base_directory = config
