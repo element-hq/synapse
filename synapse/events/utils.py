@@ -763,8 +763,8 @@ def copy_and_fixup_power_levels_contents(
     integer, e.g. `"`100"` instead of 100. Such strings are converted to integers
     in the returned dictionary (hence "fixup" in the function name).
 
-    Note that future room versions will outlaw such stringy power levels (see
-    https://github.com/matrix-org/matrix-spec/issues/853).
+    Note that room versions 10+ outlaws such stringy power levels (see
+    https://github.com/matrix-org/matrix-spec-proposals/pull/3667).
 
     Raises:
         TypeError if the input does not look like a valid power levels event content
