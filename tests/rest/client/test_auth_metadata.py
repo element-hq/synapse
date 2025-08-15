@@ -18,7 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 from http import HTTPStatus
+from typing import ClassVar
 from unittest.mock import AsyncMock
+
+from parameterized import parameterized_class
 
 from synapse.rest.client import auth_metadata
 
@@ -85,17 +88,22 @@ class AuthIssuerTestCase(HomeserverTestCase):
         req_mock.assert_not_called()
 
 
+@parameterized_class(
+    ("endpoint",),
+    [
+        ("/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",),
+        ("/_matrix/client/v1/auth_metadata",),
+    ],
+)
 class AuthMetadataTestCase(HomeserverTestCase):
+    endpoint: ClassVar[str]
     servlets = [
         auth_metadata.register_servlets,
     ]
 
     def test_returns_404_when_msc3861_disabled(self) -> None:
         # Make an unauthenticated request for the discovery info.
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",
-        )
+        channel = self.make_request("GET", self.endpoint)
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
 
     @skip_unless(HAS_AUTHLIB, "requires authlib")
@@ -124,10 +132,7 @@ class AuthMetadataTestCase(HomeserverTestCase):
         )
         self.hs.get_proxied_http_client().get_json = req_mock  # type: ignore[method-assign]
 
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/unstable/org.matrix.msc2965/auth_metadata",
-        )
+        channel = self.make_request("GET", self.endpoint)
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(
