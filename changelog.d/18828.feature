@@ -1,0 +1,1 @@
+Cleanly shutdown SynapseHomeServer object.
