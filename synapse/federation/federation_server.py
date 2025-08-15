@@ -151,7 +151,7 @@ class FederationServer(FederationBase):
         # with FederationHandlerRegistry.
         hs.get_directory_handler()
 
-        self._server_linearizer = Linearizer("fed_server")
+        self._server_linearizer = Linearizer("fed_server", clock=hs.get_clock())
 
         # origins that we are currently processing a transaction from.
         # a dict from origin to txn id.
@@ -300,7 +300,7 @@ class FederationServer(FederationBase):
             # Start a periodic check for old staged events. This is to handle
             # the case where locks time out, e.g. if another process gets killed
             # without dropping its locks.
-            self.hs.register_looping_call(self._clock.looping_call(self._handle_old_staged_events, 60 * 1000))
+            self._clock.looping_call(self._handle_old_staged_events, 60 * 1000)
 
         # keep this as early as possible to make the calculated origin ts as
         # accurate as possible.

@@ -113,7 +113,7 @@ class ApplicationServiceScheduler:
         self.store = hs.get_datastores().main
         self.as_api = hs.get_application_service_api()
 
-        self.txn_ctrl = _TransactionController(self.clock, self.store, self.as_api)
+        self.txn_ctrl = _TransactionController(hs, self.clock, self.store, self.as_api)
         self.queuer = _ServiceQueuer(self.txn_ctrl, self.clock, hs)
 
     async def start(self) -> None:
@@ -359,10 +359,11 @@ class _TransactionController:
     (Note we have only have one of these in the homeserver.)
     """
 
-    def __init__(self, clock: Clock, store: DataStore, as_api: ApplicationServiceApi):
+    def __init__(self, hs: "HomeServer", clock: Clock, store: DataStore, as_api: ApplicationServiceApi):
         self.clock = clock
         self.store = store
         self.as_api = as_api
+        self.hs = hs
 
         # map from service id to recoverer instance
         self.recoverers: Dict[str, "_Recoverer"] = {}
@@ -446,7 +447,7 @@ class _TransactionController:
         logger.info("Starting recoverer for AS ID %s", service.id)
         assert service.id not in self.recoverers
         recoverer = self.RECOVERER_CLASS(
-            self.clock, self.store, self.as_api, service, self.on_recovered
+            self.hs, self.clock, self.store, self.as_api, service, self.on_recovered
         )
         self.recoverers[service.id] = recoverer
         recoverer.recover()
@@ -486,12 +487,14 @@ class _Recoverer:
 
     def __init__(
         self,
+        hs: "HomeServer",
         clock: Clock,
         store: DataStore,
         as_api: ApplicationServiceApi,
         service: ApplicationService,
         callback: Callable[["_Recoverer"], Awaitable[None]],
     ):
+        self.hs = hs
         self.clock = clock
         self.store = store
         self.as_api = as_api

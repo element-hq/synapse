@@ -108,7 +108,7 @@ class MediaRepository:
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
-        self.remote_media_linearizer = Linearizer(name="media_remote")
+        self.remote_media_linearizer = Linearizer(name="media_remote", clock=hs.get_clock())
 
         self.recently_accessed_remotes: Set[Tuple[str, str]] = set()
         self.recently_accessed_locals: Set[str] = set()
@@ -147,9 +147,9 @@ class MediaRepository:
             hs, self.primary_base_path, self.filepaths, storage_providers
         )
 
-        hs.register_looping_call(self.clock.looping_call(
+        self.clock.looping_call(
             self._start_update_recently_accessed, UPDATE_RECENTLY_ACCESSED_TS
-        ))
+        )
 
         # Media retention configuration options
         self._media_retention_local_media_lifetime_ms = (
@@ -166,10 +166,10 @@ class MediaRepository:
         ):
             # Run the background job to apply media retention rules routinely,
             # with the duration between runs dictated by the homeserver config.
-            hs.register_looping_call(self.clock.looping_call(
+            self.clock.looping_call(
                 self._start_apply_media_retention_rules,
                 MEDIA_RETENTION_CHECK_PERIOD_MS,
-            ))
+            )
 
         if hs.config.media.url_preview_enabled:
             self.url_previewer: Optional[UrlPreviewer] = UrlPreviewer(

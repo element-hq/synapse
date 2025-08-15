@@ -115,14 +115,14 @@ class PaginationHandler:
             for job in hs.config.retention.retention_purge_jobs:
                 logger.info("Setting up purge job with config: %s", job)
 
-                hs.register_looping_call(self.clock.looping_call(
+                self.clock.looping_call(
                     run_as_background_process,
                     job.interval,
                     "purge_history_for_rooms_in_range",
                     self.purge_history_for_rooms_in_range,
                     job.shortest_max_lifetime,
                     job.longest_max_lifetime,
-                ))
+                )
 
         self._task_scheduler.register_action(
             self._purge_history, PURGE_HISTORY_ACTION_NAME

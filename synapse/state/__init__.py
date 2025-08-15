@@ -635,7 +635,7 @@ class StateResolutionHandler:
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
 
-        self.resolve_linearizer = Linearizer(name="state_resolve_lock")
+        self.resolve_linearizer = Linearizer(name="state_resolve_lock", clock=hs.get_clock())
 
         # dict of set of event_ids -> _StateCacheEntry.
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
@@ -660,7 +660,7 @@ class StateResolutionHandler:
             _StateResMetrics
         )
 
-        hs.register_looping_call(self.clock.looping_call(self._report_metrics, 120 * 1000))
+        self.clock.looping_call(self._report_metrics, 120 * 1000)
 
     async def resolve_state_groups(
         self,

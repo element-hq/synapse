@@ -95,13 +95,13 @@ class LockStore(SQLBaseStore):
         # lead to a race, as we may drop the lock while we are still processing.
         # However, a) it should be a small window, b) the lock is best effort
         # anyway and c) we want to really avoid leaking locks when we restart.
-        hs.register_shutdown_handler("LockStore _on_shutdown", self._on_shutdown)
+        hs.register_async_shutdown_handler("LockStore _on_shutdown", self._on_shutdown)
 
         self._acquiring_locks: Set[Tuple[str, str]] = set()
 
-        hs.register_looping_call(self._clock.looping_call(
+        self._clock.looping_call(
             self._reap_stale_read_write_locks, _LOCK_TIMEOUT_MS / 10.0
-        ))
+        )
 
     @wrap_as_background_process("LockStore._on_shutdown")
     async def _on_shutdown(self) -> None:

@@ -507,11 +507,11 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        hs.register_looping_call(self.clock.looping_call(
+        self.clock.looping_call(
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
-        ))
+        )
 
-        hs.register_shutdown_handler("generic_presence.on_shutdown", self._on_shutdown)
+        hs.register_async_shutdown_handler("generic_presence.on_shutdown", self._on_shutdown)
 
     @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
@@ -804,7 +804,7 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.register_shutdown_handler("presence.on_shutdown", self._on_shutdown)
+        hs.register_async_shutdown_handler("presence.on_shutdown", self._on_shutdown)
 
         # Keeps track of the number of *ongoing* syncs on this process. While
         # this is non zero a user will never go offline.
@@ -827,7 +827,7 @@ class PresenceHandler(BasePresenceHandler):
         ] = {}
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer")
+        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer", clock=hs.get_clock())
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.
@@ -2399,7 +2399,7 @@ class PresenceFederationQueue:
         self._current_tokens: Dict[str, int] = {}
 
         if self._queue_presence_updates:
-            hs.register_looping_call(self._clock.looping_call(self._clear_queue, self._CLEAR_ITEMS_EVERY_MS))
+            self._clock.looping_call(self._clear_queue, self._CLEAR_ITEMS_EVERY_MS)
 
     def _clear_queue(self) -> None:
         """Clear out older entries from the queue."""

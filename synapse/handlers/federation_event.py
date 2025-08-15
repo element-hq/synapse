@@ -182,7 +182,7 @@ class FederationEventHandler:
         # federation event staging area.
         self.room_queues: Dict[str, List[Tuple[EventBase, str]]] = {}
 
-        self._room_pdu_linearizer = Linearizer("fed_room_pdu")
+        self._room_pdu_linearizer = Linearizer("fed_room_pdu", clock=hs.get_clock())
 
     async def on_receive_pdu(self, origin: str, pdu: EventBase) -> None:
         """Process a PDU received via a federation /send/ transaction

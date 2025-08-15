@@ -31,7 +31,7 @@ class MasBaseResource(DirectServeJsonResource):
         # dependency but required if msc3861 is enabled
         from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
-        DirectServeJsonResource.__init__(self, extract_context=True)
+        DirectServeJsonResource.__init__(self, extract_context=True, clock=hs.get_clock())
         auth = hs.get_auth()
         assert isinstance(auth, MSC3861DelegatedAuth)
         self.msc3861_auth = auth

@@ -49,9 +49,9 @@ class PurgeEventsStorageController:
         self.stores = stores
 
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(hs.get_clock().looping_call(
+            hs.get_clock().looping_call(
                 self._delete_state_groups_loop, 60 * 1000
-            ))
+            )
 
         self.stores.state.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.MARK_UNREFERENCED_STATE_GROUPS_FOR_DELETION_BG_UPDATE,

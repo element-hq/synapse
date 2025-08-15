@@ -96,7 +96,7 @@ class Ratelimiter:
         #   * The rate_hz (leak rate) of this particular bucket.
         self.actions: Dict[Hashable, Tuple[float, float, float]] = {}
 
-        hs.register_looping_call(self.clock.looping_call(self._prune_message_counts, 60 * 1000))
+        self.clock.looping_call(self._prune_message_counts, 60 * 1000)
 
     def _get_key(
         self, requester: Optional[Requester], key: Optional[Hashable]

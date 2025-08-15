@@ -105,7 +105,7 @@ class ExpiringCache(Generic[KT, VT]):
         def f() -> "defer.Deferred[None]":
             return run_as_background_process("prune_cache", self._prune_cache)
 
-        hs.register_looping_call(self._clock.looping_call(f, self._expiry_ms / 2))
+        self._clock.looping_call(f, self._expiry_ms / 2)
 
     def __setitem__(self, key: KT, value: VT) -> None:
         now = self._clock.time_msec()

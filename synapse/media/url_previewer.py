@@ -208,9 +208,9 @@ class UrlPreviewer:
         )
 
         if self._worker_run_media_background_jobs:
-            hs.register_looping_call(self.clock.looping_call(
+            self.clock.looping_call(
                 self._start_expire_url_cache_data, 10 * 1000
-            ))
+            )
 
     async def preview(self, url: str, user: UserID, ts: int) -> bytes:
         # the in-memory cache:

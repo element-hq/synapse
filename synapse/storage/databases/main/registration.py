@@ -226,9 +226,9 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         # Create a background job for culling expired 3PID validity tokens
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(
+            self._clock.looping_call(
                 self.cull_expired_threepid_validation_tokens, THIRTY_MINUTES_IN_MS
-            ))
+            )
 
     async def register_user(
         self,
@@ -2727,9 +2727,9 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # Create a background job for removing expired login tokens
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(
+            self._clock.looping_call(
                 self._delete_expired_login_tokens, THIRTY_MINUTES_IN_MS
-            ))
+            )
 
     async def add_access_token_to_user(
         self,

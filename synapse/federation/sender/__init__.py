@@ -429,12 +429,12 @@ class FederationSender(AbstractFederationSender):
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
-        hs.register_looping_call(self.clock.looping_call_now(
+        self.clock.looping_call_now(
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
             self._wake_destinations_needing_catchup,
-        ))
+        )
 
     def _get_per_destination_queue(
         self, destination: str

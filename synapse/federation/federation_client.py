@@ -133,7 +133,7 @@ class FederationClient(FederationBase):
         super().__init__(hs)
 
         self.pdu_destination_tried: Dict[str, Dict[str, int]] = {}
-        hs.register_looping_call(self._clock.looping_call(self._clear_tried_cache, 60 * 1000))
+        self._clock.looping_call(self._clear_tried_cache, 60 * 1000)
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
 

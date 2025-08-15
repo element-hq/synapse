@@ -118,14 +118,14 @@ class TaskScheduler:
         self._launching_new_tasks = False
 
         if self._run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(
+            self._clock.looping_call(
                 self._launch_scheduled_tasks,
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
-            ))
-            hs.register_looping_call(self._clock.looping_call(
+            )
+            self._clock.looping_call(
                 self._clean_scheduled_tasks,
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
-            ))
+            )
 
         hs.register_later_gauge(LaterGauge(
             "synapse_scheduler_running_tasks",
@@ -435,7 +435,6 @@ class TaskScheduler:
                     log_context,
                     start_time,
                 )
-                self._hs.register_looping_call(occasional_status_call)
                 try:
                     (status, result, error) = await function(task)
                 except Exception:

@@ -81,7 +81,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
         super().__init__(database, db_conn, hs)
 
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(self._cleanup_transactions, 30 * 60 * 1000))
+            self._clock.looping_call(self._cleanup_transactions, 30 * 60 * 1000)
 
     @wrap_as_background_process("cleanup_transactions")
     async def _cleanup_transactions(self) -> None:

@@ -278,7 +278,7 @@ class SynapseRedisFactory(RedisFactory):
             convertNumbers=convertNumbers,
         )
 
-        hs.register_looping_call(hs.get_clock().looping_call(self._send_ping, 30 * 1000))
+        hs.get_clock().looping_call(self._send_ping, 30 * 1000)
 
     @wrap_as_background_process("redis_ping")
     async def _send_ping(self) -> None:

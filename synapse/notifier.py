@@ -251,9 +251,9 @@ class Notifier:
 
         self.state_handler = hs.get_state_handler()
 
-        hs.register_looping_call(self.clock.looping_call(
+        self.clock.looping_call(
             self.remove_expired_streams, self.UNUSED_STREAM_EXPIRY_MS
-        ))
+        )
 
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at

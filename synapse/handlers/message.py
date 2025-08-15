@@ -92,6 +92,7 @@ class MessageHandler:
     """Contains some read only APIs to get state about a room"""
 
     def __init__(self, hs: "HomeServer"):
+        self.hs = hs
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.state = hs.get_state_handler()
@@ -506,7 +507,7 @@ class EventCreationHandler:
 
         # We limit concurrent event creation for a room to 1. This prevents state resolution
         # from occurring when sending bursts of events to a local room
-        self.limiter = Linearizer(max_count=1, name="room_event_creation_limit")
+        self.limiter = Linearizer(max_count=1, name="room_event_creation_limit", clock=hs.get_clock())
 
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
 
@@ -538,13 +539,13 @@ class EventCreationHandler:
             self.config.worker.run_background_tasks
             and self.config.server.cleanup_extremities_with_dummy_events
         ):
-            hs.register_looping_call(self.clock.looping_call(
+            self.clock.looping_call(
                 lambda: run_as_background_process(
                     "send_dummy_events_to_fill_extremities",
                     self._send_dummy_events_to_fill_extremities,
                 ),
                 5 * 60 * 1000,
-            ))
+            )
 
         self._message_handler = hs.get_message_handler()
 

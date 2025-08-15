@@ -794,7 +794,6 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         else:
             next_interval = REGULAR_CLEANUP_INTERVAL_MS
 
-        # TODO: (devon) what is the best way to track these manually looping calls?
         self.hs.get_clock().call_later(
             next_interval / 1000, self._clean_up_cache_invalidation_wrapper
         )

@@ -55,7 +55,7 @@ class SessionStore(SQLBaseStore):
 
         # Create a background job for culling expired sessions.
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(self._delete_expired_sessions, 30 * 60 * 1000))
+            self._clock.looping_call(self._delete_expired_sessions, 30 * 60 * 1000)
 
     async def create_session(
         self, session_type: str, value: JsonDict, expiry_ms: int

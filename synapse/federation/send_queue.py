@@ -128,7 +128,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         ]:
             register(queue_name, getattr(self, queue_name))
 
-        hs.register_looping_call(self.clock.looping_call(self._clear_queue, 30 * 1000))
+        self.clock.looping_call(self._clear_queue, 30 * 1000)
 
     def _next_pos(self) -> int:
         pos = self.pos

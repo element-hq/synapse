@@ -112,7 +112,7 @@ class ReplicationStreamer:
         #
         # Note that if the position hasn't advanced then we won't send anything.
         if any(EventsStream.NAME == s.NAME for s in self.streams):
-            hs.register_looping_call(self.clock.looping_call(self.on_notifier_poke, 1000))
+            self.clock.looping_call(self.on_notifier_poke, 1000)
 
     def on_notifier_poke(self) -> None:
         """Checks if there is actually any new data and sends it to the

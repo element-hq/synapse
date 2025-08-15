@@ -65,12 +65,12 @@ class CommonUsageMetricsManager:
         run_as_background_process(
             desc="common_usage_metrics_update_gauges", func=self._update_gauges
         )
-        self.hs.register_looping_call(self._clock.looping_call(
+        self._clock.looping_call(
             run_as_background_process,
             5 * 60 * 1000,
             desc="common_usage_metrics_update_gauges",
             func=self._update_gauges,
-        ))
+        )
 
     async def _collect(self) -> CommonUsageMetrics:
         """Collect the common metrics and either create the CommonUsageMetrics object to

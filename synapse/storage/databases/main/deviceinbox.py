@@ -153,12 +153,12 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         )
 
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(
+            self._clock.looping_call(
                 run_as_background_process,
                 DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
                 self._delete_old_federation_inbox_rows,
-            ))
+            )
 
     def process_replication_rows(
         self,

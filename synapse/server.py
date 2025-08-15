@@ -32,7 +32,7 @@ from attr import dataclass
 from twisted.internet import defer
 from typing_extensions import TypeAlias
 
-from twisted.internet.interfaces import IOpenSSLContextFactory
+from twisted.internet.interfaces import IDelayedCall, IOpenSSLContextFactory
 from twisted.internet.task import LoopingCall
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
@@ -323,10 +323,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
-        self._looping_calls: List[LoopingCall] = []
         self._later_gauges: List[LaterGauge] = []
         self._background_processes: List[defer.Deferred] = []
-        self._shutdown_handlers: List[ShutdownInfo] = []
+        self._async_shutdown_handlers: List[ShutdownInfo] = []
+        self._sync_shutdown_handlers: List[ShutdownInfo] = []
 
     def shutdown(self) -> None:
         logger.info("Received shutdown request")
@@ -351,10 +351,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         # self.get_replication_command_handler()._connection.disconnect()
         # self.get_replication_command_handler()._factory.synapse_outbound_redis_connection.disconnect()
         # self.get_replication_command_handler()._factory = None
-        self.get_replication_command_handler()._streams.clear()
-        self.get_replication_command_handler()._streams_to_replicate.clear()
-        # XXX: Does this trample on other tenants?
-        STREAMS_MAP.clear()
+        # self.get_replication_command_handler()._streams.clear()
+        # self.get_replication_command_handler()._streams_to_replicate.clear()
+        # # XXX: Does this trample on other tenants?
+        # STREAMS_MAP.clear()
 
         from synapse.util.batching_queue import number_of_keys
         number_of_keys.clear()
@@ -371,13 +371,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         for db in self.get_datastores().databases:
             db.stop_background_updates()
 
-        logger.info("Stopping looping calls: %d", len(self._looping_calls))
-        for looping_call in self._looping_calls:
-            looping_call.stop()
-        self._looping_calls.clear()
-
-        self._looping_calls.clear()
-
+        logger.info("Stopping looping calls")
+        self.get_clock().cancel_all_looping_calls()
+        logger.info("Stopping call_later calls")
+        self.get_clock().cancel_all_delayed_calls()
+         
         logger.info("Stopping background processes: %d", len(self._background_processes))
         for process in self._background_processes:
             process.cancel()
@@ -389,17 +387,26 @@ class HomeServer(metaclass=abc.ABCMeta):
         # only clear them for this server
         CACHE_METRIC_REGISTRY.clear()
 
-        for shutdown_handler in self._shutdown_handlers:
+        for shutdown_handler in self._async_shutdown_handlers:
             logger.info("Shutting down %s", shutdown_handler.desc)
             self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
             # TODO: we should probably run these
             #yield defer.ensureDeferred(shutdown_handler.func())
-        self._shutdown_handlers.clear()
+        self._async_shutdown_handlers.clear()
+
+        for shutdown_handler in self._sync_shutdown_handlers:
+            logger.info("Shutting down %s", shutdown_handler.desc)
+            self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+            shutdown_handler.func()
+        self._sync_shutdown_handlers.clear()
+
+        from synapse.app._base import unregister_sighups
+        unregister_sighups(self.config.server.server_name)
 
         for call in self.get_reactor().getDelayedCalls():
             call.cancel()
 
-    def register_shutdown_handler(self, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+    def register_async_shutdown_handler(self, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
         id = self.get_reactor().addSystemEventTrigger(
             "before",
             "shutdown",
@@ -407,10 +414,15 @@ class HomeServer(metaclass=abc.ABCMeta):
             desc,
             shutdown_func,
         )
-        self._shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
+        self._async_shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
 
-    def register_looping_call(self, looping_call: LoopingCall) -> None:
-        self._looping_calls.append(looping_call)
+    def register_sync_shutdown_handler(self, phase: str, eventType: str, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+        id = self.get_reactor().addSystemEventTrigger(
+            phase,
+            eventType,
+            shutdown_func,
+        )
+        self._sync_shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
 
     def register_later_gauge(self, later_gauge: LaterGauge) -> None:
         self._later_gauges.append(later_gauge)
@@ -1084,10 +1096,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        # TODO: what do. it's different since it uses during instead of before
-        self.get_reactor().addSystemEventTrigger(
-            "during", "shutdown", media_threadpool.stop
-        )
+        hs.register_sync_shutdown_handler("during", "shutdown", "Homeserver media_threadpool.stop", media_threadpool.stop)
 
         # Register the threadpool with our metrics.
         register_threadpool("media", media_threadpool)

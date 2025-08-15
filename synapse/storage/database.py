@@ -672,7 +672,7 @@ class DatabasePool:
                 "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
             )
 
-        self.hs.register_looping_call(self._clock.looping_call(loop, 10000))
+        self._clock.looping_call(loop, 10000)
 
     def new_transaction(
         self,

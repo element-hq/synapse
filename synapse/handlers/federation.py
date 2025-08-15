@@ -157,7 +157,7 @@ class FederationHandler:
         self._notifier = hs.get_notifier()
         self._worker_locks = hs.get_worker_locks_handler()
 
-        self._room_backfill = Linearizer("room_backfill")
+        self._room_backfill = Linearizer("room_backfill", clock=hs.get_clock())
 
         self._third_party_event_rules = (
             hs.get_module_api_callbacks().third_party_event_rules
@@ -177,7 +177,7 @@ class FederationHandler:
         # When the lock is held for a given room, no other concurrent code may
         # partial state or un-partial state the room.
         self._is_partial_state_room_linearizer = Linearizer(
-            name="_is_partial_state_room_linearizer"
+            name="_is_partial_state_room_linearizer", clock=hs.get_clock()
         )
 
         # if this is the main process, fire off a background process to resume

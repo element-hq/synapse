@@ -142,9 +142,9 @@ class EventFederationWorkerStore(
         self.hs = hs
 
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(hs.get_clock().looping_call(
+            hs.get_clock().looping_call(
                 self._delete_old_forward_extrem_cache, 60 * 60 * 1000
-            ))
+            )
 
         # Cache of event ID to list of auth event IDs and their depths.
         self._event_auth_cache: LruCache[str, List[Tuple[str, int]]] = LruCache(
@@ -158,7 +158,7 @@ class EventFederationWorkerStore(
         # index.
         self.tests_allow_no_chain_cover_index = True
 
-        hs.register_looping_call(self._clock.looping_call(self._get_stats_for_federation_staging, 30 * 1000))
+        self._clock.looping_call(self._get_stats_for_federation_staging, 30 * 1000)
 
         if isinstance(self.database_engine, PostgresEngine):
             self.db_pool.updates.register_background_validate_constraint_and_delete_rows(

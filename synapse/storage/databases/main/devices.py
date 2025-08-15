@@ -194,9 +194,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
 
         if hs.config.worker.run_background_tasks:
-            hs.register_looping_call(self._clock.looping_call(
+            self._clock.looping_call(
                 self._prune_old_outbound_device_pokes, 60 * 60 * 1000
-            ))
+            )
 
     def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: Iterable[Any]

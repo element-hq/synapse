@@ -190,12 +190,12 @@ class DeviceHandler:
             hs.config.worker.run_background_tasks
             and self._delete_stale_devices_after is not None
         ):
-            hs.register_looping_call(self.clock.looping_call(
+            self.clock.looping_call(
                 run_as_background_process,
                 DELETE_STALE_DEVICES_INTERVAL_MS,
                 "delete_stale_devices",
                 self._delete_stale_devices,
-            ))
+            )
 
     async def _delete_stale_devices(self) -> None:
         """Background task that deletes devices which haven't been accessed for more than
@@ -1445,8 +1445,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_device_list")
-        self._resync_linearizer = Linearizer(name="remote_device_resync")
+        self._remote_edu_linearizer = Linearizer(name="remote_device_list", clock=hs.get_clock())
+        self._resync_linearizer = Linearizer(name="remote_device_resync", clock=hs.get_clock())
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[
@@ -1468,12 +1468,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
 
         # Attempt to resync out of sync device lists every 30s.
         self._resync_retry_lock = Lock()
-        hs.register_looping_call(self.clock.looping_call(
+        self.clock.looping_call(
             run_as_background_process,
             30 * 1000,
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
-        ))
+        )
 
     @trace
     async def incoming_device_list_update(

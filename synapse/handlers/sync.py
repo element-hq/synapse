@@ -1137,7 +1137,8 @@ class SyncHandler:
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
-            cache = LruCache(max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
+            cache = LruCache(max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
+                             )
             self.lazy_loaded_members_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)

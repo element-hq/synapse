@@ -29,6 +29,7 @@ from typing import (
     Dict,
     Generator,
     Iterator,
+    List,
     Mapping,
     Optional,
     Sequence,
@@ -110,7 +111,6 @@ def unwrapFirstError(failure: Failure) -> Failure:
 P = ParamSpec("P")
 
 
-@attr.s(slots=True)
 class Clock:
     """
     A Clock wraps a Twisted reactor and provides utilities on top of it.
@@ -119,7 +119,14 @@ class Clock:
         reactor: The Twisted reactor to use.
     """
 
-    _reactor: IReactorTime = attr.ib()
+    _reactor: IReactorTime
+    _call_id: int = 0
+
+    _looping_calls: List[LoopingCall] = []
+    _delayed_calls: Dict[int, IDelayedCall] = {}
+
+    def __init__(self, reactor: IReactorTime) -> None:
+        self._reactor = reactor
 
     @defer.inlineCallbacks
     def sleep(self, seconds: float) -> "Generator[Deferred[float], Any, Any]":
@@ -200,7 +207,13 @@ class Clock:
         call.clock = self._reactor
         d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
+        self._looping_calls.append(call)
         return call
+
+    def cancel_all_looping_calls(self) -> None:
+        for call in self._looping_calls:
+            call.stop()
+        self._looping_calls.clear()
 
     def call_later(
         self, delay: float, callback: Callable, *args: Any, **kwargs: Any
@@ -217,12 +230,17 @@ class Clock:
             **kwargs: Key arguments to pass to function.
         """
 
+        id = self._call_id
+        self._call_id += 1
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             with context.PreserveLoggingContext():
                 callback(*args, **kwargs)
+                self._delayed_calls.pop(id)
 
         with context.PreserveLoggingContext():
-            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+            call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+            self._delayed_calls[id] = call
+            return call
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:
@@ -230,6 +248,15 @@ class Clock:
         except Exception:
             if not ignore_errs:
                 raise
+
+    def cancel_all_delayed_calls(self, ignore_errs: bool = True) -> None:
+        for call in self._delayed_calls.values():
+            try:
+                call.cancel()
+            except Exception:
+                if not ignore_errs:
+                    raise
+        self._delayed_calls.clear()
 
 
 def log_failure(

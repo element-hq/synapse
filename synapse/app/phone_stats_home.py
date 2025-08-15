@@ -198,18 +198,16 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # Rather than update on per session basis, batch up the requests.
     # If you increase the loop period, the accuracy of user_daily_visits
     # table will decrease
-    hs.register_looping_call(
-        clock.looping_call(
-            hs.get_datastores().main.generate_user_daily_visits,
-            5 * MILLISECONDS_PER_SECOND,
-        )
+    clock.looping_call(
+        hs.get_datastores().main.generate_user_daily_visits,
+        5 * MILLISECONDS_PER_SECOND,
     )
 
     # monthly active user limiting functionality
-    hs.register_looping_call(clock.looping_call(
+    clock.looping_call(
         hs.get_datastores().main.reap_monthly_active_users,
         ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
-    ))
+    )
     # TODO: (devon) how does this hold onto a DB pool reference?
     #hs.register_background_process(hs.get_datastores().main.reap_monthly_active_users())
 
@@ -235,18 +233,16 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
 
     if hs.config.server.limit_usage_by_mau or hs.config.server.mau_stats_only:
         generate_monthly_active_users()
-        hs.register_looping_call(clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000))
+        clock.looping_call(generate_monthly_active_users, 5 * 60 * 1000)
     # End of monthly active user settings
 
     if hs.config.metrics.report_stats:
         logger.info("Scheduling stats reporting for 3 hour intervals")
-        hs.register_looping_call(
-            clock.looping_call(
-                phone_stats_home,
-                PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
-                hs,
-                stats,
-            )
+        clock.looping_call(
+            phone_stats_home,
+            PHONE_HOME_INTERVAL_SECONDS * MILLISECONDS_PER_SECOND,
+            hs,
+            stats,
         )
 
         # We need to defer this init for the cases that we daemonize
