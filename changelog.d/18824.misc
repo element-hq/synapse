@@ -1,0 +1,1 @@
+Fix portdb CI by hardcoding the new pg_dump restrict key that was added due to CVE-2025-8714.
