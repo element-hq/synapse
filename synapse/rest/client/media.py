@@ -30,6 +30,7 @@ from synapse.http.server import (
     respond_with_json_bytes,
     set_corp_headers,
     set_cors_headers,
+    set_headers_for_media_response,
 )
 from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
@@ -169,7 +170,8 @@ class ThumbnailResource(RestServlet):
                     method,
                     m_type,
                     max_timeout_ms,
-                    False,
+                    for_federation=False,
+                    may_redirect=True,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
@@ -180,7 +182,8 @@ class ThumbnailResource(RestServlet):
                     method,
                     m_type,
                     max_timeout_ms,
-                    False,
+                    for_federation=False,
+                    may_redirect=True,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -238,21 +241,7 @@ class DownloadResource(RestServlet):
 
         await self.auth.get_user_by_req(request, allow_guest=True)
 
-        set_cors_headers(request)
-        set_corp_headers(request)
-        request.setHeader(
-            b"Content-Security-Policy",
-            b"sandbox;"
-            b" default-src 'none';"
-            b" script-src 'none';"
-            b" plugin-types application/pdf;"
-            b" style-src 'unsafe-inline';"
-            b" media-src 'self';"
-            b" object-src 'self';",
-        )
-        # Limited non-standard form of CSP for IE11
-        request.setHeader(b"X-Content-Security-Policy", b"sandbox;")
-        request.setHeader(b"Referrer-Policy", b"no-referrer")
+        set_headers_for_media_response(request)
         max_timeout_ms = parse_integer(
             request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
         )
@@ -260,7 +249,7 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request, media_id, file_name, max_timeout_ms, may_redirect=True
             )
         else:
             ip_address = request.getClientAddress().host

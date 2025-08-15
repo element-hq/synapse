@@ -718,6 +718,17 @@ def parse_strings_from_args(
 def parse_string_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
+    default: str,
+    *,
+    allowed_values: Optional[StrCollection] = None,
+    encoding: str = "ascii",
+) -> str: ...
+
+
+@overload
+def parse_string_from_args(
+    args: Mapping[bytes, Sequence[bytes]],
+    name: str,
     default: Optional[str] = None,
     *,
     allowed_values: Optional[StrCollection] = None,
