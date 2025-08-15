@@ -74,6 +74,7 @@ from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.async_helpers import concurrently_execute
@@ -85,7 +86,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_queries_counter = Counter("synapse_federation_client_sent_queries", "", ["type"])
+sent_queries_counter = Counter(
+    "synapse_federation_client_sent_queries", "", labelnames=["type", SERVER_NAME_LABEL]
+)
 
 
 PDU_RETRY_TIME_MS = 1 * 60 * 1000
@@ -211,7 +214,10 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels(query_type).inc()
+        sent_queries_counter.labels(
+            type=query_type,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         return await self.transport_layer.make_query(
             destination,
@@ -233,7 +239,10 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels("client_device_keys").inc()
+        sent_queries_counter.labels(
+            type="client_device_keys",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
         return await self.transport_layer.query_client_keys(
             destination, content, timeout
         )
@@ -244,7 +253,10 @@ class FederationClient(FederationBase):
         """Query the device keys for a list of user ids hosted on a remote
         server.
         """
-        sent_queries_counter.labels("user_devices").inc()
+        sent_queries_counter.labels(
+            type="user_devices",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
         return await self.transport_layer.query_user_devices(
             destination, user_id, timeout
         )
@@ -266,7 +278,10 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels("client_one_time_keys").inc()
+        sent_queries_counter.labels(
+            type="client_one_time_keys",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         # Convert the query with counts into a stable and unstable query and check
         # if attempting to claim more than 1 OTK.

@@ -42,9 +42,10 @@ TRACK_MEMORY_USAGE = False
 
 # We track cache metrics in a special registry that lets us update the metrics
 # just before they are returned from the scrape endpoint.
-CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()
-
-caches_by_name: Dict[str, Sized] = {}
+#
+# The `SERVER_NAME_LABEL` is included in the individual metrics added to this registry,
+# so we don't need to worry about it on the collector itself.
+CACHE_METRIC_REGISTRY = DynamicCollectorRegistry()  # type: ignore[missing-server-name-label]
 
 cache_size = Gauge(
     "synapse_util_caches_cache_size",
@@ -242,8 +243,7 @@ def register_cache(
         server_name=server_name,
         collect_callback=collect_callback,
     )
-    metric_name = "cache_%s_%s" % (cache_type, cache_name)
-    caches_by_name[cache_name] = cache
+    metric_name = "cache_%s_%s_%s" % (cache_type, cache_name, server_name)
     CACHE_METRIC_REGISTRY.register_hook(metric_name, metric.collect)
     return metric
 

@@ -187,12 +187,16 @@ class MediaRepository:
 
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
-            "update_recently_accessed_media", self._update_recently_accessed
+            "update_recently_accessed_media",
+            self.server_name,
+            self._update_recently_accessed,
         )
 
     def _start_apply_media_retention_rules(self) -> Deferred:
         return run_as_background_process(
-            "apply_media_retention_rules", self._apply_media_retention_rules
+            "apply_media_retention_rules",
+            self.server_name,
+            self._apply_media_retention_rules,
         )
 
     async def _update_recently_accessed(self) -> None:

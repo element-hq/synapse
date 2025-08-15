@@ -34,6 +34,7 @@ class InviteAutoAccepter:
     def __init__(self, config: AutoAcceptInvitesConfig, api: ModuleApi):
         # Keep a reference to the Module API.
         self._api = api
+        self.server_name = api.server_name
         self._config = config
 
         if not self._config.enabled:

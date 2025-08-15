@@ -109,7 +109,9 @@ class UsersRestServletV2(RestServlet):
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
-        self._msc3861_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
@@ -121,10 +123,10 @@ class UsersRestServletV2(RestServlet):
         name = parse_string(request, "name", encoding="utf-8")
 
         guests = parse_boolean(request, "guests", default=True)
-        if self._msc3861_enabled and guests:
+        if self._auth_delegation_enabled and guests:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "The guests parameter is not supported when MSC3861 is enabled.",
+                "The guests parameter is not supported when delegating to MAS.",
                 errcode=Codes.INVALID_PARAM,
             )
 
@@ -998,7 +1000,7 @@ class UserAdminServlet(RestServlet):
                 "Only local users can be admins of this homeserver",
             )
 
-        is_admin = await self.store.is_server_admin(target_user)
+        is_admin = await self.store.is_server_admin(target_user.to_string())
 
         return HTTPStatus.OK, {"admin": is_admin}
 

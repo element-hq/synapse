@@ -51,10 +51,16 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, relation_from_event
+from synapse.events import (
+    EventBase,
+    StrippedStateEvent,
+    is_creator,
+    relation_from_event,
+)
 from synapse.events.snapshot import EventContext
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -89,11 +95,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter("synapse_storage_events_persisted_events", "")
+persist_event_counter = Counter(
+    "synapse_storage_events_persisted_events", "", labelnames=[SERVER_NAME_LABEL]
+)
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    ["type", "origin_type", "origin_entity"],
+    labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],
 )
 
 # State event type/key pairs that we need to gather to fill in the
@@ -237,6 +245,7 @@ class PersistEventsStore:
         db_conn: LoggingDatabaseConnection,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self.db_pool = db
         self.store = main_data_store
         self.database_engine = db.engine
@@ -356,12 +365,16 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
             )
-            persist_event_counter.inc(len(events_and_contexts))
+            persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+                len(events_and_contexts)
+            )
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
-                synapse.metrics.event_persisted_position.set(stream)
+                synapse.metrics.event_persisted_position.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).set(stream)
 
             for event, context in events_and_contexts:
                 if context.app_service:
@@ -374,7 +387,12 @@ class PersistEventsStore:
                     origin_type = "remote"
                     origin_entity = get_domain_from_id(event.sender)
 
-                event_counter.labels(event.type, origin_type, origin_entity).inc()
+                event_counter.labels(
+                    type=event.type,
+                    origin_type=origin_type,
+                    origin_entity=origin_entity,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
 
                 if (
                     not self.hs.config.experimental.msc4293_enabled
@@ -467,17 +485,27 @@ class PersistEventsStore:
         pl_id = state[(EventTypes.PowerLevels, "")]
         pl_event = await self.store.get_event(pl_id, allow_none=True)
 
-        if pl_event is None:
-            # per the spec, if a power level event isn't in the room, grant the creator
-            # level 100 and all other users 0
-            create_id = state[(EventTypes.Create, "")]
-            create_event = await self.store.get_event(create_id, allow_none=True)
-            if create_event is None:
-                # not sure how this would happen but if it does then just deny the redaction
-                logger.warning("No create event found for room %s", event.room_id)
-                return False
-            if create_event.sender == event.sender:
+        create_id = state[(EventTypes.Create, "")]
+        create_event = await self.store.get_event(create_id, allow_none=True)
+
+        if create_event is None:
+            # not sure how this would happen but if it does then just deny the redaction
+            logger.warning("No create event found for room %s", event.room_id)
+            return False
+
+        if create_event.room_version.msc4289_creator_power_enabled:
+            # per the spec, grant the creator infinite power level and all other users 0
+            if is_creator(create_event, event.sender):
                 return True
+            if pl_event is None:
+                # per the spec, users other than the room creator have power level
+                # 0, which is less than the default to redact events (50).
+                return False
+        else:
+            # per the spec, if a power level event isn't in the room, grant the creator
+            # level 100 (the default redaction level is 50) and all other users 0
+            if pl_event is None:
+                return create_event.sender == event.sender
 
         assert pl_event is not None
         sender_level = pl_event.content.get("users", {}).get(event.sender)
@@ -2840,7 +2868,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         events_and_contexts: List[Tuple[EventBase, EventContext]],
     ) -> None:
-        to_prefill = []
+        to_prefill: List[EventCacheEntry] = []
 
         ev_map = {e.event_id: e for e, _ in events_and_contexts}
         if not ev_map:

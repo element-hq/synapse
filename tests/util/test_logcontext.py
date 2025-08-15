@@ -51,20 +51,18 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext("test"):
             self._check_test_key("test")
 
-    @defer.inlineCallbacks
-    def test_sleep(self) -> Generator["defer.Deferred[object]", object, None]:
+    async def test_sleep(self) -> None:
         clock = Clock(reactor)
 
-        @defer.inlineCallbacks
-        def competing_callback() -> Generator["defer.Deferred[object]", object, None]:
+        async def competing_callback() -> None:
             with LoggingContext("competing"):
-                yield clock.sleep(0)
+                await clock.sleep(0)
                 self._check_test_key("competing")
 
-        reactor.callLater(0, competing_callback)
+        reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
         with LoggingContext("one"):
-            yield clock.sleep(0)
+            await clock.sleep(0)
             self._check_test_key("one")
 
     def _test_run_in_background(self, function: Callable[[], object]) -> defer.Deferred:
@@ -108,9 +106,8 @@ class LoggingContextTestCase(unittest.TestCase):
         return d2
 
     def test_run_in_background_with_blocking_fn(self) -> defer.Deferred:
-        @defer.inlineCallbacks
-        def blocking_function() -> Generator["defer.Deferred[object]", object, None]:
-            yield Clock(reactor).sleep(0)
+        async def blocking_function() -> None:
+            await Clock(reactor).sleep(0)
 
         return self._test_run_in_background(blocking_function)
 
@@ -133,7 +130,7 @@ class LoggingContextTestCase(unittest.TestCase):
     def test_run_in_background_with_coroutine(self) -> defer.Deferred:
         async def testfunc() -> None:
             self._check_test_key("one")
-            d = Clock(reactor).sleep(0)
+            d = defer.ensureDeferred(Clock(reactor).sleep(0))
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             await d
             self._check_test_key("one")

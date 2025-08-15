@@ -204,6 +204,8 @@ class SsoHandler:
         self._store = hs.get_datastores().main
         self._server_name = hs.hostname
         self.hs = hs
+        self._server_name = hs.hostname
+        self._is_mine_server_name = hs.is_mine_server_name
         self._registration_handler = hs.get_registration_handler()
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
@@ -238,7 +240,9 @@ class SsoHandler:
         p_id = p.idp_id
         assert p_id not in self._identity_providers
         self._identity_providers[p_id] = p
-        init_counters_for_auth_provider(p_id)
+        init_counters_for_auth_provider(
+            auth_provider_id=p_id, server_name=self.server_name
+        )
 
     def get_identity_providers(self) -> Mapping[str, SsoIdentityProvider]:
         """Get the configured identity providers"""
@@ -569,7 +573,7 @@ class SsoHandler:
                 return attributes
 
             # Check if this mxid already exists
-            user_id = UserID(attributes.localpart, self._server_name).to_string()
+            user_id = UserID(attributes.localpart, self.server_name).to_string()
             if not await self._store.get_users_by_id_case_insensitive(user_id):
                 # This mxid is free
                 break
@@ -907,7 +911,7 @@ class SsoHandler:
 
         # render an error page.
         html = self._bad_user_template.render(
-            server_name=self._server_name,
+            server_name=self.server_name,
             user_id_to_verify=user_id_to_verify,
         )
         respond_with_html(request, 200, html)
@@ -959,7 +963,7 @@ class SsoHandler:
 
         if contains_invalid_mxid_characters(localpart):
             raise SynapseError(400, "localpart is invalid: %s" % (localpart,))
-        user_id = UserID(localpart, self._server_name).to_string()
+        user_id = UserID(localpart, self.server_name).to_string()
         user_infos = await self._store.get_users_by_id_case_insensitive(user_id)
 
         logger.info("[session %s] users: %s", session_id, user_infos)

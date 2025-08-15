@@ -46,6 +46,9 @@ MAX_USERID_LENGTH = 255
 # Constant value used for the pseudo-thread which is the main timeline.
 MAIN_TIMELINE: Final = "main"
 
+# MAX_INT + 1, so it always trumps any PL in canonical JSON.
+CREATOR_POWER_LEVEL = 2**53
+
 
 class Membership:
     """Represents the membership states of a user in a room."""
@@ -235,6 +238,8 @@ class EventContentFields:
     #
     # This is deprecated in MSC2175.
     ROOM_CREATOR: Final = "creator"
+    # MSC4289
+    ADDITIONAL_CREATORS: Final = "additional_creators"
 
     # The version of the room for `m.room.create` events.
     ROOM_VERSION: Final = "room_version"

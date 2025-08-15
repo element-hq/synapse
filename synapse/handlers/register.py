@@ -45,6 +45,7 @@ from synapse.api.errors import (
 from synapse.appservice import ApplicationService
 from synapse.config.server import is_threepid_reserved
 from synapse.http.servlet import assert_params_in_dict
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.http.login import RegisterDeviceReplicationServlet
 from synapse.replication.http.register import (
     ReplicationPostRegisterActionsServlet,
@@ -62,29 +63,38 @@ logger = logging.getLogger(__name__)
 registration_counter = Counter(
     "synapse_user_registrations_total",
     "Number of new users registered (since restart)",
-    ["guest", "shadow_banned", "auth_provider"],
+    labelnames=["guest", "shadow_banned", "auth_provider", SERVER_NAME_LABEL],
 )
 
 login_counter = Counter(
     "synapse_user_logins_total",
     "Number of user logins (since restart)",
-    ["guest", "auth_provider"],
+    labelnames=["guest", "auth_provider", SERVER_NAME_LABEL],
 )
 
 
-def init_counters_for_auth_provider(auth_provider_id: str) -> None:
+def init_counters_for_auth_provider(auth_provider_id: str, server_name: str) -> None:
     """Ensure the prometheus counters for the given auth provider are initialised
 
     This fixes a problem where the counters are not reported for a given auth provider
     until the user first logs in/registers.
+
+    Args:
+        auth_provider_id: The ID of the auth provider to initialise counters for.
+        server_name: Our server name (used to label metrics) (this should be `hs.hostname`).
     """
     for is_guest in (True, False):
-        login_counter.labels(guest=is_guest, auth_provider=auth_provider_id)
+        login_counter.labels(
+            guest=is_guest,
+            auth_provider=auth_provider_id,
+            **{SERVER_NAME_LABEL: server_name},
+        )
         for shadow_banned in (True, False):
             registration_counter.labels(
                 guest=is_guest,
                 shadow_banned=shadow_banned,
                 auth_provider=auth_provider_id,
+                **{SERVER_NAME_LABEL: server_name},
             )
 
 
@@ -97,6 +107,7 @@ class LoginDict(TypedDict):
 
 class RegistrationHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.clock = hs.get_clock()
@@ -112,7 +123,6 @@ class RegistrationHandler:
         self._account_validity_handler = hs.get_account_validity_handler()
         self._user_consent_version = self.hs.config.consent.user_consent_version
         self._server_notices_mxid = hs.config.servernotices.server_notices_mxid
-        self._server_name = hs.hostname
         self._user_types_config = hs.config.user_types
 
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
@@ -149,7 +159,9 @@ class RegistrationHandler:
         )
         self.refresh_token_lifetime = hs.config.registration.refresh_token_lifetime
 
-        init_counters_for_auth_provider("")
+        init_counters_for_auth_provider(
+            auth_provider_id="", server_name=self.server_name
+        )
 
     async def check_username(
         self,
@@ -373,6 +385,7 @@ class RegistrationHandler:
             guest=make_guest,
             shadow_banned=shadow_banned,
             auth_provider=(auth_provider_id or ""),
+            **{SERVER_NAME_LABEL: self.server_name},
         ).inc()
 
         # If the user does not need to consent at registration, auto-join any
@@ -433,7 +446,7 @@ class RegistrationHandler:
         if self.hs.config.registration.auto_join_user_id:
             fake_requester = create_requester(
                 self.hs.config.registration.auto_join_user_id,
-                authenticated_entity=self._server_name,
+                authenticated_entity=self.server_name,
             )
 
             # If the room requires an invite, add the user to the list of invites.
@@ -446,7 +459,7 @@ class RegistrationHandler:
             requires_join = True
         else:
             fake_requester = create_requester(
-                user_id, authenticated_entity=self._server_name
+                user_id, authenticated_entity=self.server_name
             )
 
         # Choose whether to federate the new room.
@@ -478,7 +491,7 @@ class RegistrationHandler:
 
                     await room_member_handler.update_membership(
                         requester=create_requester(
-                            user_id, authenticated_entity=self._server_name
+                            user_id, authenticated_entity=self.server_name
                         ),
                         target=UserID.from_string(user_id),
                         room_id=room_id,
@@ -504,7 +517,7 @@ class RegistrationHandler:
                     if requires_join:
                         await room_member_handler.update_membership(
                             requester=create_requester(
-                                user_id, authenticated_entity=self._server_name
+                                user_id, authenticated_entity=self.server_name
                             ),
                             target=UserID.from_string(user_id),
                             room_id=room_id,
@@ -550,7 +563,7 @@ class RegistrationHandler:
                 # we don't have a local user in the room to craft up an invite with.
                 requires_invite = await self.store.is_host_joined(
                     room_id,
-                    self._server_name,
+                    self.server_name,
                 )
 
                 if requires_invite:
@@ -578,7 +591,7 @@ class RegistrationHandler:
                     await room_member_handler.update_membership(
                         requester=create_requester(
                             self.hs.config.registration.auto_join_user_id,
-                            authenticated_entity=self._server_name,
+                            authenticated_entity=self.server_name,
                         ),
                         target=UserID.from_string(user_id),
                         room_id=room_id,
@@ -590,7 +603,7 @@ class RegistrationHandler:
                 # Send the join.
                 await room_member_handler.update_membership(
                     requester=create_requester(
-                        user_id, authenticated_entity=self._server_name
+                        user_id, authenticated_entity=self.server_name
                     ),
                     target=UserID.from_string(user_id),
                     room_id=room_id,
@@ -801,6 +814,7 @@ class RegistrationHandler:
         login_counter.labels(
             guest=is_guest,
             auth_provider=(auth_provider_id or ""),
+            **{SERVER_NAME_LABEL: self.server_name},
         ).inc()
 
         return (

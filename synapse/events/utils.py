@@ -176,9 +176,12 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
         if room_version.updated_redaction_rules:
             # MSC2176 rules state that create events cannot have their `content` redacted.
             new_content = event_dict["content"]
-        elif not room_version.implicit_room_creator:
+        if not room_version.implicit_room_creator:
             # Some room versions give meaning to `creator`
             add_fields("creator")
+        if room_version.msc4291_room_ids_as_hashes:
+            # room_id is not allowed on the create event as it's derived from the event ID
+            allowed_keys.remove("room_id")
 
     elif event_type == EventTypes.JoinRules:
         add_fields("join_rule")
@@ -527,6 +530,10 @@ def serialize_event(
     if config.as_client_event:
         d = config.event_format(d)
 
+    # Ensure the room_id field is set for create events in MSC4291 rooms
+    if e.type == EventTypes.Create and e.room_version.msc4291_room_ids_as_hashes:
+        d["room_id"] = e.room_id
+
     # If the event is a redaction, the field with the redacted event ID appears
     # in a different location depending on the room version. e.redacts handles
     # fetching from the proper location; copy it to the other location for forwards-
@@ -538,8 +545,11 @@ def serialize_event(
             d["content"] = dict(d["content"])
             d["content"]["redacts"] = e.redacts
 
-    if config.include_admin_metadata and e.internal_metadata.is_soft_failed():
-        d["unsigned"]["io.element.synapse.soft_failed"] = True
+    if config.include_admin_metadata:
+        if e.internal_metadata.is_soft_failed():
+            d["unsigned"]["io.element.synapse.soft_failed"] = True
+        if e.internal_metadata.policy_server_spammy:
+            d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
     only_event_fields = config.only_event_fields
     if only_event_fields:
@@ -869,6 +879,14 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
+    # MSC4311: Ensure the create event is available on invites and knocks.
+    # TODO: Implement the rest of MSC4311
+    if (
+        event.room_version.msc4291_room_ids_as_hashes
+        and event.type == EventTypes.Create
+        and event.get_state_key() == ""
+    ):
+        return event.get_pdu_json()
 
     return {
         "type": event.type,

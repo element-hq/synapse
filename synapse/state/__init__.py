@@ -51,8 +51,10 @@ from synapse.events.snapshot import (
 )
 from synapse.logging.context import ContextResourceUsage
 from synapse.logging.opentracing import tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.replication.http.state import ReplicationUpdateCurrentStateRestServlet
 from synapse.state import v1, v2
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import StateMap, StrCollection
 from synapse.types.state import StateFilter
@@ -74,6 +76,7 @@ metrics_logger = logging.getLogger("synapse.state.metrics")
 state_groups_histogram = Histogram(
     "synapse_state_number_state_groups_in_resolution",
     "Number of state groups used when performing a state resolution",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
@@ -607,20 +610,24 @@ _biggest_room_by_cpu_counter = Counter(
     "synapse_state_res_cpu_for_biggest_room_seconds",
     "CPU time spent performing state resolution for the single most expensive "
     "room for state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 _biggest_room_by_db_counter = Counter(
     "synapse_state_res_db_for_biggest_room_seconds",
     "Database time spent performing state resolution for the single most "
     "expensive room for state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 _cpu_times = Histogram(
     "synapse_state_res_cpu_for_all_rooms_seconds",
     "CPU time (utime+stime) spent computing a single state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 _db_times = Histogram(
     "synapse_state_res_db_for_all_rooms_seconds",
     "Database time spent computing a single state resolution",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -736,7 +743,9 @@ class StateResolutionHandler:
                     f"State groups have been deleted: {shortstr(missing_state_groups)}"
                 )
 
-            state_groups_histogram.observe(len(state_groups_ids))
+            state_groups_histogram.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(len(state_groups_ids))
 
             new_state = await self.resolve_events_with_store(
                 room_id,
@@ -823,8 +832,12 @@ class StateResolutionHandler:
         room_metrics.db_time += rusage.db_txn_duration_sec
         room_metrics.db_events += rusage.evt_db_fetch_count
 
-        _cpu_times.observe(rusage.ru_utime + rusage.ru_stime)
-        _db_times.observe(rusage.db_txn_duration_sec)
+        _cpu_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
+            rusage.ru_utime + rusage.ru_stime
+        )
+        _db_times.labels(**{SERVER_NAME_LABEL: self.server_name}).observe(
+            rusage.db_txn_duration_sec
+        )
 
     def _report_metrics(self) -> None:
         if not self._state_res_metrics:
@@ -881,7 +894,9 @@ class StateResolutionHandler:
 
         # report info on the single biggest to prometheus
         _, biggest_metrics = biggest[0]
-        prometheus_counter_metric.inc(extract_key(biggest_metrics))
+        prometheus_counter_metric.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            extract_key(biggest_metrics)
+        )
 
 
 def _make_state_cache_entry(
@@ -977,17 +992,35 @@ class StateResolutionStore:
         )
 
     def get_auth_chain_difference(
-        self, room_id: str, state_sets: List[Set[str]]
-    ) -> Awaitable[Set[str]]:
-        """Given sets of state events figure out the auth chain difference (as
+        self,
+        room_id: str,
+        state_sets: List[Set[str]],
+        conflicted_state: Optional[Set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+    ) -> Awaitable[StateDifference]:
+        """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).
 
-        This equivalent to fetching the full auth chain for each set of state
+        This is equivalent to fetching the full auth chain for each set of state
         and returning the events that don't appear in each and every auth
         chain.
 
+        If conflicted_state is not None, calculate and return the conflicted sub-graph as per
+        state res v2.1. The event IDs in the conflicted state MUST be a subset of the event IDs in
+        state_sets.
+
+        If additional_backwards_reachable_conflicted_events is set, the provided events are included
+        when calculating the conflicted subgraph. This is primarily useful for calculating the
+        subgraph across a combination of persisted and unpersisted events.
+
         Returns:
-            An awaitable that resolves to a set of event IDs.
+            information on the auth chain difference, and also the conflicted subgraph if
+            conflicted_state is not None
         """
 
-        return self.main_store.get_auth_chain_difference(room_id, state_sets)
+        return self.main_store.get_auth_chain_difference_extended(
+            room_id,
+            state_sets,
+            conflicted_state,
+            additional_backwards_reachable_conflicted_events,
+        )

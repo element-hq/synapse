@@ -54,8 +54,9 @@ running_on_pypy = platform.python_implementation() == "PyPy"
 # Python GC metrics
 #
 
-gc_unreachable = Gauge("python_gc_unreachable_total", "Unreachable GC objects", ["gen"])
-gc_time = Histogram(
+# These are process-level metrics, so they do not have the `SERVER_NAME_LABEL`.
+gc_unreachable = Gauge("python_gc_unreachable_total", "Unreachable GC objects", ["gen"])  # type: ignore[missing-server-name-label]
+gc_time = Histogram(  # type: ignore[missing-server-name-label]
     "python_gc_time",
     "Time taken to GC (sec)",
     ["gen"],
@@ -82,7 +83,8 @@ gc_time = Histogram(
 
 class GCCounts(Collector):
     def collect(self) -> Iterable[Metric]:
-        cm = GaugeMetricFamily("python_gc_counts", "GC object counts", labels=["gen"])
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        cm = GaugeMetricFamily("python_gc_counts", "GC object counts", labels=["gen"])  # type: ignore[missing-server-name-label]
         for n, m in enumerate(gc.get_count()):
             cm.add_metric([str(n)], m)
 
@@ -101,7 +103,8 @@ def install_gc_manager() -> None:
     if running_on_pypy:
         return
 
-    REGISTRY.register(GCCounts())
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(GCCounts())  # type: ignore[missing-server-name-label]
 
     gc.disable()
 
@@ -176,7 +179,8 @@ class PyPyGCStats(Collector):
         #
         #     Total time spent in GC:  0.073                  # s.total_gc_time
 
-        pypy_gc_time = CounterMetricFamily(
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        pypy_gc_time = CounterMetricFamily(  # type: ignore[missing-server-name-label]
             "pypy_gc_time_seconds_total",
             "Total time spent in PyPy GC",
             labels=[],
@@ -184,7 +188,8 @@ class PyPyGCStats(Collector):
         pypy_gc_time.add_metric([], s.total_gc_time / 1000)
         yield pypy_gc_time
 
-        pypy_mem = GaugeMetricFamily(
+        # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+        pypy_mem = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
             "pypy_memory_bytes",
             "Memory tracked by PyPy allocator",
             labels=["state", "class", "kind"],
@@ -208,4 +213,5 @@ class PyPyGCStats(Collector):
 
 
 if running_on_pypy:
-    REGISTRY.register(PyPyGCStats())
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(PyPyGCStats())  # type: ignore[missing-server-name-label]

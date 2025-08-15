@@ -54,9 +54,9 @@ import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet.defer import Deferred, ensureDeferred
+from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
 from twisted.python.threadpool import ThreadPool
-from twisted.test.proto_helpers import MemoryReactor, MemoryReactorClock
 from twisted.trial import unittest
 from twisted.web.resource import Resource
 from twisted.web.server import Request

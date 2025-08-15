@@ -52,7 +52,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.logging.opentracing import start_active_span
-from synapse.metrics import Histogram, LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
 from synapse.util import Clock
 
 if typing.TYPE_CHECKING:
@@ -65,17 +65,17 @@ logger = logging.getLogger(__name__)
 rate_limit_sleep_counter = Counter(
     "synapse_rate_limit_sleep",
     "Number of requests slept by the rate limiter",
-    ["rate_limiter_name"],
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
 rate_limit_reject_counter = Counter(
     "synapse_rate_limit_reject",
     "Number of requests rejected by the rate limiter",
-    ["rate_limiter_name"],
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
 )
 queue_wait_timer = Histogram(
     "synapse_rate_limit_queue_wait_time_seconds",
     "Amount of time spent waiting for the rate limiter to let our request through.",
-    ["rate_limiter_name"],
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
     buckets=(
         0.005,
         0.01,
@@ -119,7 +119,10 @@ def _get_counts_from_rate_limiter_instance(
         # Only track metrics if they provided a `metrics_name` to
         # differentiate this instance of the rate limiter.
         if rate_limiter_instance.metrics_name:
-            key = (rate_limiter_instance.metrics_name,)
+            key = (
+                rate_limiter_instance.metrics_name,
+                rate_limiter_instance.our_server_name,
+            )
             counts[key] = count_func(rate_limiter_instance)
 
     return counts
@@ -129,10 +132,10 @@ def _get_counts_from_rate_limiter_instance(
 # differentiate one really noisy homeserver from a general
 # ratelimit tuning problem across the federation.
 LaterGauge(
-    "synapse_rate_limit_sleep_affected_hosts",
-    "Number of hosts that had requests put to sleep",
-    ["rate_limiter_name"],
-    lambda: _get_counts_from_rate_limiter_instance(
+    name="synapse_rate_limit_sleep_affected_hosts",
+    desc="Number of hosts that had requests put to sleep",
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
+    caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_sleep()
             for ratelimiter in rate_limiter_instance.ratelimiters.values()
@@ -140,10 +143,10 @@ LaterGauge(
     ),
 )
 LaterGauge(
-    "synapse_rate_limit_reject_affected_hosts",
-    "Number of hosts that had requests rejected",
-    ["rate_limiter_name"],
-    lambda: _get_counts_from_rate_limiter_instance(
+    name="synapse_rate_limit_reject_affected_hosts",
+    desc="Number of hosts that had requests rejected",
+    labelnames=["rate_limiter_name", SERVER_NAME_LABEL],
+    caller=lambda: _get_counts_from_rate_limiter_instance(
         lambda rate_limiter_instance: sum(
             ratelimiter.should_reject()
             for ratelimiter in rate_limiter_instance.ratelimiters.values()
@@ -157,6 +160,7 @@ class FederationRateLimiter:
 
     def __init__(
         self,
+        our_server_name: str,
         clock: Clock,
         config: FederationRatelimitSettings,
         metrics_name: Optional[str] = None,
@@ -170,11 +174,15 @@ class FederationRateLimiter:
                 for this rate limiter.
 
         """
+        self.our_server_name = our_server_name
         self.metrics_name = metrics_name
 
         def new_limiter() -> "_PerHostRatelimiter":
             return _PerHostRatelimiter(
-                clock=clock, config=config, metrics_name=metrics_name
+                our_server_name=our_server_name,
+                clock=clock,
+                config=config,
+                metrics_name=metrics_name,
             )
 
         self.ratelimiters: DefaultDict[str, "_PerHostRatelimiter"] = (
@@ -205,6 +213,7 @@ class FederationRateLimiter:
 class _PerHostRatelimiter:
     def __init__(
         self,
+        our_server_name: str,
         clock: Clock,
         config: FederationRatelimitSettings,
         metrics_name: Optional[str] = None,
@@ -218,6 +227,7 @@ class _PerHostRatelimiter:
                 for this rate limiter.
                 from the rest in the metrics
         """
+        self.our_server_name = our_server_name
         self.clock = clock
         self.metrics_name = metrics_name
 
@@ -279,7 +289,10 @@ class _PerHostRatelimiter:
     async def _on_enter_with_tracing(self, request_id: object) -> None:
         maybe_metrics_cm: ContextManager = contextlib.nullcontext()
         if self.metrics_name:
-            maybe_metrics_cm = queue_wait_timer.labels(self.metrics_name).time()
+            maybe_metrics_cm = queue_wait_timer.labels(
+                rate_limiter_name=self.metrics_name,
+                **{SERVER_NAME_LABEL: self.our_server_name},
+            ).time()
         with start_active_span("ratelimit wait"), maybe_metrics_cm:
             await self._on_enter(request_id)
 
@@ -296,7 +309,10 @@ class _PerHostRatelimiter:
         if self.should_reject():
             logger.debug("Ratelimiter(%s): rejecting request", self.host)
             if self.metrics_name:
-                rate_limit_reject_counter.labels(self.metrics_name).inc()
+                rate_limit_reject_counter.labels(
+                    rate_limiter_name=self.metrics_name,
+                    **{SERVER_NAME_LABEL: self.our_server_name},
+                ).inc()
             raise LimitExceededError(
                 limiter_name="rc_federation",
                 retry_after_ms=int(self.window_size / self.sleep_limit),
@@ -333,7 +349,10 @@ class _PerHostRatelimiter:
                 self.sleep_sec,
             )
             if self.metrics_name:
-                rate_limit_sleep_counter.labels(self.metrics_name).inc()
+                rate_limit_sleep_counter.labels(
+                    rate_limiter_name=self.metrics_name,
+                    **{SERVER_NAME_LABEL: self.our_server_name},
+                ).inc()
             ret_defer = run_in_background(self.clock.sleep, self.sleep_sec)
 
             self.sleeping_requests.add(request_id)
