@@ -1973,8 +1973,17 @@ class EventCreationHandler:
                         # way? If we have been invited by a remote server, we need
                         # to get them to sign the event.
 
+                        # As of MSC4311, "stripped" state events are formatted differently
+                        # over federation.
+                        stripped_state_fed = await self.store.get_stripped_room_state_from_event_context(
+                            context,
+                            self.room_prejoin_state_types,
+                            membership_user_id=event.sender,
+                            for_federation=True,
+                        )
+
                         returned_invite = await federation_handler.send_invite(
-                            invitee.domain, event
+                            invitee.domain, event, stripped_state_fed,
                         )
                         event.unsigned.pop("room_state", None)
 

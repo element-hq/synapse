@@ -907,7 +907,7 @@ class FederationServer(FederationBase):
         # related to the room while the knock request is pending.
         stripped_room_state = (
             await self.store.get_stripped_room_state_from_event_context(
-                context, self._room_prejoin_state_types
+                context, self._room_prejoin_state_types, for_federation=True,
             )
         )
         return {"knock_room_state": stripped_room_state}

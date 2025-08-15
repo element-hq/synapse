@@ -1094,6 +1094,7 @@ class EventsWorkerStore(SQLBaseStore):
         context: EventContext,
         state_keys_to_include: StateFilter,
         membership_user_id: Optional[str] = None,
+        for_federation: Optional[bool] = False,
     ) -> List[JsonDict]:
         """
         Retrieve the stripped state from a room, given an event context to retrieve state
@@ -1110,6 +1111,8 @@ class EventsWorkerStore(SQLBaseStore):
                 events of. This is useful when generating the stripped state of a room for
                 invites. We want to send membership events of the inviter, so that the
                 invitee can display the inviter's profile information if the room lacks any.
+            for_federation: When True, the stripped state events will be returned as PDUs
+                as per MSC4311. When False, the stripped client format is used.
 
         Returns:
             A list of dictionaries, each representing a stripped state event from the room.
@@ -1134,7 +1137,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         state_to_include = await self.get_events(selected_state_ids.values())
 
-        return [strip_event(e) for e in state_to_include.values()]
+        return [strip_event(e, for_federation) for e in state_to_include.values()]
 
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""
