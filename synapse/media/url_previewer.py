@@ -207,7 +207,7 @@ class UrlPreviewer:
         )
 
         if self._worker_run_media_background_jobs:
-            self._cleaner_loop = self.clock.looping_call(
+            self.clock.looping_call(
                 self._start_expire_url_cache_data, 10 * 1000
             )
 

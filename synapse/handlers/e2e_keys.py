@@ -114,6 +114,7 @@ class E2eKeysHandler:
         self._query_devices_linearizer = Linearizer(
             name="query_devices",
             max_count=10,
+            clock=hs.get_clock(),
         )
 
         self._query_appservices_for_otks = (
@@ -1765,7 +1766,7 @@ class SigningKeyEduUpdater:
         assert isinstance(device_handler, DeviceWriterHandler)
         self._device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_signing_key")
+        self._remote_edu_linearizer = Linearizer(name="remote_signing_key", clock=hs.get_clock())
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[str, List[Tuple[JsonDict, JsonDict]]] = {}

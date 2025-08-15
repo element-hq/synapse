@@ -37,6 +37,7 @@ from typing import (
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
+from synapse.http import proxy
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.roommember import ProfileInfo
@@ -77,7 +78,7 @@ class StateStorageController:
 
         # Used by `_get_joined_hosts` to ensure only one thing mutates the cache
         # at a time. Keyed by room_id.
-        self._joined_host_linearizer = Linearizer("_JoinedHostsCache")
+        self._joined_host_linearizer = Linearizer("_JoinedHostsCache", clock=hs.get_clock())
 
     def notify_event_un_partial_stated(self, event_id: str) -> None:
         self._partial_state_events_tracker.notify_un_partial_stated(event_id)

@@ -253,6 +253,7 @@ class Notifier:
 
         self.federation_sender = None
         if hs.should_send_federation():
+            # TODO: (devon) why is this one already a weakref proxy?
             self.federation_sender = hs.get_federation_sender()
 
         self.state_handler = hs.get_state_handler()
@@ -281,14 +282,14 @@ class Notifier:
                 )
             }
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             name="synapse_notifier_listeners",
             desc="",
             labelnames=[SERVER_NAME_LABEL],
             caller=count_listeners,
-        )
+        ))
 
-        LaterGauge(
+        hs.register_later_gauge(LaterGauge(
             name="synapse_notifier_rooms",
             desc="",
             labelnames=[SERVER_NAME_LABEL],
@@ -297,13 +298,13 @@ class Notifier:
                     bool, list(self.room_to_user_streams.values())
                 )
             },
-        )
-        LaterGauge(
+        ))
+        hs.register_later_gauge(LaterGauge(
             name="synapse_notifier_users",
             desc="",
             labelnames=[SERVER_NAME_LABEL],
             caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
-        )
+        ))
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
         """Add a callback that will be called when some new data is available.

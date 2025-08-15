@@ -21,7 +21,7 @@
 
 import logging
 from collections import OrderedDict
-from typing import Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
+from typing import TYPE_CHECKING, Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
 
 import attr
 
@@ -31,6 +31,9 @@ from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util import Clock
 from synapse.util.caches import EvictionReason, register_cache
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 

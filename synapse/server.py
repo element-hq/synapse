@@ -28,11 +28,14 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Type, TypeVar, cast
+from attr import dataclass
 
+from twisted.internet import defer
 from typing_extensions import TypeAlias
 
-from twisted.internet.interfaces import IOpenSSLContextFactory
+from twisted.internet.interfaces import IDelayedCall, IOpenSSLContextFactory
+from twisted.internet.task import LoopingCall
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
@@ -129,7 +132,8 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import LaterGauge, register_threadpool
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -139,6 +143,7 @@ from synapse.push.pusherpool import PusherPool
 from synapse.replication.tcp.client import ReplicationDataHandler
 from synapse.replication.tcp.external_cache import ExternalCache
 from synapse.replication.tcp.handler import ReplicationCommandHandler
+from synapse.replication.tcp.protocol import connected_connections
 from synapse.replication.tcp.resource import ReplicationStreamer
 from synapse.replication.tcp.streams import STREAMS_MAP, Stream
 from synapse.rest.media.media_repository_resource import MediaRepositoryResource
@@ -216,7 +221,8 @@ def cache_in_self(builder: F) -> F:
     @functools.wraps(builder)
     def _get(self: "HomeServer") -> T:
         try:
-            return getattr(self, depname)
+            dep = getattr(self, depname)
+            return dep
         except AttributeError:
             pass
 
@@ -234,6 +240,13 @@ def cache_in_self(builder: F) -> F:
         return dep
 
     return cast(F, _get)
+
+
+@dataclass
+class ShutdownInfo:
+    desc: str
+    func: Callable[..., Any]
+    trigger_id: Any
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -286,6 +299,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             hostname : The hostname for the server.
             config: The full config for the homeserver.
         """
+
         if not reactor:
             from twisted.internet import reactor as _reactor
 
@@ -311,6 +325,91 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+
+        self._later_gauges: List[LaterGauge] = []
+        self._background_processes: List[defer.Deferred] = []
+        self._async_shutdown_handlers: List[ShutdownInfo] = []
+        self._sync_shutdown_handlers: List[ShutdownInfo] = []
+
+    def shutdown(self) -> None:
+        logger.info("Received shutdown request")
+
+        # TODO: Cleanup replication pieces
+
+        from synapse.util.batching_queue import number_of_keys
+        number_of_keys.clear()
+        from synapse.util.batching_queue import number_queued
+        number_queued.clear()
+
+        # TODO: unregister all metrics that bind to HS resources!
+        logger.info("Stopping later gauges: %d", len(self._later_gauges))
+        for later_gauge in self._later_gauges:
+            later_gauge.unregister()
+        self._later_gauges.clear()
+
+        logger.info("Unregistering db background updates")
+        for db in self.get_datastores().databases:
+            db.stop_background_updates()
+
+        logger.info("Stopping looping calls")
+        self.get_clock().cancel_all_looping_calls()
+        logger.info("Stopping call_later calls")
+        self.get_clock().cancel_all_delayed_calls()
+
+        logger.info("Stopping background processes: %d", len(self._background_processes))
+        for process in self._background_processes:
+            process.cancel()
+        self._background_processes.clear()
+
+        from synapse.util.caches import CACHE_METRIC_REGISTRY
+        logger.info("Clearing cache metrics: %d", len(CACHE_METRIC_REGISTRY._pre_update_hooks))
+        # TODO: Do this better, ie. don't clear metrics for other tenants
+        # only clear them for this server
+        CACHE_METRIC_REGISTRY.clear()
+
+        for shutdown_handler in self._async_shutdown_handlers:
+            logger.info("Shutting down %s", shutdown_handler.desc)
+            self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+            # TODO: we should probably run these
+            #yield defer.ensureDeferred(shutdown_handler.func())
+        self._async_shutdown_handlers.clear()
+
+        for shutdown_handler in self._sync_shutdown_handlers:
+            logger.info("Shutting down %s", shutdown_handler.desc)
+            self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+            shutdown_handler.func()
+        self._sync_shutdown_handlers.clear()
+
+        from synapse.app._base import unregister_sighups
+        unregister_sighups(self.config.server.server_name)
+
+        for call in self.get_reactor().getDelayedCalls():
+            call.cancel()
+
+    def register_async_shutdown_handler(self, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+        id = self.get_reactor().addSystemEventTrigger(
+            "before",
+            "shutdown",
+            run_as_background_process,
+            desc,
+            self.config.server.server_name,
+            shutdown_func,
+        )
+        self._async_shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
+
+    def register_sync_shutdown_handler(self, phase: str, eventType: str, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+        id = self.get_reactor().addSystemEventTrigger(
+            phase,
+            eventType,
+            shutdown_func,
+        )
+        self._sync_shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
+
+    def register_later_gauge(self, later_gauge: LaterGauge) -> None:
+        self._later_gauges.append(later_gauge)
+
+    def register_background_process(self, process: defer.Deferred) -> None:
+        self._background_processes.append(process)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
@@ -429,6 +528,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
         return Ratelimiter(
+            hs=self,
             store=self.get_datastores().main,
             clock=self.get_clock(),
             cfg=self.config.ratelimiting.rc_registration,
@@ -948,6 +1048,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_request_ratelimiter(self) -> RequestRatelimiter:
         return RequestRatelimiter(
+            self,
             self.get_datastores().main,
             self.get_clock(),
             self.config.ratelimiting.rc_message,
@@ -979,9 +1080,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        self.get_reactor().addSystemEventTrigger(
-            "during", "shutdown", media_threadpool.stop
-        )
+        hs.register_sync_shutdown_handler("during", "shutdown", "Homeserver media_threadpool.stop", media_threadpool.stop)
 
         # Register the threadpool with our metrics.
         server_name = self.hostname

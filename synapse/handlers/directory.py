@@ -47,8 +47,9 @@ logger = logging.getLogger(__name__)
 
 class DirectoryHandler:
     def __init__(self, hs: "HomeServer"):
-        self.auth = hs.get_auth()
         self.hs = hs
+        self.auth = hs.get_auth()
+        self.hostname = hs.hostname
         self.state = hs.get_state_handler()
         self.appservice_handler = hs.get_application_service_handler()
         self.event_creation_handler = hs.get_event_creation_handler()

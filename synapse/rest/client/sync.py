@@ -131,6 +131,7 @@ class SyncRestServlet(RestServlet):
 
         # Ratelimiter for presence updates, keyed by requester.
         self._presence_per_user_limiter = Ratelimiter(
+            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_presence_per_user,
@@ -691,7 +692,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         # derived information from rooms (see how `_generate_sync_entry_for_rooms()`
         # prepares a bunch of data for `_generate_sync_entry_for_device_list()`).
         self.only_member_events_filter_collection = FilterCollection(
-            self.hs,
+            hs,
             {
                 "room": {
                     # We only care about membership events for the `device_lists`.

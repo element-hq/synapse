@@ -49,6 +49,7 @@ class CreateResource(RestServlet):
 
         # A rate limiter for creating new media IDs.
         self._create_media_rate_limiter = Ratelimiter(
+            hs=hs,
             store=hs.get_datastores().main,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_media_create,

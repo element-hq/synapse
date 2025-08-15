@@ -348,7 +348,7 @@ def setup_logging(
     # Add a SIGHUP handler to reload the logging configuration, if one is available.
     from synapse.app import _base as appbase
 
-    appbase.register_sighup(_reload_logging_config, log_config_path)
+    appbase.register_sighup(config.server.server_name, _reload_logging_config, log_config_path)
 
     # Log immediately so we can grep backwards.
     logger.warning("***** STARTING SERVER *****")

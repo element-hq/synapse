@@ -381,7 +381,7 @@ class PersistEventsStore:
                 if context.app_service:
                     origin_type = "local"
                     origin_entity = context.app_service.id
-                elif self.hs.is_mine_id(event.sender):
+                elif self.is_mine_id(event.sender):
                     origin_type = "local"
                     origin_entity = "*client*"
                 else:
@@ -591,7 +591,9 @@ class PersistEventsStore:
         if to_insert:
             membership_event_id_to_user_id_map: Dict[str, str] = {}
             for state_key, event_id in to_insert.items():
-                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
+                if state_key[0] == EventTypes.Member and self.is_mine_id(
+                    state_key[1]
+                ):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             membership_event_map: Dict[str, EventBase] = {}
@@ -2077,7 +2079,7 @@ class PersistEventsStore:
         # Check if any of the remote membership changes requires us to
         # unsubscribe from their device lists.
         self.store.handle_potentially_left_users_txn(
-            txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
+            txn, {m for m in members_to_cache_bust if not self.is_mine_id(m)}
         )
 
     @classmethod

@@ -307,3 +307,6 @@ class DynamicCollectorRegistry(CollectorRegistry):
         """
 
         self._pre_update_hooks[metric_name] = hook
+
+    def clear(self) -> None:
+        self._pre_update_hooks.clear()

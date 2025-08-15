@@ -99,13 +99,13 @@ reactor = cast(ISynapseReactor, _reactor)
 logger = logging.getLogger(__name__)
 
 # list of tuples of function, args list, kwargs dict
-_sighup_callbacks: List[
-    Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]
-] = []
+_sighup_callbacks: Dict[str, 
+    List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
+] = {}
 P = ParamSpec("P")
 
 
-def register_sighup(func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:
+def register_sighup(server_name: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:
     """
     Register a function to be called when a SIGHUP occurs.
 
@@ -113,7 +113,12 @@ def register_sighup(func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) 
         func: Function to be called when sent a SIGHUP signal.
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
-    _sighup_callbacks.append((func, args, kwargs))
+
+    _sighup_callbacks.setdefault(server_name, []).append((func, args, kwargs))
+
+
+def unregister_sighups(server_name: str) -> None:
+    _sighup_callbacks.pop(server_name, [])
 
 
 def start_worker_reactor(
@@ -541,7 +546,8 @@ async def start(hs: "HomeServer") -> None:
                 # we're not using systemd.
                 sdnotify(b"RELOADING=1")
 
-                for i, args, kwargs in _sighup_callbacks:
+            for _, v in _sighup_callbacks.items():
+                for i, args, kwargs in v:
                     i(*args, **kwargs)
 
                 sdnotify(b"READY=1")
@@ -564,8 +570,8 @@ async def start(hs: "HomeServer") -> None:
 
         signal.signal(signal.SIGHUP, run_sighup)
 
-        register_sighup(refresh_certificate, hs)
-        register_sighup(reload_cache_config, hs.config)
+        register_sighup(hs.config.server.server_name, refresh_certificate, hs)
+        register_sighup(hs.config.server.server_name, reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
@@ -602,6 +608,7 @@ async def start(hs: "HomeServer") -> None:
     hs.get_pusherpool().start()
 
     # Log when we start the shut down process.
+    # TODO: fixme
     hs.get_reactor().addSystemEventTrigger(
         "before", "shutdown", logger.info, "Shutting down..."
     )
@@ -620,13 +627,13 @@ async def start(hs: "HomeServer") -> None:
     # rest of time. Doing so means less work each GC (hopefully).
     #
     # PyPy does not (yet?) implement gc.freeze()
-    if hasattr(gc, "freeze"):
-        gc.collect()
-        gc.freeze()
-
-        # Speed up shutdowns by freezing all allocated objects. This moves everything
-        # into the permanent generation and excludes them from the final GC.
-        atexit.register(gc.freeze)
+    # if hasattr(gc, "freeze"):
+    #     gc.collect()
+    #     gc.freeze()
+    #
+    #     # Speed up shutdowns by freezing all allocated objects. This moves everything
+    #     # into the permanent generation and excludes them from the final GC.
+    #     atexit.register(gc.freeze)
 
 
 def reload_cache_config(config: HomeServerConfig) -> None:
