@@ -487,7 +487,7 @@ class MediaRepository:
         if not media_info:
             return
 
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+        if not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
 
@@ -684,7 +684,7 @@ class MediaRepository:
         """
         media_info = await self.store.get_cached_remote_media(server_name, media_id)
 
-        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+        if not allow_authenticated:
             # if it isn't cached then don't fetch it or if it's authenticated then don't serve it
             if not media_info or media_info.authenticated:
                 raise NotFoundError()
@@ -865,10 +865,8 @@ class MediaRepository:
 
         logger.info("Stored remote media in file %r", fname)
 
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
+        # Media used to be optionally authenticated, but now we force-authenticate it
+        authenticated = True
 
         return RemoteMedia(
             media_origin=server_name,
@@ -998,10 +996,8 @@ class MediaRepository:
 
         logger.debug("Stored remote media in file %r", fname)
 
-        if self.hs.config.media.enable_authenticated_media:
-            authenticated = True
-        else:
-            authenticated = False
+        # Media used to be optionally authenticated, but now we force-authenticate it
+        authenticated = True
 
         return RemoteMedia(
             media_origin=server_name,

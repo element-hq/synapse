@@ -91,7 +91,7 @@ recommend studying the PostgreSQL documentation on backup options.
 
 Synapse keeps a copy of media uploaded by users, including avatars and message
 attachments, in its [Media
-store](../configuration/config_documentation.md#media-store).
+store](../configuration/config_documentation.md#media_store_path).
 
 It is a directory on the local disk, containing the following directories:
 
