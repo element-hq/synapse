@@ -331,30 +331,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     def shutdown(self) -> None:
         logger.info("Received shutdown request")
         
-        logger.info("Unsubscribing replication callbacks")
-        self.get_replication_notifier()._replication_callbacks.clear()
-
-        logger.info("Stopping replication")
-        for connection in self.get_replication_command_handler()._connections:
-            connection.close()
-        self.get_replication_command_handler()._connections.clear()
-        # NOTE: Dont trample on other tenants
-        # for connection in connected_connections:
-        #     logger.info("Closing replication connection...")
-        #     connection.close()
-        # connected_connections.clear()
-
-        logger.info("Stopping replication streams")
-        # self.get_replication_command_handler()._factory.continueTrying = False
-        # self.get_replication_command_handler()._factory.stopFactory()
-        # self.get_replication_command_handler()._factory.stopTrying()
-        # self.get_replication_command_handler()._connection.disconnect()
-        # self.get_replication_command_handler()._factory.synapse_outbound_redis_connection.disconnect()
-        # self.get_replication_command_handler()._factory = None
-        # self.get_replication_command_handler()._streams.clear()
-        # self.get_replication_command_handler()._streams_to_replicate.clear()
-        # # XXX: Does this trample on other tenants?
-        # STREAMS_MAP.clear()
+        # TODO: Cleanup replication pieces
 
         from synapse.util.batching_queue import number_of_keys
         number_of_keys.clear()
