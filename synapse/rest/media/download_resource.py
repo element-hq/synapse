@@ -50,7 +50,7 @@ class DownloadResource(RestServlet):
     def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
         super().__init__()
         self.media_repo = media_repo
-        self.hs = hs
+        self._is_mine_server_name = hs.is_mine_server_name
 
     async def on_GET(
         self,
@@ -82,7 +82,7 @@ class DownloadResource(RestServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
-        if self.hs._is_mine_server_name(server_name):
+        if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
                 request, media_id, file_name, max_timeout_ms, allow_authenticated=False
             )

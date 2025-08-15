@@ -150,9 +150,6 @@ class RedisSubscriber(SubscriberProtocol):
             "subscribe-replication", self.server_name, self._send_subscribe
         )
 
-    def close(self) -> None:
-        pass
-
     async def _send_subscribe(self) -> None:
         # it's important to make sure that we only send the REPLICATE command once we
         # have successfully subscribed to the stream - otherwise we might miss the

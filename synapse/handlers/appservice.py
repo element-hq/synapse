@@ -80,7 +80,7 @@ class ApplicationServicesHandler:
             hs.hostname
         )  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
         self.appservice_api = hs.get_application_service_api()
         self.scheduler = hs.get_application_service_scheduler()
         self.started_scheduler = False
@@ -853,7 +853,7 @@ class ApplicationServicesHandler:
         return [s for s in services if s.is_interested_in_protocol(protocol)]
 
     async def _is_unknown_user(self, user_id: str) -> bool:
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             # we don't know if they are unknown or not since it isn't one of our
             # users. We can't poke ASes.
             return False

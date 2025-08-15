@@ -68,7 +68,7 @@ class ExperimentalFeaturesRestServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_GET(
         self,
@@ -81,7 +81,7 @@ class ExperimentalFeaturesRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "User must be local to check what experimental features are enabled.",
@@ -108,7 +108,7 @@ class ExperimentalFeaturesRestServlet(RestServlet):
         body = parse_json_object_from_request(request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "User must be local to enable experimental features.",

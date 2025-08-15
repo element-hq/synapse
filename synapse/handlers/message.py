@@ -96,7 +96,6 @@ class MessageHandler:
     """Contains some read only APIs to get state about a room"""
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
         self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
@@ -565,7 +564,6 @@ class EventCreationHandler:
         self._external_cache_joined_hosts_updates: Optional[ExpiringCache] = None
         if self._external_cache.is_enabled():
             self._external_cache_joined_hosts_updates = ExpiringCache(
-                hs=hs,
                 cache_name="_external_cache_joined_hosts_updates",
                 server_name=self.server_name,
                 clock=self.clock,

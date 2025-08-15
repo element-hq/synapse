@@ -60,6 +60,7 @@ class StatsHandler:
         self.state = hs.get_state_handler()
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
+        self.is_mine_id = hs.is_mine_id
 
         self.stats_enabled = hs.config.stats.stats_enabled
 
@@ -267,7 +268,7 @@ class StatsHandler:
                     raise ValueError("%r is not a valid membership" % (membership,))
 
                 user_id = delta.state_key
-                if self.hs.is_mine_id(user_id):
+                if self.is_mine_id(user_id):
                     # this accounts for transitions like leave → ban and so on.
                     has_changed_joinedness = (prev_membership == Membership.JOIN) != (
                         membership == Membership.JOIN

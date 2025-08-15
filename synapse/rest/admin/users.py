@@ -726,7 +726,7 @@ class WhoisRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -737,7 +737,7 @@ class WhoisRestServlet(RestServlet):
         if target_user != requester.user:
             await assert_user_is_admin(self.auth, requester)
 
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only whois a local user")
 
         ret = await self.admin_handler.get_whois(target_user)
@@ -751,7 +751,7 @@ class DeactivateAccountRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._deactivate_account_handler = hs.get_deactivate_account_handler()
         self.auth = hs.get_auth()
-        self.hs = hs
+        self.is_mine = hs.is_mine
         self.store = hs.get_datastores().main
 
     async def on_POST(
@@ -760,7 +760,7 @@ class DeactivateAccountRestServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        if not self.hs.is_mine(UserID.from_string(target_user_id)):
+        if not self.is_mine(UserID.from_string(target_user_id)):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Can only deactivate local users"
             )
@@ -793,7 +793,7 @@ class SuspendAccountRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
-        self.hs = hs
+        self.is_mine = hs.is_mine
         self.store = hs.get_datastores().main
 
     class PutBody(RequestBodyModel):
@@ -805,7 +805,7 @@ class SuspendAccountRestServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        if not self.hs.is_mine(UserID.from_string(target_user_id)):
+        if not self.is_mine(UserID.from_string(target_user_id)):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only suspend local users")
 
         if not await self.store.get_user_by_id(target_user_id):
@@ -916,7 +916,7 @@ class SearchUsersRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_GET(
         self, request: SynapseRequest, target_user_id: str
@@ -933,7 +933,7 @@ class SearchUsersRestServlet(RestServlet):
         # if not is_admin and target_user != auth_user:
         #     raise AuthError(HTTPStatus.FORBIDDEN, "You are not a server admin")
 
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only users a local user")
 
         term = parse_string(request, "term", required=True)
@@ -985,7 +985,7 @@ class UserAdminServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -994,7 +994,7 @@ class UserAdminServlet(RestServlet):
 
         target_user = UserID.from_string(user_id)
 
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Only local users can be admins of this homeserver",
@@ -1017,7 +1017,7 @@ class UserAdminServlet(RestServlet):
 
         assert_params_in_dict(body, ["admin"])
 
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Only local users can be admins of this homeserver",
@@ -1041,7 +1041,7 @@ class UserMembershipRestServlet(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/joined_rooms$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.is_mine = hs.is_mine
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
 
@@ -1073,7 +1073,7 @@ class PushersRestServlet(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/pushers$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.is_mine = hs.is_mine
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
 
@@ -1082,7 +1082,7 @@ class PushersRestServlet(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine(UserID.from_string(user_id)):
+        if not self.is_mine(UserID.from_string(user_id)):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only look up local users")
 
         if not await self.store.get_user_by_id(user_id):
@@ -1118,7 +1118,7 @@ class UserTokenRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_handler = hs.get_auth_handler()
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1127,7 +1127,7 @@ class UserTokenRestServlet(RestServlet):
         await assert_user_is_admin(self.auth, requester)
         auth_user = requester.user
 
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be logged in as"
             )
@@ -1186,14 +1186,14 @@ class ShadowBanRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be shadow-banned"
             )
@@ -1207,7 +1207,7 @@ class ShadowBanRestServlet(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be shadow-banned"
             )
@@ -1238,14 +1238,14 @@ class RateLimitRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only look up local users")
 
         if not await self.store.get_user_by_id(user_id):
@@ -1276,7 +1276,7 @@ class RateLimitRestServlet(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be ratelimited"
             )
@@ -1324,7 +1324,7 @@ class RateLimitRestServlet(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine_id(user_id):
+        if not self.is_mine_id(user_id):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Only local users can be ratelimited"
             )
@@ -1345,14 +1345,14 @@ class AccountDataRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
-        self.hs = hs
+        self._is_mine_id = hs.is_mine_id
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        if not self.hs._is_mine_id(user_id):
+        if not self._is_mine_id(user_id):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only look up local users")
 
         if not await self._store.get_user_by_id(user_id):

@@ -146,7 +146,6 @@ class FederationClient(FederationBase):
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
-            hs=hs,
             cache_name="get_pdu_cache",
             server_name=self.server_name,
             clock=self._clock,
@@ -166,7 +165,6 @@ class FederationClient(FederationBase):
             Tuple[str, bool],
             Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
         ] = ExpiringCache(
-            hs=hs,
             cache_name="get_room_hierarchy_cache",
             server_name=self.server_name,
             clock=self._clock,
@@ -943,7 +941,7 @@ class FederationClient(FederationBase):
 
         for destination in destinations:
             # We don't want to ask our own server for information we don't have
-            if self.hs._is_mine_server_name(destination):
+            if self._is_mine_server_name(destination):
                 continue
 
             try:
@@ -1623,7 +1621,7 @@ class FederationClient(FederationBase):
         self, destinations: Iterable[str], room_id: str, event_dict: JsonDict
     ) -> None:
         for destination in destinations:
-            if self.hs._is_mine_server_name(destination):
+            if self._is_mine_server_name(destination):
                 continue
 
             try:

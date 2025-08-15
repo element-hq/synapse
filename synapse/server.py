@@ -1,4 +1,6 @@
 #
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
 # Copyright 2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023-2024 New Vector, Ltd
 #
@@ -234,7 +236,7 @@ def cache_in_self(builder: F) -> F:
             setattr(self, depname, dep)
         finally:
             building[0] = False
-    
+
         return dep
 
     return cast(F, _get)
@@ -331,7 +333,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     def shutdown(self) -> None:
         logger.info("Received shutdown request")
-        
+
         # TODO: Cleanup replication pieces
 
         from synapse.util.batching_queue import number_of_keys
@@ -353,7 +355,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.get_clock().cancel_all_looping_calls()
         logger.info("Stopping call_later calls")
         self.get_clock().cancel_all_delayed_calls()
-         
+
         logger.info("Stopping background processes: %d", len(self._background_processes))
         for process in self._background_processes:
             process.cancel()

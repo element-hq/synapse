@@ -73,6 +73,8 @@ class ProfileHandler:
             hs.config.server.allowed_avatar_mimetypes
         )
 
+        self._is_mine_server_name = hs.is_mine_server_name
+
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
@@ -364,7 +366,7 @@ class ProfileHandler:
         else:
             server_name = host
 
-        if self.hs._is_mine_server_name(server_name):
+        if self._is_mine_server_name(server_name):
             media_info: Optional[
                 Union[LocalMedia, RemoteMedia]
             ] = await self.store.get_local_media(media_id)

@@ -33,7 +33,6 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_get_set(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, str] = ExpiringCache(
-            hs=self.hs,
             cache_name="test",
             server_name="testserver",
             clock=cast(Clock, clock),
@@ -47,7 +46,6 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_eviction(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, str] = ExpiringCache(
-            hs=self.hs,
             cache_name="test",
             server_name="testserver",
             clock=cast(Clock, clock),
@@ -67,7 +65,6 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_iterable_eviction(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, List[int]] = ExpiringCache(
-            hs=self.hs,
             cache_name="test",
             server_name="testserver",
             clock=cast(Clock, clock),
@@ -92,7 +89,6 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_time_eviction(self) -> None:
         clock = MockClock()
         cache: ExpiringCache[str, int] = ExpiringCache(
-            hs=self.hs,
             cache_name="test",
             server_name="testserver",
             clock=cast(Clock, clock),

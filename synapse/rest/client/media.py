@@ -134,7 +134,7 @@ class ThumbnailResource(RestServlet):
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
-        self.hs = hs
+        self._is_mine_server_name = hs.is_mine_server_name
         self._server_name = hs.hostname
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
         self.thumbnailer = ThumbnailProvider(hs, media_repo, media_storage)
@@ -159,7 +159,7 @@ class ThumbnailResource(RestServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
-        if self.hs._is_mine_server_name(server_name):
+        if self._is_mine_server_name(server_name):
             if self.dynamic_thumbnails:
                 await self.thumbnailer.select_or_generate_local_thumbnail(
                     request,
@@ -223,7 +223,7 @@ class DownloadResource(RestServlet):
     def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
         super().__init__()
         self.media_repo = media_repo
-        self.hs = hs
+        self._is_mine_server_name = hs.is_mine_server_name
         self.auth = hs.get_auth()
 
     async def on_GET(
@@ -258,7 +258,7 @@ class DownloadResource(RestServlet):
         )
         max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
 
-        if self.hs._is_mine_server_name(server_name):
+        if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
                 request, media_id, file_name, max_timeout_ms
             )

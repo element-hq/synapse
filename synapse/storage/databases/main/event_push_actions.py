@@ -1920,6 +1920,7 @@ class EventPushActionsStore(EventPushActionsWorkerStore):
             where_clause="highlight=0",
         )
 
+
 def _action_has_highlight(actions: Collection[Union[Mapping, str]]) -> bool:
     for action in actions:
         if not isinstance(action, dict):

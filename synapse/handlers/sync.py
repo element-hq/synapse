@@ -364,7 +364,6 @@ class SyncHandler:
         self.lazy_loaded_members_cache: ExpiringCache[
             Tuple[str, Optional[str]], LruCache[str, str]
         ] = ExpiringCache(
-            hs=hs,
             cache_name="lazy_loaded_members_cache",
             server_name=self.server_name,
             clock=self.clock,

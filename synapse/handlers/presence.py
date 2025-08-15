@@ -214,6 +214,7 @@ class BasePresenceHandler(abc.ABC):
         self._storage_controllers = hs.get_storage_controllers()
         self.presence_router = hs.get_presence_router()
         self.state = hs.get_state_handler()
+        self.is_mine_id = hs.is_mine_id
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
@@ -415,7 +416,7 @@ class BasePresenceHandler(abc.ABC):
         if not self._federation:
             return
 
-        states = [s for s in states if self.hs.is_mine_id(s.user_id)]
+        states = [s for s in states if self.is_mine_id(s.user_id)]
 
         if not states:
             return
@@ -808,7 +809,7 @@ class PresenceHandler(BasePresenceHandler):
                     obj=state.user_id,
                     then=state.last_user_sync_ts + SYNC_ONLINE_TIMEOUT,
                 )
-                if self.hs.is_mine_id(state.user_id):
+                if self.is_mine_id(state.user_id):
                     self.wheel_timer.insert(
                         now=now,
                         obj=state.user_id,
@@ -1095,7 +1096,7 @@ class PresenceHandler(BasePresenceHandler):
 
         changes = handle_timeouts(
             states,
-            is_mine_fn=self.hs.is_mine_id,
+            is_mine_fn=self.is_mine_id,
             syncing_user_devices=syncing_user_devices,
             user_to_devices=self._user_to_device_to_current_state,
             now=now,
@@ -1625,7 +1626,7 @@ class PresenceHandler(BasePresenceHandler):
         prev_local_users = []
         prev_remote_hosts = set()
         for user_id in prev_users:
-            if self.hs.is_mine_id(user_id):
+            if self.is_mine_id(user_id):
                 prev_local_users.append(user_id)
             else:
                 prev_remote_hosts.add(get_domain_from_id(user_id))
@@ -1637,7 +1638,7 @@ class PresenceHandler(BasePresenceHandler):
         newly_joined_local_users = []
         newly_joined_remote_hosts = set()
         for user_id in newly_joined_users:
-            if self.hs.is_mine_id(user_id):
+            if self.is_mine_id(user_id):
                 newly_joined_local_users.append(user_id)
             else:
                 host = get_domain_from_id(user_id)
@@ -1888,7 +1889,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
             # Figure out which other users this user should explicitly receive
             # updates for
             additional_users_interested_in = (
-                await self.hs.get_presence_router().get_interested_users(
+                await self.get_presence_router().get_interested_users(
                     user.to_string()
                 )
             )
@@ -1971,7 +1972,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
             # Retrieve the current presence state for each user
             users_to_state = (
-                await self.hs.get_presence_handler().current_state_for_users(
+                await self.get_presence_handler().current_state_for_users(
                     interested_and_updated_users
                 )
             )
@@ -2014,7 +2015,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         if updated_users is not None:
             # Get the actual presence update for each change
             users_to_state = (
-                await self.hs.get_presence_handler().current_state_for_users(
+                await self.get_presence_handler().current_state_for_users(
                     updated_users
                 )
             )
@@ -2035,7 +2036,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         # for a single user
 
         # Filter through the presence router
-        users_to_state_set = await self.hs.get_presence_router().get_users_for_states(
+        users_to_state_set = await self.get_presence_router().get_users_for_states(
             presence_updates
         )
 

@@ -27,6 +27,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.auth = hs.get_auth()
+        self.is_mine = hs.is_mine
         self.store = hs.get_datastores().main
         self.handler = hs.get_thread_subscriptions_handler()
 

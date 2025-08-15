@@ -40,7 +40,6 @@ from typing import (
     Tuple,
     cast,
 )
-import weakref
 
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec

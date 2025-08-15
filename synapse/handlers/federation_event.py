@@ -162,6 +162,8 @@ class FederationEventHandler:
         self._message_handler = hs.get_message_handler()
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
         self._state_resolution_handler = hs.get_state_resolution_handler()
+        # avoid a circular dependency by deferring execution here
+        self._get_room_member_handler = hs.get_room_member_handler
 
         self._federation_client = hs.get_federation_client()
         self._third_party_event_rules = (
@@ -682,7 +684,7 @@ class FederationEventHandler:
         server from invalid events (there is probably no point in trying to
         re-fetch invalid events from every other HS in the room.)
         """
-        if self.hs._is_mine_server_name(dest):
+        if self._is_mine_server_name(dest):
             raise SynapseError(400, "Can't backfill from self.")
 
         events = await self._federation_client.backfill(
@@ -1948,7 +1950,7 @@ class FederationEventHandler:
             event.room_id
         )
         current_state_list = list(current_state.values())
-        await self.hs._get_room_member_handler().kick_guest_users(current_state_list)
+        await self._get_room_member_handler().kick_guest_users(current_state_list)
 
     async def _check_for_soft_fail(
         self,
@@ -2324,7 +2326,7 @@ class FederationEventHandler:
             # users
             if event.internal_metadata.is_outlier():
                 if event.membership != Membership.INVITE:
-                    if not self.hs._is_mine_id(target_user_id):
+                    if not self._is_mine_id(target_user_id):
                         return
 
             target_user = UserID.from_string(target_user_id)

@@ -161,7 +161,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         # We always know about ourselves, even if we have nothing in
         # room_memberships (for example, the server is new).
         self._known_servers_count = max([count, 1])
-        logger.info("Known servers: %s", self._known_servers_count)
         return self._known_servers_count
 
     @cached(max_entries=100000, iterable=True)

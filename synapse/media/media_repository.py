@@ -144,7 +144,7 @@ class MediaRepository:
             storage_providers.append(provider)
 
         self.media_storage: MediaStorage = MediaStorage(
-            hs, self.primary_base_path, self.filepaths, storage_providers
+            self.hs, self.primary_base_path, self.filepaths, storage_providers
         )
 
         self.clock.looping_call(

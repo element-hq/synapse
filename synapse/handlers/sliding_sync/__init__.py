@@ -104,6 +104,7 @@ class SlidingSyncHandler:
         self.event_sources = hs.get_event_sources()
         self.relations_handler = hs.get_relations_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
+        self.is_mine_id = hs.is_mine_id
 
         self.connection_store = SlidingSyncConnectionStore(self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)

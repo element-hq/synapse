@@ -266,7 +266,7 @@ class DeleteMediaByID(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
-        self.hs = hs
+        self._is_mine_server_name = hs.is_mine_server_name
         self.media_repository = hs.get_media_repository()
 
     async def on_DELETE(
@@ -274,7 +274,7 @@ class DeleteMediaByID(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs._is_mine_server_name(server_name):
+        if not self._is_mine_server_name(server_name):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only delete local media")
 
         if await self.store.get_local_media(media_id) is None:
@@ -359,7 +359,7 @@ class UserMediaRestServlet(RestServlet):
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/media$")
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.is_mine = hs.is_mine
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.media_repository = hs.get_media_repository()
@@ -372,7 +372,7 @@ class UserMediaRestServlet(RestServlet):
 
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine(UserID.from_string(user_id)):
+        if not self.is_mine(UserID.from_string(user_id)):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only look up local users")
 
         user = await self.store.get_user_by_id(user_id)
@@ -416,7 +416,7 @@ class UserMediaRestServlet(RestServlet):
 
         await assert_requester_is_admin(self.auth, request)
 
-        if not self.hs.is_mine(UserID.from_string(user_id)):
+        if not self.is_mine(UserID.from_string(user_id)):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only look up local users")
 
         user = await self.store.get_user_by_id(user_id)

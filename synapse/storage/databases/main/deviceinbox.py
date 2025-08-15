@@ -93,7 +93,6 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         self._last_device_delete_cache: ExpiringCache[
             Tuple[str, Optional[str]], int
         ] = ExpiringCache(
-            hs=hs,
             cache_name="last_device_delete_cache",
             server_name=self.server_name,
             clock=self._clock,

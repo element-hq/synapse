@@ -52,7 +52,7 @@ class DeviceRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, device_id: str
@@ -60,7 +60,7 @@ class DeviceRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only lookup local users")
 
         u = await self.store.get_user_by_id(target_user.to_string())
@@ -80,7 +80,7 @@ class DeviceRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only lookup local users")
 
         u = await self.store.get_user_by_id(target_user.to_string())
@@ -96,7 +96,7 @@ class DeviceRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only lookup local users")
 
         u = await self.store.get_user_by_id(target_user.to_string())
@@ -124,7 +124,7 @@ class DevicesRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.device_worker_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -132,7 +132,7 @@ class DevicesRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only lookup local users")
 
         u = await self.store.get_user_by_id(target_user.to_string())
@@ -162,7 +162,7 @@ class DevicesRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Can only create devices for local users"
             )
@@ -197,7 +197,7 @@ class DeleteDevicesRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.device_handler = hs.get_device_handler()
         self.store = hs.get_datastores().main
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -205,7 +205,7 @@ class DeleteDevicesRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
 
         target_user = UserID.from_string(user_id)
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only lookup local users")
 
         u = await self.store.get_user_by_id(target_user.to_string())

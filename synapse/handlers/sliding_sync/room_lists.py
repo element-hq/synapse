@@ -187,7 +187,7 @@ class SlidingSyncRoomLists:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
 
     async def compute_interested_rooms(
         self,
@@ -469,7 +469,7 @@ class SlidingSyncRoomLists:
 
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
-                    if room_sync_config.must_await_full_state(self.hs.is_mine_id):
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
@@ -592,7 +592,7 @@ class SlidingSyncRoomLists:
 
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
-                    if room_sync_config.must_await_full_state(self.hs.is_mine_id):
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
                         if room_id in partial_state_rooms:
                             continue
 
@@ -683,7 +683,7 @@ class SlidingSyncRoomLists:
 
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
-                    if room_sync_config.must_await_full_state(self.hs.is_mine_id):
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
@@ -778,7 +778,7 @@ class SlidingSyncRoomLists:
 
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
-                    if room_sync_config.must_await_full_state(self.hs.is_mine_id):
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
                         if room_id in partial_state_rooms:
                             continue
 

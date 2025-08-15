@@ -74,7 +74,8 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
+        self.is_mine_server_name = hs.is_mine_server_name
 
         # We may have multiple federation sender instances, so we need to track
         # their positions separately.
@@ -207,7 +208,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         key: Optional[Hashable] = None,
     ) -> None:
         """As per FederationSender"""
-        if self.hs.is_mine_server_name(destination):
+        if self.is_mine_server_name(destination):
             logger.info("Not sending EDU to ourselves")
             return
 

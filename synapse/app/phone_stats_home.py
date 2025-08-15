@@ -225,7 +225,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
     # table will decrease
     clock.looping_call(
         hs.get_datastores().main.generate_user_daily_visits,
-        5 * MILLISECONDS_PER_SECOND,
+        5 * ONE_MINUTE_SECONDS * MILLISECONDS_PER_SECOND,
     )
 
     # monthly active user limiting functionality

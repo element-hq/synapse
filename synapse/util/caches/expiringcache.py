@@ -50,7 +50,6 @@ class ExpiringCache(Generic[KT, VT]):
     def __init__(
         self,
         *,
-        hs: "HomeServer",
         cache_name: str,
         server_name: str,
         clock: Clock,

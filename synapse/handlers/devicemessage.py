@@ -52,7 +52,7 @@ class DeviceMessageHandler:
         """
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
-        self.hs = hs
+        self.is_mine = hs.is_mine
         self.device_handler = hs.get_device_handler()
         if hs.config.experimental.msc3814_enabled:
             self.event_sources = hs.get_event_sources()
@@ -109,7 +109,7 @@ class DeviceMessageHandler:
         message_id = content["message_id"]
         for user_id, by_device in content["messages"].items():
             # we use UserID.from_string to catch invalid user ids
-            if not self.hs.is_mine(UserID.from_string(user_id)):
+            if not self.is_mine(UserID.from_string(user_id)):
                 logger.warning("To-device message to non-local user %s", user_id)
                 raise SynapseError(400, "Not a user here")
 
@@ -263,7 +263,7 @@ class DeviceMessageHandler:
                     continue
 
             # we use UserID.from_string to catch invalid user ids
-            if self.hs.is_mine(UserID.from_string(user_id)):
+            if self.is_mine(UserID.from_string(user_id)):
                 messages_by_device = {
                     device_id: {
                         "content": message_content,

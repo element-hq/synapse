@@ -90,11 +90,6 @@ class SynapseHomeServer(HomeServer):
         logger.info("Shutting down listening services")
         for listener in self._listening_services:
             logger.info("Shutting down %s %d", listener._type, listener._realPortNumber)
-            #listener.socket.shutdown(0)
-            #listener.stopListening()
-            #listener.stopConsuming()
-            #listener.loseConnection()
-
             # Preferred over connectionLost since it allows buffers to flush
             listener.unregisterProducer()
             listener.loseConnection()
@@ -103,11 +98,7 @@ class SynapseHomeServer(HomeServer):
             # Sometimes takes a second for some deferred to fire that cancels the socket
             # But seems to always do so within a minute
             # twisted.internet.error.AlreadyCancelled: Tried to cancel an already-cancelled event.
-
-            #listener.connectionLost(None)
         self._listening_services.clear()
-
-        #self._reactor.stop()
 
     def _listener_http(
         self,

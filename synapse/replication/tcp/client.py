@@ -415,6 +415,7 @@ class FederationSenderHandler:
 
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
+        self._is_mine_id = hs.is_mine_id
         self._hs = hs
 
         # We need to make a temporary value to ensure that mypy picks up the
@@ -470,7 +471,7 @@ class FederationSenderHandler:
         """
         for receipt in rows:
             # we only want to send on receipts for our own users
-            if not self._hs._is_mine_id(receipt.user_id):
+            if not self._is_mine_id(receipt.user_id):
                 continue
             # Private read receipts never get sent over federation.
             if receipt.receipt_type == ReceiptTypes.READ_PRIVATE:

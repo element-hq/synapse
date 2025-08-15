@@ -995,7 +995,7 @@ class FederationServer(FederationBase):
             authorising_server = get_domain_from_id(
                 event.content[EventContentFields.AUTHORISING_USER]
             )
-            if not self.hs._is_mine_server_name(authorising_server):
+            if not self._is_mine_server_name(authorising_server):
                 raise SynapseError(
                     400,
                     f"Cannot authorise membership event for {authorising_server}. We can only authorise requests from our own homeserver",

@@ -199,7 +199,6 @@ class UrlPreviewer:
         # memory cache mapping urls to an ObservableDeferred returning
         # JSON-encoded OG metadata
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
-            hs=hs,
             cache_name="url_previews",
             server_name=self.server_name,
             clock=self.clock,

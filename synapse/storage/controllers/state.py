@@ -70,7 +70,7 @@ class StateStorageController:
 
     def __init__(self, hs: "HomeServer", stores: "Databases"):
         self.server_name = hs.hostname  # nb must be called this for @cached
-        self.hs = hs
+        self._is_mine_id = hs.is_mine_id
         self._clock = hs.get_clock()
         self.stores = stores
         self._partial_state_events_tracker = PartialStateEventsTracker(stores.main)
@@ -240,7 +240,7 @@ class StateStorageController:
             state_filter = StateFilter.all()
 
         await_full_state = True
-        if not state_filter.must_await_full_state(self.hs._is_mine_id):
+        if not state_filter.must_await_full_state(self._is_mine_id):
             await_full_state = False
 
         event_to_groups = await self.get_state_group_for_events(
@@ -301,7 +301,7 @@ class StateStorageController:
             state_filter = StateFilter.all()
 
         if await_full_state and not state_filter.must_await_full_state(
-            self.hs._is_mine_id
+            self._is_mine_id
         ):
             # Full state is not required if the state filter is restrictive enough.
             await_full_state = False
@@ -603,7 +603,7 @@ class StateStorageController:
         if state_filter is None:
             state_filter = StateFilter.all()
 
-        if await_full_state and state_filter.must_await_full_state(self.hs._is_mine_id):
+        if await_full_state and state_filter.must_await_full_state(self._is_mine_id):
             await self._partial_state_room_tracker.await_full_state(room_id)
 
         if state_filter is not None and not state_filter.is_full():

@@ -647,7 +647,6 @@ class StateResolutionHandler:
         # dict of set of event_ids -> _StateCacheEntry.
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
             ExpiringCache(
-                hs=hs,
                 cache_name="state_cache",
                 server_name=self.server_name,
                 clock=self.clock,

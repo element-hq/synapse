@@ -494,7 +494,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, RestServlet):
         self.admin_handler = hs.get_admin_handler()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self.hs = hs
+        self.is_mine = hs.is_mine
 
     async def on_POST(
         self, request: SynapseRequest, room_identifier: str
@@ -510,7 +510,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, RestServlet):
         assert_params_in_dict(content, ["user_id"])
         target_user = UserID.from_string(content["user_id"])
 
-        if not self.hs.is_mine(target_user):
+        if not self.is_mine(target_user):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "This endpoint can only be used with local users",
@@ -587,7 +587,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         self._state_storage_controller = hs.get_storage_controllers().state
         self.event_creation_handler = hs.get_event_creation_handler()
         self.state_handler = hs.get_state_handler()
-        self.hs = hs
+        self.is_mine_id = hs.is_mine_id
 
     async def on_POST(
         self, request: SynapseRequest, room_identifier: str
@@ -623,7 +623,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
             # We pick the local user with the highest power.
             user_power = power_levels.content.get("users", {})
             admin_users = [
-                user_id for user_id in user_power if self.hs.is_mine_id(user_id)
+                user_id for user_id in user_power if self.is_mine_id(user_id)
             ]
             admin_users.sort(key=lambda user: user_power[user])
 
@@ -665,7 +665,7 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
             # If there is no power level events then the creator has rights.
             pl_content = {}
             admin_user_id = create_event.sender
-            if not self.hs.is_mine_id(admin_user_id):
+            if not self.is_mine_id(admin_user_id):
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
                     "No local admin user in room",

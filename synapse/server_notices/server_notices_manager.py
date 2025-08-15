@@ -44,7 +44,7 @@ class ServerNoticesManager:
         self._event_creation_handler = hs.get_event_creation_handler()
         self._message_handler = hs.get_message_handler()
         self._storage_controllers = hs.get_storage_controllers()
-        self.hs = hs
+        self._is_mine_id = hs.is_mine_id 
 
         self._notifier = hs.get_notifier()
         self.server_notices_mxid = self._config.servernotices.server_notices_mxid
@@ -148,7 +148,7 @@ class ServerNoticesManager:
         if self.server_notices_mxid is None:
             raise Exception("Server notices not enabled")
 
-        assert self.hs._is_mine_id(user_id), (
+        assert self._is_mine_id(user_id), (
             "Cannot send server notices to remote users"
         )
 

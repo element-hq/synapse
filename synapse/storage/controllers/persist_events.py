@@ -352,6 +352,7 @@ class EventsPersistenceStorageController:
         self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
+        self.is_mine_id = hs.is_mine_id
         self._event_persist_queue = _EventPeristenceQueue(
             self.server_name, self._process_event_persist_queue_task
         )
@@ -1108,7 +1109,7 @@ class EventsPersistenceStorageController:
             while events_to_check:
                 new_events: Set[str] = set()
                 for event_to_check in events_to_check:
-                    if self.hs.is_mine_id(event_to_check.sender):
+                    if self.is_mine_id(event_to_check.sender):
                         if event_to_check.type != EventTypes.Dummy:
                             logger.debug("Not dropping own event")
                             return new_latest_event_ids
@@ -1189,7 +1190,7 @@ class EventsPersistenceStorageController:
         """
 
         if not any(
-            self.hs.is_mine_id(state_key)
+            self.is_mine_id(state_key)
             for typ, state_key in itertools.chain(delta.to_delete, delta.to_insert)
             if typ == EventTypes.Member
         ):
@@ -1201,7 +1202,7 @@ class EventsPersistenceStorageController:
         # current state
         events_to_check = []  # Event IDs that aren't an event we're persisting
         for (typ, state_key), event_id in delta.to_insert.items():
-            if typ != EventTypes.Member or not self.hs.is_mine_id(state_key):
+            if typ != EventTypes.Member or not self.is_mine_id(state_key):
                 continue
 
             for event, _ in ev_ctx_rm:
@@ -1231,7 +1232,7 @@ class EventsPersistenceStorageController:
         users_to_ignore = [
             state_key
             for typ, state_key in itertools.chain(delta.to_insert, delta.to_delete)
-            if typ == EventTypes.Member and self.hs.is_mine_id(state_key)
+            if typ == EventTypes.Member and self.is_mine_id(state_key)
         ]
 
         if await self.main_store.is_local_host_in_room_ignoring_users(
