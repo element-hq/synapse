@@ -535,11 +535,15 @@ class ExperimentalConfig(Config):
             "msc4108_delegation_endpoint", None
         )
 
+        auth_delegated = self.msc3861.enabled or (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False)
+
         if (
             self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
-        ) and not self.msc3861.enabled:
+        ) and not auth_delegated:
             raise ConfigError(
-                "MSC4108 requires MSC3861 to be enabled",
+                "MSC4108 requires MSC3861 or matrix_authentication_service to be enabled",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
