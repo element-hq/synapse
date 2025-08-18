@@ -1,0 +1,1 @@
+Instrument the `encode_response` part of Sliding Sync requests for more complete traces in Jaeger.

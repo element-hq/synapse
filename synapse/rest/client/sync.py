@@ -1017,6 +1017,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return 200, response_content
 
+    @trace_with_opname("sliding_sync.encode_response")
     async def encode_response(
         self,
         requester: Requester,
@@ -1037,6 +1038,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return response
 
+    @trace_with_opname("sliding_sync.encode_lists")
     def encode_lists(
         self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
@@ -1058,6 +1060,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_lists
 
+    @trace_with_opname("sliding_sync.encode_rooms")
     async def encode_rooms(
         self,
         requester: Requester,
@@ -1178,6 +1181,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_rooms
 
+    @trace_with_opname("sliding_sync.encode_extensions")
     async def encode_extensions(
         self, requester: Requester, extensions: SlidingSyncResult.Extensions
     ) -> JsonDict:
