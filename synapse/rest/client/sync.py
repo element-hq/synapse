@@ -994,12 +994,18 @@ class SlidingSyncRestServlet(RestServlet):
             extensions=body.extensions,
         )
 
-        sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(
+        (
+            sliding_sync_results,
+            did_wait,
+        ) = await self.sliding_sync_handler.wait_for_sync_for_user(
             requester,
             sync_config,
             from_token,
             timeout,
         )
+        # Knowing whether we waited is useful in traces to filter out long-running
+        # requests where we were just waiting.
+        set_tag("sliding_sync.did_wait", str(did_wait))
 
         # The client may have disconnected by now; don't bother to serialize the
         # response if so.
