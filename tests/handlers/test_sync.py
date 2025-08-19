@@ -37,7 +37,6 @@ from synapse.handlers.sync import (
     SyncConfig,
     SyncRequestKey,
     SyncResult,
-    SyncVersion,
     TimelineBatch,
 )
 from synapse.rest import admin
@@ -113,7 +112,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -124,7 +122,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             ),
             ResourceLimitError,
@@ -142,7 +139,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             ),
             ResourceLimitError,
@@ -167,7 +163,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -203,7 +198,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -218,7 +212,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
@@ -252,7 +245,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -267,7 +259,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
@@ -310,7 +301,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(owner),
                 generate_sync_config(owner, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -336,7 +326,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -363,7 +352,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=eve_sync_after_ban.next_batch,
             )
@@ -376,7 +364,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=None,
             )
@@ -411,7 +398,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -441,7 +427,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -487,7 +472,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -527,7 +511,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -576,7 +559,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -603,7 +585,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -643,7 +624,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=incremental_sync.next_batch,
             )
@@ -717,7 +697,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -743,7 +722,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -769,7 +747,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -833,7 +810,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 bob_requester,
                 generate_sync_config(bob, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -867,7 +843,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     filter_collection=FilterCollection(self.hs, filter_dict),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=None if initial_sync else initial_sync_result.next_batch,
             )
@@ -967,7 +942,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1016,7 +990,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user2),
                 generate_sync_config(user2, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1042,7 +1015,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1079,7 +1051,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=since_token,
                 timeout=0,
@@ -1134,7 +1105,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=since_token,
                 timeout=0,
