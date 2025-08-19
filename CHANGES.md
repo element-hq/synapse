@@ -8,14 +8,14 @@
 
 ### Improved Documentation
 
-- Include IPv6 networks in denied-peer-ips of coturn setup. Contributed by @litetex. ([\#18781](https://github.com/element-hq/synapse/issues/18781))
+- Include IPv6 networks in `denied-peer-ips` of coturn setup. Contributed by @litetex. ([\#18781](https://github.com/element-hq/synapse/issues/18781))
 
 ### Internal Changes
 
 - Update tests to ensure all database tables are emptied when purging a room. ([\#18794](https://github.com/element-hq/synapse/issues/18794))
 - Instrument the `encode_response` part of Sliding Sync requests for more complete traces in Jaeger. ([\#18815](https://github.com/element-hq/synapse/issues/18815))
 - Tag Sliding Sync traces when we `wait_for_events`. ([\#18816](https://github.com/element-hq/synapse/issues/18816))
-- Fix portdb CI by hardcoding the new pg_dump restrict key that was added due to CVE-2025-8714. ([\#18824](https://github.com/element-hq/synapse/issues/18824))
+- Fix `portdb` CI by hardcoding the new `pg_dump` restrict key that was added due to CVE-2025-8714. ([\#18824](https://github.com/element-hq/synapse/issues/18824))
 
 
 
