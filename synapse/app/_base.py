@@ -318,7 +318,7 @@ def listen_manhole(
     port: int,
     manhole_settings: ManholeConfig,
     manhole_globals: dict,
-) -> None:
+) -> List[Port]:
     # twisted.conch.manhole 21.1.0 uses "int_from_bytes", which produces a confusing
     # warning. It's fixed by https://github.com/twisted/twisted/pull/1522), so
     # suppress the warning for now.
@@ -330,8 +330,7 @@ def listen_manhole(
 
     from synapse.util.manhole import manhole
 
-    # TODO: return port
-    listen_tcp(
+    return listen_tcp(
         bind_addresses,
         port,
         manhole(settings=manhole_settings, globals=manhole_globals),
