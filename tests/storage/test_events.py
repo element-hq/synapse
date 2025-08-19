@@ -519,3 +519,52 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         users = self.get_success(self.store.get_users_in_room(room_id))
         self.assertEqual(users, [])
+
+
+class AssignStitchedOrderingTestCase(HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.state = self.hs.get_state_handler()
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self._persistence = persistence
+        self.store = self.hs.get_datastores().main
+
+    def test_insert_events(self) -> None:
+        # Create a room
+        self.register_user("user", "pass")
+        token = self.login("user", "pass")
+        room_id = self.helper.create_room_as(
+            "user", room_version=RoomVersions.V12.identifier, tok=token
+        )
+
+        # Build a test event
+        test_event = event_from_pdu_json(
+            {
+                "type": EventTypes.Message,
+                "content": {"body": "blah"},
+                "room_id": room_id,
+                "sender": "@user:other",
+                "depth": 5,
+                "prev_events": [],
+                "auth_events": [],
+                "origin_server_ts": self.clock.time_msec(),
+            },
+            RoomVersions.V12,
+        )
+
+        context = self.get_success(self.state.compute_event_context(test_event))
+        self.get_success(
+            self._persistence._assign_stitched_orders(
+                room_id, [(test_event, context)]
+            )
+        )
+
+        self.assertEqual(context.stitched_ordering, 6 * 2**16)
