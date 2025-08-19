@@ -591,9 +591,7 @@ class PersistEventsStore:
         if to_insert:
             membership_event_id_to_user_id_map: Dict[str, str] = {}
             for state_key, event_id in to_insert.items():
-                if state_key[0] == EventTypes.Member and self.is_mine_id(
-                    state_key[1]
-                ):
+                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             membership_event_map: Dict[str, EventBase] = {}

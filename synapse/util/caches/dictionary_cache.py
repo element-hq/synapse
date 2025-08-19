@@ -34,7 +34,6 @@ from typing import (
 )
 
 import attr
-from synapse.util import Clock
 
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache

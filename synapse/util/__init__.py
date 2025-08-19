@@ -228,6 +228,7 @@ class Clock:
 
         id = self._call_id
         self._call_id += 1
+
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             with context.PreserveLoggingContext():
                 callback(*args, **kwargs)

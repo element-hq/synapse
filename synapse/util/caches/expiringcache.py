@@ -21,7 +21,17 @@
 
 import logging
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Iterable,
+    Literal,
+    Optional,
+    TypeVar,
+    Union,
+    overload,
+)
 
 import attr
 
@@ -33,7 +43,7 @@ from synapse.util import Clock
 from synapse.util.caches import EvictionReason, register_cache
 
 if TYPE_CHECKING:
-    from synapse.server import HomeServer
+    pass
 
 logger = logging.getLogger(__name__)
 

@@ -42,7 +42,9 @@ class MasBaseResource(DirectServeJsonResource):
 
             self._is_request_from_mas = auth.is_request_using_the_admin_token
 
-        DirectServeJsonResource.__init__(self, extract_context=True, clock=hs.get_clock())
+        DirectServeJsonResource.__init__(
+            self, extract_context=True, clock=hs.get_clock()
+        )
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.hostname = hs.hostname
 

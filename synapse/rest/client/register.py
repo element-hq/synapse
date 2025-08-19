@@ -397,7 +397,6 @@ class RegistrationTokenValidityRestServlet(RestServlet):
         self.hs = hs
         self.store = hs.get_datastores().main
         self.ratelimiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_registration_token_validity,

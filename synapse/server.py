@@ -28,14 +28,23 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Type, TypeVar, cast
-from attr import dataclass
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Type,
+    TypeVar,
+    cast,
+)
 
-from twisted.internet import defer
+from attr import dataclass
 from typing_extensions import TypeAlias
 
-from twisted.internet.interfaces import IDelayedCall, IOpenSSLContextFactory
-from twisted.internet.task import LoopingCall
+from twisted.internet import defer
+from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
@@ -143,7 +152,6 @@ from synapse.push.pusherpool import PusherPool
 from synapse.replication.tcp.client import ReplicationDataHandler
 from synapse.replication.tcp.external_cache import ExternalCache
 from synapse.replication.tcp.handler import ReplicationCommandHandler
-from synapse.replication.tcp.protocol import connected_connections
 from synapse.replication.tcp.resource import ReplicationStreamer
 from synapse.replication.tcp.streams import STREAMS_MAP, Stream
 from synapse.rest.media.media_repository_resource import MediaRepositoryResource
@@ -168,7 +176,9 @@ from synapse.util.task_scheduler import TaskScheduler
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    # Old versions don't have `LiteralString`
     from txredisapi import ConnectionHandler
+    from typing_extensions import LiteralString
 
     from synapse.handlers.jwt import JwtHandler
     from synapse.handlers.oidc import OidcHandler
@@ -337,8 +347,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         # TODO: Cleanup replication pieces
 
         from synapse.util.batching_queue import number_of_keys
+
         number_of_keys.clear()
         from synapse.util.batching_queue import number_queued
+
         number_queued.clear()
 
         # TODO: unregister all metrics that bind to HS resources!
@@ -356,13 +368,18 @@ class HomeServer(metaclass=abc.ABCMeta):
         logger.info("Stopping call_later calls")
         self.get_clock().cancel_all_delayed_calls()
 
-        logger.info("Stopping background processes: %d", len(self._background_processes))
+        logger.info(
+            "Stopping background processes: %d", len(self._background_processes)
+        )
         for process in self._background_processes:
             process.cancel()
         self._background_processes.clear()
 
         from synapse.util.caches import CACHE_METRIC_REGISTRY
-        logger.info("Clearing cache metrics: %d", len(CACHE_METRIC_REGISTRY._pre_update_hooks))
+
+        logger.info(
+            "Clearing cache metrics: %d", len(CACHE_METRIC_REGISTRY._pre_update_hooks)
+        )
         # TODO: Do this better, ie. don't clear metrics for other tenants
         # only clear them for this server
         CACHE_METRIC_REGISTRY.clear()
@@ -371,7 +388,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             logger.info("Shutting down %s", shutdown_handler.desc)
             self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
             # TODO: we should probably run these
-            #yield defer.ensureDeferred(shutdown_handler.func())
+            # yield defer.ensureDeferred(shutdown_handler.func())
         self._async_shutdown_handlers.clear()
 
         for shutdown_handler in self._sync_shutdown_handlers:
@@ -381,12 +398,15 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._sync_shutdown_handlers.clear()
 
         from synapse.app._base import unregister_sighups
+
         unregister_sighups(self.config.server.server_name)
 
         for call in self.get_reactor().getDelayedCalls():
             call.cancel()
 
-    def register_async_shutdown_handler(self, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+    def register_async_shutdown_handler(
+        self, desc: "LiteralString", shutdown_func: Callable[..., Any]
+    ) -> None:
         id = self.get_reactor().addSystemEventTrigger(
             "before",
             "shutdown",
@@ -395,15 +415,25 @@ class HomeServer(metaclass=abc.ABCMeta):
             self.config.server.server_name,
             shutdown_func,
         )
-        self._async_shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
+        self._async_shutdown_handlers.append(
+            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id)
+        )
 
-    def register_sync_shutdown_handler(self, phase: str, eventType: str, desc: "LiteralString", shutdown_func: Callable[..., Any]) -> None:
+    def register_sync_shutdown_handler(
+        self,
+        phase: str,
+        eventType: str,
+        desc: "LiteralString",
+        shutdown_func: Callable[..., Any],
+    ) -> None:
         id = self.get_reactor().addSystemEventTrigger(
             phase,
             eventType,
             shutdown_func,
         )
-        self._sync_shutdown_handlers.append(ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id))
+        self._sync_shutdown_handlers.append(
+            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id)
+        )
 
     def register_later_gauge(self, later_gauge: LaterGauge) -> None:
         self._later_gauges.append(later_gauge)
@@ -528,7 +558,6 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
         return Ratelimiter(
-            hs=self,
             store=self.get_datastores().main,
             clock=self.get_clock(),
             cfg=self.config.ratelimiting.rc_registration,
@@ -1048,7 +1077,6 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_request_ratelimiter(self) -> RequestRatelimiter:
         return RequestRatelimiter(
-            self,
             self.get_datastores().main,
             self.get_clock(),
             self.config.ratelimiting.rc_message,
@@ -1080,7 +1108,12 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        hs.register_sync_shutdown_handler("during", "shutdown", "Homeserver media_threadpool.stop", media_threadpool.stop)
+        self.register_sync_shutdown_handler(
+            "during",
+            "shutdown",
+            "Homeserver media_threadpool.stop",
+            media_threadpool.stop,
+        )
 
         # Register the threadpool with our metrics.
         server_name = self.hostname

@@ -234,7 +234,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
     )
     # TODO: (devon) how does this hold onto a DB pool reference?
-    #hs.register_background_process(hs.get_datastores().main.reap_monthly_active_users())
+    # hs.register_background_process(hs.get_datastores().main.reap_monthly_active_users())
 
     def generate_monthly_active_users() -> "defer.Deferred[None]":
         async def _generate_monthly_active_users() -> None:

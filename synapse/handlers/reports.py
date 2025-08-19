@@ -38,7 +38,6 @@ class ReportsHandler:
         # Ratelimiter for management of existing delayed events,
         # keyed by the requesting user ID.
         self._reports_ratelimiter = Ratelimiter(
-            hs=hs,
             store=self._store,
             clock=self._clock,
             cfg=hs.config.ratelimiting.rc_reports,

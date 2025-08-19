@@ -120,12 +120,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 1,
                 self._count_known_servers,
             )
-            hs.register_later_gauge(LaterGauge(
-                name="synapse_federation_known_servers",
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {(self.server_name,): self._known_servers_count},
-            ))
+            hs.register_later_gauge(
+                LaterGauge(
+                    name="synapse_federation_known_servers",
+                    desc="",
+                    labelnames=[SERVER_NAME_LABEL],
+                    caller=lambda: {(self.server_name,): self._known_servers_count},
+                )
+            )
 
     @wrap_as_background_process("_count_known_servers")
     async def _count_known_servers(self) -> int:

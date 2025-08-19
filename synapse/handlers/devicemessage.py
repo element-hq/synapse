@@ -80,7 +80,6 @@ class DeviceMessageHandler:
         # a rate limiter for room key requests.  The keys are
         # (sending_user_id, sending_device_id).
         self._ratelimiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_key_requests,

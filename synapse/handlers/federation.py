@@ -784,7 +784,7 @@ class FederationHandler:
             )
 
             # We retrieve the room member handler here as to not cause a cyclic dependency
-            member_handler = self.get_room_member_handler()
+            member_handler = self.hs.get_room_member_handler()
             await member_handler.transfer_room_state_on_room_upgrade(
                 old_room_id, room_id
             )

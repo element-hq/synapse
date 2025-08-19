@@ -137,7 +137,6 @@ class RoomCreationHandler:
         self.config = hs.config
         self.common_request_ratelimiter = hs.get_request_ratelimiter()
         self.creation_ratelimiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=self.config.ratelimiting.rc_room_creation,

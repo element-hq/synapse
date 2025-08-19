@@ -611,12 +611,14 @@ class DatabasePool:
         )
 
         self.updates = BackgroundUpdater(hs, self)
-        hs.register_later_gauge(LaterGauge(
-            name="synapse_background_update_status",
-            desc="Background update status",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): self.updates.get_status()},
-        ))
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_background_update_status",
+                desc="Background update status",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): self.updates.get_status()},
+            )
+        )
 
         self._previous_txn_total_time = 0.0
         self._current_txn_total_time = 0.0

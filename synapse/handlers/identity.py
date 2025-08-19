@@ -73,13 +73,11 @@ class IdentityHandler:
 
         # Ratelimiters for `/requestToken` endpoints.
         self._3pid_validation_ratelimiter_ip = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_3pid_validation,
         )
         self._3pid_validation_ratelimiter_address = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.rc_3pid_validation,

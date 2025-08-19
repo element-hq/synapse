@@ -79,7 +79,6 @@ class LoginTokenRequestServlet(RestServlet):
         # This endpoint can be used to spawn additional sessions and could be
         # abused by a malicious client to create many sessions.
         self._ratelimiter = Ratelimiter(
-            hs=hs,
             store=self._main_store,
             clock=hs.get_clock(),
             cfg=RatelimitSettings(

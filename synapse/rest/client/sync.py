@@ -131,7 +131,6 @@ class SyncRestServlet(RestServlet):
 
         # Ratelimiter for presence updates, keyed by requester.
         self._presence_per_user_limiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_presence_per_user,

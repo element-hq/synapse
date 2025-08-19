@@ -23,7 +23,16 @@
 """Contains functions for registering clients."""
 
 import logging
-from typing import TYPE_CHECKING, Iterable, List, Optional, Tuple, TypedDict
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Coroutine,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    TypedDict,
+)
 
 from prometheus_client import Counter
 
@@ -136,6 +145,7 @@ class RegistrationHandler:
             )
         else:
             self.device_handler = hs.get_device_handler()
+
             async def do_it(
                 user_id: str,
                 device_id: Optional[str],
@@ -145,8 +155,19 @@ class RegistrationHandler:
                 should_issue_refresh_token: bool = False,
                 auth_provider_id: Optional[str] = None,
                 auth_provider_session_id: Optional[str] = None,
-            ):
-                return RegistrationHandler.register_device_inner(self, user_id, device_id,initial_display_name, is_guest,is_appservice_ghost,should_issue_refresh_token, auth_provider_id,auth_provider_session_id)
+            ) -> Coroutine[Any, Any, LoginDict]:
+                return RegistrationHandler.register_device_inner(
+                    self,
+                    user_id,
+                    device_id,
+                    initial_display_name,
+                    is_guest,
+                    is_appservice_ghost,
+                    should_issue_refresh_token,
+                    auth_provider_id,
+                    auth_provider_session_id,
+                )
+
             self._register_device_client = do_it
             self.pusher_pool = hs.get_pusherpool()
 

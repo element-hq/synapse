@@ -130,12 +130,14 @@ class TaskScheduler:
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
             )
 
-        hs.register_later_gauge(LaterGauge(
-            name="synapse_scheduler_running_tasks",
-            desc="The number of concurrent running tasks handled by the TaskScheduler",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self._running_tasks)},
-        ))
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_scheduler_running_tasks",
+                desc="The number of concurrent running tasks handled by the TaskScheduler",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self._running_tasks)},
+            )
+        )
 
     def register_action(
         self,

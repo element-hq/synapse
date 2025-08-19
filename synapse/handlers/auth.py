@@ -215,7 +215,7 @@ class AuthHandler:
 
         self.password_auth_provider = hs.get_password_auth_provider()
 
-        self.hs = hs # FIXME better possibility to access registrationHandler later?
+        self.hs = hs  # FIXME better possibility to access registrationHandler later?
         self.macaroon_gen = hs.get_macaroon_generator()
         self._password_enabled_for_login = hs.config.auth.password_enabled_for_login
         self._password_enabled_for_reauth = hs.config.auth.password_enabled_for_reauth
@@ -227,7 +227,6 @@ class AuthHandler:
         # Ratelimiter for failed auth during UIA. Uses same ratelimit config
         # as per `rc_login.failed_attempts`.
         self._failed_uia_attempts_ratelimiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=self.hs.config.ratelimiting.rc_login_failed_attempts,
@@ -238,7 +237,6 @@ class AuthHandler:
 
         # Ratelimiter for failed /login attempts
         self._failed_login_attempts_ratelimiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=hs.get_clock(),
             cfg=self.hs.config.ratelimiting.rc_login_failed_attempts,

@@ -108,7 +108,9 @@ class MediaRepository:
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
-        self.remote_media_linearizer = Linearizer(name="media_remote", clock=hs.get_clock())
+        self.remote_media_linearizer = Linearizer(
+            name="media_remote", clock=hs.get_clock()
+        )
 
         self.recently_accessed_remotes: Set[Tuple[str, str]] = set()
         self.recently_accessed_locals: Set[str] = set()
@@ -119,7 +121,6 @@ class MediaRepository:
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
 
         self.download_ratelimiter = Ratelimiter(
-            hs=hs,
             store=hs.get_storage_controllers().main,
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.remote_media_downloads,

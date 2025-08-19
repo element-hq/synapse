@@ -22,7 +22,7 @@
 import logging
 import os
 import sys
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
@@ -325,8 +325,9 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-from typing import Optional
-def setup(config_options: List[str], reactor: Optional[ISynapseReactor]=None) -> SynapseHomeServer:
+def setup(
+    config_options: List[str], reactor: Optional[ISynapseReactor] = None
+) -> SynapseHomeServer:
     """
     Args:
         config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.

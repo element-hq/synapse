@@ -114,8 +114,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if self.hs.config.server.include_profile_data_on_invite:
             self._membership_types_to_include_profile_data_in.add(Membership.INVITE)
 
-        self.member_linearizer: Linearizer = Linearizer(name="member", clock=hs.get_clock())
-        self.member_as_limiter = Linearizer(max_count=10, name="member_as_limiter", clock=hs.get_clock())
+        self.member_linearizer: Linearizer = Linearizer(
+            name="member", clock=hs.get_clock()
+        )
+        self.member_as_limiter = Linearizer(
+            max_count=10, name="member_as_limiter", clock=hs.get_clock()
+        )
 
         self.clock = hs.get_clock()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
@@ -127,7 +131,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.allow_per_room_profiles = self.config.server.allow_per_room_profiles
 
         self._join_rate_limiter_local = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_joins_local,
@@ -136,7 +139,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # I.e. joins this server makes by requesting /make_join /send_join from
         # another server.
         self._join_rate_limiter_remote = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_joins_remote,
@@ -150,7 +152,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         #      other homeservers
         #   I wonder if a homeserver-wide collection of rate limiters might be cleaner?
         self._join_rate_per_room_limiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_joins_per_room,
@@ -159,7 +160,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # Ratelimiter for invites, keyed by room (across all issuers, all
         # recipients).
         self._invites_per_room_limiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_room,
@@ -169,7 +169,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # Ratelimiter for invites, keyed by recipient (across all rooms, all
         # issuers).
         self._invites_per_recipient_limiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_user,
@@ -179,7 +178,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # Ratelimiter for invites, keyed by issuer (across all rooms, all
         # recipients).
         self._invites_per_issuer_limiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_invites_per_issuer,
@@ -187,7 +185,6 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         )
 
         self._third_party_invite_limiter = Ratelimiter(
-            hs=hs,
             store=self.store,
             clock=self.clock,
             cfg=hs.config.ratelimiting.rc_third_party_invite,

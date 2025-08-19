@@ -52,7 +52,7 @@ class PurgeEventsStorageController:
         self.stores = stores
 
         if hs.config.worker.run_background_tasks:
-            hs.get_clock().looping_call(
+            self._delete_state_loop_call = hs.get_clock().looping_call(
                 self._delete_state_groups_loop, 60 * 1000
             )
 

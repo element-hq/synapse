@@ -525,11 +525,11 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self.clock.looping_call(
-            self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
-        )
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
 
-        hs.register_async_shutdown_handler("generic_presence.on_shutdown", self._on_shutdown)
+        hs.register_async_shutdown_handler(
+            "generic_presence.on_shutdown", self._on_shutdown
+        )
 
     @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
@@ -773,12 +773,14 @@ class PresenceHandler(BasePresenceHandler):
             EduTypes.PRESENCE, self.incoming_presence
         )
 
-        hs.register_later_gauge(LaterGauge(
-            name="synapse_handlers_presence_user_to_current_state_size",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
-        ))
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_handlers_presence_user_to_current_state_size",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
+            )
+        )
 
         # The per-device presence state, maps user to devices to per-device presence state.
         self._user_to_device_to_current_state: Dict[
@@ -849,7 +851,9 @@ class PresenceHandler(BasePresenceHandler):
         ] = {}
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer", clock=hs.get_clock())
+        self.external_sync_linearizer = Linearizer(
+            name="external_sync_linearizer", clock=hs.get_clock()
+        )
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.
@@ -869,12 +873,14 @@ class PresenceHandler(BasePresenceHandler):
                 60 * 1000,
             )
 
-        hs.register_later_gauge(LaterGauge(
-            name="synapse_handlers_presence_wheel_timer_size",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.wheel_timer)},
-        ))
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_handlers_presence_wheel_timer_size",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self.wheel_timer)},
+            )
+        )
 
         # Used to handle sending of presence to newly joined users/servers
         if self._track_presence:
@@ -1889,9 +1895,7 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
             # Figure out which other users this user should explicitly receive
             # updates for
             additional_users_interested_in = (
-                await self.get_presence_router().get_interested_users(
-                    user.to_string()
-                )
+                await self.get_presence_router().get_interested_users(user.to_string())
             )
 
             # We have a set of users that we're interested in the presence of. We want to
@@ -1971,10 +1975,8 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
                 interested_and_updated_users.update(additional_users_interested_in)
 
             # Retrieve the current presence state for each user
-            users_to_state = (
-                await self.get_presence_handler().current_state_for_users(
-                    interested_and_updated_users
-                )
+            users_to_state = await self.get_presence_handler().current_state_for_users(
+                interested_and_updated_users
             )
             presence_updates = list(users_to_state.values())
 
@@ -2014,10 +2016,8 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
 
         if updated_users is not None:
             # Get the actual presence update for each change
-            users_to_state = (
-                await self.get_presence_handler().current_state_for_users(
-                    updated_users
-                )
+            users_to_state = await self.get_presence_handler().current_state_for_users(
+                updated_users
             )
             presence_updates = list(users_to_state.values())
 

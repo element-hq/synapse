@@ -94,6 +94,7 @@ from typing import (
 )
 
 import attr
+
 from twisted.internet.task import LoopingCall
 
 from synapse.api.constants import MAIN_TIMELINE, ReceiptTypes
@@ -276,16 +277,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         self._find_stream_orderings_for_times_txn(cur)
         cur.close()
 
-        self._clock.looping_call(
-            self._find_stream_orderings_for_times, 10 * 60 * 1000
-        )
+        self._clock.looping_call(self._find_stream_orderings_for_times, 10 * 60 * 1000)
 
         self._rotate_count = 10000
         self._doing_notif_rotation = False
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
-                self._rotate_notifs, 30 * 1000
-            )
+            self._clock.looping_call(self._rotate_notifs, 30 * 1000)
 
             self._clock.looping_call(
                 self._clear_old_push_actions_staging, 30 * 60 * 1000

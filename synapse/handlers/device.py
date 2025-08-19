@@ -1450,8 +1450,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_device_list", clock=hs.get_clock())
-        self._resync_linearizer = Linearizer(name="remote_device_resync", clock=hs.get_clock())
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_device_list", clock=hs.get_clock()
+        )
+        self._resync_linearizer = Linearizer(
+            name="remote_device_resync", clock=hs.get_clock()
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[

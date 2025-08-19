@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import atexit
 import gc
 import logging
 import os
@@ -99,13 +98,15 @@ reactor = cast(ISynapseReactor, _reactor)
 logger = logging.getLogger(__name__)
 
 # list of tuples of function, args list, kwargs dict
-_sighup_callbacks: Dict[str, 
-    List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
+_sighup_callbacks: Dict[
+    str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
 ] = {}
 P = ParamSpec("P")
 
 
-def register_sighup(server_name: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:
+def register_sighup(
+    server_name: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs
+) -> None:
     """
     Register a function to be called when a SIGHUP occurs.
 
