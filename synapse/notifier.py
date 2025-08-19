@@ -253,7 +253,6 @@ class Notifier:
 
         self.federation_sender = None
         if hs.should_send_federation():
-            # TODO: (devon) why is this one already a weakref proxy?
             self.federation_sender = hs.get_federation_sender()
 
         self.state_handler = hs.get_state_handler()
