@@ -306,6 +306,12 @@ class EventContext(UnpersistedEventContextBase):
         )
 
 
+EventPersistencePair = Tuple[EventBase, EventContext]
+"""
+The combination of an event to be persisted and its context.
+"""
+
+
 @attr.s(slots=True, auto_attribs=True)
 class UnpersistedEventContext(UnpersistedEventContextBase):
     """
