@@ -687,8 +687,8 @@ class EventsPersistenceStorageController:
             await self.persist_events_store.get_room_max_stitched_ordering(room_id) or 0
         )
 
-        for _event, context in events_and_contexts:
-            current_max_stream_ordering += 1
+        for _event, context in remaining_batch:
+            current_max_stream_ordering += 2**16
             context.stitched_ordering = current_max_stream_ordering
 
     async def _calculate_new_forward_extremities_and_state_delta(
