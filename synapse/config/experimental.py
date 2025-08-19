@@ -556,6 +556,9 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        # MSC4185: Event Visibility API
+        self.msc4185_enabled: bool = experimental.get("msc4185_enabled", False)
+
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
 
