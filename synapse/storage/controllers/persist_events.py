@@ -683,6 +683,53 @@ class EventsPersistenceStorageController:
         room_id: str,
         events_and_contexts: List[EventPersistencePair],
     ) -> None:
+        """
+        Updates the EventContexts within `events_and_contexts`, to assign a
+        stitched_ordering to each event.
+        """
+        # Take a copy of the events we have to process
+        remaining_batch = list(events_and_contexts)
+
+        # Find all events in the current batch which are in a timeline gap
+        gap_events = await self.persist_events_store.db_pool.simple_select_many_batch(
+            "event_backward_extremities",
+            "event_id",
+            (ev.event_id for (ev, _) in events_and_contexts),
+            ["event_id", "before_gap_event_id"],
+        )
+
+        # TODO sort gap_events by DAG;received order
+        for gap_event, before_gap_event_id in gap_events:
+            matching_events = [gap_event]  # TODO find other events in the same gap
+
+            # Find all predecessors of those events in the batch
+            to_insert = find_predecessors(matching_events, remaining_batch)
+
+            # Find the stitched order of the event before the gap
+            # TODO consider doing this with a join
+            previous_event_stitched_order = (
+                await self.persist_events_store.db_pool.simple_select_one_onecol(
+                    "events",
+                    {"event_id": before_gap_event_id},
+                    "stitched_ordering",
+                    True,
+                )
+            )
+
+            # TODO XXX what if previous_event_stitched_order is None?
+
+            still_remaining_batch = []
+            for event, context in remaining_batch:
+                if event.event_id not in to_insert:
+                    still_remaining_batch.append((event, context))
+                    continue
+
+                # TODO we may need to reorder existing events
+                previous_event_stitched_order += 1
+                context.stitched_ordering = previous_event_stitched_order
+
+            remaining_batch = still_remaining_batch
+
         current_max_stream_ordering = (
             await self.persist_events_store.get_room_max_stitched_ordering(room_id) or 0
         )
@@ -1256,3 +1303,34 @@ class EventsPersistenceStorageController:
             return True
 
         return False
+
+
+def find_predecessors(
+    event_ids: Iterable[str], batch: List[EventPersistencePair]
+) -> Set[str]:
+    """
+    Walk the tree of dependencies (in batch), and return every event that is
+    in batch, and is an ancestor of one of the supplied events.
+    """
+    found = set()
+    unexplored = set(event_ids)
+    while len(unexplored) > 0:
+        next_unexplored: Set[str] = set()
+
+        # Iterate through the incoming events, looking for events in our "unexplored"
+        # set. For each matching event, add it to the "found" set, and add its
+        # "prev_events" to the "unexplored" set for the next pass.
+        for event, _ in batch:
+            if event.event_id in unexplored:
+                found.add(event.event_id)
+                next_unexplored.update(
+                    (
+                        event_id
+                        for event_id in event.prev_event_ids()
+                        if event_id not in found
+                    )
+                )
+
+        unexplored = next_unexplored
+
+    return found
