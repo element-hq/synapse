@@ -27,6 +27,7 @@ from typing import (
     Callable,
     Dict,
     Generator,
+    List,
     Optional,
     Protocol,
     Type,
@@ -289,24 +290,26 @@ class DynamicCollectorRegistry(CollectorRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        self._pre_update_hooks: Dict[str, Callable[[], None]] = {}
+        self._pre_update_hooks: Dict[str, List[Callable[[], None]]] = {}
 
     def collect(self) -> Generator[Metric, None, None]:
         """
         Collects metrics, calling pre-update hooks first.
         """
 
-        for pre_update_hook in self._pre_update_hooks.values():
-            pre_update_hook()
+        for pre_update_hooks in self._pre_update_hooks.values():
+            for pre_update_hook in pre_update_hooks:
+                pre_update_hook()
 
         yield from super().collect()
 
-    def register_hook(self, metric_name: str, hook: Callable[[], None]) -> None:
+    def register_hook(self, server_name: str, hook: Callable[[], None]) -> None:
         """
         Registers a hook that is called before metric collection.
         """
 
-        self._pre_update_hooks[metric_name] = hook
+        server_hooks = self._pre_update_hooks.setdefault(server_name, [])
+        server_hooks.append(hook)
 
-    def clear(self) -> None:
-        self._pre_update_hooks.clear()
+    def clear(self, server_name: str) -> None:
+        self._pre_update_hooks.pop(server_name)

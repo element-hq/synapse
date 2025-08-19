@@ -167,6 +167,7 @@ from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
+from synapse.util.caches import CACHE_METRIC_REGISTRY
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -369,21 +370,16 @@ class HomeServer(metaclass=abc.ABCMeta):
             process.cancel()
         self._background_processes.clear()
 
-        from synapse.util.caches import CACHE_METRIC_REGISTRY
-
         logger.info(
             "Clearing cache metrics: %d", len(CACHE_METRIC_REGISTRY._pre_update_hooks)
         )
-        # TODO: Do this better, ie. don't clear metrics for other tenants
-        # only clear them for this server
-        CACHE_METRIC_REGISTRY.clear()
+        CACHE_METRIC_REGISTRY.clear(self.config.server.server_name)
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:
                 logger.info("Shutting down %s", shutdown_handler.desc)
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                # TODO: we should probably run these
-                # yield defer.ensureDeferred(shutdown_handler.func())
+                defer.ensureDeferred(shutdown_handler.func())
             except Exception:
                 pass
         self._async_shutdown_handlers.clear()
