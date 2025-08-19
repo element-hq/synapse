@@ -123,10 +123,17 @@ class BatchingQueue(Generic[V, R]):
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         ).set_function(lambda: len(self._next_values))
 
-        # TODO: (devon) what do with this global?
         self._number_in_flight_metric: Gauge = number_in_flight.labels(
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
+
+    def shutdown(self) -> None:
+        number_queued.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        ).set_function(lambda: 0)
+        number_of_keys.labels(
+            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
+        ).set_function(lambda: 0)
 
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result

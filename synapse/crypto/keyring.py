@@ -194,6 +194,11 @@ class Keyring:
             valid_until_ts=2**63,  # fake future timestamp
         )
 
+    def shutdown(self) -> None:
+        self._fetch_keys_queue.shutdown()
+        for key_fetcher in self._key_fetchers:
+            key_fetcher.shutdown()
+
     async def verify_json_for_server(
         self,
         server_name: str,
@@ -483,6 +488,9 @@ class KeyFetcher(metaclass=abc.ABCMeta):
             clock=hs.get_clock(),
             process_batch_callback=self._fetch_keys,
         )
+
+    def shutdown(self) -> None:
+        self._queue.shutdown()
 
     async def get_keys(
         self, server_name: str, key_ids: List[str], minimum_valid_until_ts: int

@@ -346,14 +346,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # TODO: Cleanup replication pieces
 
-        from synapse.util.batching_queue import number_of_keys
+        self.get_keyring().shutdown()
 
-        number_of_keys.clear()
-        from synapse.util.batching_queue import number_queued
-
-        number_queued.clear()
-
-        # TODO: unregister all metrics that bind to HS resources!
         logger.info("Stopping later gauges: %d", len(self._later_gauges))
         for later_gauge in self._later_gauges:
             later_gauge.unregister()
