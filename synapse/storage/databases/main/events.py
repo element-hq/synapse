@@ -2629,7 +2629,7 @@ class PersistEventsStore:
 
                 # Update the event_backward_extremities table now that this
                 # event isn't an outlier any more.
-                self._update_backward_extremeties(txn, [event])
+                self._update_backward_extremeties(txn, [(event, context)])
 
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
@@ -2811,7 +2811,8 @@ class PersistEventsStore:
         # Update the event_forward_extremities, event_backward_extremities and
         # event_edges tables.
         self._handle_mult_prev_events(
-            txn, events=[event for event, _ in events_and_contexts]
+            txn,
+            events_and_contexts,
         )
 
         for event, _ in events_and_contexts:
@@ -3517,7 +3518,9 @@ class PersistEventsStore:
         )
 
     def _handle_mult_prev_events(
-        self, txn: LoggingTransaction, events: List[EventBase]
+        self,
+        txn: LoggingTransaction,
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """
         For the given event, update the event edges table and forward and
@@ -3528,14 +3531,18 @@ class PersistEventsStore:
             table="event_edges",
             keys=("event_id", "prev_event_id"),
             values=[
-                (ev.event_id, e_id) for ev in events for e_id in ev.prev_event_ids()
+                (ev.event_id, e_id)
+                for (ev, _) in events_and_contexts
+                for e_id in ev.prev_event_ids()
             ],
         )
 
-        self._update_backward_extremeties(txn, events)
+        self._update_backward_extremeties(txn, events_and_contexts)
 
     def _update_backward_extremeties(
-        self, txn: LoggingTransaction, events: List[EventBase]
+        self,
+        txn: LoggingTransaction,
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Updates the event_backward_extremities tables based on the new/updated
         events being persisted.
@@ -3546,11 +3553,11 @@ class PersistEventsStore:
         Forward extremities are handled when we first start persisting the events.
         """
 
-        room_id = events[0].room_id
+        room_id = events_and_contexts[0][0].room_id
 
         potential_backwards_extremities = {
             e_id
-            for ev in events
+            for (ev,_) in events_and_contexts
             for e_id in ev.prev_event_ids()
             if not ev.internal_metadata.is_outlier()
         }
@@ -3558,7 +3565,9 @@ class PersistEventsStore:
         if not potential_backwards_extremities:
             return
 
-        existing_events_outliers = self.db_pool.simple_select_many_txn(
+        # Filter potential_backwards_extremities to remove events that are in the
+        # table.
+        existing_events = self.db_pool.simple_select_many_txn(
             txn,
             table="events",
             column="event_id",
@@ -3568,7 +3577,7 @@ class PersistEventsStore:
         )
 
         potential_backwards_extremities.difference_update(
-            e for (e,) in existing_events_outliers
+            e for (e,) in existing_events
         )
 
         if potential_backwards_extremities:
@@ -3584,7 +3593,7 @@ class PersistEventsStore:
             # Record the stream orderings where we have new gaps.
             gap_events = [
                 (room_id, self._instance_name, ev.internal_metadata.stream_ordering)
-                for ev in events
+                for (ev, _) in events_and_contexts
                 if any(
                     e_id in potential_backwards_extremities
                     for e_id in ev.prev_event_ids()
@@ -3605,7 +3614,7 @@ class PersistEventsStore:
         )
         backward_extremity_tuples_to_remove = [
             (ev.event_id, ev.room_id)
-            for ev in events
+            for (ev, _) in events_and_contexts
             if not ev.internal_metadata.is_outlier()
             # If we encountered an event with no prev_events, then we might
             # as well remove it now because it won't ever have anything else
