@@ -1493,6 +1493,18 @@ def _required_state_changes(
     added, removed and then added again to the required state. In that case we
     only want to re-send that entry down sync if it has changed.
 
+    Args:
+        prev_required_state_map: Map from state event type to state_keys requested for
+            the room. The values are close to `StateKey` but actually use a syntax where you
+            can provide `*` wildcard. `$ME  and `$LAZY` for lazy-loading room members should
+            already be expanded into their explicit forms by this point.
+        request_required_state_map: Map from state event type to state_keys requested for
+            the room. The values are close to `StateKey` but actually use a syntax where you
+            can provide `*` wildcard. `$ME  and `$LAZY` for lazy-loading room members should
+            already be expanded into their explicit forms by this point.
+        state_deltas: Relevant changes to the current state. "Relevant" for sync means
+            in the token range.
+
     Returns:
         A 2-tuple of updated required state config (or None if there is no update)
         and the state filter to use to fetch extra current state that we need to
