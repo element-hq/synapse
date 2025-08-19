@@ -994,12 +994,18 @@ class SlidingSyncRestServlet(RestServlet):
             extensions=body.extensions,
         )
 
-        sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(
+        (
+            sliding_sync_results,
+            did_wait,
+        ) = await self.sliding_sync_handler.wait_for_sync_for_user(
             requester,
             sync_config,
             from_token,
             timeout,
         )
+        # Knowing whether we waited is useful in traces to filter out long-running
+        # requests where we were just waiting.
+        set_tag("sliding_sync.did_wait", str(did_wait))
 
         # The client may have disconnected by now; don't bother to serialize the
         # response if so.
@@ -1011,6 +1017,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return 200, response_content
 
+    @trace_with_opname("sliding_sync.encode_response")
     async def encode_response(
         self,
         requester: Requester,
@@ -1031,6 +1038,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return response
 
+    @trace_with_opname("sliding_sync.encode_lists")
     def encode_lists(
         self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
@@ -1052,6 +1060,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_lists
 
+    @trace_with_opname("sliding_sync.encode_rooms")
     async def encode_rooms(
         self,
         requester: Requester,
@@ -1172,6 +1181,7 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_rooms
 
+    @trace_with_opname("sliding_sync.encode_extensions")
     async def encode_extensions(
         self, requester: Requester, extensions: SlidingSyncResult.Extensions
     ) -> JsonDict:
