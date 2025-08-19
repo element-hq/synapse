@@ -206,9 +206,13 @@ class Clock:
         self._looping_calls.append(call)
         return call
 
-    def cancel_all_looping_calls(self) -> None:
+    def cancel_all_looping_calls(self, consumeErrors: bool = True) -> None:
         for call in self._looping_calls:
-            call.stop()
+            try:
+                call.stop()
+            except Exception:
+                if not consumeErrors:
+                    raise
         self._looping_calls.clear()
 
     def call_later(

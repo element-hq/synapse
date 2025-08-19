@@ -385,16 +385,22 @@ class HomeServer(metaclass=abc.ABCMeta):
         CACHE_METRIC_REGISTRY.clear()
 
         for shutdown_handler in self._async_shutdown_handlers:
-            logger.info("Shutting down %s", shutdown_handler.desc)
-            self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-            # TODO: we should probably run these
-            # yield defer.ensureDeferred(shutdown_handler.func())
+            try:
+                logger.info("Shutting down %s", shutdown_handler.desc)
+                self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+                # TODO: we should probably run these
+                # yield defer.ensureDeferred(shutdown_handler.func())
+            except Exception:
+                pass
         self._async_shutdown_handlers.clear()
 
         for shutdown_handler in self._sync_shutdown_handlers:
-            logger.info("Shutting down %s", shutdown_handler.desc)
-            self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-            shutdown_handler.func()
+            try:
+                logger.info("Shutting down %s", shutdown_handler.desc)
+                self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+                shutdown_handler.func()
+            except Exception:
+                pass
         self._sync_shutdown_handlers.clear()
 
         from synapse.app._base import unregister_sighups

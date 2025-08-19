@@ -307,6 +307,7 @@ def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
 
     from synapse.metrics import RegistryProxy
 
+    # TODO: track for shutdown
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
         start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
@@ -329,6 +330,7 @@ def listen_manhole(
 
     from synapse.util.manhole import manhole
 
+    # TODO: return port
     listen_tcp(
         bind_addresses,
         port,
