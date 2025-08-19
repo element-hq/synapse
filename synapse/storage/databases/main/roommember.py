@@ -113,7 +113,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._count_known_servers_task: Optional[LoopingCall] = (
                 self.hs.get_clock().looping_call(
                     self._count_known_servers,
-                    6 * 1000,
+                    60 * 1000,
                 )
             )
             self.hs.get_clock().call_later(
