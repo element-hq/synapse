@@ -92,8 +92,8 @@ class SynapseHomeServer(HomeServer):
             # During unit tests, an incomplete `_FakePort` is used for listeners so
             # check listener type here to ensure shutdown procedure is only applied to
             # actual `Port` instances.
-            if listener is Port:
-                #logger.info("Shutting down %s %d", listener._type, listener._realPortNumber)
+            if type(listener) is Port:
+                # logger.info("Shutting down %s %d", listener._type, listener._realPortNumber)
                 # Preferred over connectionLost since it allows buffers to flush
                 listener.unregisterProducer()
                 listener.loseConnection()
