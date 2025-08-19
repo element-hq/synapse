@@ -130,6 +130,9 @@ class EventContext(UnpersistedEventContextBase):
 
         partial_state: if True, we may be storing this event with a temporary,
             incomplete state.
+
+        stitched_ordering: the assigned stitched ordering for this event, or None if we
+            have not yet assigned one.
     """
 
     _storage: "StorageControllers"
@@ -141,6 +144,8 @@ class EventContext(UnpersistedEventContextBase):
     app_service: Optional[ApplicationService] = None
 
     partial_state: bool = False
+
+    stitched_ordering: Optional[int] = None
 
     @staticmethod
     def with_state(

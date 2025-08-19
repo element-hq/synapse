@@ -616,6 +616,8 @@ class EventsPersistenceStorageController:
             if not events_and_contexts:
                 return replaced_events
 
+        await self._assign_stitched_orders(room_id, events_and_contexts)
+
         chunks = [
             events_and_contexts[x : x + 100]
             for x in range(0, len(events_and_contexts), 100)
@@ -675,6 +677,19 @@ class EventsPersistenceStorageController:
                 )
 
         return replaced_events
+
+    async def _assign_stitched_orders(
+        self,
+        room_id: str,
+        events_and_contexts: List[EventPersistencePair],
+    ) -> None:
+        current_max_stream_ordering = (
+            await self.persist_events_store.get_room_max_stitched_ordering(room_id) or 0
+        )
+
+        for _event, context in events_and_contexts:
+            current_max_stream_ordering += 1
+            context.stitched_ordering = current_max_stream_ordering
 
     async def _calculate_new_forward_extremities_and_state_delta(
         self, room_id: str, ev_ctx_rm: List[EventPersistencePair]
