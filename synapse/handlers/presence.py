@@ -528,7 +528,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
 
         hs.register_async_shutdown_handler(
-            "generic_presence.on_shutdown", self._on_shutdown
+            "before", "shutdown", "generic_presence.on_shutdown", self._on_shutdown
         )
 
     @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
@@ -828,7 +828,9 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.register_async_shutdown_handler("presence.on_shutdown", self._on_shutdown)
+        hs.register_async_shutdown_handler(
+            "before", "shutdown", "presence.on_shutdown", self._on_shutdown
+        )
 
         # Keeps track of the number of *ongoing* syncs on this process. While
         # this is non zero a user will never go offline.

@@ -427,11 +427,15 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._metrics_listeners.clear()
 
     def register_async_shutdown_handler(
-        self, desc: "LiteralString", shutdown_func: Callable[..., Any]
+        self,
+        phase: str,
+        eventType: str,
+        desc: "LiteralString",
+        shutdown_func: Callable[..., Any],
     ) -> None:
         id = self.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
+            phase,
+            eventType,
             run_as_background_process,
             desc,
             self.config.server.server_name,

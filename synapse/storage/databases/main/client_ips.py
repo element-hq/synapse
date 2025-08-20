@@ -454,6 +454,8 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
 
             self._clock.looping_call(self._update_client_ips_batch, 5 * 1000)
             hs.register_async_shutdown_handler(
+                "before",
+                "shutdown",
                 "ClientIpWorkerStore _update_client_ips_batch",
                 self._update_client_ips_batch,
             )
