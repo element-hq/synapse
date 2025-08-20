@@ -22,6 +22,7 @@
 """Contains the URL paths to prefix various aspects of the server with."""
 
 import hmac
+import urllib.parse
 from hashlib import sha256
 from typing import Optional
 from urllib.parse import urlencode, urljoin
@@ -96,11 +97,21 @@ class LoginSSORedirectURIBuilder:
         serialized_query_parameters = urlencode({"redirectUrl": client_redirect_url})
 
         if idp_id:
+            # Make this this user-controlled string safe to include in a URL path.
+            url_encoded_idp_id = urllib.parse.quote(
+                idp_id,
+                # Since this defaults to `safe="/"`, we have to override it. We're
+                # working with an individual URL path parameter so there shouldn't be
+                # any slashes in it which could change the request path.
+                safe="",
+                encoding="utf8",
+            )
+
             resultant_url = urljoin(
                 # We have to add a trailing slash to the base URL to ensure that the
                 # last path segment is not stripped away when joining with another path.
                 f"{base_url}/",
-                f"{idp_id}?{serialized_query_parameters}",
+                f"{url_encoded_idp_id}?{serialized_query_parameters}",
             )
         else:
             resultant_url = f"{base_url}?{serialized_query_parameters}"
