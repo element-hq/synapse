@@ -1,28 +1,47 @@
-# Synapse 1.136.0rc2 (2025-08-11)
-
-This is the Synapse portion of the [Matrix coordinated security release](https://matrix.org/blog/2025/07/security-predisclosure/). This release includes support for [room version](https://spec.matrix.org/v1.15/rooms/) 12 which fixes a number of security vulnerabilities, including [CVE-2025-49090](https://www.cve.org/CVERecord?id=CVE-2025-49090).
-
-The default room version is not changed. Not all clients will support room version 12 immediately, and not all users will be using the latest version of their clients. Large, public rooms are advised to wait a few weeks before upgrading to room version 12 to allow users throughout the Matrix ecosystem to update their clients.
-
-Note: release 1.135.1 was skipped due to issues discovered during the release process.
-
-Two patched Synapse releases are now available:
-
-* `1.135.2`: stable release comprised of `1.135.0` + security patches
-    * Upgrade to this release **if you are currently running 1.135.0 or below**.
-* `1.136.0rc2`: unstable release candidate comprised of `1.136.0rc1` + security patches.
-    * Upgrade to this release **only if you are on 1.136.0rc1**.
+# Synapse 1.137.0rc1 (2025-08-19)
 
 ### Bugfixes
 
-- Update MSC4293 redaction logic for room v12. ([\#80](https://github.com/element-hq/synapse/issues/80))
+- Fix a bug which could corrupt auth chains making it impossible to perform state resolution. ([\#18746](https://github.com/element-hq/synapse/issues/18746))
+- Fix error message in `register_new_matrix_user` utility script for empty `registration_shared_secret`. ([\#18780](https://github.com/element-hq/synapse/issues/18780))
+- Allow enabling [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108) when the stable Matrix Authentication Service integration is enabled. ([\#18832](https://github.com/element-hq/synapse/issues/18832))
+
+### Improved Documentation
+
+- Include IPv6 networks in `denied-peer-ips` of coturn setup. Contributed by @litetex. ([\#18781](https://github.com/element-hq/synapse/issues/18781))
 
 ### Internal Changes
 
-- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#83](https://github.com/element-hq/synapse/issues/83))
+- Update tests to ensure all database tables are emptied when purging a room. ([\#18794](https://github.com/element-hq/synapse/issues/18794))
+- Instrument the `encode_response` part of Sliding Sync requests for more complete traces in Jaeger. ([\#18815](https://github.com/element-hq/synapse/issues/18815))
+- Tag Sliding Sync traces when we `wait_for_events`. ([\#18816](https://github.com/element-hq/synapse/issues/18816))
+- Fix `portdb` CI by hardcoding the new `pg_dump` restrict key that was added due to [CVE-2025-8714](https://nvd.nist.gov/vuln/detail/cve-2025-8714). ([\#18824](https://github.com/element-hq/synapse/issues/18824))
 
 
 
+### Updates to locked dependencies
+
+* Bump actions/add-to-project from 5b1a254a3546aef88e0a7724a77a623fa2e47c36 to 0c37450c4be3b6a7582b2fb013c9ebfd9c8e9300. ([\#18557](https://github.com/element-hq/synapse/issues/18557))
+* Bump actions/cache from 4.2.3 to 4.2.4. ([\#18799](https://github.com/element-hq/synapse/issues/18799))
+* Bump actions/checkout from 4.2.2 to 4.3.0. ([\#18800](https://github.com/element-hq/synapse/issues/18800))
+* Bump actions/download-artifact from 4.3.0 to 5.0.0. ([\#18801](https://github.com/element-hq/synapse/issues/18801))
+* Bump docker/metadata-action from 5.7.0 to 5.8.0. ([\#18773](https://github.com/element-hq/synapse/issues/18773))
+* Bump mypy from 1.16.1 to 1.17.1. ([\#18775](https://github.com/element-hq/synapse/issues/18775))
+* Bump phonenumbers from 9.0.10 to 9.0.11. ([\#18797](https://github.com/element-hq/synapse/issues/18797))
+* Bump pygithub from 2.6.1 to 2.7.0. ([\#18779](https://github.com/element-hq/synapse/issues/18779))
+* Bump serde_json from 1.0.141 to 1.0.142. ([\#18776](https://github.com/element-hq/synapse/issues/18776))
+* Bump slab from 0.4.10 to 0.4.11. ([\#18809](https://github.com/element-hq/synapse/issues/18809))
+* Bump tokio from 1.47.0 to 1.47.1. ([\#18774](https://github.com/element-hq/synapse/issues/18774))
+* Bump types-pyyaml from 6.0.12.20250516 to 6.0.12.20250809. ([\#18798](https://github.com/element-hq/synapse/issues/18798))
+* Bump types-setuptools from 80.9.0.20250529 to 80.9.0.20250809. ([\#18796](https://github.com/element-hq/synapse/issues/18796))
+
+# Synapse 1.136.0 (2025-08-12)
+
+Note: This release includes the security fixes from `1.135.2` and `1.136.0rc2`, detailed below.
+
+### Bugfixes
+
+- Fix bug introduced in 1.135.2 and 1.136.0rc2 where the [Make Room Admin API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#make-room-admin-api) would not treat a room v12's creator power level as the highest in room. ([\#18805](https://github.com/element-hq/synapse/issues/18805))
 
 
 # Synapse 1.135.2 (2025-08-11)
@@ -50,7 +69,13 @@ Two patched Synapse releases are now available:
 - Speed up upgrading a room with large numbers of banned users. ([\#18574](https://github.com/element-hq/synapse/issues/18574))
 
 
+# Synapse 1.136.0rc2 (2025-08-11)
 
+- Update MSC4293 redaction logic for room v12. ([\#80](https://github.com/element-hq/synapse/issues/80))
+
+### Internal Changes
+
+- Add a parameter to `upgrade_rooms(..)` to allow auto join local users. ([\#83](https://github.com/element-hq/synapse/issues/83))
 
 
 # Synapse 1.136.0rc1 (2025-08-05)
@@ -115,11 +140,6 @@ Please check [the relevant section in the upgrade notes](https://github.com/elem
 * Bump tokio from 1.46.1 to 1.47.0. ([\#18740](https://github.com/element-hq/synapse/issues/18740))
 * Bump types-jsonschema from 4.24.0.20250708 to 4.25.0.20250720. ([\#18703](https://github.com/element-hq/synapse/issues/18703))
 * Bump types-psycopg2 from 2.9.21.20250516 to 2.9.21.20250718. ([\#18706](https://github.com/element-hq/synapse/issues/18706))
-
-
-
-
-
 
 # Synapse 1.135.0 (2025-08-01)
 

@@ -1,1 +1,0 @@
-Fix error message in `register_new_matrix_user` utility script for empty `registration_shared_secret`.
