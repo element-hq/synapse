@@ -262,6 +262,8 @@ class ShutdownInfo:
     desc: str
     func: Callable[..., Any]
     trigger_id: Any
+    args: Tuple[object, ...]
+    kwargs: Dict[str, object]
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -384,7 +386,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             try:
                 logger.info("Shutting down %s", shutdown_handler.desc)
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                defer.ensureDeferred(shutdown_handler.func())
+                defer.ensureDeferred(shutdown_handler.func(*shutdown_handler.args, **shutdown_handler.kwargs))
             except Exception:
                 pass
         self._async_shutdown_handlers.clear()
@@ -393,7 +395,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             try:
                 logger.info("Shutting down %s", shutdown_handler.desc)
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                shutdown_handler.func()
+                shutdown_handler.func(*shutdown_handler.args, **shutdown_handler.kwargs)
             except Exception:
                 pass
         self._sync_shutdown_handlers.clear()
@@ -432,6 +434,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         eventType: str,
         desc: "LiteralString",
         shutdown_func: Callable[..., Any],
+        *args: object,
+        **kwargs: object,
     ) -> None:
         id = self.get_reactor().addSystemEventTrigger(
             phase,
@@ -442,7 +446,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             shutdown_func,
         )
         self._async_shutdown_handlers.append(
-            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id)
+            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs)
         )
 
     def register_sync_shutdown_handler(
@@ -451,14 +455,18 @@ class HomeServer(metaclass=abc.ABCMeta):
         eventType: str,
         desc: "LiteralString",
         shutdown_func: Callable[..., Any],
+        *args: object,
+        **kwargs: object,
     ) -> None:
         id = self.get_reactor().addSystemEventTrigger(
             phase,
             eventType,
             shutdown_func,
+            args,
+            kwargs,
         )
         self._sync_shutdown_handlers.append(
-            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id)
+            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs)
         )
 
     def register_later_gauge(self, later_gauge: LaterGauge) -> None:

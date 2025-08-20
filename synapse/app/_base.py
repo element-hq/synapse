@@ -618,9 +618,8 @@ async def start(hs: "HomeServer") -> None:
     hs.get_pusherpool().start()
 
     # Log when we start the shut down process.
-    # TODO: fixme
-    hs.get_reactor().addSystemEventTrigger(
-        "before", "shutdown", logger.info, "Shutting down..."
+    hs.register_sync_shutdown_handler(
+        "before", "shutdown", "shutdown log entry", logger.info, "Shutting down..."
     )
 
     setup_sentry(hs)
@@ -718,7 +717,6 @@ def setup_sdnotify(hs: "HomeServer") -> None:
     # we're not using systemd.
     sdnotify(b"READY=1\nMAINPID=%i" % (os.getpid(),))
 
-    # TODO: fixme
     hs.get_reactor().addSystemEventTrigger(
         "before", "shutdown", sdnotify, b"STOPPING=1"
     )
