@@ -18,6 +18,7 @@ from tests.unittest import TestCase
 
 from synapse.storage.controllers.persist_events import find_predecessors
 
+
 class FindPredecessorsTestCase(TestCase):
     def test_predecessors_finds_nothing_if_event_is_not_in_batch(self) -> None:
         batch = [
@@ -47,9 +48,7 @@ class FindPredecessorsTestCase(TestCase):
             (FakeEvent(event_id="G", prev_event_ids=[]), None),
         ]
         predecessors = find_predecessors({"A"}, batch)  # type: ignore[arg-type]
-        self.assertEqual(
-            predecessors, {"A", "B", "C", "D", "E"}
-        )
+        self.assertEqual(predecessors, {"A", "B", "C", "D", "E"})
 
     def test_predecessors_ignores_cycles(self) -> None:
         batch = [
@@ -80,10 +79,7 @@ class FindPredecessorsTestCase(TestCase):
             (FakeEvent(event_id="G", prev_event_ids=[]), None),
         ]
         predecessors = find_predecessors({"A", "C"}, batch)  # type: ignore[arg-type]
-        self.assertEqual(
-            predecessors, {"A", "B", "C", "D", "E"}
-        )
-
+        self.assertEqual(predecessors, {"A", "B", "C", "D", "E"})
 
 
 @attr.s(auto_attribs=True)
