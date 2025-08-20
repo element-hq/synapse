@@ -27,7 +27,7 @@ from parameterized import parameterized
 from twisted.internet import defer
 from twisted.internet.defer import Deferred, TimeoutError
 from twisted.internet.error import ConnectingCancelledError, DNSLookupError
-from twisted.test.proto_helpers import MemoryReactor, StringTransport
+from twisted.internet.testing import MemoryReactor, StringTransport
 from twisted.web.client import Agent, ResponseNeverReceived
 from twisted.web.http import HTTPChannel
 from twisted.web.http_headers import Headers
@@ -436,8 +436,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # Send it the HTTP response
         client.dataReceived(
-            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-            b"Server: Fake\r\n\r\n"
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nServer: Fake\r\n\r\n"
         )
 
         # Push by enough to time it out
@@ -691,10 +690,7 @@ class FederationClientTests(HomeserverTestCase):
 
         # Send it a huge HTTP response
         protocol.dataReceived(
-            b"HTTP/1.1 200 OK\r\n"
-            b"Server: Fake\r\n"
-            b"Content-Type: application/json\r\n"
-            b"\r\n"
+            b"HTTP/1.1 200 OK\r\nServer: Fake\r\nContent-Type: application/json\r\n\r\n"
         )
 
         self.pump()

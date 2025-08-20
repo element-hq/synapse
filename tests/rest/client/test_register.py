@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock
 
 import pkg_resources
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -39,7 +39,7 @@ from synapse.appservice import ApplicationService
 from synapse.rest.client import account, account_validity, login, logout, register, sync
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests import unittest
@@ -75,7 +75,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
             as_token,
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
         )
 
         self.hs.get_datastores().main.services_cache.append(appservice)
@@ -99,7 +99,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
             as_token,
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
         )
 
         self.hs.get_datastores().main.services_cache.append(appservice)
@@ -129,7 +129,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
             as_token,
             id="1234",
             namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
-            sender="@as:test",
+            sender=UserID.from_string("@as:test"),
             msc4190_device_management=True,
         )
 

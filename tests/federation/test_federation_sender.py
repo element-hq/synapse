@@ -24,13 +24,13 @@ from signedjson import key, sign
 from signedjson.types import BaseKey, SigningKey
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender.per_destination_queue import MAX_PRESENCE_STATES_PER_EDU
 from synapse.federation.units import Transaction
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceListUpdater, DeviceWriterHandler
 from synapse.rest import admin
 from synapse.rest.client import login
 from synapse.server import HomeServer
@@ -500,7 +500,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
         hs.get_datastores().main.get_current_hosts_in_room = get_current_hosts_in_room  # type: ignore[assignment]
 
         device_handler = hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         self.device_handler = device_handler
 
         # whenever send_transaction is called, record the edu data
@@ -553,6 +553,8 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
             "user_id": "@user2:host2",
             "devices": [{"device_id": "D1"}],
         }
+
+        assert isinstance(self.device_handler.device_list_updater, DeviceListUpdater)
 
         self.get_success(
             self.device_handler.device_list_updater.incoming_device_list_update(
@@ -672,7 +674,7 @@ class FederationSenderDevicesTestCases(HomeserverTestCase):
             self.assertEqual(edu["edu_type"], EduTypes.DEVICE_LIST_UPDATE)
             c = edu["content"]
             if stream_id is not None:
-                self.assertEqual(c["prev_id"], [stream_id])  # type: ignore[unreachable]
+                self.assertEqual(c["prev_id"], [stream_id])
                 self.assertGreaterEqual(c["stream_id"], stream_id)
             stream_id = c["stream_id"]
         devices = {edu["content"]["device_id"] for edu in self.edus}

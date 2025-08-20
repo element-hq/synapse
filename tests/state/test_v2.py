@@ -41,9 +41,11 @@ from synapse.event_auth import auth_types_for_event
 from synapse.events import EventBase, make_event_from_dict
 from synapse.state.v2 import (
     _get_auth_chain_difference,
+    _get_power_level_for_sender,
     lexicographical_topological_sort,
     resolve_events_with_store,
 )
+from synapse.storage.databases.main.event_federation import StateDifference
 from synapse.types import EventID, StateMap
 
 from tests import unittest
@@ -64,8 +66,8 @@ ORIGIN_SERVER_TS = 0
 
 
 class FakeClock:
-    def sleep(self, msec: float) -> "defer.Deferred[None]":
-        return defer.succeed(None)
+    async def sleep(self, msec: float) -> None:
+        return None
 
 
 class FakeEvent:
@@ -733,7 +735,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -790,7 +796,11 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
@@ -857,11 +867,154 @@ class AuthChainDifferenceTestCase(unittest.TestCase):
         store = TestStateResolutionStore(persisted_events)
 
         diff_d = _get_auth_chain_difference(
-            ROOM_ID, state_sets, unpersited_events, store
+            ROOM_ID,
+            state_sets,
+            unpersited_events,
+            store,
+            None,
         )
         difference = self.successResultOf(defer.ensureDeferred(diff_d))
 
         self.assertEqual(difference, {d.event_id, e.event_id})
+
+    def test_get_power_level_for_sender(self) -> None:
+        """Test that we use the correct definition of `creator` depending
+        on room version"""
+        store = TestStateResolutionStore({})
+        for room_version in [RoomVersions.V10, RoomVersions.V11]:
+            create_event = make_event_from_dict(
+                {
+                    "room_id": ROOM_ID,
+                    "sender": ALICE,
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "content": {
+                        "room_version": room_version.identifier,
+                    }
+                    # conditionally add 'creator' if the version doesn't use implicit room creators
+                    | (
+                        {"creator": ALICE}
+                        if not room_version.implicit_room_creator
+                        else {}
+                    ),
+                },
+                room_version,
+            )
+            member_event = make_event_from_dict(
+                {
+                    "room_id": ROOM_ID,
+                    "sender": ALICE,
+                    "type": EventTypes.Member,
+                    "state_key": ALICE,
+                    "content": {
+                        "membership": "join",
+                    },
+                    "auth_events": [create_event.event_id],
+                    "prev_events": [create_event.event_id],
+                },
+                room_version,
+            )
+            pl_event = make_event_from_dict(
+                {
+                    "room_id": ROOM_ID,
+                    "sender": ALICE,
+                    "type": EventTypes.PowerLevels,
+                    "state_key": "",
+                    "content": {
+                        "users": {
+                            ALICE: 100,
+                            BOB: 50,
+                        },
+                        "users_default": 10,
+                    },
+                    "auth_events": [create_event.event_id, member_event.event_id],
+                    "prev_events": [member_event.event_id],
+                },
+                room_version,
+            )
+
+            event_map = {
+                create_event.event_id: create_event,
+                member_event.event_id: member_event,
+                pl_event.event_id: pl_event,
+            }
+            want_pls = {
+                ALICE: 100,
+                BOB: 50,
+                CHARLIE: 10,
+            }
+            for user_id, want_pl in want_pls.items():
+                test_event = make_event_from_dict(
+                    {
+                        "room_id": ROOM_ID,
+                        "sender": user_id,
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "content": {"topic": "Test"},
+                        "auth_events": [
+                            create_event.event_id,
+                            member_event.event_id,
+                            pl_event.event_id,
+                        ],
+                        "prev_events": [pl_event.event_id],
+                    },
+                    room_version,
+                )
+                event_map[test_event.event_id] = test_event
+                got_pl = self.successResultOf(
+                    defer.ensureDeferred(
+                        _get_power_level_for_sender(
+                            ROOM_ID, test_event.event_id, event_map, store
+                        )
+                    )
+                )
+                self.assertEqual(
+                    got_pl,
+                    want_pl,
+                    f"wrong pl for {user_id} on v{room_version.identifier}",
+                )
+
+            # the creator alone without PL is 100, everyone else is 0
+            want_pls = {
+                ALICE: 100,
+                BOB: 0,
+                CHARLIE: 0,
+            }
+            for user_id, want_pl in want_pls.items():
+                test_event = make_event_from_dict(
+                    {
+                        "room_id": ROOM_ID,
+                        "sender": user_id,
+                        "type": EventTypes.Topic,
+                        "state_key": "",
+                        "content": {"topic": "Test"},
+                        "auth_events": [
+                            create_event.event_id,
+                            member_event.event_id,
+                            pl_event.event_id,
+                        ],
+                        "prev_events": [pl_event.event_id],
+                    },
+                    room_version,
+                )
+                got_pl = self.successResultOf(
+                    defer.ensureDeferred(
+                        _get_power_level_for_sender(
+                            ROOM_ID,
+                            test_event.event_id,
+                            {
+                                test_event.event_id: test_event,
+                                create_event.event_id: create_event,
+                            },
+                            store,
+                        )
+                    )
+                )
+                self.assertEqual(
+                    got_pl,
+                    want_pl,
+                    f"wrong pl for {user_id} with no PL event on v{room_version.identifier}",
+                )
 
 
 T = TypeVar("T")
@@ -930,9 +1083,18 @@ class TestStateResolutionStore:
         return list(result)
 
     def get_auth_chain_difference(
-        self, room_id: str, auth_sets: List[Set[str]]
-    ) -> "defer.Deferred[Set[str]]":
+        self,
+        room_id: str,
+        auth_sets: List[Set[str]],
+        conflicted_state: Optional[Set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+    ) -> "defer.Deferred[StateDifference]":
         chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 
         common = set(chains[0]).intersection(*chains[1:])
-        return defer.succeed(set(chains[0]).union(*chains[1:]) - common)
+        return defer.succeed(
+            StateDifference(
+                auth_difference=set(chains[0]).union(*chains[1:]) - common,
+                conflicted_subgraph=set(),
+            ),
+        )

@@ -37,7 +37,9 @@ from synapse.appservice import ApplicationService
 from synapse.http import get_request_user_agent
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace
+from synapse.state import CREATE_KEY, POWER_KEY
 from synapse.types import Requester, create_requester
+from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
@@ -170,7 +172,7 @@ class BaseAuth:
         """
 
         # It's ok if the app service is trying to use the sender from their registration
-        if app_service.sender == user_id:
+        if app_service.sender.to_string() == user_id:
             pass
         # Check to make sure the app service is allowed to control the user
         elif not app_service.is_interested_in_user(user_id):
@@ -216,18 +218,20 @@ class BaseAuth:
         # by checking if they would (theoretically) be able to change the
         # m.room.canonical_alias events
 
-        power_level_event = (
-            await self._storage_controllers.state.get_current_state_event(
-                room_id, EventTypes.PowerLevels, ""
-            )
+        auth_events = await self._storage_controllers.state.get_current_state(
+            room_id,
+            StateFilter.from_types(
+                [
+                    POWER_KEY,
+                    CREATE_KEY,
+                ]
+            ),
         )
 
-        auth_events = {}
-        if power_level_event:
-            auth_events[(EventTypes.PowerLevels, "")] = power_level_event
-
         send_level = event_auth.get_send_level(
-            EventTypes.CanonicalAlias, "", power_level_event
+            EventTypes.CanonicalAlias,
+            "",
+            auth_events.get(POWER_KEY),
         )
         user_level = event_auth.get_user_power_level(
             requester.user.to_string(), auth_events

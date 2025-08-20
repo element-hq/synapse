@@ -1,1 +1,0 @@
-In start_for_complement.sh, replace some external program calls with shell builtins.

@@ -21,7 +21,7 @@
 from typing import List, Optional, Tuple
 
 from twisted.internet.task import deferLater
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
@@ -112,11 +112,11 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # At this point, there should be MAX_CONCURRENT_RUNNING_TASKS active tasks and
         # one scheduled task.
-        self.assertEquals(
+        self.assertEqual(
             len(get_tasks_of_status(TaskStatus.ACTIVE)),
             TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
         )
-        self.assertEquals(
+        self.assertEqual(
             len(get_tasks_of_status(TaskStatus.SCHEDULED)),
             1,
         )
@@ -126,17 +126,17 @@ class TestTaskScheduler(HomeserverTestCase):
 
         # Check that MAX_CONCURRENT_RUNNING_TASKS tasks have run and that one
         # is still scheduled.
-        self.assertEquals(
+        self.assertEqual(
             len(get_tasks_of_status(TaskStatus.COMPLETE)),
             TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
         )
         scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
-        self.assertEquals(len(scheduled_tasks), 1)
+        self.assertEqual(len(scheduled_tasks), 1)
 
         # The scheduled task should start 0.1s after the first of the active tasks
         # finishes
         self.reactor.advance(0.1)
-        self.assertEquals(len(get_tasks_of_status(TaskStatus.ACTIVE)), 1)
+        self.assertEqual(len(get_tasks_of_status(TaskStatus.ACTIVE)), 1)
 
         # ... and should finally complete after another second
         self.reactor.advance(1)
@@ -144,7 +144,7 @@ class TestTaskScheduler(HomeserverTestCase):
             self.task_scheduler.get_task(scheduled_tasks[0].id)
         )
         assert prev_scheduled_task is not None
-        self.assertEquals(
+        self.assertEqual(
             prev_scheduled_task.status,
             TaskStatus.COMPLETE,
         )

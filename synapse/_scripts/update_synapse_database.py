@@ -53,6 +53,7 @@ class MockHomeserver(HomeServer):
 
 
 def run_background_updates(hs: HomeServer) -> None:
+    server_name = hs.hostname
     main = hs.get_datastores().main
     state = hs.get_datastores().state
 
@@ -66,7 +67,11 @@ def run_background_updates(hs: HomeServer) -> None:
     def run() -> None:
         # Apply all background updates on the database.
         defer.ensureDeferred(
-            run_as_background_process("background_updates", run_background_updates)
+            run_as_background_process(
+                "background_updates",
+                server_name,
+                run_background_updates,
+            )
         )
 
     reactor.callWhenRunning(run)

@@ -54,7 +54,7 @@ from sortedcontainers import SortedDict
 
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender import AbstractFederationSender, FederationSender
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.replication.tcp.streams.federation import FederationStream
 from synapse.types import JsonDict, ReadReceipt, RoomStreamToken, StrCollection
 from synapse.util.metrics import Measure
@@ -113,10 +113,10 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # changes. ARGH.
         def register(name: str, queue: Sized) -> None:
             LaterGauge(
-                "synapse_federation_send_queue_%s_size" % (queue_name,),
-                "",
-                [],
-                lambda: len(queue),
+                name="synapse_federation_send_queue_%s_size" % (queue_name,),
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(queue)},
             )
 
         for queue_name in [
@@ -156,7 +156,9 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     def _clear_queue_before_pos(self, position_to_delete: int) -> None:
         """Clear all the queues from before a given position"""
-        with Measure(self.clock, "send_queue._clear"):
+        with Measure(
+            self.clock, name="send_queue._clear", server_name=self.server_name
+        ):
             # Delete things out of presence maps
             keys = self.presence_destinations.keys()
             i = self.presence_destinations.bisect_left(position_to_delete)

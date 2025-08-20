@@ -40,9 +40,6 @@ from synapse.logging.opentracing import (
     log_kv,
     set_tag,
 )
-from synapse.replication.http.devices import (
-    ReplicationMultiUserDevicesResyncRestServlet,
-)
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
 from synapse.util import json_encoder
 from synapse.util.stringutils import random_string
@@ -63,9 +60,9 @@ class DeviceMessageHandler:
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self.is_mine = hs.is_mine
+        self.device_handler = hs.get_device_handler()
         if hs.config.experimental.msc3814_enabled:
             self.event_sources = hs.get_event_sources()
-            self.device_handler = hs.get_device_handler()
 
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by
@@ -85,18 +82,6 @@ class DeviceMessageHandler:
             hs.get_federation_registry().register_instances_for_edu(
                 EduTypes.DIRECT_TO_DEVICE,
                 hs.config.worker.writers.to_device,
-            )
-
-        # The handler to call when we think a user's device list might be out of
-        # sync. We do all device list resyncing on the master instance, so if
-        # we're on a worker we hit the device resync replication API.
-        if hs.config.worker.worker_app is None:
-            self._multi_user_device_resync = (
-                hs.get_device_handler().device_list_updater.multi_user_device_resync
-            )
-        else:
-            self._multi_user_device_resync = (
-                ReplicationMultiUserDevicesResyncRestServlet.make_client(hs)
             )
 
         # a rate limiter for room key requests.  The keys are
@@ -220,7 +205,10 @@ class DeviceMessageHandler:
             await self.store.mark_remote_users_device_caches_as_stale((sender_user_id,))
 
             # Immediately attempt a resync in the background
-            run_in_background(self._multi_user_device_resync, user_ids=[sender_user_id])
+            run_in_background(
+                self.device_handler.device_list_updater.multi_user_device_resync,
+                user_ids=[sender_user_id],
+            )
 
     async def send_device_message(
         self,

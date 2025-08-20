@@ -26,8 +26,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Collection,
     Dict,
-    Iterable,
     List,
     Mapping,
     Match,
@@ -49,6 +49,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
+from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.types import JsonDict, Requester
 
 from . import EventBase, StrippedStateEvent, make_event_from_dict
@@ -176,9 +177,12 @@ def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDic
         if room_version.updated_redaction_rules:
             # MSC2176 rules state that create events cannot have their `content` redacted.
             new_content = event_dict["content"]
-        elif not room_version.implicit_room_creator:
+        if not room_version.implicit_room_creator:
             # Some room versions give meaning to `creator`
             add_fields("creator")
+        if room_version.msc4291_room_ids_as_hashes:
+            # room_id is not allowed on the create event as it's derived from the event ID
+            allowed_keys.remove("room_id")
 
     elif event_type == EventTypes.JoinRules:
         add_fields("join_rule")
@@ -421,9 +425,19 @@ class SerializeEventConfig:
     # False, that state will be removed from the event before it is returned.
     # Otherwise, it will be kept.
     include_stripped_room_state: bool = False
+    # When True, sets unsigned fields to help clients identify events which
+    # only server admins can see through other configuration. For example,
+    # whether an event was soft failed by the server.
+    include_admin_metadata: bool = False
 
 
 _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
+
+
+def make_config_for_admin(existing: SerializeEventConfig) -> SerializeEventConfig:
+    # Set the options which are only available to server admins,
+    # and copy the rest.
+    return attr.evolve(existing, include_admin_metadata=True)
 
 
 def serialize_event(
@@ -517,6 +531,10 @@ def serialize_event(
     if config.as_client_event:
         d = config.event_format(d)
 
+    # Ensure the room_id field is set for create events in MSC4291 rooms
+    if e.type == EventTypes.Create and e.room_version.msc4291_room_ids_as_hashes:
+        d["room_id"] = e.room_id
+
     # If the event is a redaction, the field with the redacted event ID appears
     # in a different location depending on the room version. e.redacts handles
     # fetching from the proper location; copy it to the other location for forwards-
@@ -527,6 +545,12 @@ def serialize_event(
         else:
             d["content"] = dict(d["content"])
             d["content"]["redacts"] = e.redacts
+
+    if config.include_admin_metadata:
+        if e.internal_metadata.is_soft_failed():
+            d["unsigned"]["io.element.synapse.soft_failed"] = True
+        if e.internal_metadata.policy_server_spammy:
+            d["unsigned"]["io.element.synapse.policy_server_spammy"] = True
 
     only_event_fields = config.only_event_fields
     if only_event_fields:
@@ -548,6 +572,7 @@ class EventClientSerializer:
 
     def __init__(self, hs: "HomeServer") -> None:
         self._store = hs.get_datastores().main
+        self._auth = hs.get_auth()
         self._add_extra_fields_to_unsigned_client_event_callbacks: List[
             ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
         ] = []
@@ -575,6 +600,15 @@ class EventClientSerializer:
         # To handle the case of presence events and the like
         if not isinstance(event, EventBase):
             return event
+
+        # Force-enable server admin metadata because the only time an event with
+        # relevant metadata will be when the admin requested it via their admin
+        # client config account data. Also, it's "just" some `unsigned` fields, so
+        # shouldn't cause much in terms of problems to downstream consumers.
+        if config.requester is not None and await self._auth.is_server_admin(
+            config.requester
+        ):
+            config = make_config_for_admin(config)
 
         serialized_event = serialize_event(event, time_now, config=config)
 
@@ -677,9 +711,10 @@ class EventClientSerializer:
                 "m.relations", {}
             ).update(serialized_aggregations)
 
+    @trace
     async def serialize_events(
         self,
-        events: Iterable[Union[JsonDict, EventBase]],
+        events: Collection[Union[JsonDict, EventBase]],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -698,6 +733,11 @@ class EventClientSerializer:
         Returns:
             The list of serialized events
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "events.length",
+            str(len(events)),
+        )
+
         return [
             await self.serialize_event(
                 event,
@@ -846,6 +886,14 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
+    # MSC4311: Ensure the create event is available on invites and knocks.
+    # TODO: Implement the rest of MSC4311
+    if (
+        event.room_version.msc4291_room_ids_as_hashes
+        and event.type == EventTypes.Create
+        and event.get_state_key() == ""
+    ):
+        return event.get_pdu_json()
 
     return {
         "type": event.type,

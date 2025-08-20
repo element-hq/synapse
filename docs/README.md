@@ -63,6 +63,18 @@ mdbook serve
 
 The URL at which the docs can be viewed at will be logged.
 
+## Synapse configuration documentation
+
+The [Configuration
+Manual](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html)
+page is generated from a YAML file,
+[schema/synapse-config.schema.yaml](../schema/synapse-config.schema.yaml). To
+add new options or modify existing ones, first edit that file, then run
+[scripts-dev/gen_config_documentation.py](../scripts-dev/gen_config_documentation.py)
+to generate an updated Configuration Manual markdown file.
+
+Build the book as described above to preview it in a web browser.
+
 ## Configuration and theming
 
 The look and behaviour of the website is configured by the [book.toml](../book.toml) file

@@ -29,7 +29,7 @@ from twisted.internet._resolver import HostResolution
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.error import DNSLookupError
 from twisted.internet.interfaces import IAddress, IResolutionReceiver
-from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactor
+from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.config.oembed import OEmbedEndpointConfig
@@ -878,7 +878,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         data = base64.b64encode(SMALL_PNG)
 
         end_content = (
-            b"<html><head>" b'<img src="data:image/png;base64,%s" />' b"</head></html>"
+            b'<html><head><img src="data:image/png;base64,%s" /></head></html>'
         ) % (data,)
 
         channel = self.make_request(

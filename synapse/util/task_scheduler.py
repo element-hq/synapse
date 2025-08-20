@@ -30,7 +30,7 @@ from synapse.logging.context import (
     nested_logging_context,
     set_current_context,
 )
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -101,6 +101,9 @@ class TaskScheduler:
 
     def __init__(self, hs: "HomeServer"):
         self._hs = hs
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._running_tasks: Set[str] = set()
@@ -128,10 +131,10 @@ class TaskScheduler:
             )
 
         LaterGauge(
-            "synapse_scheduler_running_tasks",
-            "The number of concurrent running tasks handled by the TaskScheduler",
-            labels=None,
-            caller=lambda: len(self._running_tasks),
+            name="synapse_scheduler_running_tasks",
+            desc="The number of concurrent running tasks handled by the TaskScheduler",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 
     def register_action(
@@ -354,7 +357,7 @@ class TaskScheduler:
             finally:
                 self._launching_new_tasks = False
 
-        run_as_background_process("launch_scheduled_tasks", inner)
+        run_as_background_process("launch_scheduled_tasks", self.server_name, inner)
 
     @wrap_as_background_process("clean_scheduled_tasks")
     async def _clean_scheduled_tasks(self) -> None:
@@ -440,7 +443,8 @@ class TaskScheduler:
                 except Exception:
                     f = Failure()
                     logger.error(
-                        f"scheduled task {task.id} failed",
+                        "scheduled task %s failed",
+                        task.id,
                         exc_info=(f.type, f.value, f.getTracebackObject()),
                     )
                     status = TaskStatus.FAILED
@@ -473,8 +477,10 @@ class TaskScheduler:
             self._clock.time_msec()
             > task.timestamp + TaskScheduler.LAST_UPDATE_BEFORE_WARNING_MS
         ):
-            logger.warn(
-                f"Task {task.id} (action {task.action}) has seen no update for more than 24h and may be stuck"
+            logger.warning(
+                "Task %s (action %s) has seen no update for more than 24h and may be stuck",
+                task.id,
+                task.action,
             )
 
         if task.id in self._running_tasks:
@@ -482,4 +488,4 @@ class TaskScheduler:
 
         self._running_tasks.add(task.id)
         await self.update_task(task.id, status=TaskStatus.ACTIVE)
-        run_as_background_process(f"task-{task.action}", wrapper)
+        run_as_background_process(f"task-{task.action}", self.server_name, wrapper)

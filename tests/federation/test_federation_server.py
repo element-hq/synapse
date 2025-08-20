@@ -25,7 +25,7 @@ from unittest.mock import Mock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import FederationError
@@ -44,6 +44,8 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.unittest import override_config
+
+logger = logging.getLogger(__name__)
 
 
 class FederationServerTests(unittest.FederatingHomeserverTestCase):
@@ -252,7 +254,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:
         e = _create_acl_event({"allow": ["*"], "deny": ["evil.com"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -266,7 +268,7 @@ class ServerACLsTestCase(unittest.TestCase):
 
     def test_block_ip_literals(self) -> None:
         e = _create_acl_event({"allow_ip_literals": False, "allow": ["*"]})
-        logging.info("ACL event: %s", e.content)
+        logger.info("ACL event: %s", e.content)
 
         server_acl_evalutor = server_acl_evaluator_from_event(e)
 
@@ -533,7 +535,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "content": {"membership": "join"},
             "auth_events": [],
             "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
@@ -550,7 +551,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.member",
-            "origin": "test.servx",
             "auth_events": [],
             "content": {"membership": "join"},
             "unsigned": {
@@ -577,7 +577,6 @@ class StripUnsignedFromEventsTestCase(unittest.TestCase):
             "depth": 1000,
             "origin_server_ts": 1,
             "type": "m.room.power_levels",
-            "origin": "test.servx",
             "content": {},
             "auth_events": [],
             "unsigned": {

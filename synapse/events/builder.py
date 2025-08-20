@@ -82,7 +82,8 @@ class EventBuilder:
 
     room_version: RoomVersion
 
-    room_id: str
+    # MSC4291 makes the room ID == the create event ID. This means the create event has no room_id.
+    room_id: Optional[str]
     type: str
     sender: str
 
@@ -142,7 +143,14 @@ class EventBuilder:
         Returns:
             The signed and hashed event.
         """
+        # Create events always have empty auth_events.
+        if self.type == EventTypes.Create and self.is_state() and self.state_key == "":
+            auth_event_ids = []
+
+        # Calculate auth_events for non-create events
         if auth_event_ids is None:
+            # Every non-create event must have a room ID
+            assert self.room_id is not None
             state_ids = await self._state.compute_state_after_events(
                 self.room_id,
                 prev_event_ids,
@@ -224,12 +232,31 @@ class EventBuilder:
             "auth_events": auth_events,
             "prev_events": prev_events,
             "type": self.type,
-            "room_id": self.room_id,
             "sender": self.sender,
             "content": self.content,
             "unsigned": self.unsigned,
             "depth": depth,
         }
+        if self.room_id is not None:
+            event_dict["room_id"] = self.room_id
+
+        if self.room_version.msc4291_room_ids_as_hashes:
+            # In MSC4291: the create event has no room ID as the create event ID /is/ the room ID.
+            if (
+                self.type == EventTypes.Create
+                and self.is_state()
+                and self._state_key == ""
+            ):
+                assert self.room_id is None
+            else:
+                # All other events do not reference the create event in auth_events, as the room ID
+                # /is/ the create event. However, the rest of the code (for consistency between room
+                # versions) assume that the create event remains part of the auth events. c.f. event
+                # class which automatically adds the create event when `.auth_event_ids()` is called
+                assert self.room_id is not None
+                create_event_id = "$" + self.room_id[1:]
+                auth_event_ids.remove(create_event_id)
+                event_dict["auth_events"] = auth_event_ids
 
         if self.is_state():
             event_dict["state_key"] = self._state_key
@@ -285,7 +312,7 @@ class EventBuilderFactory:
             room_version=room_version,
             type=key_values["type"],
             state_key=key_values.get("state_key"),
-            room_id=key_values["room_id"],
+            room_id=key_values.get("room_id"),
             sender=key_values["sender"],
             content=key_values.get("content", {}),
             unsigned=key_values.get("unsigned", {}),
@@ -302,8 +329,8 @@ def create_local_event_from_event_dict(
     event_dict: JsonDict,
     internal_metadata_dict: Optional[JsonDict] = None,
 ) -> EventBase:
-    """Takes a fully formed event dict, ensuring that fields like `origin`
-    and `origin_server_ts` have correct values for a locally produced event,
+    """Takes a fully formed event dict, ensuring that fields like
+    `origin_server_ts` have correct values for a locally produced event,
     then signs and hashes it.
     """
 
@@ -319,7 +346,6 @@ def create_local_event_from_event_dict(
     if format_version == EventFormatVersions.ROOM_V1_V2:
         event_dict["event_id"] = _create_event_id(clock, hostname)
 
-    event_dict["origin"] = hostname
     event_dict.setdefault("origin_server_ts", time_now)
 
     event_dict.setdefault("unsigned", {})

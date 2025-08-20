@@ -67,7 +67,6 @@ class EventValidator:
             "auth_events",
             "content",
             "hashes",
-            "origin",
             "prev_events",
             "sender",
             "type",
@@ -76,13 +75,6 @@ class EventValidator:
         for k in required:
             if k not in event:
                 raise SynapseError(400, "Event does not have key %s" % (k,))
-
-        # Check that the following keys have string values
-        event_strings = ["origin"]
-
-        for s in event_strings:
-            if not isinstance(getattr(event, s), str):
-                raise SynapseError(400, "'%s' not a string type" % (s,))
 
         # Depending on the room version, ensure the data is spec compliant JSON.
         if event.room_version.strict_canonicaljson:
@@ -191,7 +183,17 @@ class EventValidator:
         fields an event would have
         """
 
+        create_event_as_room_id = (
+            event.room_version.msc4291_room_ids_as_hashes
+            and event.type == EventTypes.Create
+            and hasattr(event, "state_key")
+            and event.state_key == ""
+        )
+
         strings = ["room_id", "sender", "type"]
+
+        if create_event_as_room_id:
+            strings.remove("room_id")
 
         if hasattr(event, "state_key"):
             strings.append("state_key")
@@ -200,7 +202,14 @@ class EventValidator:
             if not isinstance(getattr(event, s), str):
                 raise SynapseError(400, "Not '%s' a string type" % (s,))
 
-        RoomID.from_string(event.room_id)
+        if not create_event_as_room_id:
+            assert event.room_id is not None
+            RoomID.from_string(event.room_id)
+            if event.room_version.msc4291_room_ids_as_hashes and not RoomID.is_valid(
+                event.room_id
+            ):
+                raise SynapseError(400, f"Invalid room ID '{event.room_id}'")
+
         UserID.from_string(event.sender)
 
         if event.type == EventTypes.Message:

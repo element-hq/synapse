@@ -35,6 +35,7 @@ KEY = "mykey"
 
 class TestCache:
     current_value = FIRST_VALUE
+    server_name = "test_server"  # nb must be called this for @cached
 
     @cached()
     async def cached_function(self, user_id: str) -> str:

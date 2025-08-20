@@ -21,10 +21,9 @@
 import logging
 import random
 import re
-from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Collection, Dict, List, Optional, Sequence, Tuple, Union, cast
 from urllib.parse import urlparse
 from urllib.request import (  # type: ignore[attr-defined]
-    getproxies_environment,
     proxy_bypass_environment,
 )
 
@@ -40,6 +39,7 @@ from twisted.internet.interfaces import (
     IProtocol,
     IProtocolFactory,
     IReactorCore,
+    IReactorTime,
     IStreamClientEndpoint,
 )
 from twisted.python.failure import Failure
@@ -53,6 +53,7 @@ from twisted.web.error import SchemeNotSupported
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import IAgent, IBodyProducer, IPolicyForHTTPS, IResponse
 
+from synapse.config.server import ProxyConfig
 from synapse.config.workers import (
     InstanceLocationConfig,
     InstanceTcpLocationConfig,
@@ -98,8 +99,7 @@ class ProxyAgent(_AgentBase):
         pool: connection pool to be used. If None, a
             non-persistent pool instance will be created.
 
-        use_proxy: Whether proxy settings should be discovered and used
-            from conventional environment variables.
+        proxy_config: Proxy configuration to use for this agent.
 
         federation_proxy_locations: An optional list of locations to proxy outbound federation
             traffic through (only requests that use the `matrix-federation://` scheme
@@ -117,19 +117,22 @@ class ProxyAgent(_AgentBase):
 
     def __init__(
         self,
+        *,
         reactor: IReactorCore,
         proxy_reactor: Optional[IReactorCore] = None,
         contextFactory: Optional[IPolicyForHTTPS] = None,
         connectTimeout: Optional[float] = None,
         bindAddress: Optional[bytes] = None,
         pool: Optional[HTTPConnectionPool] = None,
-        use_proxy: bool = False,
+        proxy_config: Optional[ProxyConfig] = None,
         federation_proxy_locations: Collection[InstanceLocationConfig] = (),
         federation_proxy_credentials: Optional[ProxyCredentials] = None,
     ):
         contextFactory = contextFactory or BrowserLikePolicyForHTTPS()
 
-        _AgentBase.__init__(self, reactor, pool)
+        # `_AgentBase` expects an `IReactorTime` provider. `IReactorCore`
+        # extends `IReactorTime`, so this cast is safe.
+        _AgentBase.__init__(self, cast(IReactorTime, reactor), pool)
 
         if proxy_reactor is None:
             self.proxy_reactor = reactor
@@ -142,40 +145,42 @@ class ProxyAgent(_AgentBase):
         if bindAddress is not None:
             self._endpoint_kwargs["bindAddress"] = bindAddress
 
-        http_proxy = None
-        https_proxy = None
-        no_proxy = None
-        if use_proxy:
-            proxies = getproxies_environment()
-            http_proxy = proxies["http"].encode() if "http" in proxies else None
-            https_proxy = proxies["https"].encode() if "https" in proxies else None
-            no_proxy = proxies["no"] if "no" in proxies else None
+        self.proxy_config = proxy_config
+        if self.proxy_config is not None:
             logger.debug(
                 "Using proxy settings: http_proxy=%s, https_proxy=%s, no_proxy=%s",
-                http_proxy,
-                https_proxy,
-                no_proxy,
+                self.proxy_config.http_proxy,
+                self.proxy_config.https_proxy,
+                self.proxy_config.no_proxy_hosts,
             )
 
         self.http_proxy_endpoint, self.http_proxy_creds = http_proxy_endpoint(
-            http_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
+            self.proxy_config.http_proxy.encode()
+            if self.proxy_config and self.proxy_config.http_proxy
+            else None,
+            self.proxy_reactor,
+            contextFactory,
+            **self._endpoint_kwargs,
         )
 
         self.https_proxy_endpoint, self.https_proxy_creds = http_proxy_endpoint(
-            https_proxy, self.proxy_reactor, contextFactory, **self._endpoint_kwargs
+            self.proxy_config.https_proxy.encode()
+            if self.proxy_config and self.proxy_config.https_proxy
+            else None,
+            self.proxy_reactor,
+            contextFactory,
+            **self._endpoint_kwargs,
         )
 
-        self.no_proxy = no_proxy
-
         self._policy_for_https = contextFactory
-        self._reactor = reactor
+        self._reactor = cast(IReactorTime, reactor)
 
         self._federation_proxy_endpoint: Optional[IStreamClientEndpoint] = None
         self._federation_proxy_credentials: Optional[ProxyCredentials] = None
         if federation_proxy_locations:
-            assert (
-                federation_proxy_credentials is not None
-            ), "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            assert federation_proxy_credentials is not None, (
+                "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            )
 
             endpoints: List[IStreamClientEndpoint] = []
             for federation_proxy_location in federation_proxy_locations:
@@ -257,14 +262,18 @@ class ProxyAgent(_AgentBase):
             raise ValueError(f"Invalid URI {uri!r}")
 
         parsed_uri = URI.fromBytes(uri)
-        pool_key = f"{parsed_uri.scheme!r}{parsed_uri.host!r}{parsed_uri.port}"
+        pool_key: tuple[bytes, bytes, int] = (
+            parsed_uri.scheme,
+            parsed_uri.host,
+            parsed_uri.port,
+        )
         request_path = parsed_uri.originForm
 
         should_skip_proxy = False
-        if self.no_proxy is not None:
+        if self.proxy_config is not None:
             should_skip_proxy = proxy_bypass_environment(
                 parsed_uri.host.decode(),
-                proxies={"no": self.no_proxy},
+                proxies=self.proxy_config.get_proxies_dictionary(),
             )
 
         if (
@@ -283,7 +292,7 @@ class ProxyAgent(_AgentBase):
                 )
             # Cache *all* connections under the same key, since we are only
             # connecting to a single destination, the proxy:
-            pool_key = "http-proxy"
+            pool_key = (b"http-proxy", b"", 0)
             endpoint = self.http_proxy_endpoint
             request_path = uri
         elif (
@@ -302,9 +311,9 @@ class ProxyAgent(_AgentBase):
             parsed_uri.scheme == b"matrix-federation"
             and self._federation_proxy_endpoint
         ):
-            assert (
-                self._federation_proxy_credentials is not None
-            ), "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            assert self._federation_proxy_credentials is not None, (
+                "`federation_proxy_credentials` are required when using `federation_proxy_locations`"
+            )
 
             # Set a Proxy-Authorization header
             if headers is None:

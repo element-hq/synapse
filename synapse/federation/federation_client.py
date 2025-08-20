@@ -74,7 +74,9 @@ from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.client import is_unknown_endpoint
 from synapse.http.types import QueryParams
 from synapse.logging.opentracing import SynapseTags, log_kv, set_tag, tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict, StrCollection, UserID, get_domain_from_id
+from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
 from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.retryutils import NotRetryingDestination
@@ -84,7 +86,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-sent_queries_counter = Counter("synapse_federation_client_sent_queries", "", ["type"])
+sent_queries_counter = Counter(
+    "synapse_federation_client_sent_queries", "", labelnames=["type", SERVER_NAME_LABEL]
+)
 
 
 PDU_RETRY_TIME_MS = 1 * 60 * 1000
@@ -136,13 +140,14 @@ class FederationClient(FederationBase):
         self.state = hs.get_state_handler()
         self.transport_layer = hs.get_federation_transport_client()
 
-        self.hostname = hs.hostname
+        self.server_name = hs.hostname
         self.signing_key = hs.signing_key
 
         # Cache mapping `event_id` to a tuple of the event itself and the `pull_origin`
         # (which server we pulled the event from)
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=1000,
             expiry_ms=120 * 1000,
@@ -161,6 +166,7 @@ class FederationClient(FederationBase):
             Tuple[JsonDict, Sequence[JsonDict], Sequence[JsonDict], Sequence[str]],
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=1000,
             expiry_ms=5 * 60 * 1000,
@@ -206,7 +212,10 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels(query_type).inc()
+        sent_queries_counter.labels(
+            type=query_type,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         return await self.transport_layer.make_query(
             destination,
@@ -228,7 +237,10 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels("client_device_keys").inc()
+        sent_queries_counter.labels(
+            type="client_device_keys",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
         return await self.transport_layer.query_client_keys(
             destination, content, timeout
         )
@@ -239,7 +251,10 @@ class FederationClient(FederationBase):
         """Query the device keys for a list of user ids hosted on a remote
         server.
         """
-        sent_queries_counter.labels("user_devices").inc()
+        sent_queries_counter.labels(
+            type="user_devices",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
         return await self.transport_layer.query_user_devices(
             destination, user_id, timeout
         )
@@ -261,7 +276,10 @@ class FederationClient(FederationBase):
         Returns:
             The JSON object from the response
         """
-        sent_queries_counter.labels("client_one_time_keys").inc()
+        sent_queries_counter.labels(
+            type="client_one_time_keys",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         # Convert the query with counts into a stable and unstable query and check
         # if attempting to claim more than 1 OTK.
@@ -420,6 +438,62 @@ class FederationClient(FederationBase):
             return signed_pdu
 
         return None
+
+    @trace
+    @tag_args
+    async def get_pdu_policy_recommendation(
+        self, destination: str, pdu: EventBase, timeout: Optional[int] = None
+    ) -> str:
+        """Requests that the destination server (typically a policy server)
+        check the event and return its recommendation on how to handle the
+        event.
+
+        If the policy server could not be contacted or the policy server
+        returned an unknown recommendation, this returns an OK recommendation.
+        This type fixing behaviour is done because the typical caller will be
+        in a critical call path and would generally interpret a `None` or similar
+        response as "weird value; don't care; move on without taking action". We
+        just frontload that logic here.
+
+
+        Args:
+            destination: The remote homeserver to ask (a policy server)
+            pdu: The event to check
+            timeout: How long to try (in ms) the destination for before
+                giving up. None indicates no timeout.
+
+        Returns:
+            The policy recommendation, or RECOMMENDATION_OK if the policy server was
+            uncontactable or returned an unknown recommendation.
+        """
+
+        logger.debug(
+            "get_pdu_policy_recommendation for event_id=%s from %s",
+            pdu.event_id,
+            destination,
+        )
+
+        try:
+            res = await self.transport_layer.get_policy_recommendation_for_pdu(
+                destination, pdu, timeout=timeout
+            )
+            recommendation = res.get("recommendation")
+            if not isinstance(recommendation, str):
+                raise InvalidResponseError("recommendation is not a string")
+            if recommendation not in (RECOMMENDATION_OK, RECOMMENDATION_SPAM):
+                logger.warning(
+                    "get_pdu_policy_recommendation: unknown recommendation: %s",
+                    recommendation,
+                )
+                return RECOMMENDATION_OK
+            return recommendation
+        except Exception as e:
+            logger.warning(
+                "get_pdu_policy_recommendation: server %s responded with error, assuming OK recommendation: %s",
+                destination,
+                e,
+            )
+            return RECOMMENDATION_OK
 
     @trace
     @tag_args
@@ -1011,7 +1085,7 @@ class FederationClient(FederationBase):
             # there's some we never care about
             ev = builder.create_local_event_from_event_dict(
                 self._clock,
-                self.hostname,
+                self.server_name,
                 self.signing_key,
                 room_version=room_version,
                 event_dict=pdu_dict,
@@ -1761,7 +1835,7 @@ class FederationClient(FederationBase):
             )
             return timestamp_to_event_response
         except SynapseError as e:
-            logger.warn(
+            logger.warning(
                 "timestamp_to_event(room_id=%s, timestamp=%s, direction=%s): encountered error when trying to fetch from destinations: %s",
                 room_id,
                 timestamp,

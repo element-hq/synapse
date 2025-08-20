@@ -249,6 +249,7 @@ class BackgroundUpdater:
         self._clock = hs.get_clock()
         self.db_pool = database
         self.hs = hs
+        self.server_name = hs.hostname
 
         self._database_name = database.name()
 
@@ -395,7 +396,10 @@ class BackgroundUpdater:
             self._all_done = False
             sleep = self.sleep_enabled
             run_as_background_process(
-                "background_updates", self.run_background_updates, sleep
+                "background_updates",
+                self.server_name,
+                self.run_background_updates,
+                sleep,
             )
 
     async def run_background_updates(self, sleep: bool) -> None:
@@ -739,9 +743,9 @@ class BackgroundUpdater:
             c.execute(sql)
 
         async def updater(progress: JsonDict, batch_size: int) -> int:
-            assert isinstance(
-                self.db_pool.engine, engines.PostgresEngine
-            ), "validate constraint background update registered for non-Postres database"
+            assert isinstance(self.db_pool.engine, engines.PostgresEngine), (
+                "validate constraint background update registered for non-Postres database"
+            )
 
             logger.info("Validating constraint %s to %s", constraint_name, table)
             await self.db_pool.runWithConnection(runner)
@@ -900,9 +904,9 @@ class BackgroundUpdater:
               on the table. Used to iterate over the table.
         """
 
-        assert isinstance(
-            self.db_pool.engine, engines.PostgresEngine
-        ), "validate constraint background update registered for non-Postres database"
+        assert isinstance(self.db_pool.engine, engines.PostgresEngine), (
+            "validate constraint background update registered for non-Postres database"
+        )
 
         async def updater(progress: JsonDict, batch_size: int) -> int:
             return await self.validate_constraint_and_delete_in_background(

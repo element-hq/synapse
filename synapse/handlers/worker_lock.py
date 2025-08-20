@@ -44,11 +44,14 @@ from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.constants import ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
     from synapse.server import HomeServer
 
+
+logger = logging.getLogger(__name__)
 
 # This lock is used to avoid creating an event while we are purging the room.
 # We take a read lock when creating an event, and a write one when purging a room.
@@ -63,6 +66,9 @@ class WorkerLocksHandler:
     """
 
     def __init__(self, hs: "HomeServer") -> None:
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self._reactor = hs.get_reactor()
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
@@ -270,9 +276,10 @@ class WaitingLock:
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
-            logging.warning(
-                f"Lock timeout is getting excessive: {self._retry_interval}s. There may be a deadlock."
+        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
+            logger.warning(
+                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)
 
@@ -349,8 +356,9 @@ class WaitingMultiLock:
     def _get_next_retry_interval(self) -> float:
         next = self._retry_interval
         self._retry_interval = max(5, next * 2)
-        if self._retry_interval > 5 * 2 ^ 7:  # ~10 minutes
-            logging.warning(
-                f"Lock timeout is getting excessive: {self._retry_interval}s. There may be a deadlock."
+        if self._retry_interval > 10 * ONE_MINUTE_SECONDS:  # >7 iterations
+            logger.warning(
+                "Lock timeout is getting excessive: %ss. There may be a deadlock.",
+                self._retry_interval,
             )
         return next * random.uniform(0.9, 1.1)

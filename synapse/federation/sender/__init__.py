@@ -160,6 +160,7 @@ from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     LaterGauge,
     event_processing_loop_counter,
     event_processing_loop_room_count,
@@ -189,11 +190,13 @@ logger = logging.getLogger(__name__)
 sent_pdus_destination_dist_count = Counter(
     "synapse_federation_client_sent_pdu_destinations_count",
     "Number of PDUs queued for sending to one or more destinations",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 sent_pdus_destination_dist_total = Counter(
     "synapse_federation_client_sent_pdu_destinations",
     "Total number of PDUs queued for sending across all destinations",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # Time (in s) to wait before trying to wake up destinations that have
@@ -296,6 +299,7 @@ class _DestinationWakeupQueue:
 
     Staggers waking up of per destination queues to ensure that we don't attempt
     to start TLS connections with many hosts all at once, leading to pinned CPU.
+
     """
 
     # The maximum duration in seconds between queuing up a destination and it
@@ -303,6 +307,10 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    server_name: str = attr.ib()
+    """
+    Our homeserver name (used to label metrics) (`hs.hostname`).
+    """
     clock: Clock = attr.ib()
     max_delay_s: int = attr.ib()
 
@@ -342,6 +350,8 @@ class _DestinationWakeupQueue:
                 destination, _ = self.queue.popitem(last=False)
 
                 queue = self.sender._get_per_destination_queue(destination)
+                if queue is None:
+                    continue
 
                 if not queue._new_data_to_send:
                     # The per destination queue has already been woken up.
@@ -389,31 +399,37 @@ class FederationSender(AbstractFederationSender):
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_destinations",
-            "",
-            [],
-            lambda: sum(
-                1
-                for d in self._per_destination_queues.values()
-                if d.transmission_loop_running
-            ),
+            name="synapse_federation_transaction_queue_pending_destinations",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    1
+                    for d in self._per_destination_queues.values()
+                    if d.transmission_loop_running
+                )
+            },
         )
 
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_pdus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_pdu_count() for d in self._per_destination_queues.values()
-            ),
+            name="synapse_federation_transaction_queue_pending_pdus",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    d.pending_pdu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
         LaterGauge(
-            "synapse_federation_transaction_queue_pending_edus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_edu_count() for d in self._per_destination_queues.values()
-            ),
+            name="synapse_federation_transaction_queue_pending_edus",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): sum(
+                    d.pending_edu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
 
         self._is_processing = False
@@ -425,7 +441,7 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
@@ -433,15 +449,27 @@ class FederationSender(AbstractFederationSender):
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
+            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
-    def _get_per_destination_queue(self, destination: str) -> PerDestinationQueue:
+    def _get_per_destination_queue(
+        self, destination: str
+    ) -> Optional[PerDestinationQueue]:
         """Get or create a PerDestinationQueue for the given destination
 
         Args:
             destination: server_name of remote server
+
+        Returns:
+            None if the destination is not allowed by the federation whitelist.
+            Otherwise a PerDestinationQueue for this destination.
         """
+        if not self.hs.config.federation.is_domain_allowed_according_to_federation_whitelist(
+            destination
+        ):
+            return None
+
         queue = self._per_destination_queues.get(destination)
         if not queue:
             queue = PerDestinationQueue(self.hs, self._transaction_manager, destination)
@@ -464,7 +492,9 @@ class FederationSender(AbstractFederationSender):
 
         # fire off a processing loop in the background
         run_as_background_process(
-            "process_event_queue_for_federation", self._process_event_queue_loop
+            "process_event_queue_for_federation",
+            self.server_name,
+            self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:
@@ -637,14 +667,19 @@ class FederationSender(AbstractFederationSender):
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "federation_sender"
+                            name="federation_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                 async def handle_room_events(events: List[EventBase]) -> None:
                     logger.debug(
                         "Handling %i events in room %s", len(events), events[0].room_id
                     )
-                    with Measure(self.clock, "handle_room_events"):
+                    with Measure(
+                        self.clock,
+                        name="handle_room_events",
+                        server_name=self.server_name,
+                    ):
                         for event in events:
                             await handle_event(event)
 
@@ -677,22 +712,30 @@ class FederationSender(AbstractFederationSender):
                     assert ts is not None
 
                     synapse.metrics.event_processing_lag.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(now - ts)
                     synapse.metrics.event_processing_last_ts.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(ts)
 
-                    events_processed_counter.inc(len(event_entries))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(event_entries))
 
-                    event_processing_loop_room_count.labels("federation_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                event_processing_loop_counter.labels("federation_sender").inc()
+                event_processing_loop_counter.labels(
+                    name="federation_sender",
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
 
                 synapse.metrics.event_processing_positions.labels(
-                    "federation_sender"
+                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
                 ).set(next_token)
 
         finally:
@@ -710,14 +753,28 @@ class FederationSender(AbstractFederationSender):
         if not destinations:
             return
 
-        sent_pdus_destination_dist_total.inc(len(destinations))
-        sent_pdus_destination_dist_count.inc()
+        sent_pdus_destination_dist_total.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(len(destinations))
+        sent_pdus_destination_dist_count.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         assert pdu.internal_metadata.stream_ordering
 
         # track the fact that we have a PDU for these destinations,
         # to allow us to perform catch-up later on if the remote is unreachable
         # for a while.
+        # Filter out any destinations not present in the federation_domain_whitelist, if
+        # the whitelist exists. These destinations should not be sent to so let's not
+        # waste time or space keeping track of events destined for them.
+        destinations = [
+            d
+            for d in destinations
+            if self.hs.config.federation.is_domain_allowed_according_to_federation_whitelist(
+                d
+            )
+        ]
         await self.store.store_destination_rooms_entries(
             destinations,
             pdu.room_id,
@@ -732,7 +789,12 @@ class FederationSender(AbstractFederationSender):
         )
 
         for destination in destinations:
-            self._get_per_destination_queue(destination).send_pdu(pdu)
+            queue = self._get_per_destination_queue(destination)
+            # We expect `queue` to not be None as we already filtered out
+            # non-whitelisted destinations above.
+            assert queue is not None
+
+            queue.send_pdu(pdu)
 
     async def send_read_receipt(self, receipt: ReadReceipt) -> None:
         """Send a RR to any other servers in the room
@@ -841,12 +903,16 @@ class FederationSender(AbstractFederationSender):
         for domain in immediate_domains:
             # Add to destination queue and wake the destination up
             queue = self._get_per_destination_queue(domain)
+            if queue is None:
+                continue
             queue.queue_read_receipt(receipt)
             queue.attempt_new_transaction()
 
         for domain in delay_domains:
             # Add to destination queue...
             queue = self._get_per_destination_queue(domain)
+            if queue is None:
+                continue
             queue.queue_read_receipt(receipt)
 
             # ... and schedule the destination to be woken up.
@@ -882,9 +948,10 @@ class FederationSender(AbstractFederationSender):
             if self.is_mine_server_name(destination):
                 continue
 
-            self._get_per_destination_queue(destination).send_presence(
-                states, start_loop=False
-            )
+            queue = self._get_per_destination_queue(destination)
+            if queue is None:
+                continue
+            queue.send_presence(states, start_loop=False)
 
             self._destination_wakeup_queue.add_to_queue(destination)
 
@@ -934,6 +1001,8 @@ class FederationSender(AbstractFederationSender):
             return
 
         queue = self._get_per_destination_queue(edu.destination)
+        if queue is None:
+            return
         if key:
             queue.send_keyed_edu(edu, key)
         else:
@@ -958,9 +1027,15 @@ class FederationSender(AbstractFederationSender):
 
         for destination in destinations:
             if immediate:
-                self._get_per_destination_queue(destination).attempt_new_transaction()
+                queue = self._get_per_destination_queue(destination)
+                if queue is None:
+                    continue
+                queue.attempt_new_transaction()
             else:
-                self._get_per_destination_queue(destination).mark_new_data()
+                queue = self._get_per_destination_queue(destination)
+                if queue is None:
+                    continue
+                queue.mark_new_data()
                 self._destination_wakeup_queue.add_to_queue(destination)
 
     def wake_destination(self, destination: str) -> None:
@@ -979,7 +1054,9 @@ class FederationSender(AbstractFederationSender):
         ):
             return
 
-        self._get_per_destination_queue(destination).attempt_new_transaction()
+        queue = self._get_per_destination_queue(destination)
+        if queue is not None:
+            queue.attempt_new_transaction()
 
     @staticmethod
     def get_current_token() -> int:
@@ -1024,6 +1101,9 @@ class FederationSender(AbstractFederationSender):
                 d
                 for d in destinations_to_wake
                 if self._federation_shard_config.should_handle(self._instance_name, d)
+                and self.hs.config.federation.is_domain_allowed_according_to_federation_whitelist(
+                    d
+                )
             ]
 
             for destination in destinations_to_wake:

@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     EventContentFields,
@@ -45,6 +45,7 @@ from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 def _create_event(
@@ -245,6 +246,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_large_space(self) -> None:
         """Test a space with a large number of rooms."""
         rooms = [self.room]
@@ -527,6 +529,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_pagination(self) -> None:
         """Test simple pagination works."""
         room_ids = []
@@ -564,6 +567,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         self._assert_hierarchy(result, expected)
         self.assertNotIn("next_batch", result)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_invalid_pagination_token(self) -> None:
         """An invalid pagination token, or changing other parameters, shoudl be rejected."""
         room_ids = []
@@ -615,6 +619,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             SynapseError,
         )
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_max_depth(self) -> None:
         """Create a deep tree to test the max depth against."""
         spaces = [self.space]
@@ -1079,6 +1084,62 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             )
             self.assertEqual(federation_requests, 2)
             self._assert_hierarchy(result, expected)
+
+    def test_fed_remote_room_hosts(self) -> None:
+        """
+        Test if requested room is available over federation using via's.
+        """
+        fed_hostname = self.hs.hostname + "2"
+        fed_space = "#fed_space:" + fed_hostname
+        fed_subroom = "#fed_sub_room:" + fed_hostname
+
+        remote_room_hosts = tuple(fed_hostname)
+
+        requested_room_entry = _RoomEntry(
+            fed_space,
+            {
+                "room_id": fed_space,
+                "world_readable": True,
+                "join_rule": "public",
+                "room_type": RoomTypes.SPACE,
+            },
+            [
+                {
+                    "type": EventTypes.SpaceChild,
+                    "room_id": fed_space,
+                    "state_key": fed_subroom,
+                    "content": {"via": [fed_hostname]},
+                }
+            ],
+        )
+        child_room = {
+            "room_id": fed_subroom,
+            "world_readable": True,
+            "join_rule": "public",
+        }
+
+        async def summarize_remote_room_hierarchy(
+            _self: Any, room: Any, suggested_only: bool
+        ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
+            return requested_room_entry, {fed_subroom: child_room}, set()
+
+        expected = [
+            (fed_space, [fed_subroom]),
+            (fed_subroom, ()),
+        ]
+
+        with mock.patch(
+            "synapse.handlers.room_summary.RoomSummaryHandler._summarize_remote_room_hierarchy",
+            new=summarize_remote_room_hierarchy,
+        ):
+            result = self.get_success(
+                self.handler.get_room_hierarchy(
+                    create_requester(self.user),
+                    fed_space,
+                    remote_room_hosts=remote_room_hosts,
+                )
+            )
+        self._assert_hierarchy(result, expected)
 
 
 class RoomSummaryTestCase(unittest.HomeserverTestCase):

@@ -51,7 +51,6 @@ from synapse.rest.admin.background_updates import (
 from synapse.rest.admin.devices import (
     DeleteDevicesRestServlet,
     DeviceRestServlet,
-    DevicesGetRestServlet,
     DevicesRestServlet,
 )
 from synapse.rest.admin.event_reports import (
@@ -207,8 +206,7 @@ class PurgeHistoryRestServlet(RestServlet):
             (stream, topo, _event_id) = r
             token = "t%d-%d" % (topo, stream)
             logger.info(
-                "[purge] purging up to token %s (received_ts %i => "
-                "stream_ordering %i)",
+                "[purge] purging up to token %s (received_ts %i => stream_ordering %i)",
                 token,
                 ts,
                 stream_ordering,
@@ -274,10 +272,14 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     # Admin servlets below may not work on workers.
     if hs.config.worker.worker_app is not None:
         # Some admin servlets can be mounted on workers when MSC3861 is enabled.
+        # Note that this is only for MSC3861 mode, as modern MAS using the
+        # matrix_authentication_service integration uses the dedicated MAS API.
         if hs.config.experimental.msc3861.enabled:
             register_servlets_for_msc3861_delegation(hs, http_server)
 
         return
+
+    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
 
     register_servlets_for_client_rest_resource(hs, http_server)
     BlockRoomRestServlet(hs).register(http_server)
@@ -289,10 +291,10 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     DeleteRoomStatusByRoomIdRestServlet(hs).register(http_server)
     JoinRoomAliasServlet(hs).register(http_server)
     VersionServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         UserAdminServlet(hs).register(http_server)
     UserMembershipRestServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)
     UsersRestServletV2(hs).register(http_server)
@@ -309,7 +311,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomEventContextServlet(hs).register(http_server)
     RateLimitRestServlet(hs).register(http_server)
     UsernameAvailableRestServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         ListRegistrationTokensRestServlet(hs).register(http_server)
         NewRegistrationTokenRestServlet(hs).register(http_server)
         RegistrationTokenRestServlet(hs).register(http_server)
@@ -343,16 +345,18 @@ def register_servlets_for_client_rest_resource(
     hs: "HomeServer", http_server: HttpServer
 ) -> None:
     """Register only the servlets which need to be exposed on /_matrix/client/xxx"""
+    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+
     WhoisRestServlet(hs).register(http_server)
     PurgeHistoryStatusRestServlet(hs).register(http_server)
     PurgeHistoryRestServlet(hs).register(http_server)
     # The following resources can only be run on the main process.
     if hs.config.worker.worker_app is None:
         DeactivateAccountRestServlet(hs).register(http_server)
-        if not hs.config.experimental.msc3861.enabled:
+        if not auth_delegated:
             ResetPasswordRestServlet(hs).register(http_server)
     SearchUsersRestServlet(hs).register(http_server)
-    if not hs.config.experimental.msc3861.enabled:
+    if not auth_delegated:
         UserRegisterServlet(hs).register(http_server)
         AccountValidityRenewServlet(hs).register(http_server)
 
@@ -376,4 +380,5 @@ def register_servlets_for_msc3861_delegation(
     UserRestServletV2(hs).register(http_server)
     UsernameAvailableRestServlet(hs).register(http_server)
     UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
-    DevicesGetRestServlet(hs).register(http_server)
+    DeviceRestServlet(hs).register(http_server)
+    DevicesRestServlet(hs).register(http_server)

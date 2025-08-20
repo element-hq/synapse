@@ -29,6 +29,7 @@ from typing import (
     Iterable,
     List,
     Literal,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -50,7 +51,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -74,10 +75,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-notified_events_counter = Counter("synapse_notifier_notified_events", "")
+# FIXME: Unused metric, remove if not needed.
+notified_events_counter = Counter(
+    "synapse_notifier_notified_events", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 users_woken_by_stream_counter = Counter(
-    "synapse_notifier_users_woken_by_stream", "", ["stream"]
+    "synapse_notifier_users_woken_by_stream",
+    "",
+    labelnames=["stream", SERVER_NAME_LABEL],
 )
 
 T = TypeVar("T")
@@ -158,6 +164,9 @@ class _NotifierUserStream:
             lst = notifier.room_to_user_streams.get(room, set())
             lst.discard(self)
 
+            if not lst:
+                notifier.room_to_user_streams.pop(room, None)
+
         notifier.user_to_user_stream.pop(self.user_id)
 
     def count_listeners(self) -> int:
@@ -221,6 +230,7 @@ class Notifier:
         self.room_to_user_streams: Dict[str, Set[_NotifierUserStream]] = {}
 
         self.hs = hs
+        self.server_name = hs.hostname
         self._storage_controllers = hs.get_storage_controllers()
         self.event_sources = hs.get_event_sources()
         self.store = hs.get_datastores().main
@@ -254,7 +264,10 @@ class Notifier:
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
         # most when scraping it.
-        def count_listeners() -> int:
+        #
+        # Ideally, we'd use `Mapping[Tuple[str], int]` here but mypy doesn't like it.
+        # This is close enough and better than a type ignore.
+        def count_listeners() -> Mapping[Tuple[str, ...], int]:
             all_user_streams: Set[_NotifierUserStream] = set()
 
             for streams in list(self.room_to_user_streams.values()):
@@ -262,18 +275,34 @@ class Notifier:
             for stream in list(self.user_to_user_stream.values()):
                 all_user_streams.add(stream)
 
-            return sum(stream.count_listeners() for stream in all_user_streams)
-
-        LaterGauge("synapse_notifier_listeners", "", [], count_listeners)
+            return {
+                (self.server_name,): sum(
+                    stream.count_listeners() for stream in all_user_streams
+                )
+            }
 
         LaterGauge(
-            "synapse_notifier_rooms",
-            "",
-            [],
-            lambda: count(bool, list(self.room_to_user_streams.values())),
+            name="synapse_notifier_listeners",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=count_listeners,
+        )
+
+        LaterGauge(
+            name="synapse_notifier_rooms",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {
+                (self.server_name,): count(
+                    bool, list(self.room_to_user_streams.values())
+                )
+            },
         )
         LaterGauge(
-            "synapse_notifier_users", "", [], lambda: len(self.user_to_user_stream)
+            name="synapse_notifier_users",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+            caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
@@ -347,9 +376,10 @@ class Notifier:
             for listener in listeners:
                 listener.callback(current_token)
 
-        users_woken_by_stream_counter.labels(StreamKeyType.UN_PARTIAL_STATED_ROOMS).inc(
-            len(user_streams)
-        )
+        users_woken_by_stream_counter.labels(
+            stream=StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc(len(user_streams))
 
         # Poke the replication so that other workers also see the write to
         # the un-partial-stated rooms stream.
@@ -572,7 +602,10 @@ class Notifier:
                         listener.callback(current_token)
 
             if user_streams:
-                users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
+                users_woken_by_stream_counter.labels(
+                    stream=stream_key,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc(len(user_streams))
 
         self.notify_replication()
 

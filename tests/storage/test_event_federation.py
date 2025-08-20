@@ -26,6 +26,7 @@ from typing import (
     Iterable,
     List,
     Mapping,
+    NamedTuple,
     Set,
     Tuple,
     TypeVar,
@@ -36,7 +37,7 @@ from typing import (
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import (
@@ -114,7 +115,7 @@ def get_all_topologically_sorted_orders(
     # This is implemented by Kahn's algorithm, and forking execution each time
     # we have a choice over which node to consider next.
 
-    degree_map = {node: 0 for node in nodes}
+    degree_map = dict.fromkeys(nodes, 0)
     reverse_graph: Dict[T, Set[T]] = {}
 
     for node, edges in graph.items():
@@ -729,6 +730,202 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
             self.store.get_auth_chain_difference(room_id, [{"a"}])
         )
         self.assertSetEqual(difference, set())
+
+    def test_conflicted_subgraph(self) -> None:
+        """Test that the conflicted subgraph code in state res v2.1 can walk arbitrary length links
+        and chains.
+
+        We construct a chain cover index like this:
+
+        A1 <- A2 <- A3
+               ^--- B1 <- B2 <- B3
+                           ^--- C1 <- C2 <- C3     v--- G1 <- G2
+                                 ^--- D1 <- D2 <- D3
+                                             ^--- E1
+                                                   ^--- F1 <- F2
+
+        ..and then pick various events to be conflicted / additional backwards reachable to assert
+        that the code walks the chains correctly. We're particularly interested in ensuring that
+        the code walks multiple links between chains, hence why we have so many chains.
+        """
+
+        class TestNode(NamedTuple):
+            event_id: str
+            chain_id: int
+            seq_num: int
+
+        class TestLink(NamedTuple):
+            origin_chain_and_seq: Tuple[int, int]
+            target_chain_and_seq: Tuple[int, int]
+
+        # Map to chain IDs / seq nums
+        nodes: List[TestNode] = [
+            TestNode("A1", 1, 1),
+            TestNode("A2", 1, 2),
+            TestNode("A3", 1, 3),
+            TestNode("B1", 2, 1),
+            TestNode("B2", 2, 2),
+            TestNode("B3", 2, 3),
+            TestNode("C1", 3, 1),
+            TestNode("C2", 3, 2),
+            TestNode("C3", 3, 3),
+            TestNode("D1", 4, 1),
+            TestNode("D2", 4, 2),
+            TestNode("D3", 4, 3),
+            TestNode("E1", 5, 1),
+            TestNode("F1", 6, 1),
+            TestNode("F2", 6, 2),
+            TestNode("G1", 7, 1),
+            TestNode("G2", 7, 2),
+        ]
+        links: List[TestLink] = [
+            TestLink((2, 1), (1, 2)),  # B1 -> A2
+            TestLink((3, 1), (2, 2)),  # C1 -> B2
+            TestLink((4, 1), (3, 1)),  # D1 -> C1
+            TestLink((5, 1), (4, 2)),  # E1 -> D2
+            TestLink((6, 1), (5, 1)),  # F1 -> E1
+            TestLink((7, 1), (4, 3)),  # G1 -> D3
+        ]
+
+        # populate the chain cover index tables as that's all we need
+        for node in nodes:
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "event_auth_chains",
+                    {
+                        "event_id": node.event_id,
+                        "chain_id": node.chain_id,
+                        "sequence_number": node.seq_num,
+                    },
+                    desc="insert",
+                )
+            )
+        for link in links:
+            self.get_success(
+                self.store.db_pool.simple_insert(
+                    "event_auth_chain_links",
+                    {
+                        "origin_chain_id": link.origin_chain_and_seq[0],
+                        "origin_sequence_number": link.origin_chain_and_seq[1],
+                        "target_chain_id": link.target_chain_and_seq[0],
+                        "target_sequence_number": link.target_chain_and_seq[1],
+                    },
+                    desc="insert",
+                )
+            )
+
+        # Define the test cases
+        class TestCase(NamedTuple):
+            name: str
+            conflicted: Set[str]
+            additional_backwards_reachable: Set[str]
+            want_conflicted_subgraph: Set[str]
+
+        # Reminder:
+        # A1 <- A2 <- A3
+        #        ^--- B1 <- B2 <- B3
+        #                    ^--- C1 <- C2 <- C3     v--- G1 <- G2
+        #                          ^--- D1 <- D2 <- D3
+        #                                      ^--- E1
+        #                                            ^--- F1 <- F2
+        test_cases = [
+            TestCase(
+                name="basic_single_chain",
+                conflicted={"B1", "B3"},
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"B1", "B2", "B3"},
+            ),
+            TestCase(
+                name="basic_single_link",
+                conflicted={"A1", "B2"},
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"A1", "A2", "B1", "B2"},
+            ),
+            TestCase(
+                name="basic_multi_link",
+                conflicted={"B1", "F1"},
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"B1", "B2", "C1", "D1", "D2", "E1", "F1"},
+            ),
+            # Repeat these tests but put the later event as an additional backwards reachable event.
+            # The output should be the same.
+            TestCase(
+                name="basic_single_chain_as_additional",
+                conflicted={"B1"},
+                additional_backwards_reachable={"B3"},
+                want_conflicted_subgraph={"B1", "B2", "B3"},
+            ),
+            TestCase(
+                name="basic_single_link_as_additional",
+                conflicted={"A1"},
+                additional_backwards_reachable={"B2"},
+                want_conflicted_subgraph={"A1", "A2", "B1", "B2"},
+            ),
+            TestCase(
+                name="basic_multi_link_as_additional",
+                conflicted={"B1"},
+                additional_backwards_reachable={"F1"},
+                want_conflicted_subgraph={"B1", "B2", "C1", "D1", "D2", "E1", "F1"},
+            ),
+            TestCase(
+                name="mixed_multi_link",
+                conflicted={"D1", "F1"},
+                additional_backwards_reachable={"G1"},
+                want_conflicted_subgraph={"D1", "D2", "D3", "E1", "F1", "G1"},
+            ),
+            TestCase(
+                name="additional_backwards_doesnt_add_forwards_info",
+                conflicted={"C1", "C3"},
+                # This is on the path to the root but Chain C isn't forwards reachable so this doesn't
+                # change anything.
+                additional_backwards_reachable={"B1"},
+                want_conflicted_subgraph={"C1", "C2", "C3"},
+            ),
+            TestCase(
+                name="empty_subgraph",
+                conflicted={
+                    "B3",
+                    "C3",
+                },  # these can't reach each other going forwards, so the subgraph is empty
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"B3", "C3"},
+            ),
+            TestCase(
+                name="empty_subgraph_with_additional",
+                conflicted={"C1"},
+                # This is on the path to the root but Chain C isn't forwards reachable so this doesn't
+                # change anything.
+                additional_backwards_reachable={"B1"},
+                want_conflicted_subgraph={"C1"},
+            ),
+            TestCase(
+                name="empty_subgraph_single_conflict",
+                conflicted={"C1"},  # no subgraph can form as you need 2+
+                additional_backwards_reachable=set(),
+                want_conflicted_subgraph={"C1"},
+            ),
+        ]
+
+        def run_test(txn: LoggingTransaction, test_case: TestCase) -> None:
+            result = self.store._get_auth_chain_difference_using_cover_index_txn(
+                txn,
+                "!not_relevant",
+                [test_case.conflicted.union(test_case.additional_backwards_reachable)],
+                test_case.conflicted,
+                test_case.additional_backwards_reachable,
+            )
+            self.assertEquals(
+                result.conflicted_subgraph,
+                test_case.want_conflicted_subgraph,
+                f"{test_case.name} : conflicted subgraph mismatch",
+            )
+
+        for test_case in test_cases:
+            self.get_success(
+                self.store.db_pool.runInteraction(
+                    f"test_case_{test_case.name}", run_test, test_case
+                )
+            )
 
     @parameterized.expand(
         [(room_version,) for room_version in KNOWN_ROOM_VERSIONS.values()]

@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 from parameterized import parameterized, parameterized_class
 from typing_extensions import assert_never
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -1616,3 +1616,55 @@ class SlidingSyncTestCase(SlidingSyncBase):
                 {space_room_id, space_room_id2},
                 exact=True,
             )
+
+    def test_exclude_rooms_from_sync(self) -> None:
+        """Tests that sliding sync honours the `exclude_rooms_from_sync` config
+        option.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id_to_exclude = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        room_id_to_include = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # We cheekily modify the stored config here, as we can't add it to the
+        # raw config since we don't know the room ID before we start up.
+        self.hs.get_sliding_sync_handler().rooms_to_exclude_globally.append(
+            room_id_to_exclude
+        )
+        self.hs.get_sliding_sync_handler().room_lists.rooms_to_exclude_globally.append(
+            room_id_to_exclude
+        )
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make sure response only contains room_id_to_include
+        self.assertIncludes(
+            set(response_body["rooms"].keys()),
+            {room_id_to_include},
+            exact=True,
+        )
+
+        # Test that the excluded room is not in the list ops
+        # Make sure the list is sorted in the way we expect
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id_to_include},
+            exact=True,
+        )

@@ -17,7 +17,7 @@ import logging
 from parameterized import parameterized, parameterized_class
 from typing_extensions import assert_never
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import AccountDataTypes

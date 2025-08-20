@@ -29,12 +29,14 @@ from http import HTTPStatus
 from typing import (
     Any,
     AnyStr,
+    Callable,
     Dict,
     Iterable,
     Literal,
     Mapping,
     MutableMapping,
     Optional,
+    Sequence,
     Tuple,
     overload,
 )
@@ -42,10 +44,10 @@ from urllib.parse import urlencode
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactorClock
+from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import Membership, ReceiptTypes
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -185,7 +187,7 @@ class RestHelper:
     def join(
         self,
         room: str,
-        user: Optional[str] = None,
+        user: str,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
         appservice_user_id: Optional[str] = None,
@@ -393,6 +395,32 @@ class RestHelper:
             expect_code,
             custom_headers=custom_headers,
         )
+
+    def send_messages(
+        self,
+        room_id: str,
+        num_events: int,
+        content_fn: Callable[[int], JsonDict] = lambda idx: {
+            "msgtype": "m.text",
+            "body": f"Test event {idx}",
+        },
+        tok: Optional[str] = None,
+    ) -> Sequence[str]:
+        """
+        Helper to send a handful of sequential events and return their event IDs as a sequence.
+        """
+        event_ids = []
+
+        for event_index in range(num_events):
+            response = self.send_event(
+                room_id,
+                EventTypes.Message,
+                content_fn(event_index),
+                tok=tok,
+            )
+            event_ids.append(response["event_id"])
+
+        return event_ids
 
     def send_event(
         self,
@@ -716,9 +744,9 @@ class RestHelper:
             "/login",
             content={"type": "m.login.token", "token": login_token},
         )
-        assert (
-            channel.code == expected_status
-        ), f"unexpected status in response: {channel.code}"
+        assert channel.code == expected_status, (
+            f"unexpected status in response: {channel.code}"
+        )
         return channel.json_body
 
     def auth_via_oidc(

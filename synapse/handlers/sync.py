@@ -63,9 +63,11 @@ from synapse.logging.opentracing import (
     start_active_span,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
+from synapse.storage.invite_rule import InviteRule
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -103,7 +105,7 @@ non_empty_sync_counter = Counter(
     "Count of non empty sync responses. type is initial_sync/full_state_sync"
     "/incremental_sync. lazy_loaded indicates if lazy loaded members were "
     "enabled for that request.",
-    ["type", "lazy_loaded"],
+    labelnames=["type", "lazy_loaded", SERVER_NAME_LABEL],
 )
 
 # Store the cache that tracks which lazy-loaded members have been sent to a given
@@ -328,6 +330,7 @@ class E2eeSyncResult:
 
 class SyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.hs_config = hs.config
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
@@ -351,8 +354,9 @@ class SyncHandler:
         #    cached result any more, and we could flush the entry from the cache to save
         #    memory.
         self.response_cache: ResponseCache[SyncRequestKey] = ResponseCache(
-            hs.get_clock(),
-            "sync",
+            clock=hs.get_clock(),
+            name="sync",
+            server_name=self.server_name,
             timeout_ms=hs.config.caches.sync_response_cache_duration,
         )
 
@@ -360,8 +364,9 @@ class SyncHandler:
         self.lazy_loaded_members_cache: ExpiringCache[
             Tuple[str, Optional[str]], LruCache[str, str]
         ] = ExpiringCache(
-            "lazy_loaded_members_cache",
-            self.clock,
+            cache_name="lazy_loaded_members_cache",
+            server_name=self.server_name,
+            clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
         )
@@ -610,7 +615,11 @@ class SyncHandler:
                 lazy_loaded = "true"
             else:
                 lazy_loaded = "false"
-            non_empty_sync_counter.labels(sync_label, lazy_loaded).inc()
+            non_empty_sync_counter.labels(
+                type=sync_label,
+                lazy_loaded=lazy_loaded,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
 
         return result
 
@@ -709,7 +718,9 @@ class SyncHandler:
 
         sync_config = sync_result_builder.sync_config
 
-        with Measure(self.clock, "ephemeral_by_room"):
+        with Measure(
+            self.clock, name="ephemeral_by_room", server_name=self.server_name
+        ):
             typing_key = since_token.typing_key if since_token else 0
 
             room_ids = sync_result_builder.joined_room_ids
@@ -782,7 +793,9 @@ class SyncHandler:
                 and current token to send down to clients.
             newly_joined_room
         """
-        with Measure(self.clock, "load_filtered_recents"):
+        with Measure(
+            self.clock, name="load_filtered_recents", server_name=self.server_name
+        ):
             timeline_limit = sync_config.filter_collection.timeline_limit()
             block_all_timeline = (
                 sync_config.filter_collection.blocks_all_room_timeline()
@@ -1128,7 +1141,7 @@ class SyncHandler:
         )
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
-            cache = LruCache(LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
+            cache = LruCache(max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE)
             self.lazy_loaded_members_cache[cache_key] = cache
         else:
             logger.debug("found LruCache for %r", cache_key)
@@ -1173,7 +1186,9 @@ class SyncHandler:
         # updates even if they occurred logically before the previous event.
         # TODO(mjark) Check for new redactions in the state events.
 
-        with Measure(self.clock, "compute_state_delta"):
+        with Measure(
+            self.clock, name="compute_state_delta", server_name=self.server_name
+        ):
             # The memberships needed for events in the timeline.
             # Only calculated when `lazy_load_members` is on.
             members_to_fetch: Optional[Set[str]] = None
@@ -1790,7 +1805,9 @@ class SyncHandler:
             # the DB.
             return RoomNotifCounts.empty()
 
-        with Measure(self.clock, "unread_notifs_for_room_id"):
+        with Measure(
+            self.clock, name="unread_notifs_for_room_id", server_name=self.server_name
+        ):
             return await self.store.get_unread_event_push_actions_by_room_for_user(
                 room_id,
                 sync_config.user.to_string(),
@@ -2549,6 +2566,7 @@ class SyncHandler:
         room_entries: List[RoomSyncResultBuilder] = []
         invited: List[InvitedSyncResult] = []
         knocked: List[KnockedSyncResult] = []
+        invite_config = await self.store.get_invite_config_for_user(user_id)
         for room_id, events in mem_change_events_by_room_id.items():
             # The body of this loop will add this room to at least one of the five lists
             # above. Things get messy if you've e.g. joined, left, joined then left the
@@ -2631,7 +2649,11 @@ class SyncHandler:
             # Only bother if we're still currently invited
             should_invite = last_non_join.membership == Membership.INVITE
             if should_invite:
-                if last_non_join.sender not in ignored_users:
+                if (
+                    last_non_join.sender not in ignored_users
+                    and invite_config.get_invite_rule(last_non_join.sender)
+                    != InviteRule.IGNORE
+                ):
                     invite_room_sync = InvitedSyncResult(room_id, invite=last_non_join)
                     if invite_room_sync:
                         invited.append(invite_room_sync)
@@ -2786,6 +2808,7 @@ class SyncHandler:
             membership_list=Membership.LIST,
             excluded_rooms=sync_result_builder.excluded_room_ids,
         )
+        invite_config = await self.store.get_invite_config_for_user(user_id)
 
         room_entries = []
         invited = []
@@ -2810,6 +2833,8 @@ class SyncHandler:
                 )
             elif event.membership == Membership.INVITE:
                 if event.sender in ignored_users:
+                    continue
+                if invite_config.get_invite_rule(event.sender) == InviteRule.IGNORE:
                     continue
                 invite = await self.store.get_event(event.event_id)
                 invited.append(InvitedSyncResult(room_id=event.room_id, invite=invite))
@@ -3065,8 +3090,10 @@ class SyncHandler:
                 if batch.limited and since_token:
                     user_id = sync_result_builder.sync_config.user.to_string()
                     logger.debug(
-                        "Incremental gappy sync of %s for user %s with %d state events"
-                        % (room_id, user_id, len(state))
+                        "Incremental gappy sync of %s for user %s with %d state events",
+                        room_id,
+                        user_id,
+                        len(state),
                     )
             elif room_builder.rtype == "archived":
                 archived_room_sync = ArchivedSyncResult(

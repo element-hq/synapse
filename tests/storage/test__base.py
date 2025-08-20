@@ -22,7 +22,7 @@
 import secrets
 from typing import Generator, List, Tuple, cast
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.util import Clock

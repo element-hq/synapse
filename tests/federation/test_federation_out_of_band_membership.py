@@ -29,7 +29,7 @@ from unittest.mock import Mock
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -65,20 +65,20 @@ def required_state_json_to_state_map(required_state: Any) -> StateMap[EventBase]
     if isinstance(required_state, list):
         for state_event_dict in required_state:
             # Yell because we're in a test and this is unexpected
-            assert isinstance(
-                state_event_dict, dict
-            ), "`required_state` should be a list of event dicts"
+            assert isinstance(state_event_dict, dict), (
+                "`required_state` should be a list of event dicts"
+            )
 
             event_type = state_event_dict["type"]
             event_state_key = state_event_dict["state_key"]
 
             # Yell because we're in a test and this is unexpected
-            assert isinstance(
-                event_type, str
-            ), "Each event in `required_state` should have a string `type`"
-            assert isinstance(
-                event_state_key, str
-            ), "Each event in `required_state` should have a string `state_key`"
+            assert isinstance(event_type, str), (
+                "Each event in `required_state` should have a string `type`"
+            )
+            assert isinstance(event_state_key, str), (
+                "Each event in `required_state` should have a string `state_key`"
+            )
 
             state_map[(event_type, event_state_key)] = make_event_from_dict(
                 state_event_dict

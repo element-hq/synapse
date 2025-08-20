@@ -421,6 +421,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+        self.server_name = hs.hostname
 
         if hs.config.redis.redis_enabled:
             # If we're using Redis, we can shift this update process off to
@@ -434,7 +435,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
 
         # (user_id, access_token, ip,) -> last_seen
         self.client_ip_last_seen = LruCache[Tuple[str, str, str], int](
-            cache_name="client_ip_last_seen", max_size=50000
+            cache_name="client_ip_last_seen",
+            server_name=self.server_name,
+            max_size=50000,
         )
 
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:
@@ -650,9 +653,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
 
     @wrap_as_background_process("update_client_ips")
     async def _update_client_ips_batch(self) -> None:
-        assert (
-            self._update_on_this_worker
-        ), "This worker is not designated to update client IPs"
+        assert self._update_on_this_worker, (
+            "This worker is not designated to update client IPs"
+        )
 
         # If the DB pool has already terminated, don't try updating
         if not self.db_pool.is_running():
@@ -671,9 +674,9 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
         txn: LoggingTransaction,
         to_update: Mapping[Tuple[str, str, str], Tuple[str, Optional[str], int]],
     ) -> None:
-        assert (
-            self._update_on_this_worker
-        ), "This worker is not designated to update client IPs"
+        assert self._update_on_this_worker, (
+            "This worker is not designated to update client IPs"
+        )
 
         # Keys and values for the `user_ips` upsert.
         user_ips_keys = []

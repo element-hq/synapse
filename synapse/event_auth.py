@@ -45,6 +45,7 @@ from signedjson.sign import SignatureVerifyException, verify_signed_json
 from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import (
+    CREATOR_POWER_LEVEL,
     MAX_PDU_SIZE,
     EventContentFields,
     EventTypes,
@@ -64,6 +65,8 @@ from synapse.api.room_versions import (
     RoomVersion,
     RoomVersions,
 )
+from synapse.events import is_creator
+from synapse.state import CREATE_KEY
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
     MutableStateMap,
@@ -260,7 +263,8 @@ async def check_state_independent_auth_rules(
                 f"Event {event.event_id} has unexpected auth_event for {k}: {auth_event_id}",
             )
 
-        # We also need to check that the auth event itself is not rejected.
+        # 2.3 ... If there are entries which were themselves rejected under the checks performed on receipt
+        # of a PDU, reject.
         if auth_event.rejected_reason:
             raise AuthError(
                 403,
@@ -270,7 +274,7 @@ async def check_state_independent_auth_rules(
 
         auth_dict[k] = auth_event_id
 
-    # 3. If event does not have a m.room.create in its auth_events, reject.
+    # 2.4. If event does not have a m.room.create in its auth_events, reject.
     creation_event = auth_dict.get((EventTypes.Create, ""), None)
     if not creation_event:
         raise AuthError(403, "No create event in auth events")
@@ -308,8 +312,16 @@ def check_state_dependent_auth_rules(
 
     auth_dict = {(e.type, e.state_key): e for e in auth_events}
 
+    # Later code relies on there being a create event e.g _can_federate, _is_membership_change_allowed
+    # so produce a more intelligible error if we don't have one.
+    create_event = auth_dict.get(CREATE_KEY)
+    if create_event is None:
+        raise AuthError(
+            403, f"Event {event.event_id} is missing a create event in auth_events."
+        )
+
     # additional check for m.federate
-    creating_domain = get_domain_from_id(event.room_id)
+    creating_domain = get_domain_from_id(create_event.sender)
     originating_domain = get_domain_from_id(event.sender)
     if creating_domain != originating_domain:
         if not _can_federate(event, auth_dict):
@@ -462,12 +474,20 @@ def _check_create(event: "EventBase") -> None:
     if event.prev_event_ids():
         raise AuthError(403, "Create event has prev events")
 
-    # 1.2 If the domain of the room_id does not match the domain of the sender,
-    # reject.
-    sender_domain = get_domain_from_id(event.sender)
-    room_id_domain = get_domain_from_id(event.room_id)
-    if room_id_domain != sender_domain:
-        raise AuthError(403, "Creation event's room_id domain does not match sender's")
+    if event.room_version.msc4291_room_ids_as_hashes:
+        # 1.2 If the create event has a room_id, reject
+        if "room_id" in event:
+            raise AuthError(403, "Create event has a room_id")
+    else:
+        # 1.2 If the domain of the room_id does not match the domain of the sender,
+        # reject.
+        if not event.room_version.msc4291_room_ids_as_hashes:
+            sender_domain = get_domain_from_id(event.sender)
+            room_id_domain = get_domain_from_id(event.room_id)
+            if room_id_domain != sender_domain:
+                raise AuthError(
+                    403, "Creation event's room_id domain does not match sender's"
+                )
 
     # 1.3 If content.room_version is present and is not a recognised version, reject
     room_version_prop = event.content.get("room_version", "1")
@@ -483,6 +503,16 @@ def _check_create(event: "EventBase") -> None:
         and EventContentFields.ROOM_CREATOR not in event.content
     ):
         raise AuthError(403, "Create event lacks a 'creator' property")
+
+    # 1.5 If the additional_creators field is present and is not an array of strings where each
+    # string is a valid user ID, reject.
+    if (
+        event.room_version.msc4289_creator_power_enabled
+        and EventContentFields.ADDITIONAL_CREATORS in event.content
+    ):
+        check_valid_additional_creators(
+            event.content[EventContentFields.ADDITIONAL_CREATORS]
+        )
 
 
 def _can_federate(event: "EventBase", auth_events: StateMap["EventBase"]) -> bool:
@@ -525,7 +555,13 @@ def _is_membership_change_allowed(
 
     target_user_id = event.state_key
 
-    creating_domain = get_domain_from_id(event.room_id)
+    # We need the create event in order to check if we can federate or not.
+    # If it's missing, yell loudly. Previously we only did this inside the
+    # _can_federate check.
+    create_event = auth_events.get((EventTypes.Create, ""))
+    if not create_event:
+        raise AuthError(403, "Create event missing from auth_events")
+    creating_domain = get_domain_from_id(create_event.sender)
     target_domain = get_domain_from_id(target_user_id)
     if creating_domain != target_domain:
         if not _can_federate(event, auth_events):
@@ -895,6 +931,32 @@ def _check_power_levels(
         except Exception:
             raise SynapseError(400, "Not a valid power level: %s" % (v,))
 
+    if room_version_obj.msc4289_creator_power_enabled:
+        # Enforce the creator does not appear in the users map
+        create_event = auth_events.get((EventTypes.Create, ""))
+        if not create_event:
+            raise SynapseError(
+                400, "Cannot check power levels without a create event in auth_events"
+            )
+        if create_event.sender in user_list:
+            raise SynapseError(
+                400,
+                "Creator user %s must not appear in content.users"
+                % (create_event.sender,),
+            )
+        additional_creators = create_event.content.get(
+            EventContentFields.ADDITIONAL_CREATORS, []
+        )
+        if additional_creators:
+            creators_in_user_list = set(additional_creators).intersection(
+                set(user_list)
+            )
+            if len(creators_in_user_list) > 0:
+                raise SynapseError(
+                    400,
+                    "Additional creators users must not appear in content.users",
+                )
+
     # Reject events with stringy power levels if required by room version
     if (
         event.type == EventTypes.PowerLevels
@@ -986,8 +1048,7 @@ def _check_power_levels(
             if old_level == user_level:
                 raise AuthError(
                     403,
-                    "You don't have permission to remove ops level equal "
-                    "to your own",
+                    "You don't have permission to remove ops level equal to your own",
                 )
 
         # Check if the old and new levels are greater than the user level
@@ -1011,11 +1072,19 @@ def get_user_power_level(user_id: str, auth_events: StateMap["EventBase"]) -> in
         user_id: user's id to look up in power_levels
         auth_events:
             state in force at this point in the room (or rather, a subset of
-            it including at least the create event and power levels event.
+            it including at least the create event, and possibly a power levels event).
 
     Returns:
         the user's power level in this room.
     """
+    create_event = auth_events.get(CREATE_KEY)
+    assert create_event is not None, (
+        "A create event in the auth events chain is required to calculate user power level correctly,"
+        " but was not found. This indicates a bug"
+    )
+    if create_event.room_version.msc4289_creator_power_enabled:
+        if is_creator(create_event, user_id):
+            return CREATOR_POWER_LEVEL
     power_level_event = get_power_level_event(auth_events)
     if power_level_event:
         level = power_level_event.content.get("users", {}).get(user_id)
@@ -1029,18 +1098,12 @@ def get_user_power_level(user_id: str, auth_events: StateMap["EventBase"]) -> in
     else:
         # if there is no power levels event, the creator gets 100 and everyone
         # else gets 0.
-
-        # some things which call this don't pass the create event: hack around
-        # that.
-        key = (EventTypes.Create, "")
-        create_event = auth_events.get(key)
-        if create_event is not None:
-            if create_event.room_version.implicit_room_creator:
-                creator = create_event.sender
-            else:
-                creator = create_event.content[EventContentFields.ROOM_CREATOR]
-            if creator == user_id:
-                return 100
+        if create_event.room_version.implicit_room_creator:
+            creator = create_event.sender
+        else:
+            creator = create_event.content[EventContentFields.ROOM_CREATOR]
+        if creator == user_id:
+            return 100
         return 0
 
 
@@ -1182,3 +1245,26 @@ def auth_types_for_event(
                 auth_types.add(key)
 
     return auth_types
+
+
+def check_valid_additional_creators(additional_creators: Any) -> None:
+    """Check if the additional_creators provided is valid according to MSC4289.
+
+    The additional_creators can be supplied from an m.room.create event or from an /upgrade request.
+
+    Raises:
+        AuthError if the additional_creators is invalid for some reason.
+    """
+    if type(additional_creators) is not list:
+        raise AuthError(400, "additional_creators must be an array")
+    for entry in additional_creators:
+        if type(entry) is not str:
+            raise AuthError(400, "entry in additional_creators is not a string")
+        if not UserID.is_valid(entry):
+            raise AuthError(400, "entry in additional_creators is not a valid user ID")
+        # UserID.is_valid doesn't actually validate everything, so check the rest manually.
+        if len(entry) > 255 or len(entry.encode("utf-8")) > 255:
+            raise AuthError(
+                400,
+                "entry in additional_creators too long",
+            )

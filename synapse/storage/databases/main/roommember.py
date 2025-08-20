@@ -43,7 +43,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -117,10 +117,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 self._count_known_servers,
             )
             LaterGauge(
-                "synapse_federation_known_servers",
-                "",
-                [],
-                lambda: self._known_servers_count,
+                name="synapse_federation_known_servers",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): self._known_servers_count},
             )
 
     @wrap_as_background_process("_count_known_servers")
@@ -194,6 +194,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 "membership": Membership.JOIN,
             },
             retcol="state_key",
+        )
+
+    async def get_invited_users_in_room(self, room_id: str) -> StrCollection:
+        """Returns a list of users invited to the room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "type": EventTypes.Member,
+                "room_id": room_id,
+                "membership": Membership.INVITE,
+            },
+            retcol="state_key",
+            desc="get_invited_users_in_room",
         )
 
     @cached()
@@ -871,6 +884,73 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return {u for u, share_room in user_dict.items() if share_room}
 
+    @cached(max_entries=10000)
+    async def does_pair_of_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_id: str
+    ) -> bool:
+        raise NotImplementedError()
+
+    @cachedList(
+        cached_method_name="does_pair_of_users_share_a_room_joined_or_invited",
+        list_name="other_user_ids",
+    )
+    async def _do_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_ids: Collection[str]
+    ) -> Mapping[str, Optional[bool]]:
+        """Return mapping from user ID to whether they share a room with the
+        given user via being either joined or invited.
+
+        Note: `None` and `False` are equivalent and mean they don't share a
+        room.
+        """
+
+        def do_users_share_a_room_joined_or_invited_txn(
+            txn: LoggingTransaction, user_ids: Collection[str]
+        ) -> Dict[str, bool]:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "state_key", user_ids
+            )
+
+            # This query works by fetching both the list of rooms for the target
+            # user and the set of other users, and then checking if there is any
+            # overlap.
+            sql = f"""
+                SELECT DISTINCT b.state_key
+                FROM (
+                    SELECT room_id FROM current_state_events
+                    WHERE type = 'm.room.member' AND (membership = 'join' OR membership = 'invite') AND state_key = ?
+                ) AS a
+                INNER JOIN (
+                    SELECT room_id, state_key FROM current_state_events
+                    WHERE type = 'm.room.member' AND (membership = 'join' OR membership = 'invite') AND {clause}
+                ) AS b using (room_id)
+            """
+
+            txn.execute(sql, (user_id, *args))
+            return {u: True for (u,) in txn}
+
+        to_return = {}
+        for batch_user_ids in batch_iter(other_user_ids, 1000):
+            res = await self.db_pool.runInteraction(
+                "do_users_share_a_room_joined_or_invited",
+                do_users_share_a_room_joined_or_invited_txn,
+                batch_user_ids,
+            )
+            to_return.update(res)
+
+        return to_return
+
+    async def do_users_share_a_room_joined_or_invited(
+        self, user_id: str, other_user_ids: Collection[str]
+    ) -> Set[str]:
+        """Return the set of users who share a room with the first users via being either joined or invited"""
+
+        user_dict = await self._do_users_share_a_room_joined_or_invited(
+            user_id, other_user_ids
+        )
+
+        return {u for u, share_room in user_dict.items() if share_room}
+
     async def get_users_who_share_room_with_user(self, user_id: str) -> Set[str]:
         """Returns the set of users who share a room with `user_id`"""
         room_ids = await self.get_rooms_for_user(user_id)
@@ -916,7 +996,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         `_get_user_ids_from_membership_event_ids` for any uncached events.
         """
 
-        with Measure(self._clock, "get_joined_user_ids_from_state"):
+        with Measure(
+            self._clock,
+            name="get_joined_user_ids_from_state",
+            server_name=self.server_name,
+        ):
             users_in_room = set()
             member_event_ids = [
                 e_id for key, e_id in state.items() if key[0] == EventTypes.Member
@@ -1776,6 +1860,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction(
             "_get_room_participation_txn", _get_room_participation_txn, user_id, room_id
+        )
+
+    async def get_ban_event_ids_in_room(self, room_id: str) -> StrCollection:
+        """Get all event IDs for ban events in the given room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "room_id": room_id,
+                "type": EventTypes.Member,
+                "membership": Membership.BAN,
+            },
+            retcol="event_id",
+            desc="get_ban_event_ids_in_room",
         )
 
 

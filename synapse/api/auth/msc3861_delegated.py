@@ -28,10 +28,6 @@ from authlib.oauth2.auth import encode_client_secret_basic, encode_client_secret
 from authlib.oauth2.rfc7523 import ClientSecretJWT, PrivateKeyJWT, private_key_jwt_sign
 from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
-from prometheus_client import Histogram
-
-from twisted.web.client import readBody
-from twisted.web.http_headers import Headers
 
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
@@ -43,25 +39,27 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import make_deferred_yieldable
-from synapse.logging.opentracing import active_span, force_tracing, start_active_span
+from synapse.logging.context import PreserveLoggingContext
+from synapse.logging.opentracing import (
+    active_span,
+    force_tracing,
+    inject_request_headers,
+    start_active_span,
+)
+from synapse.metrics import SERVER_NAME_LABEL
+from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+
+from . import introspection_response_timer
 
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-introspection_response_timer = Histogram(
-    "synapse_api_auth_delegated_introspection_response",
-    "Time taken to get a response for an introspection request",
-    ["code"],
-)
-
 
 # Scope as defined by MSC2967
 # https://github.com/matrix-org/matrix-spec-proposals/pull/2967
@@ -173,11 +171,17 @@ class MSC3861DelegatedAuth(BaseAuth):
         assert self._config.client_id, "No client_id provided"
         assert auth_method is not None, "Invalid client_auth_method provided"
 
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
         self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
         self._force_tracing_for_users = hs.config.tracing.force_tracing_for_users
+
+        self._rust_http_client = HttpClient(
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
+        )
 
         # # Token Introspection Cache
         # This remembers what users/devices are represented by which access tokens,
@@ -199,8 +203,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         #   In this case, the device still exists and it's not the end of the world for
         #   the old access token to continue working for a short time.
         self._introspection_cache: ResponseCache[str] = ResponseCache(
-            self._clock,
-            "token_introspection",
+            clock=self._clock,
+            name="token_introspection",
+            server_name=self.server_name,
             timeout_ms=120_000,
             # don't log because the keys are access tokens
             enable_logging=False,
@@ -301,7 +306,6 @@ class MSC3861DelegatedAuth(BaseAuth):
         introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": str(self._http_client.user_agent, "utf-8"),
             "Accept": "application/json",
             # Tell MAS that we support reading the device ID as an explicit
             # value, not encoded in the scope. This is supported by MAS 0.15+
@@ -315,38 +319,40 @@ class MSC3861DelegatedAuth(BaseAuth):
         uri, raw_headers, body = self._client_auth.prepare(
             method="POST", uri=introspection_endpoint, headers=raw_headers, body=body
         )
-        headers = Headers({k: [v] for (k, v) in raw_headers.items()})
 
         # Do the actual request
-        # We're not using the SimpleHttpClient util methods as we don't want to
-        # check the HTTP status code, and we do the body encoding ourselves.
 
+        logger.debug("Fetching token from MAS")
         start_time = self._clock.time()
         try:
-            response = await self._http_client.request(
-                method="POST",
-                uri=uri,
-                data=body.encode("utf-8"),
-                headers=headers,
-            )
-
-            resp_body = await make_deferred_yieldable(readBody(response))
+            with start_active_span("mas-introspect-token"):
+                inject_request_headers(raw_headers)
+                with PreserveLoggingContext():
+                    resp_body = await self._rust_http_client.post(
+                        url=uri,
+                        response_limit=1 * 1024 * 1024,
+                        headers=raw_headers,
+                        request_body=body,
+                    )
+        except HttpResponseException as e:
+            end_time = self._clock.time()
+            introspection_response_timer.labels(
+                code=e.code, **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(end_time - start_time)
+            raise
         except Exception:
             end_time = self._clock.time()
-            introspection_response_timer.labels("ERR").observe(end_time - start_time)
+            introspection_response_timer.labels(
+                code="ERR", **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(end_time - start_time)
             raise
 
-        end_time = self._clock.time()
-        introspection_response_timer.labels(response.code).observe(
-            end_time - start_time
-        )
+        logger.debug("Fetched token from MAS")
 
-        if response.code < 200 or response.code >= 300:
-            raise HttpResponseException(
-                response.code,
-                response.phrase.decode("ascii", errors="replace"),
-                resp_body,
-            )
+        end_time = self._clock.time()
+        introspection_response_timer.labels(
+            code=200, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time - start_time)
 
         resp = json_decoder.decode(resp_body.decode("utf-8"))
 
@@ -363,6 +369,12 @@ class MSC3861DelegatedAuth(BaseAuth):
 
     async def is_server_admin(self, requester: Requester) -> bool:
         return "urn:synapse:admin:*" in requester.scope
+
+    def _is_access_token_the_admin_token(self, token: str) -> bool:
+        admin_token = self._admin_token()
+        if admin_token is None:
+            return False
+        return token == admin_token
 
     async def get_user_by_req(
         self,
@@ -429,7 +441,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             requester = await self.get_user_by_access_token(access_token, allow_expired)
 
         # Do not record requests from MAS using the virtual `__oidc_admin` user.
-        if access_token != self._admin_token():
+        if not self._is_access_token_the_admin_token(access_token):
             await self._record_request(request, requester)
 
         if not allow_guest and requester.is_guest:
@@ -465,17 +477,29 @@ class MSC3861DelegatedAuth(BaseAuth):
 
             raise UnrecognizedRequestError(code=404)
 
+    def is_request_using_the_admin_token(self, request: SynapseRequest) -> bool:
+        """
+        Check if the request is using the admin token.
+
+        Args:
+            request: The request to check.
+
+        Returns:
+            True if the request is using the admin token, False otherwise.
+        """
+        access_token = self.get_access_token_from_request(request)
+        return self._is_access_token_the_admin_token(access_token)
+
     async def get_user_by_access_token(
         self,
         token: str,
         allow_expired: bool = False,
     ) -> Requester:
-        admin_token = self._admin_token()
-        if admin_token is not None and token == admin_token:
+        if self._is_access_token_the_admin_token(token):
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
-            logging.info("Admin toked used")
+            logger.info("Admin token used")
             # XXX: that user doesn't exist and won't be provisioned.
             # This is mostly fine for admin calls, but we should also think about doing
             # requesters without a user_id.

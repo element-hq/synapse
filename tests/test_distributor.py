@@ -28,7 +28,7 @@ from . import unittest
 
 class DistributorTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.dist = Distributor()
+        self.dist = Distributor(server_name="test_server")
 
     def test_signal_dispatch(self) -> None:
         self.dist.declare("alert")
