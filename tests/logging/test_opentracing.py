@@ -74,7 +74,10 @@ class LogContextScopeManagerTestCase(TestCase):
         # global variables that power opentracing. We create our own tracer instance
         # and test with it.
 
-        scope_manager = LogContextScopeManager()
+        from opentracing.scope_managers.contextvars import ContextVarsScopeManager
+
+        # scope_manager = LogContextScopeManager()
+        scope_manager = ContextVarsScopeManager()
         config = jaeger_client.config.Config(
             config={}, service_name="test", scope_manager=scope_manager
         )
