@@ -23,7 +23,7 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
-import attrs
+import attr
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
@@ -1260,16 +1260,46 @@ class SlidingSyncRestServlet(RestServlet):
 
         if (
             extensions.thread_subscriptions is not None
-            and extensions.thread_subscriptions.changed is not None
+            and extensions.thread_subscriptions
         ):
-            serialized_extensions["thread_subscriptions"] = {
-                "changes": [
-                    attrs.asdict(change, filter=lambda _attr, v: v is not None)
-                    for change in extensions.thread_subscriptions.changed
-                ]
-            }
+            serialized_extensions["io.element.msc4308.thread_subscriptions"] = (
+                _serialise_thread_subscriptions(extensions.thread_subscriptions)
+            )
 
         return serialized_extensions
+
+
+def _serialise_thread_subscriptions(
+    thread_subscriptions: SlidingSyncResult.Extensions.ThreadSubscriptionsExtension,
+) -> JsonDict:
+    out: JsonDict = {}
+
+    if thread_subscriptions.subscribed:
+        out["subscribed"] = {
+            room_id: {
+                thread_root_id: attr.asdict(
+                    change, filter=lambda _attr, v: v is not None
+                )
+                for thread_root_id, change in room_threads.items()
+            }
+            for room_id, room_threads in thread_subscriptions.subscribed.items()
+        }
+
+    if thread_subscriptions.unsubscribed:
+        out["unsubscribed"] = {
+            room_id: {
+                thread_root_id: attr.asdict(
+                    change, filter=lambda _attr, v: v is not None
+                )
+                for thread_root_id, change in room_threads.items()
+            }
+            for room_id, room_threads in thread_subscriptions.unsubscribed.items()
+        }
+
+    if thread_subscriptions.prev_batch:
+        out["prev_batch"] = thread_subscriptions.prev_batch.to_string()
+
+    return out
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

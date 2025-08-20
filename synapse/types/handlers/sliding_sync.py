@@ -50,6 +50,7 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
+    ThreadSubscriptionsToken,
     UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
@@ -362,22 +363,38 @@ class SlidingSyncResult:
             """The Thread Subscriptions extension (MSC4308)
 
             Attributes:
-                changes: list of changes to thread subscriptions
+                subscribed: map (room_id -> thread_root_id -> info) of new or changed subscriptions
+                unsubscribed: map (room_id -> thread_root_id -> info) of new unsubscriptions
+                prev_batch: if present, there is a gap and the client can use this token to backpaginate
             """
 
             @attr.s(slots=True, frozen=True, auto_attribs=True)
-            class ThreadSubscriptionChange:
-                room_id: str
-                root_event_id: str
-                subscribed: bool
-
+            class ThreadSubscription:
                 # always present when `subscribed`
                 automatic: Optional[bool]
 
-            changed: Optional[List[ThreadSubscriptionChange]]
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUnsubscription:
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            # room_id -> event_id (of thread root) -> the subscription change
+            subscribed: Optional[Mapping[str, Mapping[str, ThreadSubscription]]]
+            # room_id -> event_id (of thread root) -> the unsubscription
+            unsubscribed: Optional[Mapping[str, Mapping[str, ThreadUnsubscription]]]
+            prev_batch: Optional[ThreadSubscriptionsToken]
 
             def __bool__(self) -> bool:
-                return bool(self.changed)
+                return (
+                    bool(self.subscribed)
+                    or bool(self.unsubscribed)
+                    or bool(self.prev_batch)
+                )
 
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None

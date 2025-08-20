@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from synapse._pydantic_compat import (
     Extra,
+    Field,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -380,7 +381,9 @@ class SlidingSyncBody(RequestBodyModel):
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
-        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
+        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = Field(
+            alias="io.element.msc4308.thread_subscriptions"
+        )
 
     conn_id: Optional[StrictStr]
 

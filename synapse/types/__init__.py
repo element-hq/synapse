@@ -1328,6 +1328,27 @@ class SlidingSyncStreamToken:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
+class ThreadSubscriptionsToken:
+    """
+    Token for a position in the thread subscriptions stream.
+
+    Format: `ts<stream_id>`
+    """
+
+    stream_id: int
+
+    @staticmethod
+    def from_string(s: str) -> "ThreadSubscriptionsToken":
+        if not s.startswith("ts"):
+            raise ValueError("thread subscription token must start with `ts`")
+
+        return ThreadSubscriptionsToken(stream_id=int(s[2:]))
+
+    def to_string(self) -> str:
+        return f"ts{self.stream_id}"
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
 class PersistedPosition:
     """Position of a newly persisted row with instance that persisted it."""
 
