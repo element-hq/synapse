@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Awaitable, Dict, cast
+from typing import Awaitable, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
@@ -41,11 +41,6 @@ try:
     from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     LogContextScopeManager = None  # type: ignore
-
-try:
-    import opentracing
-except ImportError:
-    opentracing = None  # type: ignore
 
 try:
     import jaeger_client
@@ -70,8 +65,6 @@ class LogContextScopeManagerTestCase(TestCase):
     """
 
     if LogContextScopeManager is None:
-        skip = "Requires opentracing"  # type: ignore[unreachable]
-    if opentracing is None:
         skip = "Requires opentracing"  # type: ignore[unreachable]
     if jaeger_client is None:
         skip = "Requires jaeger_client"  # type: ignore[unreachable]
@@ -213,135 +206,6 @@ class LogContextScopeManagerTestCase(TestCase):
         self.assertEqual(
             self._reporter.get_spans(),
             [scopes[1].span, scopes[2].span, scopes[0].span],
-        )
-
-    def test_run_in_background_active_scope_still_available(self) -> None:
-        """
-        Test that tasks running via `run_in_background` still have access to the
-        active tracing scope.
-
-        This is a regression test for a previous Synapse issue where the tracing scope
-        would `__exit__` and close before the `run_in_background` task completed and our
-        own `_LogContextScope.close(...)` would clear the `LoggingContext.scope`
-        preventing further tracing spans from having the correct parent.
-        """
-        reactor = MemoryReactorClock()
-        clock = Clock(reactor)
-
-        scope_map: Dict[str, opentracing.Scope] = {}
-
-        async def async_task() -> None:
-            root_scope = scope_map["root"]
-            root_context = cast(jaeger_client.SpanContext, root_scope.span.context)
-
-            self.assertEqual(
-                self._tracer.active_span,
-                root_scope.span,
-                "expected to inherit the root tracing scope from where this was run",
-            )
-
-            # Return control back to the reactor thread and wait an arbitrary amount
-            await clock.sleep(4)
-
-            # This is a key part of what we're testing! In a previous version of
-            # Synapse, we would lose the active span at this point.
-            self.assertEqual(
-                self._tracer.active_span,
-                root_scope.span,
-                "expected to still have a root tracing scope/span active",
-            )
-
-            # For complete-ness sake, let's also trace more sub-tasks here and assert
-            # they have the correct span parents as well (root)
-
-            # Start tracing some other sub-task.
-            #
-            # This is a key part of what we're testing! In a previous version of
-            # Synapse, it would have the incorrect span parents.
-            scope = start_active_span(
-                "task1",
-                tracer=self._tracer,
-            )
-            scope_map["task1"] = scope
-
-            # Ensure the span parent is pointing to the root scope
-            context = cast(jaeger_client.SpanContext, scope.span.context)
-            self.assertEqual(
-                context.parent_id,
-                root_context.span_id,
-                "expected task1 parent to be the root span",
-            )
-
-            # Ensure that the active span is our new sub-task now
-            self.assertEqual(self._tracer.active_span, scope.span)
-            # Return control back to the reactor thread and wait an arbitrary amount
-            await clock.sleep(4)
-            # We should still see the active span as the scope wasn't closed yet
-            self.assertEqual(self._tracer.active_span, scope.span)
-            scope.close()
-
-        async def root() -> None:
-            with start_active_span(
-                "root span",
-                tracer=self._tracer,
-                # We will close this off later. We're basically just mimicking the same
-                # pattern for how we handle requests. We pass the span off to the
-                # request for it to finish.
-                finish_on_close=False,
-            ) as root_scope:
-                scope_map["root"] = root_scope
-                self.assertEqual(self._tracer.active_span, root_scope.span)
-
-                # Fire-and-forget a task
-                #
-                # XXX: The root scope context manager will `__exit__` before this task
-                # completes.
-                run_in_background(async_task)
-
-                # Because we used `run_in_background`, the active span should still be
-                # the root.
-                self.assertEqual(self._tracer.active_span, root_scope.span)
-
-            # We shouldn't see any active spans outside of the scope
-            self.assertIsNone(self._tracer.active_span)
-
-        with LoggingContext("root context"):
-            # Start the test off
-            d_root = defer.ensureDeferred(root())
-
-            # Let the tasks complete
-            reactor.pump((2,) * 8)
-            self.successResultOf(d_root)
-
-            # After we see all of the tasks are done (like a request when it
-            # `_finished_processing`), let's finish our root span
-            scope_map["root"].span.finish()
-
-            # Sanity check again: We shouldn't see any active spans leftover on this
-            # logging context. This is to ensure sure we don't leave behind a `scope` in
-            # `LoggingContext.scope`.
-            self.assertIsNone(self._tracer.active_span)
-
-        # The spans should be reported in order of their finishing: task 1, task 2,
-        # root.
-        #
-        # We use `assertIncludes` just as an easier way to see if items are missing or
-        # added. We assert the order just below
-        self.assertIncludes(
-            set(self._reporter.get_spans()),
-            {
-                scope_map["task1"].span,
-                scope_map["root"].span,
-            },
-            exact=True,
-        )
-        # This is where we actually assert the correct order
-        self.assertEqual(
-            self._reporter.get_spans(),
-            [
-                scope_map["task1"].span,
-                scope_map["root"].span,
-            ],
         )
 
     def test_trace_decorator_sync(self) -> None:

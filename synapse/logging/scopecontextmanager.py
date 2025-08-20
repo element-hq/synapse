@@ -98,13 +98,6 @@ class LogContextScopeManager(ScopeManager):
             enter_logcontext = False
 
         scope = _LogContextScope(self, span, ctx, enter_logcontext, finish_on_close)
-        # Keep track of the current scope on the log context.
-        #
-        # In the case where we're re-using the existing logging context, because the log
-        # context existed before without a `scope`, we will need to restore it back to
-        # how it originally looked (i.e. without a scope). Clearing the `scope` later
-        # ensures that there is no active tracing span when all of the tracing scopes
-        # exit and close.
         ctx.scope = scope
         if enter_logcontext:
             ctx.__enter__()
@@ -162,11 +155,6 @@ class _LogContextScope(Scope):
         if self._finish_on_close:
             self.span.finish()
 
-        # Clearing the `scope` ensures that there is no active tracing span when all of
-        # the tracing scopes exit and close.
-        #
-        # Technically, we only need to do this in the case where the logging context
-        # didn't have a `scope` before but it doesn't really hurt to do it all the time.
         self.logcontext.scope = None
 
         if self._enter_logcontext:
