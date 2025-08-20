@@ -24,10 +24,10 @@ import os
 import signal
 import socket
 import sys
-from threading import Thread
 import traceback
 import warnings
 from textwrap import indent
+from threading import Thread
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -291,7 +291,9 @@ def register_start(
     reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
 
 
-def listen_metrics(bind_addresses: StrCollection, port: int) -> List[Tuple[WSGIServer, Thread]]:
+def listen_metrics(
+    bind_addresses: StrCollection, port: int
+) -> List[Tuple[WSGIServer, Thread]]:
     """
     Start Prometheus metrics server.
 

@@ -53,13 +53,13 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
-from synapse.app._base import unregister_sighups
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
+from synapse.app._base import unregister_sighups
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
@@ -421,7 +421,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._listening_services.clear()
 
         logger.info("Shutting down metrics listeners")
-        for (server, thread) in self._metrics_listeners:
+        for server, thread in self._metrics_listeners:
             server.shutdown()
             thread.join()
         self._metrics_listeners.clear()
