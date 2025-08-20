@@ -406,9 +406,6 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         unregister_sighups(self.config.server.server_name)
 
-        for call in self.get_reactor().getDelayedCalls():
-            call.cancel()
-
         logger.info("Shutting down listening services")
         for listener in self._listening_services:
             # During unit tests, an incomplete `_FakePort` is used for listeners so
