@@ -700,10 +700,15 @@ class EventsPersistenceStorageController:
 
         # TODO sort gap_events by DAG;received order
         for gap_event, before_gap_event_id in gap_events:
+
+            logger.debug("Processing received gap event %s", gap_event)
+
             matching_events = [gap_event]  # TODO find other events in the same gap
 
             # Find all predecessors of those events in the batch
             to_insert = find_predecessors(matching_events, remaining_batch)
+
+            logger.debug("Processing to_insert set %s", to_insert)
 
             # Find the stitched order of the event before the gap
             # TODO consider doing this with a join
@@ -715,6 +720,9 @@ class EventsPersistenceStorageController:
                     True,
                 )
             )
+
+            logger.debug("Previous event stitched_ordering = %i",
+                         previous_event_stitched_order)
 
             # if previous_event_stitched_order is None, that means we have a room
             # where there are existing events or gaps without assigned stitched orders.
@@ -733,8 +741,18 @@ class EventsPersistenceStorageController:
                 # TODO we may need to reorder existing events
                 previous_event_stitched_order += 1
                 context.stitched_ordering = previous_event_stitched_order
+                logger.debug(
+                    "Persisting inserted events with stitched_order=%i",
+                    previous_event_stitched_order
+                )
 
             remaining_batch = still_remaining_batch
+            logger.debug("Remaining events: %s", [ev.event_id for (ev, _) in
+                                                  remaining_batch])
+
+        logger.debug("Remaining events after processing gap matches: %s", [ev.event_id
+                                                                           for (ev, _) in
+                                                  remaining_batch])
 
         current_max_stream_ordering = (
             await self.persist_events_store.get_room_max_stitched_ordering(room_id) or 0
