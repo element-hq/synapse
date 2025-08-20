@@ -487,7 +487,7 @@ def get_device_message_edu_contents(
     if len(current_edu_content["messages"]) > 0:
         edu_contents.append(current_edu_content)
         logger.debug(
-            "Queuing last %d device messages from %s into EDU msgid %s, %d EDUs queued",
+            "Splitting remaining %d device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
             len(current_edu_content["messages"]),
             sender_user_id,
             current_edu_content["message_id"],
