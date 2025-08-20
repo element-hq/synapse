@@ -314,7 +314,7 @@ class SynapseHomeServer(HomeServer):
 
 
 def setup(
-    config_options: List[str], reactor: Optional[ISynapseReactor] = None
+        config_options: List[str], reactor: Optional[ISynapseReactor] = None, freeze: bool = True,
 ) -> SynapseHomeServer:
     """
     Args:
@@ -391,7 +391,7 @@ def setup(
             # Loading the provider metadata also ensures the provider config is valid.
             await oidc.load_metadata()
 
-        await _base.start(hs)
+        await _base.start(hs, freeze)
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 

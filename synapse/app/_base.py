@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import atexit
 import gc
 import logging
 import os
@@ -515,7 +516,7 @@ def refresh_certificate(hs: "HomeServer") -> None:
         logger.info("Context factories updated.")
 
 
-async def start(hs: "HomeServer") -> None:
+async def start(hs: "HomeServer", freeze: bool = True) -> None:
     """
     Start a Synapse server or worker.
 
@@ -631,18 +632,19 @@ async def start(hs: "HomeServer") -> None:
         await hs.get_common_usage_metrics_manager().setup()
         start_phone_stats_home(hs)
 
-    # We now freeze all allocated objects in the hopes that (almost)
-    # everything currently allocated are things that will be used for the
-    # rest of time. Doing so means less work each GC (hopefully).
-    #
-    # PyPy does not (yet?) implement gc.freeze()
-    # if hasattr(gc, "freeze"):
-    #     gc.collect()
-    #     gc.freeze()
-    #
-    #     # Speed up shutdowns by freezing all allocated objects. This moves everything
-    #     # into the permanent generation and excludes them from the final GC.
-    #     atexit.register(gc.freeze)
+    if freeze:
+        # We now freeze all allocated objects in the hopes that (almost)
+        # everything currently allocated are things that will be used for the
+        # rest of time. Doing so means less work each GC (hopefully).
+        #
+        # PyPy does not (yet?) implement gc.freeze()
+        if hasattr(gc, "freeze"):
+            gc.collect()
+            gc.freeze()
+        
+            # Speed up shutdowns by freezing all allocated objects. This moves everything
+            # into the permanent generation and excludes them from the final GC.
+            atexit.register(gc.freeze)
 
 
 def reload_cache_config(config: HomeServerConfig) -> None:
