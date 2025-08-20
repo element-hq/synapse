@@ -616,7 +616,8 @@ class EventsPersistenceStorageController:
             if not events_and_contexts:
                 return replaced_events
 
-        await self._assign_stitched_orders(room_id, events_and_contexts)
+        if not backfilled:
+            await self._assign_stitched_orders(room_id, events_and_contexts)
 
         chunks = [
             events_and_contexts[x : x + 100]
@@ -698,9 +699,9 @@ class EventsPersistenceStorageController:
             ["event_id", "before_gap_event_id"],
         )
 
+        # TODO matching against gaps is pointless here
         # TODO sort gap_events by DAG;received order
         for gap_event, before_gap_event_id in gap_events:
-
             logger.debug("Processing received gap event %s", gap_event)
 
             matching_events = [gap_event]  # TODO find other events in the same gap
@@ -721,15 +722,19 @@ class EventsPersistenceStorageController:
                 )
             )
 
-            logger.debug("Previous event stitched_ordering = %i",
-                         previous_event_stitched_order)
+            logger.debug(
+                "Previous event stitched_ordering = %i", previous_event_stitched_order
+            )
 
             # if previous_event_stitched_order is None, that means we have a room
             # where there are existing events or gaps without assigned stitched orders.
             # Let's give up trying to assign stitched orders here.
             if previous_event_stitched_order is None:
                 # TODO do something better here
-                logger.warning("Found gap event %s without assigned stitched order: bailing", gap_event)
+                logger.warning(
+                    "Found gap event %s without assigned stitched order: bailing",
+                    gap_event,
+                )
                 return
 
             still_remaining_batch = []
@@ -743,19 +748,21 @@ class EventsPersistenceStorageController:
                 context.stitched_ordering = previous_event_stitched_order
                 logger.debug(
                     "Persisting inserted events with stitched_order=%i",
-                    previous_event_stitched_order
+                    previous_event_stitched_order,
                 )
 
             remaining_batch = still_remaining_batch
-            logger.debug("Remaining events: %s", [ev.event_id for (ev, _) in
-                                                  remaining_batch])
+            logger.debug(
+                "Remaining events: %s", [ev.event_id for (ev, _) in remaining_batch]
+            )
 
-        logger.debug("Remaining events after processing gap matches: %s", [ev.event_id
-                                                                           for (ev, _) in
-                                                  remaining_batch])
+        logger.debug(
+            "Remaining events after processing gap matches: %s",
+            [ev.event_id for (ev, _) in remaining_batch],
+        )
 
         current_max_stream_ordering = (
-            await self.persist_events_store.get_room_max_stitched_ordering(room_id) or 0
+            await self.main_store.get_room_max_stitched_ordering(room_id) or 0
         )
 
         for _event, context in remaining_batch:

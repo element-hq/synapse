@@ -3746,29 +3746,13 @@ class PersistEventsStore:
         # This is an existing backwards extremity with an assigned stitched ordering.
         # Leave it as-is unless we have successfully calculated a new stitched ordering
         # which is lower than the existing.
-        if new_previous_stitched_ordering is not None and new_previous_stitched_ordering < existing_previous_stitched_ordering:
+        if (
+            new_previous_stitched_ordering is not None
+            and new_previous_stitched_ordering < existing_previous_stitched_ordering
+        ):
             return new_before_gap_event_id
         else:
             return existing_previous_stitched_ordering
-
-
-    async def get_room_max_stitched_ordering(self, room_id: str) -> Optional[int]:
-        """Get the maximum stitched order for any event currently in the room.
-
-        If no events in this room have an assigned stitched order, returns None.
-        """
-
-        def get_room_max_stitched_ordering_txn(
-            txn: LoggingTransaction,
-        ) -> Optional[int]:
-            sql = "SELECT MAX(stitched_ordering) FROM events WHERE room_id=?"
-            txn.execute(sql, [room_id])
-            ret = [r[0] for r in txn]
-            return ret[0]
-
-        return await self.db_pool.runInteraction(
-            "get_room_max_stitched_ordering", get_room_max_stitched_ordering_txn
-        )
 
 
 @attr.s(slots=True, auto_attribs=True)
