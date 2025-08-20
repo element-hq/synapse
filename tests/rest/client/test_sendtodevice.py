@@ -185,7 +185,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         mock_send_transaction.reset_mock()
 
-        # 2 messages, each just big enough to fit in an EDU
+        # 2 messages, each just big enough to fit into their own EDU
         for i in range(2):
             messages[f"@remote_user{i}:" + destination] = {
                 "device": {"foo": random_string(MAX_EDU_SIZE - 1000)}
