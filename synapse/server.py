@@ -28,6 +28,7 @@
 import abc
 import functools
 import logging
+from threading import Thread
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -35,10 +36,12 @@ from typing import (
     Dict,
     List,
     Optional,
+    Tuple,
     Type,
     TypeVar,
     cast,
 )
+from wsgiref.simple_server import WSGIServer
 
 from attr import dataclass
 from typing_extensions import TypeAlias
@@ -50,6 +53,7 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
+from synapse.app._base import unregister_sighups
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -322,6 +326,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.signing_key = config.key.signing_key[0]
         self.config = config
         self._listening_services: List[Port] = []
+        self._metrics_listeners: List[Tuple[WSGIServer, Thread]] = []
         self.start_time: Optional[int] = None
 
         self._instance_id = random_string(5)
@@ -393,12 +398,33 @@ class HomeServer(metaclass=abc.ABCMeta):
                 pass
         self._sync_shutdown_handlers.clear()
 
-        from synapse.app._base import unregister_sighups
-
         unregister_sighups(self.config.server.server_name)
 
         for call in self.get_reactor().getDelayedCalls():
             call.cancel()
+
+        logger.info("Shutting down listening services")
+        for listener in self._listening_services:
+            # During unit tests, an incomplete `_FakePort` is used for listeners so
+            # check listener type here to ensure shutdown procedure is only applied to
+            # actual `Port` instances.
+            if type(listener) is Port:
+                # logger.info("Shutting down %s %d", listener._type, listener._realPortNumber)
+                # Preferred over connectionLost since it allows buffers to flush
+                listener.unregisterProducer()
+                listener.loseConnection()
+
+                # NOTE: not guaranteed to immediately shutdown
+                # Sometimes takes a second for some deferred to fire that cancels the socket
+                # But seems to always do so within a minute
+                # twisted.internet.error.AlreadyCancelled: Tried to cancel an already-cancelled event.
+        self._listening_services.clear()
+
+        logger.info("Shutting down metrics listeners")
+        for (server, thread) in self._metrics_listeners:
+            server.shutdown()
+            thread.join()
+        self._metrics_listeners.clear()
 
     def register_async_shutdown_handler(
         self, desc: "LiteralString", shutdown_func: Callable[..., Any]

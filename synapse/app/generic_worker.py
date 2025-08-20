@@ -297,9 +297,11 @@ class GenericWorkerServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(

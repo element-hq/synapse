@@ -24,6 +24,7 @@ import os
 import signal
 import socket
 import sys
+from threading import Thread
 import traceback
 import warnings
 from textwrap import indent
@@ -39,6 +40,7 @@ from typing import (
     Tuple,
     cast,
 )
+from wsgiref.simple_server import WSGIServer
 
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec
@@ -289,7 +291,7 @@ def register_start(
     reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
 
 
-def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
+def listen_metrics(bind_addresses: StrCollection, port: int) -> List[Tuple[WSGIServer, Thread]]:
     """
     Start Prometheus metrics server.
 
@@ -307,10 +309,14 @@ def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
 
     from synapse.metrics import RegistryProxy
 
-    # TODO: track for shutdown
+    servers: List[Tuple[WSGIServer, Thread]] = []
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
-        start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
+        server, thread = start_http_server_prometheus(
+            port, addr=host, registry=RegistryProxy
+        )
+        servers.append((server, thread))
+    return servers
 
 
 def listen_manhole(

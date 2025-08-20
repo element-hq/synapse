@@ -87,23 +87,6 @@ class SynapseHomeServer(HomeServer):
     def shutdown(self) -> None:
         super().shutdown()
 
-        logger.info("Shutting down listening services")
-        for listener in self._listening_services:
-            # During unit tests, an incomplete `_FakePort` is used for listeners so
-            # check listener type here to ensure shutdown procedure is only applied to
-            # actual `Port` instances.
-            if type(listener) is Port:
-                # logger.info("Shutting down %s %d", listener._type, listener._realPortNumber)
-                # Preferred over connectionLost since it allows buffers to flush
-                listener.unregisterProducer()
-                listener.loseConnection()
-
-                # NOTE: not guaranteed to immediately shutdown
-                # Sometimes takes a second for some deferred to fire that cancels the socket
-                # But seems to always do so within a minute
-                # twisted.internet.error.AlreadyCancelled: Tried to cancel an already-cancelled event.
-        self._listening_services.clear()
-
     def _listener_http(
         self,
         config: HomeServerConfig,
@@ -316,9 +299,11 @@ class SynapseHomeServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
