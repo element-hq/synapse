@@ -386,7 +386,11 @@ class HomeServer(metaclass=abc.ABCMeta):
             try:
                 logger.info("Shutting down %s", shutdown_handler.desc)
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                defer.ensureDeferred(shutdown_handler.func(*shutdown_handler.args, **shutdown_handler.kwargs))
+                defer.ensureDeferred(
+                    shutdown_handler.func(
+                        *shutdown_handler.args, **shutdown_handler.kwargs
+                    )
+                )
             except Exception:
                 pass
         self._async_shutdown_handlers.clear()
@@ -446,7 +450,9 @@ class HomeServer(metaclass=abc.ABCMeta):
             shutdown_func,
         )
         self._async_shutdown_handlers.append(
-            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs)
+            ShutdownInfo(
+                desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
+            )
         )
 
     def register_sync_shutdown_handler(
@@ -466,7 +472,9 @@ class HomeServer(metaclass=abc.ABCMeta):
             kwargs,
         )
         self._sync_shutdown_handlers.append(
-            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs)
+            ShutdownInfo(
+                desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
+            )
         )
 
     def register_later_gauge(self, later_gauge: LaterGauge) -> None:
