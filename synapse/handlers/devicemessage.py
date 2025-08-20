@@ -20,7 +20,6 @@
 #
 
 import logging
-from copy import deepcopy
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -426,9 +425,21 @@ def get_device_message_edu_contents(
     context: Dict[str, Any],
 ) -> List[JsonDict]:
     """
-    This function takes a dictionary of messages and splits them into several EDUs if needed.
+    This function takes a dictionary of to-device messages and splits them into several
+    EDUs by recipient if necessary as the overall request can overrun the
+    `max_request_body_size` and prevent outbound federation traffic because of the size
+    of the transaction (cf. MAX_EDU_SIZE).
 
-    It will raise an EventSizeError if a single message is too large to fit into an EDU.
+    Args:
+        sender_user_id: The user that is sending the to-device messages.
+        message_type: The type of to-device messages that are being sent.
+        messages: A dictionary containing recipients mapped to messages intended for them.
+        context: The span context for opentracing
+
+    Returns:
+        A list of dictionary containing the EDUs of to-device messages
+        Raises an EventSizeError if a single to-device message is too large
+        to fit into an EDU.
     """
 
     BASE_EDU_CONTENT = {
@@ -437,7 +448,8 @@ def get_device_message_edu_contents(
         "type": message_type,
         "message_id": random_string(16),
     }
-    # This is the size of the full EDU without any messages and without the opentracing context
+    # This is the size of the full EDU without any messages and without the
+    # opentracing context as this is not sent as part of the transaction
     BASE_EDU_SIZE = len(
         encode_canonical_json(
             {
@@ -450,11 +462,17 @@ def get_device_message_edu_contents(
 
     edu_contents = []
 
-    current_edu_content: JsonDict = deepcopy(BASE_EDU_CONTENT)
+    current_edu_content: JsonDict = create_new_to_device_edu_content(
+        BASE_EDU_CONTENT['sender'],
+        BASE_EDU_CONTENT['type'],
+        BASE_EDU_CONTENT['org.matrix.opentracing_context'],
+        BASE_EDU_CONTENT['message_id'],
+    )
     current_edu_size = BASE_EDU_SIZE
 
     for recipient, message in messages.items():
-        # We remove 2 for the curly braces and add 1 for the colon
+        # As curly braces is already taken into account in BASE_EDU_CONTENT["messages"]
+        # we remove 2 for those and add 1 for the comma per message
         message_entry_size = len(encode_canonical_json({recipient: message})) - 2 + 1
 
         if BASE_EDU_SIZE + message_entry_size > MAX_EDU_SIZE:
@@ -476,8 +494,11 @@ def get_device_message_edu_contents(
                 len(edu_contents),
             )
 
-            current_edu_content = deepcopy(BASE_EDU_CONTENT)
-            current_edu_content["message_id"] = random_string(16)
+            current_edu_content = create_new_to_device_edu_content(
+                BASE_EDU_CONTENT['sender'],
+                BASE_EDU_CONTENT['type'],
+                BASE_EDU_CONTENT['org.matrix.opentracing_context'],
+            )
 
             current_edu_size = BASE_EDU_SIZE
 
@@ -495,3 +516,22 @@ def get_device_message_edu_contents(
         )
 
     return edu_contents
+
+
+def create_new_to_device_edu_content(
+    sender_user_id: str,
+    message_type: str,
+    context: Dict[str, Any],
+    message_id: str = random_string(16),
+) -> JsonDict:
+    """
+    Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
+    """
+    content = {
+        "messages": {},
+        "sender": sender_user_id,
+        "type": message_type,
+        "message_id": message_id,
+        "org.matrix.opentracing_context": json_encoder.encode(context)
+    }
+    return content
