@@ -932,7 +932,7 @@ class SlidingSyncExtensionHandler:
 
         to_stream_id = to_token.thread_subscriptions_key
 
-        updates = await self.store.get_updated_thread_subscriptions_for_user(
+        updates = await self.store.get_latest_updated_thread_subscriptions_for_user(
             user_id=sync_config.user.to_string(),
             from_id=from_stream_id,
             to_id=to_stream_id,

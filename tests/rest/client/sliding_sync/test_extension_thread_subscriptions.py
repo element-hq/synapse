@@ -351,6 +351,121 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
             len(thread_subscriptions["subscribed"][room_id]), 3, thread_subscriptions
         )
 
+    def test_limit_and_companion_backpagination(self) -> None:
+        """
+        Create 1 thread subscription, do a sync, create 4 more,
+        then sync with a limit of 2 and fill in the gap
+        using the companion /thread_subscriptions endpoint.
+        """
+
+        thread_root_ids: List[str] = []
+
+        def make_subscription() -> None:
+            thread_root_resp = self.helper.send(
+                room_id, body="Some thread root", tok=user1_tok
+            )
+            thread_root_ids.append(thread_root_resp["event_id"])
+            self._subscribe_to_thread(user1_id, room_id, thread_root_ids[-1])
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # get the baseline stream_id of the thread_subscriptions stream
+        # before we write any data.
+        # Required because the initial value differs between SQLite and Postgres.
+        base = self.store.get_max_thread_subscriptions_stream_id()
+
+        # Make our first subscription
+        make_subscription()
+
+        # Sync for the first time
+        sync_body = {
+            "lists": {},
+            "extensions": {EXT_NAME: {"enabled": True, "limit": 2}},
+        }
+
+        sync_resp, first_sync_pos = self.do_sync(sync_body, tok=user1_tok)
+
+        thread_subscriptions = sync_resp["extensions"][EXT_NAME]
+        self.assertEqual(
+            thread_subscriptions["subscribed"],
+            {
+                room_id: {
+                    thread_root_ids[0]: {"automatic": False, "bump_stamp": base + 1},
+                }
+            },
+        )
+
+        # Get our pos for the next sync
+        first_sync_pos = sync_resp["pos"]
+
+        # Create 4 more thread subsrciptions and subscribe to each
+        for _ in range(5):
+            make_subscription()
+
+        # Now sync again. Our limit is 2,
+        # so we should get the latest 2 subscriptions,
+        # with a gap of 3 more subscriptions in the middle
+        sync_resp, _pos = self.do_sync(sync_body, tok=user1_tok, since=first_sync_pos)
+
+        thread_subscriptions = sync_resp["extensions"][EXT_NAME]
+        self.assertEqual(
+            thread_subscriptions["subscribed"],
+            {
+                room_id: {
+                    thread_root_ids[4]: {"automatic": False, "bump_stamp": base + 5},
+                    thread_root_ids[5]: {"automatic": False, "bump_stamp": base + 6},
+                }
+            },
+        )
+        # 1st backpagination: expecting a page with 2 subscriptions
+        page, end_tok = self._do_backpaginate(
+            from_tok=thread_subscriptions["prev_batch"],
+            to_tok=first_sync_pos,
+            limit=2,
+            access_token=user1_tok,
+        )
+        self.assertIsNotNone(end_tok, "backpagination should continue")
+        self.assertEqual(
+            page["subscribed"],
+            {
+                room_id: {
+                    thread_root_ids[2]: {"automatic": False, "bump_stamp": base + 3},
+                    thread_root_ids[3]: {"automatic": False, "bump_stamp": base + 4},
+                }
+            },
+        )
+
+        # 2nd backpagination: expecting a page with only 1 subscription
+        # and no other token for further backpagination
+        assert end_tok is not None
+        page, end_tok = self._do_backpaginate(
+            from_tok=end_tok, to_tok=first_sync_pos, limit=2, access_token=user1_tok
+        )
+        self.assertIsNone(end_tok, "backpagination should have finished")
+        self.assertEqual(
+            page["subscribed"],
+            {
+                room_id: {
+                    thread_root_ids[1]: {"automatic": False, "bump_stamp": base + 2},
+                }
+            },
+        )
+
+    def _do_backpaginate(
+        self, *, from_tok: str, to_tok: str, limit: int, access_token: str
+    ) -> Tuple[JsonDict, Optional[str]]:
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/unstable/io.element.msc4308/thread_subscriptions"
+            f"?from={from_tok}&to={to_tok}&limit={limit}&dir=b",
+            access_token=access_token,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+        body = channel.json_body
+        return body, cast(Optional[str], body.get("end"))
 
     def _subscribe_to_thread(
         self, user_id: str, room_id: str, thread_root_id: str

@@ -541,30 +541,38 @@ class ThreadSubscriptionsWorkerStore(CacheInvalidationWorkerStore):
             get_updated_thread_subscriptions_txn,
         )
 
-    async def get_updated_thread_subscriptions_for_user(
+    async def get_latest_updated_thread_subscriptions_for_user(
         self, user_id: str, *, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str]]:
-        """Get updates to thread subscriptions for a specific user.
+    ) -> List[Tuple[int, str, str, bool, Optional[bool]]]:
+        """Get the latest updates to thread subscriptions for a specific user.
 
         Args:
             user_id: The ID of the user
             from_id: The starting stream ID (exclusive)
             to_id: The ending stream ID (inclusive)
             limit: The maximum number of rows to return
+                If there are too many rows to return, rows from the start (closer to `from_id`)
+                will be omitted.
 
         Returns:
             A list of (stream_id, room_id, thread_root_event_id, subscribed, automatic) tuples.
+            The row with lowest `stream_id` is the first row.
         """
 
         def get_updated_thread_subscriptions_for_user_txn(
             txn: LoggingTransaction,
         ) -> List[Tuple[int, str, str, bool, Optional[bool]]]:
             sql = """
+                WITH the_updates AS (
+                    SELECT stream_id, room_id, event_id, subscribed, automatic
+                    FROM thread_subscriptions
+                    WHERE user_id = ? AND ? < stream_id AND stream_id <= ?
+                    ORDER BY stream_id DESC
+                    LIMIT ?
+                )
                 SELECT stream_id, room_id, event_id, subscribed, automatic
-                FROM thread_subscriptions
-                WHERE user_id = ? AND ? < stream_id AND stream_id <= ?
+                FROM the_updates
                 ORDER BY stream_id ASC
-                LIMIT ?
             """
 
             txn.execute(sql, (user_id, from_id, to_id, limit))

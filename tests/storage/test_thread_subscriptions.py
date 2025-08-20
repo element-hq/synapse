@@ -189,7 +189,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self._subscribe(self.other_thread_root_id, automatic_event_orderings=None)
 
         subscriptions = self.get_success(
-            self.store.get_updated_thread_subscriptions_for_user(
+            self.store.get_latest_updated_thread_subscriptions_for_user(
                 self.user_id,
                 from_id=0,
                 to_id=50,
@@ -212,7 +212,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
 
         # Check user has no subscriptions
         subscriptions = self.get_success(
-            self.store.get_updated_thread_subscriptions_for_user(
+            self.store.get_latest_updated_thread_subscriptions_for_user(
                 self.user_id,
                 from_id=0,
                 to_id=50,
@@ -280,7 +280,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
 
         # Get updates for main user
         updates = self.get_success(
-            self.store.get_updated_thread_subscriptions_for_user(
+            self.store.get_latest_updated_thread_subscriptions_for_user(
                 self.user_id, from_id=0, to_id=stream_id2, limit=10
             )
         )
@@ -290,7 +290,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
 
         # Get updates for other user
         updates = self.get_success(
-            self.store.get_updated_thread_subscriptions_for_user(
+            self.store.get_latest_updated_thread_subscriptions_for_user(
                 other_user_id, from_id=0, to_id=max(stream_id1, stream_id2), limit=10
             )
         )
