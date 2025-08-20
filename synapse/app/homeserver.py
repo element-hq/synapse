@@ -84,9 +84,6 @@ def gz_wrap(r: Resource) -> Resource:
 class SynapseHomeServer(HomeServer):
     DATASTORE_CLASS = DataStore
 
-    def shutdown(self) -> None:
-        super().shutdown()
-
     def _listener_http(
         self,
         config: HomeServerConfig,
