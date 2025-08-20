@@ -3677,7 +3677,8 @@ class PersistEventsStore:
         Figure out where in the stitched order a gap (or backwards extremity) belongs.
 
         The result is in terms of the event that precedes the gap in the ordering.
-        "None" means the gap belongs at the start of the stitched ordering.
+        "None" means we were unable to find a preceding event, which should only
+        happen if the create event was not assigned a stitched ordering.
 
         We check if the backwards extremity already exists in the database, at an
         earlier ordering than that implied by `lowest_referring_ordering`, and if
@@ -3705,10 +3706,12 @@ class PersistEventsStore:
         )
         row = txn.fetchone()
         if row is None:
-            # There is no event in the table before this gap.
-            return None
-
-        (new_before_gap_event_id, previous_stitched_ordering) = row
+            # There is no event in the table before this gap. This shouldn't happen
+            # (assuming the create event was given a stitched ordering), because the
+            # create event should always be before any gaps.
+            (new_before_gap_event_id, new_previous_stitched_ordering) = (None, None)
+        else:
+            (new_before_gap_event_id, new_previous_stitched_ordering) = row
 
         # If this is an existing backwards extremity, see where it currently
         # exists in the order.
@@ -3724,28 +3727,24 @@ class PersistEventsStore:
         row = txn.fetchone()
 
         if row is None:
-            # Not an existing backwards extremity, so insert it at the location
-            # we just calculated.
+            # Not an existing backwards extremity: use our new before_gap_event_id
             return new_before_gap_event_id
 
         (existing_before_gap_id, existing_previous_stitched_ordering) = row
 
-        # If existing_previous_stitched_ordering is NULL, that means that this
-        # gap is already at the start of the order.
-        #
-        # Alternatively, if existing_previous_stitched_ordering is before
-        # previous_stitched_ordering, that means the gap already exists in
-        # the order, before any of our newly-inserted events.
-        #
-        # In either case, we keep the backwards extremity as-is rather
-        # than overwriting its before_gap_event_id.
-        if (
-            existing_previous_stitched_ordering is None
-            or existing_previous_stitched_ordering < previous_stitched_ordering
-        ):
-            return existing_before_gap_id
-        else:
+        # If the existing backwards extremity has not yet been assigned a
+        # stream ordering, use our new before_gap_event_id.
+        if existing_previous_stitched_ordering is None:
             return new_before_gap_event_id
+
+        # This is an existing backwards extremity with an assigned stitched ordering.
+        # Leave it as-is unless we have successfully calculated a new stitched ordering
+        # which is lower than the existing.
+        if new_previous_stitched_ordering is not None and new_previous_stitched_ordering < existing_previous_stitched_ordering:
+            return new_before_gap_event_id
+        else:
+            return existing_previous_stitched_ordering
+
 
     async def get_room_max_stitched_ordering(self, room_id: str) -> Optional[int]:
         """Get the maximum stitched order for any event currently in the room.
