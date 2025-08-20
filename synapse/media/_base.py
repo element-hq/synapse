@@ -122,9 +122,9 @@ MAXIMUM_ALLOWED_MAX_TIMEOUT_MS = 60_000
 _IMMUTABLE_ETAG = "1"
 
 
-def respond_404(request: SynapseRequest) -> None:
+async def respond_404(request: SynapseRequest) -> None:
     assert request.path is not None
-    respond_with_json(
+    await respond_with_json(
         request,
         404,
         cs_error("Not found '%s'" % (request.path.decode(),), code=Codes.NOT_FOUND),
@@ -154,7 +154,7 @@ async def respond_with_file(
 
         finish_request(request)
     else:
-        respond_404(request)
+        await respond_404(request)
 
 
 def add_file_headers(

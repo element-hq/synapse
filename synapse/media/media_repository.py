@@ -396,8 +396,8 @@ class MediaRepository:
 
         return MXCUri(self.server_name, media_id)
 
-    def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
-        respond_with_json(
+    async def respond_not_yet_uploaded(self, request: SynapseRequest) -> None:
+        await respond_with_json(
             request,
             504,
             cs_error("Media has not been uploaded yet", code=Codes.NOT_YET_UPLOADED),
@@ -455,7 +455,7 @@ class MediaRepository:
             await self.clock.sleep(0.5)
 
         logger.info("Media %s has not yet been uploaded", media_id)
-        self.respond_not_yet_uploaded(request)
+        await self.respond_not_yet_uploaded(request)
         return None
 
     async def get_local_media(

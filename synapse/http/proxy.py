@@ -173,7 +173,7 @@ class ProxyResource(_AsyncResource):
 
         return response.code, response
 
-    def _send_response(
+    async def _send_response(
         self,
         request: "SynapseRequest",
         code: int,
@@ -205,7 +205,7 @@ class ProxyResource(_AsyncResource):
 
         response.deliverBody(_ProxyResponseBody(request))
 
-    def _send_error_response(
+    async def _send_error_response(
         self,
         f: failure.Failure,
         request: "SynapseRequest",

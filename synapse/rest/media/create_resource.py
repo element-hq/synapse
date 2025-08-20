@@ -79,7 +79,7 @@ class CreateResource(RestServlet):
             content_uri,
             unused_expires_at,
         )
-        respond_with_json(
+        await respond_with_json(
             request,
             200,
             {
