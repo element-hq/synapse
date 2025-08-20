@@ -3696,13 +3696,17 @@ class PersistEventsStore:
         # Given the lowest stitched ordering of all the events that we have just
         # inserted, find the previous event (by stitched ordering); the gap
         # will likely come just afterwards.
+        #
+        # Note: we include "AND event_id <> backward_extremity_event_id" because
+        # if this backward extremity is actually an outlier, then that event
+        # does exist in events, but we don't want to find it.
         txn.execute(
             """
             SELECT event_id, stitched_ordering FROM events
-            WHERE room_id = ? AND stitched_ordering < ?
+            WHERE room_id = ? AND stitched_ordering < ? AND event_id <> ?
             ORDER BY stitched_ordering DESC LIMIT 1
             """,
-            [room_id, lowest_referring_ordering],
+            [room_id, lowest_referring_ordering, backward_extremity_event_id],
         )
         row = txn.fetchone()
         if row is None:
