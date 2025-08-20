@@ -3558,7 +3558,7 @@ class PersistEventsStore:
         room_id = events_and_contexts[0][0].room_id
 
         # Map from missing event ID, to the lowest stitched order of the events that reference it.
-        potential_backwards_extremities: Dict[str, int] = {}
+        potential_backwards_extremities: Dict[str, Optional[int]] = {}
         for ev, ctx in events_and_contexts:
             if ev.internal_metadata.is_outlier():
                 continue
@@ -3569,10 +3569,11 @@ class PersistEventsStore:
                 )
                 persisted_event_stitched_ordering = ctx.stitched_ordering
 
-                # EventContext.stitched_ordering is Optional, because it is assigned
-                # quite late in the persistence process, but it should have been
-                # assigned by now.
-                assert persisted_event_stitched_ordering is not None
+                # If any of the events we persisted did not get assigned a stitched order,
+                # we cannot yet assign a stitched order to the backwards extremity either.
+                if persisted_event_stitched_ordering is None:
+                    potential_backwards_extremities[prev_event] = None
+                    continue
 
                 if lowest_referring_ordering is None:
                     lowest_referring_ordering = persisted_event_stitched_ordering
@@ -3671,7 +3672,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         room_id: str,
         backward_extremity_event_id: str,
-        lowest_referring_ordering: int,
+        lowest_referring_ordering: Optional[int],
     ) -> Optional[str]:
         """
         Figure out where in the stitched order a gap (or backwards extremity) belongs.
@@ -3693,29 +3694,27 @@ class PersistEventsStore:
               lowest_referring_ordering: The lowest stitched ordering of all the events
                  that we have just inserted, that refer to this backwards extremity.
         """
-        # Given the lowest stitched ordering of all the events that we have just
-        # inserted, find the previous event (by stitched ordering); the gap
-        # will likely come just afterwards.
-        #
-        # Note: we include "AND event_id <> backward_extremity_event_id" because
-        # if this backward extremity is actually an outlier, then that event
-        # does exist in events, but we don't want to find it.
-        txn.execute(
-            """
-            SELECT event_id, stitched_ordering FROM events
-            WHERE room_id = ? AND stitched_ordering < ? AND event_id <> ?
-            ORDER BY stitched_ordering DESC LIMIT 1
-            """,
-            [room_id, lowest_referring_ordering, backward_extremity_event_id],
-        )
-        row = txn.fetchone()
-        if row is None:
-            # There is no event in the table before this gap. This shouldn't happen
-            # (assuming the create event was given a stitched ordering), because the
-            # create event should always be before any gaps.
-            (new_before_gap_event_id, new_previous_stitched_ordering) = (None, None)
-        else:
-            (new_before_gap_event_id, new_previous_stitched_ordering) = row
+        (new_before_gap_event_id, new_previous_stitched_ordering) = (None, None)
+
+        if lowest_referring_ordering is not None:
+            # Given the lowest stitched ordering of all the events that we have just
+            # inserted, find the previous event (by stitched ordering); the gap
+            # will likely come just afterwards.
+            #
+            # Note: we include "AND event_id <> backward_extremity_event_id" because
+            # if this backward extremity is actually an outlier, then that event
+            # does exist in events, but we don't want to find it.
+            txn.execute(
+                """
+                SELECT event_id, stitched_ordering FROM events
+                WHERE room_id = ? AND stitched_ordering < ? AND event_id <> ?
+                ORDER BY stitched_ordering DESC LIMIT 1
+                """,
+                [room_id, lowest_referring_ordering, backward_extremity_event_id],
+            )
+            row = txn.fetchone()
+            if row is not None:
+                (new_before_gap_event_id, new_previous_stitched_ordering) = row
 
         # If this is an existing backwards extremity, see where it currently
         # exists in the order.
@@ -3744,29 +3743,13 @@ class PersistEventsStore:
         # This is an existing backwards extremity with an assigned stitched ordering.
         # Leave it as-is unless we have successfully calculated a new stitched ordering
         # which is lower than the existing.
-        if new_previous_stitched_ordering is not None and new_previous_stitched_ordering < existing_previous_stitched_ordering:
+        if (
+            new_previous_stitched_ordering is not None
+            and new_previous_stitched_ordering < existing_previous_stitched_ordering
+        ):
             return new_before_gap_event_id
         else:
             return existing_previous_stitched_ordering
-
-
-    async def get_room_max_stitched_ordering(self, room_id: str) -> Optional[int]:
-        """Get the maximum stitched order for any event currently in the room.
-
-        If no events in this room have an assigned stitched order, returns None.
-        """
-
-        def get_room_max_stitched_ordering_txn(
-            txn: LoggingTransaction,
-        ) -> Optional[int]:
-            sql = "SELECT MAX(stitched_ordering) FROM events WHERE room_id=?"
-            txn.execute(sql, [room_id])
-            ret = [r[0] for r in txn]
-            return ret[0]
-
-        return await self.db_pool.runInteraction(
-            "get_room_max_stitched_ordering", get_room_max_stitched_ordering_txn
-        )
 
 
 @attr.s(slots=True, auto_attribs=True)
