@@ -63,6 +63,16 @@ class PickIdpResource(DirectServeHtmlResource):
         if not idp:
             return await self._serve_id_picker(request, client_redirect_url)
 
+        # Validate the `idp` query parameter
+        providers = self._sso_handler.get_identity_providers()
+        auth_provider = providers.get(idp)
+        if not auth_provider:
+            logger.info("Unknown idp %r", idp)
+            self._sso_handler.render_error(
+                request, "unknown_idp", "Unknown identity provider ID"
+            )
+            return
+
         # Otherwise, redirect to the login SSO redirect endpoint for the given IdP
         # (which will in turn take us to the the IdP's redirect URI).
         #
