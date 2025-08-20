@@ -716,7 +716,13 @@ class EventsPersistenceStorageController:
                 )
             )
 
-            # TODO XXX what if previous_event_stitched_order is None?
+            # if previous_event_stitched_order is None, that means we have a room
+            # where there are existing events or gaps without assigned stitched orders.
+            # Let's give up trying to assign stitched orders here.
+            if previous_event_stitched_order is None:
+                # TODO do something better here
+                logger.warning("Found gap event %s without assigned stitched order: bailing", gap_event)
+                return
 
             still_remaining_batch = []
             for event, context in remaining_batch:
