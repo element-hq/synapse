@@ -38,11 +38,6 @@ from synapse.logging.opentracing import (
 from synapse.util import Clock
 
 try:
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
-except ImportError:
-    LogContextScopeManager = None  # type: ignore
-
-try:
     import jaeger_client
 except ImportError:
     jaeger_client = None  # type: ignore
@@ -54,9 +49,10 @@ from tests.unittest import TestCase
 logger = logging.getLogger(__name__)
 
 
-class LogContextScopeManagerTestCase(TestCase):
+class TracingScopeTestCase(TestCase):
     """
-    Test logging contexts and active opentracing spans.
+    Test that our tracing machinery works well in a variety of situations (especially
+    with Twisted's runtime and deferreds).
 
     There's casts throughout this from generic opentracing objects (e.g.
     opentracing.Span) to the ones specific to Jaeger since they have additional
@@ -64,8 +60,6 @@ class LogContextScopeManagerTestCase(TestCase):
     opentracing backend is Jaeger.
     """
 
-    if LogContextScopeManager is None:
-        skip = "Requires opentracing"  # type: ignore[unreachable]
     if jaeger_client is None:
         skip = "Requires jaeger_client"  # type: ignore[unreachable]
 
@@ -76,7 +70,6 @@ class LogContextScopeManagerTestCase(TestCase):
 
         from opentracing.scope_managers.contextvars import ContextVarsScopeManager
 
-        # scope_manager = LogContextScopeManager()
         scope_manager = ContextVarsScopeManager()
         config = jaeger_client.config.Config(
             config={}, service_name="test", scope_manager=scope_manager

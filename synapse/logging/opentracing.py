@@ -260,11 +260,8 @@ except ImportError:
     ContextVarsScopeManager = None  # type: ignore
 try:
     from jaeger_client import Config as JaegerConfig
-
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     JaegerConfig = None  # type: ignore
-    LogContextScopeManager = None  # type: ignore
 
 
 try:
@@ -486,7 +483,6 @@ def init_tracer(hs: "HomeServer") -> None:
     config = JaegerConfig(
         config=jaeger_config,
         service_name=f"{hs.config.server.server_name} {instance_name_by_type}",
-        # scope_manager=LogContextScopeManager(),
         scope_manager=ContextVarsScopeManager(),
         metrics_factory=PrometheusMetricsFactory(),
     )
