@@ -207,6 +207,13 @@ class Clock:
         return call
 
     def cancel_all_looping_calls(self, consumeErrors: bool = True) -> None:
+        """
+        Stop all running looping calls.
+
+        Args:
+            consumeErrors: Whether to re-raise errors encountered when cancelling the
+            scheduled call.
+        """
         for call in self._looping_calls:
             try:
                 call.stop()
@@ -243,14 +250,31 @@ class Clock:
             self._delayed_calls[id] = call
             return call
 
-    def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
+    def cancel_call_later(
+        self, timer: IDelayedCall, consumeErrors: bool = False
+    ) -> None:
+        """
+        Stop the specified scheduled calls.
+
+        Args:
+            timer: The scheduled call to stop.
+            consumeErrors: Whether to re-raise errors encountered when cancelling the
+            scheduled call.
+        """
         try:
             timer.cancel()
         except Exception:
-            if not ignore_errs:
+            if not consumeErrors:
                 raise
 
     def cancel_all_delayed_calls(self, ignore_errs: bool = True) -> None:
+        """
+        Stop all scheduled calls.
+
+        Args:
+            ignore_errs: Whether to re-raise errors encountered when cancelling the
+            scheduled call.
+        """
         for call in self._delayed_calls.values():
             try:
                 call.cancel()

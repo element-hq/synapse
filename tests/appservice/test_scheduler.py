@@ -177,7 +177,6 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
         self.service = Mock()
         self.callback = AsyncMock()
         self.recoverer = _Recoverer(
-            hs=self.hs,
             server_name="test_server",
             clock=cast(Clock, self.clock),
             as_api=self.as_api,

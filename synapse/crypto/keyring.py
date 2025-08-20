@@ -195,6 +195,9 @@ class Keyring:
         )
 
     def shutdown(self) -> None:
+        """
+        Prepares the KeyRing for garbage collection by shutting down it's queues.
+        """
         self._fetch_keys_queue.shutdown()
         for key_fetcher in self._key_fetchers:
             key_fetcher.shutdown()

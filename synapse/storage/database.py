@@ -653,8 +653,10 @@ class DatabasePool:
         )
 
     def stop_background_updates(self) -> None:
+        """
+        Stops the database from running any further background updates.
+        """
         self.updates.enabled = False
-        self.updates._background_update_handlers.clear()
 
     def name(self) -> str:
         "Return the name of this database"

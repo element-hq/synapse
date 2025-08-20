@@ -363,7 +363,6 @@ class _TransactionController:
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
         self.as_api = hs.get_application_service_api()
-        self.hs = hs
 
         # map from service id to recoverer instance
         self.recoverers: Dict[str, "_Recoverer"] = {}
@@ -447,7 +446,6 @@ class _TransactionController:
         logger.info("Starting recoverer for AS ID %s", service.id)
         assert service.id not in self.recoverers
         recoverer = self.RECOVERER_CLASS(
-            self.hs,
             self.server_name,
             self.clock,
             self.store,
@@ -494,7 +492,6 @@ class _Recoverer:
 
     def __init__(
         self,
-        hs: "HomeServer",
         server_name: str,
         clock: Clock,
         store: DataStore,
@@ -502,7 +499,6 @@ class _Recoverer:
         service: ApplicationService,
         callback: Callable[["_Recoverer"], Awaitable[None]],
     ):
-        self.hs = hs
         self.server_name = server_name
         self.clock = clock
         self.store = store

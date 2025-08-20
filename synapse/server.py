@@ -259,6 +259,8 @@ def cache_in_self(builder: F) -> F:
 
 @dataclass
 class ShutdownInfo:
+    """Information for callable functions called at time of shutdown."""
+
     desc: str
     func: Callable[..., Any]
     trigger_id: Any
@@ -350,41 +352,40 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._sync_shutdown_handlers: List[ShutdownInfo] = []
 
     def shutdown(self) -> None:
+        """
+        Cleanly stops all aspects of the HomeServer and removes any references that
+        have been handed out in order to allow the HomeServer object to be garbage
+        collected.
+
+        You must ensure the HomeServer object to not be frozen in the garbage collector
+        in order for it to be cleaned up. By default, Synapse freezes the HomeServer
+        object in the garbage collector.
+        """
+
         logger.info("Received shutdown request")
 
         # TODO: Cleanup replication pieces
 
         self.get_keyring().shutdown()
 
-        logger.info("Stopping later gauges: %d", len(self._later_gauges))
         for later_gauge in self._later_gauges:
             later_gauge.unregister()
         self._later_gauges.clear()
 
-        logger.info("Unregistering db background updates")
         for db in self.get_datastores().databases:
             db.stop_background_updates()
 
-        logger.info("Stopping looping calls")
         self.get_clock().cancel_all_looping_calls()
-        logger.info("Stopping call_later calls")
         self.get_clock().cancel_all_delayed_calls()
 
-        logger.info(
-            "Stopping background processes: %d", len(self._background_processes)
-        )
         for process in self._background_processes:
             process.cancel()
         self._background_processes.clear()
 
-        logger.info(
-            "Clearing cache metrics: %d", len(CACHE_METRIC_REGISTRY._pre_update_hooks)
-        )
         CACHE_METRIC_REGISTRY.clear(self.config.server.server_name)
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:
-                logger.info("Shutting down %s", shutdown_handler.desc)
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
                 defer.ensureDeferred(
                     shutdown_handler.func(
@@ -397,7 +398,6 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         for shutdown_handler in self._sync_shutdown_handlers:
             try:
-                logger.info("Shutting down %s", shutdown_handler.desc)
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
                 shutdown_handler.func(*shutdown_handler.args, **shutdown_handler.kwargs)
             except Exception:
@@ -406,7 +406,6 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         unregister_sighups(self.config.server.server_name)
 
-        logger.info("Shutting down listening services")
         for listener in self._listening_services:
             # During unit tests, an incomplete `_FakePort` is used for listeners so
             # check listener type here to ensure shutdown procedure is only applied to
@@ -423,7 +422,6 @@ class HomeServer(metaclass=abc.ABCMeta):
                 # twisted.internet.error.AlreadyCancelled: Tried to cancel an already-cancelled event.
         self._listening_services.clear()
 
-        logger.info("Shutting down metrics listeners")
         for server, thread in self._metrics_listeners:
             server.shutdown()
             thread.join()
@@ -438,6 +436,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         *args: object,
         **kwargs: object,
     ) -> None:
+        """
+        Register a system event trigger with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
         id = self.get_reactor().addSystemEventTrigger(
             phase,
             eventType,
@@ -461,6 +463,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         *args: object,
         **kwargs: object,
     ) -> None:
+        """
+        Register a system event trigger with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
         id = self.get_reactor().addSystemEventTrigger(
             phase,
             eventType,
@@ -475,9 +481,17 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     def register_later_gauge(self, later_gauge: LaterGauge) -> None:
+        """
+        Register a LaterGauge specific to this instance with the HomeServer so it
+        can be cleanly removed when the HomeServer is shutdown.
+        """
         self._later_gauges.append(later_gauge)
 
     def register_background_process(self, process: defer.Deferred) -> None:
+        """
+        Register a background process with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
         self._background_processes.append(process)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:

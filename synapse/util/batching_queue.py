@@ -128,6 +128,10 @@ class BatchingQueue(Generic[V, R]):
         )
 
     def shutdown(self) -> None:
+        """
+        Prepares the object for garbage collection by removing any handed out
+        references.
+        """
         number_queued.labels(
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         ).set_function(lambda: 0)
