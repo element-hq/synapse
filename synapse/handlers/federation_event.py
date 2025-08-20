@@ -2402,7 +2402,7 @@ class FederationEventHandler:
         remaining_batch = list(events)
 
         # Find all events in the current batch which are in a timeline gap
-        gap_events = await self.persist_events_store.db_pool.simple_select_many_batch(
+        gap_events = await self._store.db_pool.simple_select_many_batch(
             "event_backward_extremities",
             "event_id",
             (ev.event_id for ev in events),
