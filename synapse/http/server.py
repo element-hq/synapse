@@ -909,6 +909,9 @@ def _write_bytes_to_request(request: Request, bytes_to_write: bytes) -> None:
     large response bodies.
     """
 
+    request.write(bytes_to_write)
+    request.finish()
+
     # The problem with dumping all of the response into the `Request` object at
     # once (via `Request.write`) is that doing so starts the timeout for the
     # next request to be received: so if it takes longer than 60s to stream back
@@ -919,12 +922,12 @@ def _write_bytes_to_request(request: Request, bytes_to_write: bytes) -> None:
 
     # To make sure we don't write all of the bytes at once we split it up into
     # chunks.
-    chunk_size = 4096
-    bytes_generator = chunk_seq(bytes_to_write, chunk_size)
+    # chunk_size = 4096
+    # bytes_generator = chunk_seq(bytes_to_write, chunk_size)
 
-    # We use a `_ByteProducer` here rather than `NoRangeStaticProducer` as the
-    # unit tests can't cope with being given a pull producer.
-    _ByteProducer(request, bytes_generator)
+    # # We use a `_ByteProducer` here rather than `NoRangeStaticProducer` as the
+    # # unit tests can't cope with being given a pull producer.
+    # _ByteProducer(request, bytes_generator)
 
 
 def set_cors_headers(request: "SynapseRequest") -> None:
