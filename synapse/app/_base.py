@@ -641,7 +641,7 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
         if hasattr(gc, "freeze"):
             gc.collect()
             gc.freeze()
-        
+
             # Speed up shutdowns by freezing all allocated objects. This moves everything
             # into the permanent generation and excludes them from the final GC.
             atexit.register(gc.freeze)

@@ -314,7 +314,9 @@ class SynapseHomeServer(HomeServer):
 
 
 def setup(
-        config_options: List[str], reactor: Optional[ISynapseReactor] = None, freeze: bool = True,
+    config_options: List[str],
+    reactor: Optional[ISynapseReactor] = None,
+    freeze: bool = True,
 ) -> SynapseHomeServer:
     """
     Args:
