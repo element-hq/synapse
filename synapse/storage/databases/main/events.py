@@ -381,7 +381,7 @@ class PersistEventsStore:
                 if context.app_service:
                     origin_type = "local"
                     origin_entity = context.app_service.id
-                elif self.is_mine_id(event.sender):
+                elif self.hs.is_mine_id(event.sender):
                     origin_type = "local"
                     origin_entity = "*client*"
                 else:
@@ -2077,7 +2077,7 @@ class PersistEventsStore:
         # Check if any of the remote membership changes requires us to
         # unsubscribe from their device lists.
         self.store.handle_potentially_left_users_txn(
-            txn, {m for m in members_to_cache_bust if not self.is_mine_id(m)}
+            txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
     @classmethod

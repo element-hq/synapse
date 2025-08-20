@@ -52,7 +52,6 @@ class CommonUsageMetricsManager:
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
-        self.hs = hs
 
     async def get_metrics(self) -> CommonUsageMetrics:
         """Get the CommonUsageMetrics object. If no collection has happened yet, do it

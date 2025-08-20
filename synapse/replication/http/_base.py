@@ -206,7 +206,6 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
         parameter to specify which instance to hit (the instance must be in
         the `instance_map` config).
         """
-        _hs = hs
         server_name = hs.hostname
         clock = hs.get_clock()
         client = hs.get_replication_client()
@@ -230,8 +229,8 @@ class ReplicationEndpoint(metaclass=abc.ABCMeta):
             *, instance_name: str = MAIN_PROCESS_INSTANCE_NAME, **kwargs: Any
         ) -> Any:
             # We have to pull these out here to avoid circular dependencies...
-            streams = _hs.get_replication_command_handler().get_streams_to_replicate()
-            replication = _hs.get_replication_data_handler()
+            streams = hs.get_replication_command_handler().get_streams_to_replicate()
+            replication = hs.get_replication_data_handler()
 
             with outgoing_gauge.track_inprogress():
                 if instance_name == local_instance_name:

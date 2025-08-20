@@ -1822,7 +1822,6 @@ class PresenceEventSource(EventSource[int, UserPresenceState]):
         #
         #   AuthHandler -> Notifier -> PresenceEventSource -> ModuleApi -> AuthHandler
         self.server_name = hs.hostname
-        self.hs = hs
         self.get_presence_handler = hs.get_presence_handler
         self.get_presence_router = hs.get_presence_router
         self.server_name = hs.hostname

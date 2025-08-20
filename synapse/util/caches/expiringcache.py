@@ -22,7 +22,6 @@
 import logging
 from collections import OrderedDict
 from typing import (
-    TYPE_CHECKING,
     Any,
     Generic,
     Iterable,
@@ -41,9 +40,6 @@ from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util import Clock
 from synapse.util.caches import EvictionReason, register_cache
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

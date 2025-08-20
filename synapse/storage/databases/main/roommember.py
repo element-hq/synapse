@@ -39,8 +39,6 @@ from typing import (
 
 import attr
 
-from twisted.internet.task import LoopingCall
-
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
@@ -110,11 +108,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             and self.hs.config.metrics.metrics_flags.known_servers
         ):
             self._known_servers_count = 1
-            self._count_known_servers_task: Optional[LoopingCall] = (
-                self.hs.get_clock().looping_call(
-                    self._count_known_servers,
-                    60 * 1000,
-                )
+            self.hs.get_clock().looping_call(
+                self._count_known_servers,
+                60 * 1000,
             )
             self.hs.get_clock().call_later(
                 1,
