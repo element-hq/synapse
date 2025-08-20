@@ -306,6 +306,12 @@ class EventContext(UnpersistedEventContextBase):
         )
 
 
+EventPersistencePair = Tuple[EventBase, EventContext]
+"""
+The combination of an event to be persisted and its context.
+"""
+
+
 @attr.s(slots=True, auto_attribs=True)
 class UnpersistedEventContext(UnpersistedEventContextBase):
     """
@@ -363,7 +369,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
         room_id: str,
         last_known_state_group: int,
         datastore: "StateGroupDataStore",
-    ) -> List[Tuple[EventBase, EventContext]]:
+    ) -> List[EventPersistencePair]:
         """
         Takes a list of events and their associated unpersisted contexts and persists
         the unpersisted contexts, returning a list of events and persisted contexts.
