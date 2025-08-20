@@ -24,7 +24,12 @@ from parameterized import parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import MAX_EDU_SIZE, EduTypes
+from synapse.api.constants import (
+    MAX_EDU_SIZE,
+    MAX_EDUS_PER_TRANSACTION,
+    SYNAPSE_EDUS_PER_TRANSACTION,
+    EduTypes,
+)
 from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, sendtodevice, sync
@@ -242,7 +247,10 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
         # A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
         first_call = mock_send_transaction.call_args_list[0][0][1]()
-        self.assertEqual(len(first_call["edus"]), 90)
+        self.assertEqual(
+            len(first_call["edus"]),
+            MAX_EDUS_PER_TRANSACTION - SYNAPSE_EDUS_PER_TRANSACTION,
+        )
 
         second_call = mock_send_transaction.call_args_list[1][0][1]()
         self.assertEqual(len(second_call["edus"]), 11)

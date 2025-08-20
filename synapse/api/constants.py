@@ -39,6 +39,11 @@ MAX_PDU_SIZE = 65536
 # and over and prevent other outbound federation traffic from happening.
 MAX_EDU_SIZE = 65536
 
+# This is defined in the Matrix spec and enforced by the receiver.
+MAX_EDUS_PER_TRANSACTION = 100
+# A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
+SYNAPSE_EDUS_PER_TRANSACTION = 10
+
 # Max/min size of ints in canonical JSON
 CANONICALJSON_MAX_INT = (2**53) - 1
 CANONICALJSON_MIN_INT = -CANONICALJSON_MAX_INT

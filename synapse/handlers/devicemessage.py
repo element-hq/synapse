@@ -430,11 +430,12 @@ def get_device_message_edu_contents(
         to fit into an EDU.
     """
 
+    first_message_id = random_string(16)
     BASE_EDU_CONTENT = {
         "messages": {},
         "sender": sender_user_id,
         "type": message_type,
-        "message_id": random_string(16),
+        "message_id": first_message_id,
     }
     # This is the size of the full EDU without any messages and without the
     # opentracing context as this is not sent as part of the transaction
@@ -451,10 +452,10 @@ def get_device_message_edu_contents(
     edu_contents = []
 
     current_edu_content: JsonDict = create_new_to_device_edu_content(
-        BASE_EDU_CONTENT['sender'],
-        BASE_EDU_CONTENT['type'],
-        BASE_EDU_CONTENT['org.matrix.opentracing_context'],
-        BASE_EDU_CONTENT['message_id'],
+        sender_user_id,
+        message_type,
+        context,
+        first_message_id,
     )
     current_edu_size = BASE_EDU_SIZE
 
@@ -483,9 +484,7 @@ def get_device_message_edu_contents(
             )
 
             current_edu_content = create_new_to_device_edu_content(
-                BASE_EDU_CONTENT['sender'],
-                BASE_EDU_CONTENT['type'],
-                BASE_EDU_CONTENT['org.matrix.opentracing_context'],
+                sender_user_id, message_type, context
             )
 
             current_edu_size = BASE_EDU_SIZE
@@ -520,6 +519,6 @@ def create_new_to_device_edu_content(
         "sender": sender_user_id,
         "type": message_type,
         "message_id": message_id,
-        "org.matrix.opentracing_context": json_encoder.encode(context)
+        "org.matrix.opentracing_context": json_encoder.encode(context),
     }
     return content
