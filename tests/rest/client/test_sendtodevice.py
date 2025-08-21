@@ -160,7 +160,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        server_logger = logging.getLogger("tests.server")
+        server_logger = logging.getLogger("synapse.storage.SQL")
         server_logger_was_disabled = server_logger.disabled
         server_logger.disabled = True
         try:
@@ -231,7 +231,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
         # ref: https://github.com/twisted/twisted/issues/12482
         # To remove this, we would need to fix the above issue and
         # update, including in olddeps (so several years' wait).
-        server_logger = logging.getLogger("tests.server")
+        server_logger = logging.getLogger("synapse.storage.SQL")
         server_logger_was_disabled = server_logger.disabled
         server_logger.disabled = True
         try:
