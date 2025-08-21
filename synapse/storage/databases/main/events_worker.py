@@ -1337,6 +1337,7 @@ class EventsWorkerStore(SQLBaseStore):
         fetched_event_ids: Set[str] = set()
         fetched_events: Dict[str, _EventRow] = {}
 
+        @trace
         async def _fetch_event_ids_and_get_outstanding_redactions(
             event_ids_to_fetch: Collection[str],
         ) -> Collection[str]:
@@ -1344,6 +1345,10 @@ class EventsWorkerStore(SQLBaseStore):
             Fetch all of the given event_ids and return any associated redaction event_ids
             that we still need to fetch in the next iteration.
             """
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "event_ids_to_fetch.length",
+                str(len(event_ids_to_fetch)),
+            )
             row_map = await self._enqueue_events(event_ids_to_fetch)
 
             # we need to recursively fetch any redactions of those events
