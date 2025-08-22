@@ -1626,15 +1626,12 @@ class EventsWorkerStore(SQLBaseStore):
                 self.database_engine, ("room_id", "user_id"), to_check_set
             )
             txn.execute(room_redaction_sql + in_list_clause, room_redaction_args)
-            res = txn.fetchall()
-            if not res:
-                continue
             for (
                 returned_room_id,
                 returned_user_id,
                 redacting_event_id,
                 redact_end_ordering,
-            ) in res:
+            ) in txn:
                 for e_row in events:
                     e_json = json.loads(e_row.json)
                     room_id = e_json.get("room_id")
