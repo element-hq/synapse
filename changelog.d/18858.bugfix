@@ -1,0 +1,1 @@
+Do not throw an error when fetching a rejected delayed state event on startup.
