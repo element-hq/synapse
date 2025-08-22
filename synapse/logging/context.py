@@ -296,6 +296,7 @@ class LoggingContext:
     def __init__(
         self,
         name: Optional[str] = None,
+        server_name: Optional[str] = None,
         parent_context: "Optional[LoggingContext]" = None,
         request: Optional[ContextRequest] = None,
     ) -> None:
