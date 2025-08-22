@@ -26,6 +26,17 @@ The oldest supported version of SQLite is the version
 [provided](https://packages.debian.org/bullseye/libsqlite3-0) by
 [Debian oldstable](https://wiki.debian.org/DebianOldStable).
 
+For Python dependencies, we often specify loose version constraints (ex. `>=X.Y.Z`) to
+be forwards compatible with any new versions. Upper bounds (`<A.B.C`) are only added
+when necessary to prevent known incompatibilities.
+
+When selecting a minimum version, we prioritize alignment with major Linux
+distributions. A version is typically considered acceptable once it is available in both
+the latest [Debian Stable](https://packages.debian.org/stable/) and [Ubuntu
+LTS](https://launchpad.net/ubuntu) repositories.
+
+
+
 Context
 -------
 
