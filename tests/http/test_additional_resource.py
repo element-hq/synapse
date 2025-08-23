@@ -36,7 +36,7 @@ class _AsyncTestCustomEndpoint:
 
     async def handle_request(self, request: Request) -> None:
         assert isinstance(request, SynapseRequest)
-        respond_with_json(request, 200, {"some_key": "some_value_async"})
+        await respond_with_json(request, 200, {"some_key": "some_value_async"})
 
 
 class _SyncTestCustomEndpoint:
@@ -45,7 +45,7 @@ class _SyncTestCustomEndpoint:
 
     async def handle_request(self, request: Request) -> None:
         assert isinstance(request, SynapseRequest)
-        respond_with_json(request, 200, {"some_key": "some_value_sync"})
+        await respond_with_json(request, 200, {"some_key": "some_value_sync"})
 
 
 class AdditionalResourceTests(HomeserverTestCase):
