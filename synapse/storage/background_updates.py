@@ -395,11 +395,13 @@ class BackgroundUpdater:
             # if we start a new background update, not all updates are done.
             self._all_done = False
             sleep = self.sleep_enabled
-            run_as_background_process(
-                "background_updates",
-                self.server_name,
-                self.run_background_updates,
-                sleep,
+            self.hs.register_background_process(
+                run_as_background_process(
+                    "background_updates",
+                    self.server_name,
+                    self.run_background_updates,
+                    sleep,
+                )
             )
 
     async def run_background_updates(self, sleep: bool) -> None:

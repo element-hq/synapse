@@ -525,19 +525,13 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self._send_stop_syncing_loop = self.clock.looping_call(
-            self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
+
+        hs.register_async_shutdown_handler(
+            "before", "shutdown", "generic_presence.on_shutdown", self._on_shutdown
         )
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "generic_presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
-        )
-
+    @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_command(
@@ -779,11 +773,13 @@ class PresenceHandler(BasePresenceHandler):
             EduTypes.PRESENCE, self.incoming_presence
         )
 
-        LaterGauge(
-            name="synapse_handlers_presence_user_to_current_state_size",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_handlers_presence_user_to_current_state_size",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
+            )
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -832,13 +828,8 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
+        hs.register_async_shutdown_handler(
+            "before", "shutdown", "presence.on_shutdown", self._on_shutdown
         )
 
         # Keeps track of the number of *ongoing* syncs on this process. While
@@ -862,7 +853,9 @@ class PresenceHandler(BasePresenceHandler):
         ] = {}
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer")
+        self.external_sync_linearizer = Linearizer(
+            name="external_sync_linearizer", clock=hs.get_clock()
+        )
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.
@@ -882,11 +875,13 @@ class PresenceHandler(BasePresenceHandler):
                 60 * 1000,
             )
 
-        LaterGauge(
-            name="synapse_handlers_presence_wheel_timer_size",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.wheel_timer)},
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_handlers_presence_wheel_timer_size",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self.wheel_timer)},
+            )
         )
 
         # Used to handle sending of presence to newly joined users/servers
