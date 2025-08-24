@@ -32,18 +32,16 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-
 from synapse.types import (
     JsonDict,
     JsonMapping,
-    JsonValue
+    JsonValue,
     Requester,
     ScheduledTask,
     TaskStatus,
     UserID,
     create_requester,
 )
-
 from synapse.util.caches.descriptors import cached
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -627,7 +625,8 @@ class ProfileHandler:
             return TaskStatus.COMPLETE, None, None
 
         room_ids = await self.store.get_rooms_for_user(target_user.to_string())
-
+        # TODO order list based on some sort of recent usage heuristic so that the fact
+        # the changes are not happening instantly is less obvious.
         for room_id in room_ids:
             handler = self.hs.get_room_member_handler()
             try:
