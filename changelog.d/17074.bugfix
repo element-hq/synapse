@@ -1,0 +1,1 @@
+Process room membership changes likes profile updates asynchronously so the request does not timeout. Fixes https://github.com/element-hq/synapse/issues/1297
