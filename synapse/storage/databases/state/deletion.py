@@ -25,8 +25,7 @@ from typing import (
     Tuple,
 )
 
-from synapse.events import EventBase
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventPersistencePair
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -228,7 +227,7 @@ class StateDeletionDataStore:
 
     @contextlib.asynccontextmanager
     async def persisting_state_group_references(
-        self, event_and_contexts: Collection[Tuple[EventBase, EventContext]]
+        self, event_and_contexts: Collection[EventPersistencePair]
     ) -> AsyncIterator[None]:
         """Wraps the persistence of the given events and contexts, ensuring that
         any state groups referenced still exist and that they don't get deleted
