@@ -92,17 +92,17 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_id=room_ids[0],
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
         self.assertEqual(
             get_localpart_from_id(self.frank_registered), event_content["displayname"]
         )
 
         user1_displayname = "user1 displayname"
-        
         # Create the deferred but don't pump the reactor yet
         # This allows us to verify that set_displayname doesn't block on room updates
         from twisted.internet.defer import ensureDeferred
+
         displayname_deferred = ensureDeferred(
             self.handler.set_displayname(
                 self.frank,
@@ -110,21 +110,18 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 user1_displayname,
             )
         )
-        
         # Check room state BEFORE resolving the deferred
         # If set_displayname is truly async, room states shouldn't be updated yet
         event_content = self.helper.get_state(
             room_id=room_ids[room_count - 1],
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
         original_displayname = event_content.get("displayname")
-        
         # This proves set_displayname doesn't block - room states are unchanged
         # even though the deferred exists
         self.assertNotEqual(user1_displayname, original_displayname)
-        
         # Now resolve the deferred - this will pump the reactor and run background tasks
         self.get_success(displayname_deferred)
 
@@ -133,9 +130,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_id=room_ids[room_count - 1],
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
-        
         # Final verification that the background task updated the room state
         self.assertEqual(user1_displayname, event_content["displayname"])
 
@@ -154,7 +150,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_id=room_id,
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
         self.assertEqual(
             get_localpart_from_id(self.frank_registered), event_content["displayname"]
@@ -176,7 +172,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_id=room_id,
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
         self.assertEqual(displayname1, event_content["displayname"])
 
@@ -196,7 +192,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_id=room_id,
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
         self.assertEqual(displayname2, event_content["displayname"])
 
@@ -214,7 +210,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             room_id=room_id,
             event_type=EventTypes.Member,
             tok=self.frank_token,
-            state_key=self.frank,
+            state_key=str(self.frank),
         )
         self.assertEqual(None, event_content.get("displayname"))
 
