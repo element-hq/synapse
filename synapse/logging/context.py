@@ -276,12 +276,15 @@ class LoggingContext:
 
     Args:
         name: Name for the context for logging.
+        server_name: The name of the server this context is associated with
+            (`config.server.server_name` or `hs.hostname`)
         parent_context (LoggingContext|None): The parent of the new context
     """
 
     __slots__ = [
         "previous_context",
         "name",
+        "server_name",
         "parent_context",
         "_resource_usage",
         "usage_start",
@@ -296,7 +299,7 @@ class LoggingContext:
         self,
         *,
         name: str,
-        server_name: Optional[str] = None,
+        server_name: str,
         parent_context: "Optional[LoggingContext]" = None,
         request: Optional[ContextRequest] = None,
     ) -> None:
@@ -310,6 +313,7 @@ class LoggingContext:
         self.usage_start: Optional[resource.struct_rusage] = None
 
         self.name = name
+        self.server_name = server_name
         self.main_thread = get_thread_id()
         self.request = None
         self.tag = ""
@@ -322,11 +326,13 @@ class LoggingContext:
 
         self.parent_context = parent_context
 
+        # Inherit some fields from the parent context
         if self.parent_context is not None:
-            # we track the current request_id
+            # which server this corresponds to
+            self.server_name = self.parent_context.server_name
+            # which request this corresponds to
             self.request = self.parent_context.request
-
-            # we also track the current scope:
+            # tracing scope
             self.scope = self.parent_context.scope
 
         if request is not None:
