@@ -19,10 +19,14 @@
 #
 #
 
+# Integer literals for push rule `kind`s
+# This is used to store them in the database.
 PRIORITY_CLASS_MAP = {
     "underride": 1,
     "sender": 2,
     "room": 3,
+    # MSC4306
+    "postcontent": 6,
     "content": 4,
     "override": 5,
 }
