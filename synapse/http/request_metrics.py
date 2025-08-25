@@ -164,11 +164,13 @@ def _get_in_flight_counts() -> Mapping[Tuple[str, ...], int]:
     return counts
 
 
-LaterGauge(
+in_flight_requests = LaterGauge(
     name="synapse_http_server_in_flight_requests_count",
     desc="",
     labelnames=["method", "servlet", SERVER_NAME_LABEL],
-    caller=_get_in_flight_counts,
+)
+in_flight_requests.register_hook(
+    homeserver_instance_id=None, hook=_get_in_flight_counts
 )
 
 

@@ -99,6 +99,7 @@ from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
 from synapse.util import SYNAPSE_VERSION, Clock
+from synapse.util.stringutils import random_string
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -329,6 +330,9 @@ class MockHomeserver:
 
     def get_reactor(self) -> ISynapseReactor:
         return reactor
+
+    def get_instance_id(self) -> Optional[str]:
+        return random_string(5)
 
     def get_instance_name(self) -> str:
         return "master"
@@ -685,7 +689,15 @@ class Porter:
             )
             prepare_database(db_conn, engine, config=self.hs_config)
             # Type safety: ignore that we're using Mock homeservers here.
-            store = Store(DatabasePool(hs, db_config, engine), db_conn, hs)  # type: ignore[arg-type]
+            store = Store(
+                DatabasePool(
+                    hs,  # type: ignore[arg-type]
+                    db_config,
+                    engine,
+                ),
+                db_conn,
+                hs,  # type: ignore[arg-type]
+            )
             db_conn.commit()
 
         return store
