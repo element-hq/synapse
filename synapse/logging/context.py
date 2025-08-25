@@ -230,12 +230,20 @@ LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
 class _Sentinel:
     """Sentinel to represent the root context"""
 
-    __slots__ = ["previous_context", "finished", "request", "scope", "tag"]
+    __slots__ = [
+        "previous_context",
+        "finished",
+        "server_name",
+        "request",
+        "scope",
+        "tag",
+    ]
 
     def __init__(self) -> None:
         # Minimal set for compatibility with LoggingContext
         self.previous_context = None
         self.finished = False
+        self.server_name = "unknown_server_from_sentinel_context"
         self.request = None
         self.scope = None
         self.tag = None
@@ -583,21 +591,20 @@ class LoggingContextFilter(logging.Filter):
     record.
     """
 
-    def __init__(self, request: str = ""):
-        self._default_request = request
-
     def filter(self, record: logging.LogRecord) -> Literal[True]:
         """Add each fields from the logging contexts to the record.
         Returns:
             True to include the record in the log output.
         """
         context = current_context()
-        record.request = self._default_request
+        record.request = ""
+        record.server_name = "unknown_server_from_no_context"
 
         # context should never be None, but if it somehow ends up being, then
         # we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
         if context is not None:
+            record.server_name = context.server_name
             # Logging is interested in the request ID. Note that for backwards
             # compatibility this is stored as the "request" on the record.
             record.request = str(context)
