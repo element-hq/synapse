@@ -328,8 +328,6 @@ class LoggingContext:
 
         # Inherit some fields from the parent context
         if self.parent_context is not None:
-            # which server this corresponds to
-            self.server_name = self.parent_context.server_name
             # which request this corresponds to
             self.request = self.parent_context.request
             # tracing scope
@@ -717,12 +715,15 @@ def nested_logging_context(suffix: str) -> LoggingContext:
             "Starting nested logging context from sentinel context: metrics will be lost"
         )
         parent_context = None
+        server_name = "unknown_server_from_sentinel_context"
     else:
         assert isinstance(curr_context, LoggingContext)
         parent_context = curr_context
+        server_name = parent_context.server_name
     prefix = str(curr_context)
     return LoggingContext(
         name=prefix + "-" + suffix,
+        server_name=server_name,
         parent_context=parent_context,
     )
 
@@ -1003,12 +1004,18 @@ def defer_to_threadpool(
             "Calling defer_to_threadpool from sentinel context: metrics will be lost"
         )
         parent_context = None
+        server_name = "unknown_server_from_sentinel_context"
     else:
         assert isinstance(curr_context, LoggingContext)
         parent_context = curr_context
+        server_name = parent_context.server_name
 
     def g() -> R:
-        with LoggingContext(name=str(curr_context), parent_context=parent_context):
+        with LoggingContext(
+            name=str(curr_context),
+            server_name=server_name,
+            parent_context=parent_context,
+        ):
             return f(*args, **kwargs)
 
     return make_deferred_yieldable(threads.deferToThreadPool(reactor, threadpool, g))

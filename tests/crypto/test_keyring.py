@@ -122,6 +122,7 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         async def first_lookup() -> None:
             with LoggingContext(
                 name="context_11",
+                server_name=self.hs.hostname,
                 request=cast(ContextRequest, FakeRequest("context_11")),
             ):
                 res_deferreds = kr.verify_json_objects_for_server(
@@ -163,6 +164,7 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         async def second_lookup() -> None:
             with LoggingContext(
                 name="context_12",
+                server_name=self.hs.hostname,
                 request=cast(ContextRequest, FakeRequest("context_12")),
             ):
                 res_deferreds_2 = kr.verify_json_objects_for_server(

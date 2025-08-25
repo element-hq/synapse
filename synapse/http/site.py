@@ -310,6 +310,7 @@ class SynapseRequest(Request):
         request_id = self.get_request_id()
         self.logcontext = LoggingContext(
             name=request_id,
+            server_name=self.our_server_name,
             request=ContextRequest(
                 request_id=request_id,
                 ip_address=self.get_client_ip_if_available(),

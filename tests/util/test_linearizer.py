@@ -135,7 +135,7 @@ class LinearizerTestCase(unittest.TestCase):
         key = ""
 
         async def func(i: int) -> None:
-            with LoggingContext(name="func(%s)" % i) as lc:
+            with LoggingContext(name="func(%s)" % i, server_name="test_server") as lc:
                 async with linearizer.queue(key):
                     self.assertEqual(current_context(), lc)
 

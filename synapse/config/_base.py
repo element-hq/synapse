@@ -601,7 +601,7 @@ class RootConfig:
 
     @classmethod
     def load_config_with_parser(
-        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv: List[str]
+        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv_options: List[str]
     ) -> Tuple[TRootConfig, argparse.Namespace]:
         """Parse the commandline and config files with the given parser
 
@@ -611,14 +611,14 @@ class RootConfig:
 
         Args:
             parser
-            argv
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Returns the parsed config object and the parsed argparse.Namespace
             object from parser.parse_args(..)`
         """
 
-        config_args = parser.parse_args(argv)
+        config_args = parser.parse_args(argv_options)
 
         config_files = find_config_files(search_paths=config_args.config_path)
         obj = cls(config_files)

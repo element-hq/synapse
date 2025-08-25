@@ -80,7 +80,10 @@ class FederationClientTests(HomeserverTestCase):
 
         @defer.inlineCallbacks
         def do_request() -> Generator["Deferred[Any]", object, object]:
-            with LoggingContext(name="one") as context:
+            with LoggingContext(
+                name="one",
+                server_name=self.hs.hostname,
+            ) as context:
                 fetch_d = defer.ensureDeferred(
                     self.cl.get_json("testserv:8008", "foo/bar")
                 )

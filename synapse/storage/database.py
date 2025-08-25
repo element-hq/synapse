@@ -146,7 +146,7 @@ def make_pool(
     def _on_new_connection(conn: Connection) -> None:
         # Ensure we have a logging context so we can correctly track queries,
         # etc.
-        with LoggingContext(name="db.on_new_connection"):
+        with LoggingContext(name="db.on_new_connection", server_name=server_name):
             engine.on_new_connection(
                 LoggingDatabaseConnection(
                     conn=conn,
@@ -1049,7 +1049,9 @@ class DatabasePool:
             assert not self.engine.in_transaction(conn)
 
             with LoggingContext(
-                name=str(curr_context), parent_context=parent_context
+                name=str(curr_context),
+                server_name=self.server_name,
+                parent_context=parent_context,
             ) as context:
                 with opentracing.start_active_span(
                     operation_name="db.connection",

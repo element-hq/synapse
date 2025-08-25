@@ -382,7 +382,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
         """
         if instance_id is None:
             instance_id = id(self)
-        super().__init__(name="%s-%s" % (name, instance_id))
+        super().__init__(name="%s-%s" % (name, instance_id), server_name=server_name)
         self._proc: Optional[_BackgroundProcess] = _BackgroundProcess(
             desc=name, server_name=server_name, ctx=self
         )

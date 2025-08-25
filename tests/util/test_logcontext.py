@@ -48,20 +48,20 @@ class LoggingContextTestCase(unittest.TestCase):
         self.assertEqual(context.name, value)
 
     def test_with_context(self) -> None:
-        with LoggingContext(name="test"):
+        with LoggingContext(name="test", server_name="test_server"):
             self._check_test_key("test")
 
     async def test_sleep(self) -> None:
         clock = Clock(reactor)
 
         async def competing_callback() -> None:
-            with LoggingContext(name="competing"):
+            with LoggingContext(name="competing", server_name="test_server"):
                 await clock.sleep(0)
                 self._check_test_key("competing")
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
-        with LoggingContext(name="one"):
+        with LoggingContext(name="one", server_name="test_server"):
             await clock.sleep(0)
             self._check_test_key("one")
 
@@ -70,7 +70,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         callback_completed = False
 
-        with LoggingContext(name="one"):
+        with LoggingContext(name="one", server_name="test_server"):
             # fire off function, but don't wait on it.
             d2 = run_in_background(function)
 
@@ -156,7 +156,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         sentinel_context = current_context()
 
-        with LoggingContext(name="one"):
+        with LoggingContext(name="one", server_name="test_server"):
             d1 = make_deferred_yieldable(blocking_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -172,7 +172,7 @@ class LoggingContextTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[object]", object, None]:
         sentinel_context = current_context()
 
-        with LoggingContext(name="one"):
+        with LoggingContext(name="one", server_name="test_server"):
             d1 = make_deferred_yieldable(_chained_deferred_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -183,7 +183,7 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("one")
 
     def test_nested_logging_context(self) -> None:
-        with LoggingContext(name="foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             nested_context = nested_logging_context(suffix="bar")
             self.assertEqual(nested_context.name, "foo-bar")
 

@@ -218,7 +218,9 @@ class Measure:
             assert isinstance(curr_context, LoggingContext)
             parent_context = curr_context
         self._logging_context = LoggingContext(
-            name=str(curr_context), parent_context=parent_context
+            name=str(curr_context),
+            server_name=self.server_name,
+            parent_context=parent_context,
         )
         self.start: Optional[float] = None
 

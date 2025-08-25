@@ -52,7 +52,10 @@ class SrvResolverTestCase(unittest.TestCase):
 
         @defer.inlineCallbacks
         def do_lookup() -> Generator["Deferred[object]", object, List[Server]]:
-            with LoggingContext(name="one") as ctx:
+            with LoggingContext(
+                name="one",
+                server_name="test_server",
+            ) as ctx:
                 resolve_d = resolver.resolve_service(service_name)
                 result: List[Server]
                 result = yield defer.ensureDeferred(resolve_d)  # type: ignore[assignment]

@@ -76,7 +76,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             self.event_ids.append(event.event_id)
 
     def test_simple(self) -> None:
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             res = self.get_success(
                 self.store.have_seen_events(
                     self.room_id, [self.event_ids[0], "eventdoesnotexist"]
@@ -88,7 +88,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             self.assertEqual(ctx.get_resource_usage().db_txn_count, 1)
 
         # a second lookup of the same events should cause no queries
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             res = self.get_success(
                 self.store.have_seen_events(
                     self.room_id, [self.event_ids[0], "eventdoesnotexist"]
@@ -113,7 +113,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # First, check `have_seen_event` for an event we have not seen yet
             # to prime the cache with a `false` value.
             res = self.get_success(
@@ -135,7 +135,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # Check `have_seen_event` again and we should see the updated fact
             # that we have now seen the event after persisting it.
             res = self.get_success(
@@ -166,7 +166,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         res = self.store._get_event_cache.get_local((event.event_id,))
         self.assertEqual(res, None, "Event was cached when it should not have been.")
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # Persist the event which should invalidate then prefill the
             # `_get_event_cache` so we don't return stale values.
             # Side Note: Apparently, persisting an event isn't a transaction in the
@@ -200,7 +200,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         Test to make sure that all events associated with the given `(room_id,)`
         are invalidated in the `have_seen_event` cache.
         """
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # Prime the cache with some values
             res = self.get_success(
                 self.store.have_seen_events(self.room_id, self.event_ids)
@@ -213,7 +213,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         # Clear the cache with any events associated with the `room_id`
         self.store.have_seen_event.invalidate((self.room_id,))
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             res = self.get_success(
                 self.store.have_seen_events(self.room_id, self.event_ids)
             )
@@ -249,7 +249,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
     def test_simple(self) -> None:
         """Test that we cache events that we pull from the DB."""
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             self.get_success(self.store.get_event(self.event_id))
 
             # We should have fetched the event from the DB
@@ -263,7 +263,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         # Reset the event cache
         self.store._get_event_cache.clear()
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             # We keep hold of the event event though we never use it.
             event = self.get_success(self.store.get_event(self.event_id))  # noqa: F841
 
@@ -273,7 +273,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         # Reset the event cache
         self.store._get_event_cache.clear()
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             self.get_success(self.store.get_event(self.event_id))
 
             # Since the event is still in memory we shouldn't have fetched it
@@ -285,7 +285,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         out once.
         """
 
-        with LoggingContext(name="test") as ctx:
+        with LoggingContext(name="test", server_name=self.hs.hostname) as ctx:
             d = yieldable_gather_results(
                 self.store.get_event, [self.event_id, self.event_id]
             )
@@ -531,8 +531,8 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
             "runWithConnection",
             new=runWithConnection,
         ):
-            ctx1 = LoggingContext(name="get_event1")
-            ctx2 = LoggingContext(name="get_event2")
+            ctx1 = LoggingContext(name="get_event1", server_name=self.hs.hostname)
+            ctx2 = LoggingContext(name="get_event2", server_name=self.hs.hostname)
 
             async def get_event(ctx: LoggingContext) -> None:
                 with ctx:

@@ -1587,7 +1587,9 @@ def main() -> None:
 
         @defer.inlineCallbacks
         def run() -> Generator["defer.Deferred[Any]", Any, None]:
-            with LoggingContext(name="synapse_port_db_run"):
+            with LoggingContext(
+                name="synapse_port_db_run", server_name=config.server.server_name
+            ):
                 yield defer.ensureDeferred(porter.run())
 
         reactor.callWhenRunning(run)
