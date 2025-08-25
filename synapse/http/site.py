@@ -309,7 +309,7 @@ class SynapseRequest(Request):
         # unnecessarily piling up metrics on the main process's context.
         request_id = self.get_request_id()
         self.logcontext = LoggingContext(
-            request_id,
+            name=request_id,
             request=ContextRequest(
                 request_id=request_id,
                 ip_address=self.get_client_ip_if_available(),

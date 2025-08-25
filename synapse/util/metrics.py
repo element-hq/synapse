@@ -217,7 +217,9 @@ class Measure:
         else:
             assert isinstance(curr_context, LoggingContext)
             parent_context = curr_context
-        self._logging_context = LoggingContext(str(curr_context), parent_context)
+        self._logging_context = LoggingContext(
+            name=str(curr_context), parent_context=parent_context
+        )
         self.start: Optional[float] = None
 
     def __enter__(self) -> "Measure":

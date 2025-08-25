@@ -149,7 +149,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             room_version,
         )
 
-        with LoggingContext("send_rejected"):
+        with LoggingContext(name="send_rejected"):
             d = run_in_background(
                 self.hs.get_federation_event_handler().on_receive_pdu, OTHER_SERVER, ev
             )
@@ -203,7 +203,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             room_version,
         )
 
-        with LoggingContext("send_rejected"):
+        with LoggingContext(name="send_rejected"):
             d = run_in_background(
                 self.hs.get_federation_event_handler().on_receive_pdu, OTHER_SERVER, ev
             )
@@ -323,7 +323,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
 
         current_depth = 1
         limit = 100
-        with LoggingContext("receive_pdu"):
+        with LoggingContext(name="receive_pdu"):
             # Make sure backfill still works
             d = run_in_background(
                 self.hs.get_federation_handler().maybe_backfill,
@@ -491,7 +491,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         # the auth code requires that a signature exists, but doesn't check that
         # signature... go figure.
         join_event.signatures[other_server] = {"x": "y"}
-        with LoggingContext("send_join"):
+        with LoggingContext(name="send_join"):
             d = run_in_background(
                 self.hs.get_federation_event_handler().on_send_membership_event,
                 other_server,

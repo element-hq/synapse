@@ -295,6 +295,7 @@ class LoggingContext:
 
     def __init__(
         self,
+        *,
         name: Optional[str] = None,
         server_name: Optional[str] = None,
         parent_context: "Optional[LoggingContext]" = None,
@@ -724,7 +725,7 @@ def nested_logging_context(suffix: str) -> LoggingContext:
         parent_context = curr_context
     prefix = str(curr_context)
     return LoggingContext(
-        prefix + "-" + suffix,
+        name=prefix + "-" + suffix,
         parent_context=parent_context,
     )
 
@@ -1010,7 +1011,7 @@ def defer_to_threadpool(
         parent_context = curr_context
 
     def g() -> R:
-        with LoggingContext(str(curr_context), parent_context=parent_context):
+        with LoggingContext(name=str(curr_context), parent_context=parent_context):
             return f(*args, **kwargs)
 
     return make_deferred_yieldable(threads.deferToThreadPool(reactor, threadpool, g))

@@ -25,7 +25,7 @@ from synapse.util.logcontext import LoggingContext
 
 
 def main() -> None:
-    with LoggingContext("main"):
+    with LoggingContext(name="main"):
         start(sys.argv[1:])
 
 

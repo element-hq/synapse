@@ -249,7 +249,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
     def test_simple(self) -> None:
         """Test that we cache events that we pull from the DB."""
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test") as ctx:
             self.get_success(self.store.get_event(self.event_id))
 
             # We should have fetched the event from the DB
@@ -263,7 +263,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         # Reset the event cache
         self.store._get_event_cache.clear()
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test") as ctx:
             # We keep hold of the event event though we never use it.
             event = self.get_success(self.store.get_event(self.event_id))  # noqa: F841
 
@@ -273,7 +273,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         # Reset the event cache
         self.store._get_event_cache.clear()
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test") as ctx:
             self.get_success(self.store.get_event(self.event_id))
 
             # Since the event is still in memory we shouldn't have fetched it
@@ -285,7 +285,7 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
         out once.
         """
 
-        with LoggingContext("test") as ctx:
+        with LoggingContext(name="test") as ctx:
             d = yieldable_gather_results(
                 self.store.get_event, [self.event_id, self.event_id]
             )
@@ -531,8 +531,8 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
             "runWithConnection",
             new=runWithConnection,
         ):
-            ctx1 = LoggingContext("get_event1")
-            ctx2 = LoggingContext("get_event2")
+            ctx1 = LoggingContext(name="get_event1")
+            ctx2 = LoggingContext(name="get_event2")
 
             async def get_event(ctx: LoggingContext) -> None:
                 with ctx:

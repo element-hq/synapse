@@ -229,7 +229,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
             room_version=RoomVersions.V10,
         )
 
-        with LoggingContext("test-context"):
+        with LoggingContext(name="test-context"):
             failure = self.get_failure(
                 self.federation_event_handler.on_receive_pdu(
                     self.OTHER_SERVER_NAME, lying_event

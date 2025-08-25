@@ -365,7 +365,7 @@ def start(config_options: List[str]) -> None:
 
 
 def main() -> None:
-    with LoggingContext("main"):
+    with LoggingContext(name="main"):
         start(sys.argv[1:])
 
 

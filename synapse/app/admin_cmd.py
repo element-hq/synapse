@@ -325,7 +325,7 @@ def start(config_options: List[str]) -> None:
     # command.
 
     async def run() -> None:
-        with LoggingContext("command"):
+        with LoggingContext(name="command"):
             await _base.start(ss)
             await args.func(ss, args)
 
@@ -337,5 +337,5 @@ def start(config_options: List[str]) -> None:
 
 
 if __name__ == "__main__":
-    with LoggingContext("main"):
+    with LoggingContext(name="main"):
         start(sys.argv[1:])

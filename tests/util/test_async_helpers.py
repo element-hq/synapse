@@ -203,7 +203,7 @@ class TimeoutDeferredTest(TestCase):
                     blocking_was_cancelled = True
                     raise
 
-        with LoggingContext("one") as context_one:
+        with LoggingContext(name="one") as context_one:
             # the errbacks should be run in the test logcontext
             def errback(res: Failure, deferred_name: str) -> Failure:
                 self.assertIs(
@@ -502,7 +502,7 @@ class DelayCancellationTests(TestCase):
             await make_deferred_yieldable(blocking_d)
 
         async def outer() -> None:
-            with LoggingContext("c") as c:
+            with LoggingContext(name="c") as c:
                 try:
                     await delay_cancellation(inner())
                     self.fail("`CancelledError` was not raised")
@@ -617,7 +617,7 @@ class GatherCoroutineTests(TestCase):
     def test_single(self) -> None:
         "Test passing in a single coroutine works"
 
-        with LoggingContext("test_ctx") as text_ctx:
+        with LoggingContext(name="test_ctx") as text_ctx:
             deferred: "defer.Deferred[None]"
             coroutine, deferred = self.make_coroutine()
 
@@ -643,7 +643,7 @@ class GatherCoroutineTests(TestCase):
     def test_multiple_resolve(self) -> None:
         "Test passing in multiple coroutine that all resolve works"
 
-        with LoggingContext("test_ctx") as test_ctx:
+        with LoggingContext(name="test_ctx") as test_ctx:
             deferred1: "defer.Deferred[int]"
             coroutine1, deferred1 = self.make_coroutine()
             deferred2: "defer.Deferred[str]"
@@ -676,7 +676,7 @@ class GatherCoroutineTests(TestCase):
     def test_multiple_fail(self) -> None:
         "Test passing in multiple coroutine where one fails does the right thing"
 
-        with LoggingContext("test_ctx") as test_ctx:
+        with LoggingContext(name="test_ctx") as test_ctx:
             deferred1: "defer.Deferred[int]"
             coroutine1, deferred1 = self.make_coroutine()
             deferred2: "defer.Deferred[str]"
