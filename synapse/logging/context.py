@@ -275,8 +275,7 @@ class LoggingContext:
           child to the parent
 
     Args:
-        name: Name for the context for logging. If this is omitted, it is
-           inherited from the parent context.
+        name: Name for the context for logging.
         parent_context (LoggingContext|None): The parent of the new context
     """
 
@@ -296,7 +295,7 @@ class LoggingContext:
     def __init__(
         self,
         *,
-        name: Optional[str] = None,
+        name: str,
         server_name: Optional[str] = None,
         parent_context: "Optional[LoggingContext]" = None,
         request: Optional[ContextRequest] = None,
@@ -310,6 +309,7 @@ class LoggingContext:
         # if the context is not currently active.
         self.usage_start: Optional[resource.struct_rusage] = None
 
+        self.name = name
         self.main_thread = get_thread_id()
         self.request = None
         self.tag = ""
@@ -332,15 +332,6 @@ class LoggingContext:
         if request is not None:
             # the request param overrides the request from the parent context
             self.request = request
-
-        # if we don't have a `name`, but do have a parent context, use its name.
-        if self.parent_context and name is None:
-            name = str(self.parent_context)
-        if name is None:
-            raise ValueError(
-                "LoggingContext must be given either a name or a parent context"
-            )
-        self.name = name
 
     def __str__(self) -> str:
         return self.name
