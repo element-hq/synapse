@@ -31,6 +31,7 @@ from typing import NoReturn, Optional, Type
 
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
+    LoggingContext,
     PreserveLoggingContext,
 )
 
@@ -149,11 +150,33 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
 
     signal.signal(signal.SIGTERM, sigterm)
 
+    # Create a logging context that we can use later as these `atexit` handlers will run
+    # after the `with LoggingContext("main")` context manager finishes and we still want
+    # some context here to know which server is logging.
+    #
+    # We're using `PreserveLoggingContext(SENTINEL_CONTEXT)` so our new `LoggingContext`
+    # ends up with `LoggingContext.previous_context = SENTINEL_CONTEXT` so that when the
+    # `LoggingContext` exits and restores the previous context, we don't leak some
+    # context into the reactor that would be erroneously be picked up by something else
+    # down the line.
+    with PreserveLoggingContext(SENTINEL_CONTEXT):
+        exit_logging_context = LoggingContext(
+            "atexit",
+            # TODO: In the future, we will want
+            # `server_name=calling_context.server_name` so we know which server this log
+            # pertains to, https://github.com/element-hq/synapse/pull/18868
+            #
+            # No parent_context as we don't want to attribute the metrics/traces to the
+            # calling context. `atexit` is completely out-of-band from our application
+            # so it doesn't make sense to associate it back.
+        )
+
     # Cleanup pid file at exit.
     def exit() -> None:
-        logger.warning("Stopping daemon.")
-        os.remove(pid_file)
-        sys.exit(0)
+        with PreserveLoggingContext(exit_logging_context):
+            logger.warning("Stopping daemon.")
+            os.remove(pid_file)
+            sys.exit(0)
 
     atexit.register(exit)
 
