@@ -72,7 +72,6 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
-from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -185,23 +184,15 @@ def start_reactor(
         install_gc_manager()
         run_command()
 
-    # make sure that we run the reactor with the sentinel log context,
-    # otherwise other PreserveLoggingContext instances will get confused
-    # and complain when they see the logcontext arbitrarily swapping
-    # between the sentinel and `run` logcontexts.
-    #
-    # We also need to drop the logcontext before forking if we're daemonizing,
-    # otherwise the cputime metrics get confused about the per-thread resource usage
-    # appearing to go backwards.
-    with PreserveLoggingContext():
-        if daemonize:
-            assert pid_file is not None
+    if daemonize:
+        assert pid_file is not None
 
-            if print_pidfile:
-                print(pid_file)
+        if print_pidfile:
+            print(pid_file)
 
-            daemonize_process(pid_file, logger)
-        run()
+        daemonize_process(pid_file, logger)
+
+    run()
 
 
 def quit_with_error(error_string: str) -> NoReturn:
