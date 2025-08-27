@@ -634,7 +634,7 @@ class HomeserverTestCase(TestCase):
         )
 
     def setup_test_homeserver(
-        self, name: Optional[str] = None, **kwargs: Any
+        self, server_name: Optional[str] = None, **kwargs: Any
     ) -> HomeServer:
         """
         Set up the test homeserver, meant to be called by the overridable
@@ -656,8 +656,8 @@ class HomeserverTestCase(TestCase):
 
         # The server name can be specified using either the `name` argument or a config
         # override. The `name` argument takes precedence over any config overrides.
-        if name is not None:
-            config["server_name"] = name
+        if server_name is not None:
+            config["server_name"] = server_name
 
         # Parse the config from a config dict into a HomeServerConfig
         config_obj = make_homeserver_config_obj(config)
@@ -666,10 +666,11 @@ class HomeserverTestCase(TestCase):
         # The server name in the config is now `name`, if provided, or the `server_name`
         # from a config override, or the default of "test". Whichever it is, we
         # construct a homeserver with a matching name.
-        kwargs["name"] = config_obj.server.server_name
+        server_name = config_obj.server.server_name
+        kwargs["name"] = server_name
 
         async def run_bg_updates() -> None:
-            with LoggingContext("run_bg_updates"):
+            with LoggingContext(name="run_bg_updates", server_name=server_name):
                 self.get_success(stor.db_pool.updates.run_background_updates(False))
 
         hs = setup_test_homeserver(self.addCleanup, **kwargs)

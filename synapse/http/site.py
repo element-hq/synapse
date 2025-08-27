@@ -302,10 +302,15 @@ class SynapseRequest(Request):
         # this is called once a Resource has been found to serve the request; in our
         # case the Resource in question will normally be a JsonResource.
 
-        # create a LogContext for this request
+        # Create a LogContext for this request
+        #
+        # We only care about associating logs and tallying up metrics at the per-request
+        # level so we don't worry about setting the `parent_context`; preventing us from
+        # unnecessarily piling up metrics on the main process's context.
         request_id = self.get_request_id()
         self.logcontext = LoggingContext(
-            request_id,
+            name=request_id,
+            server_name=self.our_server_name,
             request=ContextRequest(
                 request_id=request_id,
                 ip_address=self.get_client_ip_if_available(),

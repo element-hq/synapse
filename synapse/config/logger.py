@@ -40,7 +40,6 @@ from twisted.logger import (
 )
 
 from synapse.logging.context import LoggingContextFilter
-from synapse.logging.filter import MetadataFilter
 from synapse.synapse_rust import reset_logging_config
 from synapse.types import JsonDict
 
@@ -213,13 +212,11 @@ def _setup_stdlib_logging(
     # writes.
 
     log_context_filter = LoggingContextFilter()
-    log_metadata_filter = MetadataFilter({"server_name": config.server.server_name})
     old_factory = logging.getLogRecordFactory()
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = old_factory(*args, **kwargs)
         log_context_filter.filter(record)
-        log_metadata_filter.filter(record)
         return record
 
     logging.setLogRecordFactory(factory)

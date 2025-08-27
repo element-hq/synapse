@@ -601,7 +601,7 @@ class RootConfig:
 
     @classmethod
     def load_config_with_parser(
-        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv: List[str]
+        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv_options: List[str]
     ) -> Tuple[TRootConfig, argparse.Namespace]:
         """Parse the commandline and config files with the given parser
 
@@ -611,14 +611,14 @@ class RootConfig:
 
         Args:
             parser
-            argv
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Returns the parsed config object and the parsed argparse.Namespace
             object from parser.parse_args(..)`
         """
 
-        config_args = parser.parse_args(argv)
+        config_args = parser.parse_args(argv_options)
 
         config_files = find_config_files(search_paths=config_args.config_path)
         obj = cls(config_files)
@@ -646,11 +646,15 @@ class RootConfig:
 
     @classmethod
     def load_or_generate_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: Type[TRootConfig], description: str, argv_options: List[str]
     ) -> Optional[TRootConfig]:
         """Parse the commandline and config files
 
         Supports generation of config files, so is used for the main homeserver app.
+
+        Args:
+            description: TODO
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Config object, or None if --generate-config or --generate-keys was set
@@ -747,7 +751,7 @@ class RootConfig:
         )
 
         cls.invoke_all_static("add_arguments", parser)
-        config_args = parser.parse_args(argv)
+        config_args = parser.parse_args(argv_options)
 
         config_files = find_config_files(search_paths=config_args.config_path)
 

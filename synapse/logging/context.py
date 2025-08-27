@@ -230,12 +230,20 @@ LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
 class _Sentinel:
     """Sentinel to represent the root context"""
 
-    __slots__ = ["previous_context", "finished", "request", "scope", "tag"]
+    __slots__ = [
+        "previous_context",
+        "finished",
+        "server_name",
+        "request",
+        "scope",
+        "tag",
+    ]
 
     def __init__(self) -> None:
         # Minimal set for compatibility with LoggingContext
         self.previous_context = None
         self.finished = False
+        self.server_name = "unknown_server_from_sentinel_context"
         self.request = None
         self.scope = None
         self.tag = None
@@ -275,14 +283,16 @@ class LoggingContext:
           child to the parent
 
     Args:
-        name: Name for the context for logging. If this is omitted, it is
-           inherited from the parent context.
+        name: Name for the context for logging.
+        server_name: The name of the server this context is associated with
+            (`config.server.server_name` or `hs.hostname`)
         parent_context (LoggingContext|None): The parent of the new context
     """
 
     __slots__ = [
         "previous_context",
         "name",
+        "server_name",
         "parent_context",
         "_resource_usage",
         "usage_start",
@@ -295,7 +305,9 @@ class LoggingContext:
 
     def __init__(
         self,
-        name: Optional[str] = None,
+        *,
+        name: str,
+        server_name: str,
         parent_context: "Optional[LoggingContext]" = None,
         request: Optional[ContextRequest] = None,
     ) -> None:
@@ -308,6 +320,8 @@ class LoggingContext:
         # if the context is not currently active.
         self.usage_start: Optional[resource.struct_rusage] = None
 
+        self.name = name
+        self.server_name = server_name
         self.main_thread = get_thread_id()
         self.request = None
         self.tag = ""
@@ -320,25 +334,16 @@ class LoggingContext:
 
         self.parent_context = parent_context
 
+        # Inherit some fields from the parent context
         if self.parent_context is not None:
-            # we track the current request_id
+            # which request this corresponds to
             self.request = self.parent_context.request
-
-            # we also track the current scope:
+            # tracing scope
             self.scope = self.parent_context.scope
 
         if request is not None:
             # the request param overrides the request from the parent context
             self.request = request
-
-        # if we don't have a `name`, but do have a parent context, use its name.
-        if self.parent_context and name is None:
-            name = str(self.parent_context)
-        if name is None:
-            raise ValueError(
-                "LoggingContext must be given either a name or a parent context"
-            )
-        self.name = name
 
     def __str__(self) -> str:
         return self.name
@@ -586,21 +591,20 @@ class LoggingContextFilter(logging.Filter):
     record.
     """
 
-    def __init__(self, request: str = ""):
-        self._default_request = request
-
     def filter(self, record: logging.LogRecord) -> Literal[True]:
         """Add each fields from the logging contexts to the record.
         Returns:
             True to include the record in the log output.
         """
         context = current_context()
-        record.request = self._default_request
+        record.request = ""
+        record.server_name = "unknown_server_from_no_context"
 
         # context should never be None, but if it somehow ends up being, then
         # we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
         if context is not None:
+            record.server_name = context.server_name
             # Logging is interested in the request ID. Note that for backwards
             # compatibility this is stored as the "request" on the record.
             record.request = str(context)
@@ -718,12 +722,15 @@ def nested_logging_context(suffix: str) -> LoggingContext:
             "Starting nested logging context from sentinel context: metrics will be lost"
         )
         parent_context = None
+        server_name = "unknown_server_from_sentinel_context"
     else:
         assert isinstance(curr_context, LoggingContext)
         parent_context = curr_context
+        server_name = parent_context.server_name
     prefix = str(curr_context)
     return LoggingContext(
-        prefix + "-" + suffix,
+        name=prefix + "-" + suffix,
+        server_name=server_name,
         parent_context=parent_context,
     )
 
@@ -1004,12 +1011,18 @@ def defer_to_threadpool(
             "Calling defer_to_threadpool from sentinel context: metrics will be lost"
         )
         parent_context = None
+        server_name = "unknown_server_from_sentinel_context"
     else:
         assert isinstance(curr_context, LoggingContext)
         parent_context = curr_context
+        server_name = parent_context.server_name
 
     def g() -> R:
-        with LoggingContext(str(curr_context), parent_context=parent_context):
+        with LoggingContext(
+            name=str(curr_context),
+            server_name=server_name,
+            parent_context=parent_context,
+        ):
             return f(*args, **kwargs)
 
     return make_deferred_yieldable(threads.deferToThreadPool(reactor, threadpool, g))

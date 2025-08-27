@@ -112,4 +112,7 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
 
         # Test that allowing open registration without verification raises an error
         with self.assertRaises(ConfigError):
-            synapse.app.homeserver.setup(["-c", self.config_file])
+            homeserver_config = synapse.app.homeserver.load_or_generate_config(
+                ["-c", self.config_file]
+            )
+            synapse.app.homeserver.setup(homeserver_config)
