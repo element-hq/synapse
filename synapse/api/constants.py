@@ -28,6 +28,21 @@ from typing import Final
 
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
+# This isn't spec'ed but is our own reasonable default to play nice with Synapse's
+# `max_request_size`/`max_request_body_size`. We chose the same as `MAX_PDU_SIZE` as our
+# `max_request_body_size` math is currently limited by 200 `MAX_PDU_SIZE` things. The
+# spec for a `/federation/v1/send` request sets the limit at 100 EDU's and 50 PDU's
+# which is below that 200 `MAX_PDU_SIZE` limit (`max_request_body_size`).
+#
+# Allowing oversized EDU's results in failed `/federation/v1/send` transactions (because
+# the request overall can overrun the `max_request_body_size`) which are retried over
+# and over and prevent other outbound federation traffic from happening.
+MAX_EDU_SIZE = 65536
+
+# This is defined in the Matrix spec and enforced by the receiver.
+MAX_EDUS_PER_TRANSACTION = 100
+# A transaction can contain up to 100 EDUs but synapse reserves 10 EDUs for other purposes
+SYNAPSE_EDUS_PER_TRANSACTION = 10
 
 # Max/min size of ints in canonical JSON
 CANONICALJSON_MAX_INT = (2**53) - 1
