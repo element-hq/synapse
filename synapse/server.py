@@ -376,6 +376,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         """
         WIP: Clean-up any references to the homeserver and stop any running related
         processes, timers, loops, replication stream, etc.
+
+        This should be called wherever you care about the HomeServer being completely
+        garbage collected like in tests. It's not necessary to call if you plan to just
+        shut down the whole Python process anyway.
         """
         logger.info("Received cleanup request for %s.", self.hostname)
 
