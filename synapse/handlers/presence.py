@@ -529,14 +529,14 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
         )
 
-        # hs.get_reactor().addSystemEventTrigger(
-        #     "before",
-        #     "shutdown",
-        #     run_as_background_process,
-        #     "generic_presence.on_shutdown",
-        #     self.server_name,
-        #     self._on_shutdown,
-        # )
+        hs.get_reactor().addSystemEventTrigger(
+            "before",
+            "shutdown",
+            run_as_background_process,
+            "generic_presence.on_shutdown",
+            self.server_name,
+            self._on_shutdown,
+        )
 
     async def _on_shutdown(self) -> None:
         if self._track_presence:

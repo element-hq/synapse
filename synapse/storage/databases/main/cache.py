@@ -26,10 +26,7 @@ from typing import TYPE_CHECKING, Any, Collection, Iterable, List, Optional, Tup
 
 from synapse.api.constants import EventTypes
 from synapse.config._base import Config
-from synapse.metrics.background_process_metrics import (
-    wrap_as_background_process,
-    run_as_background_process,
-)
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.tcp.streams import BackfillStream, CachesStream
 from synapse.replication.tcp.streams.events import (
     EventsStream,
@@ -131,19 +128,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         # old rows.
         # This is only applicable when Postgres is in use; this table is unused
         # and not populated at all when SQLite is the active database engine.
-        # if hs.config.worker.run_background_tasks and isinstance(
-        #     self.database_engine, PostgresEngine
-        # ):
-        #     self.hs.get_clock().call_later(
-        #         CATCH_UP_CLEANUP_INTERVAL_MS / 1000,
-        #         self._clean_up_cache_invalidation_wrapper,
-        #     )
-
-    #     run_as_background_process("qwer_call_later", self.server_name, self.qwer)
-
-    # async def qwer(self) -> None:
-    #     # Await some dummy value
-    #     await self._clock.sleep(1.0)
+        if hs.config.worker.run_background_tasks and isinstance(
+            self.database_engine, PostgresEngine
+        ):
+            self.hs.get_clock().call_later(
+                CATCH_UP_CLEANUP_INTERVAL_MS / 1000,
+                self._clean_up_cache_invalidation_wrapper,
+            )
 
     async def get_all_updated_caches(
         self, instance_name: str, last_id: int, current_id: int, limit: int

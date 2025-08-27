@@ -411,13 +411,10 @@ class LoggingContext:
         current = set_current_context(self.previous_context)
         if current is not self:
             if current is SENTINEL_CONTEXT:
-                logcontext_error(
-                    "LoggingContext: Expected logging context %s was lost" % (self,)
-                )
+                logcontext_error("Expected logging context %s was lost" % (self,))
             else:
                 logcontext_error(
-                    "LoggingContext: Expected logging context %s but found %s"
-                    % (self, current)
+                    "Expected logging context %s but found %s" % (self, current)
                 )
 
         # the fact that we are here suggests that the caller thinks that everything
@@ -639,16 +636,6 @@ class PreserveLoggingContext:
 
     def __enter__(self) -> None:
         self._old_context = set_current_context(self._new_context)
-        import traceback
-
-        logger.info(
-            "asdf PreserveLoggingContext enter new=%s old=%s %s",
-            self._new_context,
-            self._old_context,
-            traceback.format_stack()[-2].replace(
-                "/home/eric/Documents/github/element/synapse/", ""
-            ),
-        )
 
     def __exit__(
         self,
@@ -656,27 +643,16 @@ class PreserveLoggingContext:
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
-        import traceback
-
-        logger.info(
-            "asdf PreserveLoggingContext exit new=%s old=%s %s",
-            self._new_context,
-            self._old_context,
-            traceback.format_stack()[-2].replace(
-                "/home/eric/Documents/github/element/synapse/", ""
-            ),
-        )
         context = set_current_context(self._old_context)
 
         if context != self._new_context:
             if not context:
                 logcontext_error(
-                    "PreserveLoggingContext: Expected logging context %s was lost"
-                    % (self._new_context,)
+                    "Expected logging context %s was lost" % (self._new_context,)
                 )
             else:
                 logcontext_error(
-                    "PreserveLoggingContext: Expected logging context %s but found %s"
+                    "Expected logging context %s but found %s"
                     % (
                         self._new_context,
                         context,
@@ -707,15 +683,6 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
         raise TypeError("'context' argument may not be None")
 
     current = current_context()
-
-    # import traceback
-
-    logger.info(
-        "asdf set_current_context new=%s old=%s",
-        context,
-        current,
-        # traceback.format_stack(),
-    )
 
     if current is not context:
         rusage = get_thread_resource_usage()

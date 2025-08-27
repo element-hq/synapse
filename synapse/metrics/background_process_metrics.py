@@ -260,12 +260,6 @@ def run_as_background_process(
         with BackgroundProcessLoggingContext(
             name=desc, server_name=server_name, instance_id=count
         ) as context:
-            logger.info(
-                "asdf run_as_background_process %s %s previous_context=%s",
-                desc,
-                context,
-                context.previous_context,
-            )
             try:
                 if bg_start_span:
                     ctx = start_active_span(
