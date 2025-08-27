@@ -67,7 +67,7 @@ implementations of this callback.
 
 ### `get_media_upload_limits_for_user`
 
-_First introduced in Synapse v1.137.0_
+_First introduced in Synapse v1.138.0_
 
 ```python
 async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[List[MediaUploadLimit]]
@@ -97,7 +97,7 @@ If no module returns a non-`None` value then the default [media upload limits co
 
 ### `on_media_upload_limit_exceeded`
 
-_First introduced in Synapse v1.137.0_
+_First introduced in Synapse v1.138.0_
 
 ```python
 async def on_media_upload_limit_exceeded(user_id: str, limit: MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -> None
