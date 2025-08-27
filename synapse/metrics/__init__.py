@@ -181,15 +181,17 @@ class LaterGauge(Collector):
         # (we don't enforce it here, one level up).
         g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
-        for hook in self._instance_id_to_hook_map.values():
+        for homeserver_instance_id, hook in self._instance_id_to_hook_map.items():
             try:
                 hook_result = hook()
             except Exception:
                 logger.exception(
-                    "Exception running callback for LaterGauge(%s)", self.name
+                    "Exception running callback for LaterGauge(%s) for homeserver_instance_id=%s",
+                    self.name,
+                    homeserver_instance_id,
                 )
                 yield g
-                # Continue to return metrics that aren't broken
+                # Continue to return the rest of the metrics that aren't broken
                 continue
 
             if isinstance(hook_result, (int, float)):
