@@ -197,7 +197,7 @@ class LaterGauge(Collector):
                 for k, v in hook_result.items():
                     g.add_metric(k, v)
 
-            yield g
+        yield g
 
     def register_hook(
         self,
