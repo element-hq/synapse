@@ -372,6 +372,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         if self.config.worker.run_background_tasks:
             self.setup_background_tasks()
 
+    def __del__(self) -> None:
+        """
+        Called when an the homeserver is garbage collected.
+
+        Make sure we actually do some clean-up, rather than leak data.
+        """
+        self.cleanup()
+
     def cleanup(self) -> None:
         """
         WIP: Clean-up any references to the homeserver and stop any running related
@@ -380,6 +388,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         This should be called wherever you care about the HomeServer being completely
         garbage collected like in tests. It's not necessary to call if you plan to just
         shut down the whole Python process anyway.
+
+        Can be called multiple times.
         """
         logger.info("Received cleanup request for %s.", self.hostname)
 
