@@ -1145,6 +1145,9 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
+    # Register the cleanup hook
+    cleanup_func(hs.cleanup)
+
     # Install @cache_in_self attributes
     for key, val in kwargs.items():
         setattr(hs, "_" + key, val)

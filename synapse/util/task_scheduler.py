@@ -44,6 +44,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+running_tasks_gauge = LaterGauge(
+    name="synapse_scheduler_running_tasks",
+    desc="The number of concurrent running tasks handled by the TaskScheduler",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+
 class TaskScheduler:
     """
     This is a simple task scheduler designed for resumable tasks. Normally,
@@ -130,11 +137,9 @@ class TaskScheduler:
                 TaskScheduler.SCHEDULE_INTERVAL_MS,
             )
 
-        LaterGauge(
-            name="synapse_scheduler_running_tasks",
-            desc="The number of concurrent running tasks handled by the TaskScheduler",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self._running_tasks)},
+        running_tasks_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self._running_tasks)},
         )
 
     def register_action(
