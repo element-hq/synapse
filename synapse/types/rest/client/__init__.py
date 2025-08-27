@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from synapse._pydantic_compat import (
     Extra,
+    Field,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -364,11 +365,25 @@ class SlidingSyncBody(RequestBodyModel):
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
             rooms: Optional[List[StrictStr]] = ["*"]
 
+        class ThreadSubscriptionsExtension(RequestBodyModel):
+            """The Thread Subscriptions extension (MSC4308)
+
+            Attributes:
+                enabled
+                limit: maximum number of subscription changes to return (default 100)
+            """
+
+            enabled: Optional[StrictBool] = False
+            limit: StrictInt = 100
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
+        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = Field(
+            alias="io.element.msc4308.thread_subscriptions"
+        )
 
     conn_id: Optional[StrictStr]
 

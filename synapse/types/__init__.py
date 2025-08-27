@@ -996,6 +996,7 @@ class StreamKeyType(Enum):
     TO_DEVICE = "to_device_key"
     DEVICE_LIST = "device_list_key"
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
+    THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1003,7 +1004,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -1016,6 +1017,7 @@ class StreamToken:
         8. `device_list_key`: `265584`
         9. `groups_key`: `1` (note that this key is now unused)
         10. `un_partial_stated_rooms_key`: `379`
+        11. `thread_subscriptions_key`: 4242
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -1074,6 +1076,7 @@ class StreamToken:
     # Note that the groups key is no longer used and may have bogus values.
     groups_key: int
     un_partial_stated_rooms_key: int
+    thread_subscriptions_key: int
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1101,6 +1104,7 @@ class StreamToken:
                 device_list_key,
                 groups_key,
                 un_partial_stated_rooms_key,
+                thread_subscriptions_key,
             ) = keys
 
             return cls(
@@ -1116,6 +1120,7 @@ class StreamToken:
                 ),
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
+                thread_subscriptions_key=int(thread_subscriptions_key),
             )
         except CancelledError:
             raise
@@ -1138,6 +1143,7 @@ class StreamToken:
                 # if additional tokens are added.
                 str(self.groups_key),
                 str(self.un_partial_stated_rooms_key),
+                str(self.thread_subscriptions_key),
             ]
         )
 
@@ -1202,6 +1208,7 @@ class StreamToken:
             StreamKeyType.TO_DEVICE,
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            StreamKeyType.THREAD_SUBSCRIPTIONS,
         ],
     ) -> int: ...
 
@@ -1257,7 +1264,8 @@ class StreamToken:
             f"typing: {self.typing_key}, receipt: {self.receipt_key}, "
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
-            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key})"
+            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
+            f"thread_subscriptions: {self.thread_subscriptions_key})"
         )
 
 
@@ -1272,6 +1280,7 @@ StreamToken.START = StreamToken(
     device_list_key=MultiWriterStreamToken(stream=0),
     groups_key=0,
     un_partial_stated_rooms_key=0,
+    thread_subscriptions_key=0,
 )
 
 
@@ -1316,6 +1325,27 @@ class SlidingSyncStreamToken:
         """Serializes the token to a string"""
         stream_token_str = await self.stream_token.to_string(store)
         return f"{self.connection_position}/{stream_token_str}"
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ThreadSubscriptionsToken:
+    """
+    Token for a position in the thread subscriptions stream.
+
+    Format: `ts<stream_id>`
+    """
+
+    stream_id: int
+
+    @staticmethod
+    def from_string(s: str) -> "ThreadSubscriptionsToken":
+        if not s.startswith("ts"):
+            raise ValueError("thread subscription token must start with `ts`")
+
+        return ThreadSubscriptionsToken(stream_id=int(s[2:]))
+
+    def to_string(self) -> str:
+        return f"ts{self.stream_id}"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
