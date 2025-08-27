@@ -31,7 +31,7 @@ from typing import NoReturn, Optional, Type
 
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
-    set_current_context,
+    PreserveLoggingContext,
 )
 
 
@@ -72,14 +72,11 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
     # Stop the existing context *before* we fork the process. Otherwise the cputime
     # metrics get confused about the per-thread resource usage appearing to go backwards
     # because we're comparing the resource usage from the original process to the forked
-    # process.
-    calling_context = set_current_context(SENTINEL_CONTEXT)
-
-    # Fork, creating a new process for the child.
-    process_id = os.fork()
-
-    # Restart the logging context *after* forking
-    set_current_context(calling_context)
+    # process. `PreserveLoggingContext` already takes care of restarting the original
+    # context *after* the block.
+    with PreserveLoggingContext(SENTINEL_CONTEXT):
+        # Fork, creating a new process for the child.
+        process_id = os.fork()
 
     if process_id != 0:
         # parent process: exit.
