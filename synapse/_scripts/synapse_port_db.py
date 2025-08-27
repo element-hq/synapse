@@ -324,6 +324,7 @@ class MockHomeserver:
         self.config = config
         self.hostname = config.server.server_name
         self.version_string = SYNAPSE_VERSION
+        self.instance_id = random_string(5)
 
     def get_clock(self) -> Clock:
         return self.clock
@@ -331,8 +332,8 @@ class MockHomeserver:
     def get_reactor(self) -> ISynapseReactor:
         return reactor
 
-    def get_instance_id(self) -> Optional[str]:
-        return random_string(5)
+    def get_instance_id(self) -> str:
+        return self.instance_id
 
     def get_instance_name(self) -> str:
         return "master"
