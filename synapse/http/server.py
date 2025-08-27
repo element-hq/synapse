@@ -925,8 +925,9 @@ def _write_bytes_to_request(request: Request, bytes_to_write: bytes) -> None:
     # once (via `Request.write`) is that doing so starts the timeout for the
     # next request to be received: so if it takes longer than 60s to stream back
     # the response to the client, the client never gets it.
+    # c.f https://github.com/twisted/twisted/issues/12498
     #
-    # The correct solution is to use a Producer; then the timeout is only
+    # One workaround is to use a `Producer`; then the timeout is only
     # started once all of the content is sent over the TCP connection.
 
     # To make sure we don't write all of the bytes at once we split it up into
