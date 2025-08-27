@@ -527,6 +527,7 @@ impl PushRules {
             .chain(base_rules::BASE_APPEND_OVERRIDE_RULES.iter())
             .chain(self.content.iter())
             .chain(base_rules::BASE_APPEND_CONTENT_RULES.iter())
+            .chain(base_rules::BASE_APPEND_POSTCONTENT_RULES.iter())
             .chain(self.room.iter())
             .chain(self.sender.iter())
             .chain(self.underride.iter())
