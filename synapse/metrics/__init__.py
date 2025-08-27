@@ -189,7 +189,8 @@ class LaterGauge(Collector):
                     "Exception running callback for LaterGauge(%s)", self.name
                 )
                 yield g
-                return
+                # Continue to return metrics that aren't broken
+                continue
 
             if isinstance(hook_result, (int, float)):
                 g.add_metric([], hook_result)
