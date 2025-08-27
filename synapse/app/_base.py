@@ -72,6 +72,7 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
+from synapse.logging.context import PreserveLoggingContext, current_context
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -182,7 +183,9 @@ def start_reactor(
         if gc_thresholds:
             gc.set_threshold(*gc_thresholds)
         install_gc_manager()
+        logger.info("run-asdf1")
         run_command()
+        logger.info("run-asdf2")
 
     if daemonize:
         assert pid_file is not None
@@ -192,7 +195,9 @@ def start_reactor(
 
         daemonize_process(pid_file, logger)
 
+    logger.info("asdf1")
     run()
+    logger.info("asdf2")
 
 
 def quit_with_error(error_string: str) -> NoReturn:

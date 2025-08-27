@@ -124,6 +124,7 @@ class Clock:
         with context.PreserveLoggingContext():
             self._reactor.callLater(seconds, d.callback, seconds)
             await d
+            logger.info("asdf sleep done")
 
     def time(self) -> float:
         """Returns the current system time in seconds since epoch."""
@@ -158,6 +159,8 @@ class Clock:
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
+        # TODO: remove
+        return
         return self._looping_call_common(f, msec, False, *args, **kwargs)
 
     def looping_call_now(
@@ -213,12 +216,14 @@ class Clock:
             **kwargs: Key arguments to pass to function.
         """
 
-        def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+        def wrapped_call_later_callback(*args: Any, **kwargs: Any) -> None:
             with context.PreserveLoggingContext():
                 callback(*args, **kwargs)
 
         with context.PreserveLoggingContext():
-            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+            return self._reactor.callLater(
+                delay, wrapped_call_later_callback, *args, **kwargs
+            )
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:

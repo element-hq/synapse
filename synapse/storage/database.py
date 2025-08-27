@@ -52,6 +52,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 from twisted.enterprise import adbapi
 from twisted.internet.interfaces import IReactorCore
+from twisted.internet import defer
 
 from synapse.api.errors import StoreError
 from synapse.config.database import DatabaseConnectionConfig
@@ -642,13 +643,31 @@ class DatabasePool:
 
         # Check ASAP (and then later, every 1s) to see if we have finished
         # background updates of tables that aren't safe to update.
-        self._clock.call_later(
-            0.0,
-            run_as_background_process,
-            "upsert_safety_check",
-            self.server_name,
-            self._check_safe_to_upsert,
-        )
+        # self._clock.call_later(
+        #     0.0,
+        #     run_as_background_process,
+        #     "upsert_safety_check",
+        #     self.server_name,
+        #     self._check_safe_to_upsert,
+        # )
+
+        # self._clock.call_later(
+        #     0.0,
+        #     run_as_background_process,
+        #     "asdf_call_later",
+        #     self.server_name,
+        #     self.asdf,
+        # )
+        run_as_background_process("asdf_call_later", self.server_name, self.asdf)
+        run_as_background_process("qwer_call_later", self.server_name, self.qwer)
+
+    async def asdf(self) -> None:
+        # Await some dummy value
+        await self._clock.sleep(1.0)
+
+    async def qwer(self) -> None:
+        # Await some dummy value
+        await self._clock.sleep(1.0)
 
     def name(self) -> str:
         "Return the name of this database"
