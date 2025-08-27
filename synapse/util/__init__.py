@@ -241,9 +241,8 @@ class Clock:
         self._call_id += 1
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            with context.PreserveLoggingContext():
-                callback(*args, **kwargs)
-                self._delayed_calls.pop(id)
+            callback(*args, **kwargs)
+            self._delayed_calls.pop(id)
 
         with context.PreserveLoggingContext():
             call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)

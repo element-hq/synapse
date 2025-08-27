@@ -364,6 +364,31 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         logger.info("Received shutdown request")
 
+        for listener in self._listening_services:
+            # During unit tests, an incomplete `_FakePort` is used for listeners so
+            # check listener type here to ensure shutdown procedure is only applied to
+            # actual `Port` instances.
+            if type(listener) is Port:
+                port_shutdown = listener.stopListening()
+                if port_shutdown is not None:
+
+                    def on_error(_: T) -> None:
+                        logger.error("Port shutdown with error")
+
+                    def on_success(_: T) -> None:
+                        logger.error("Port shutdown successfully")
+
+                    port_shutdown.addCallback(on_success)
+                    port_shutdown.addErrback(on_error)
+        self._listening_services.clear()
+
+        logger.error("Shutting down metrics listeners")
+        for server, thread in self._metrics_listeners:
+            logger.error("Shutting down metrics listener")
+            server.shutdown()
+            thread.join()
+        self._metrics_listeners.clear()
+
         # TODO: Cleanup replication pieces
 
         self.get_keyring().shutdown()
@@ -371,6 +396,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         for later_gauge in self._later_gauges:
             later_gauge.unregister()
         self._later_gauges.clear()
+        # TODO: What about the other gauge types?
+        # from synapse.metrics import all_gauges
+        # all_gauges.clear()
 
         for db in self.get_datastores().databases:
             db.stop_background_updates()
@@ -405,27 +433,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._sync_shutdown_handlers.clear()
 
         unregister_sighups(self.config.server.server_name)
-
-        for listener in self._listening_services:
-            # During unit tests, an incomplete `_FakePort` is used for listeners so
-            # check listener type here to ensure shutdown procedure is only applied to
-            # actual `Port` instances.
-            if type(listener) is Port:
-                # logger.info("Shutting down %s %d", listener._type, listener._realPortNumber)
-                # Preferred over connectionLost since it allows buffers to flush
-                listener.unregisterProducer()
-                listener.loseConnection()
-
-                # NOTE: not guaranteed to immediately shutdown
-                # Sometimes takes a second for some deferred to fire that cancels the socket
-                # But seems to always do so within a minute
-                # twisted.internet.error.AlreadyCancelled: Tried to cancel an already-cancelled event.
-        self._listening_services.clear()
-
-        for server, thread in self._metrics_listeners:
-            server.shutdown()
-            thread.join()
-        self._metrics_listeners.clear()
 
     def register_async_shutdown_handler(
         self,

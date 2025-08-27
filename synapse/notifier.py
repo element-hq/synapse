@@ -673,7 +673,7 @@ class Notifier:
                         listener = timeout_deferred(
                             listener,
                             (end_time - now) / 1000.0,
-                            self.hs.get_reactor(),
+                            self.hs.get_clock(),
                         )
 
                         log_kv(

@@ -228,7 +228,7 @@ class EmailPusher(Pusher):
                     self.timed_call = None
 
         if soonest_due_at is not None:
-            self.timed_call = self.hs.get_reactor().callLater(
+            self.timed_call = self.hs.get_clock().call_later(
                 self.seconds_until(soonest_due_at), self.on_timer
             )
 

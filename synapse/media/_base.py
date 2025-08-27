@@ -704,6 +704,7 @@ class ThreadedFileSender:
 
     def __init__(self, hs: "HomeServer") -> None:
         self.reactor = hs.get_reactor()
+        self.clock = hs.get_clock()
         self.thread_pool = hs.get_media_sender_thread_pool()
 
         self.file: Optional[BinaryIO] = None
@@ -712,7 +713,7 @@ class ThreadedFileSender:
 
         # Signals if the thread should keep reading/sending data. Set means
         # continue, clear means pause.
-        self.wakeup_event = DeferredEvent(self.reactor)
+        self.wakeup_event = DeferredEvent(self.clock)
 
         # Signals if the thread should terminate, e.g. because the consumer has
         # gone away.

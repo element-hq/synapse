@@ -166,7 +166,7 @@ class ProxyResource(_AsyncResource):
             # so that it has enough time to complete and pass us the data before we give
             # up.
             timeout=90,
-            reactor=self.reactor,
+            clock=self._clock,
         )
 
         response = await make_deferred_yieldable(request_deferred)

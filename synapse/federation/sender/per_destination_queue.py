@@ -94,6 +94,7 @@ class PerDestinationQueue:
         destination: str,
     ):
         self.server_name = hs.hostname
+        self._hs = hs
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
         self._store = hs.get_datastores().main
@@ -311,10 +312,12 @@ class PerDestinationQueue:
 
         logger.debug("TX [%s] Starting transaction loop", self._destination)
 
-        run_as_background_process(
-            "federation_transaction_transmission_loop",
-            self.server_name,
-            self._transaction_transmission_loop,
+        self._hs.register_background_process(
+            run_as_background_process(
+                "federation_transaction_transmission_loop",
+                self.server_name,
+                self._transaction_transmission_loop,
+            )
         )
 
     async def _transaction_transmission_loop(self) -> None:

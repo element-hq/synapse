@@ -337,7 +337,7 @@ class ReplicationDataHandler:
         # to wedge here forever.
         deferred: "Deferred[None]" = Deferred()
         deferred = timeout_deferred(
-            deferred, _WAIT_FOR_REPLICATION_TIMEOUT_SECONDS, self._reactor
+            deferred, _WAIT_FOR_REPLICATION_TIMEOUT_SECONDS, self._clock
         )
 
         waiting_list = self._streams_to_waiters.setdefault(
