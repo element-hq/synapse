@@ -702,6 +702,10 @@ class _ByteProducer:
         self._request: Optional[Request] = request
         self._iterator = iterator
         self._paused = False
+        self.tracing_scope = start_active_span(
+            "write_bytes_to_request",
+        )
+        self.tracing_scope.__enter__()
 
         try:
             self._request.registerProducer(self, True)
@@ -712,8 +716,8 @@ class _ByteProducer:
             logger.info("Connection disconnected before response was written: %r", e)
 
             # We drop our references to data we'll not use.
-            self._request = None
             self._iterator = iter(())
+            self.tracing_scope.__exit__(type(e), None, e.__traceback__)
         else:
             # Start producing if `registerProducer` was successful
             self.resumeProducing()
@@ -727,6 +731,9 @@ class _ByteProducer:
         self._request.write(b"".join(data))
 
     def pauseProducing(self) -> None:
+        opentracing_span = active_span()
+        if opentracing_span is not None:
+            opentracing_span.log_kv({"event": "producer_paused"})
         self._paused = True
 
     def resumeProducing(self) -> None:
@@ -736,6 +743,10 @@ class _ByteProducer:
             return
 
         self._paused = False
+
+        opentracing_span = active_span()
+        if opentracing_span is not None:
+            opentracing_span.log_kv({"event": "producer_resumed"})
 
         # Write until there's backpressure telling us to stop.
         while not self._paused:
@@ -771,6 +782,7 @@ class _ByteProducer:
     def stopProducing(self) -> None:
         # Clear a circular reference.
         self._request = None
+        self.tracing_scope.__exit__(None, None, None)
 
 
 def _encode_json_bytes(json_object: object) -> bytes:
