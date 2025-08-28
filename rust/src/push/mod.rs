@@ -552,6 +552,7 @@ pub struct FilteredPushRules {
     msc4028_push_encrypted_events: bool,
     msc4210_enabled: bool,
     msc4306_enabled: bool,
+    xxx_enabled: bool,
 }
 
 #[pymethods]
@@ -567,6 +568,7 @@ impl FilteredPushRules {
         msc4028_push_encrypted_events: bool,
         msc4210_enabled: bool,
         msc4306_enabled: bool,
+        xxx_enabled: bool,
     ) -> Self {
         Self {
             push_rules,
@@ -577,6 +579,7 @@ impl FilteredPushRules {
             msc4028_push_encrypted_events,
             msc4210_enabled,
             msc4306_enabled,
+            xxx_enabled,
         }
     }
 
@@ -629,6 +632,10 @@ impl FilteredPushRules {
 
                 if !self.msc4306_enabled && rule.rule_id.contains("/.io.element.msc4306.rule.") {
                     return false;
+                }
+
+                if self.xxx_enabled {
+                    return true;
                 }
 
                 true

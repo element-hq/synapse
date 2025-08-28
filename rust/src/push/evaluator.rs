@@ -111,6 +111,8 @@ pub struct PushRuleEvaluator {
 
     /// If MSC4306 (thread subscriptions) is enabled.
     msc4306_enabled: bool,
+
+    xxx_enabled: bool,
 }
 
 #[pymethods]
@@ -130,6 +132,7 @@ impl PushRuleEvaluator {
         msc3931_enabled,
         msc4210_enabled,
         msc4306_enabled,
+        xxx_enabled,
     ))]
     pub fn py_new(
         flattened_keys: BTreeMap<String, JsonValue>,
@@ -143,6 +146,7 @@ impl PushRuleEvaluator {
         msc3931_enabled: bool,
         msc4210_enabled: bool,
         msc4306_enabled: bool,
+        xxx_enabled: bool,
     ) -> Result<Self, Error> {
         let body = match flattened_keys.get("content.body") {
             Some(JsonValue::Value(SimpleJsonValue::Str(s))) => s.clone().into_owned(),
@@ -162,6 +166,7 @@ impl PushRuleEvaluator {
             msc3931_enabled,
             msc4210_enabled,
             msc4306_enabled,
+            xxx_enabled,
         })
     }
 
@@ -569,6 +574,7 @@ fn push_rule_evaluator() {
         true,
         false,
         false,
+        false,
     )
     .unwrap();
 
@@ -598,6 +604,7 @@ fn test_requires_room_version_supports_condition() {
         false,
         flags,
         true,
+        false,
         false,
         false,
     )
@@ -634,6 +641,7 @@ fn test_requires_room_version_supports_condition() {
             true,
             false,
             true,
+            false,
             false,
             false,
             false,

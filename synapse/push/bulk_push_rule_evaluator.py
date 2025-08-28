@@ -479,6 +479,7 @@ class BulkPushRuleEvaluator:
             self.hs.config.experimental.msc1767_enabled,  # MSC3931 flag
             self.hs.config.experimental.msc4210_enabled,
             self.hs.config.experimental.msc4306_enabled,
+            False,
         )
 
         msc4306_thread_subscribers: Optional[FrozenSet[str]] = None
