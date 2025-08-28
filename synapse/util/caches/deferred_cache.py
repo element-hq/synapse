@@ -295,9 +295,6 @@ class DeferredCache(Generic[KT, VT]):
         *original* `value`, (c) any future calls to `get()` will complete with the
         result from the *new* `value`.
 
-        It is expected that `value` does *not* follow the synapse logcontext rules - ie,
-        if it is incomplete, it runs its callbacks in the sentinel context.
-
         Args:
             key: Key to be set
             value: a deferred which will complete with a result to add to the cache
