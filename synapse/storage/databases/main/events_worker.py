@@ -34,6 +34,7 @@ from typing import (
     Mapping,
     MutableMapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
     cast,
@@ -42,6 +43,7 @@ from typing import (
 
 import attr
 from prometheus_client import Gauge
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
@@ -83,13 +85,17 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_in_list_sql_clause,
 )
+
+# from synapse.storage.databases.main.stream import (
+#     generate_next_token,
+# )
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     AbstractStreamIdGenerator,
     MultiWriterIdGenerator,
 )
 from synapse.storage.util.sequence import build_sequence_generator
-from synapse.types import JsonDict, get_domain_from_id
+from synapse.types import JsonDict, RoomStreamToken, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util import unwrapFirstError
@@ -100,6 +106,7 @@ from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 from synapse.util.metrics import Measure
+from synapse.util.tokens import generate_next_token
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -212,6 +219,30 @@ class EventRedactBehaviour(Enum):
     as_is = auto()
     redact = auto()
     block = auto()
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class EventGapEntry:
+    """
+    Represents a gap in the timeline.
+
+    From MSC3871: Gappy timeline
+    """
+
+    prev_token: RoomStreamToken
+    """
+    The token position before the target `event_id`
+    """
+
+    event_id: str
+    """
+    The target event ID which we see a gap before or after.
+    """
+
+    next_token: RoomStreamToken
+    """
+    The token position after the target `event_id`
+    """
 
 
 class EventsWorkerStore(SQLBaseStore):
@@ -2315,15 +2346,24 @@ class EventsWorkerStore(SQLBaseStore):
             is_event_next_to_backward_gap_txn,
         )
 
-    async def is_event_next_to_forward_gap(self, event: EventBase) -> bool:
-        """Check if the given event is next to a forward gap of missing events.
-        The gap in front of the latest events is not considered a gap.
+    async def is_event_next_to_forward_gap(
+        self, event: EventBase, *, ignore_gap_after_latest: bool = True
+    ) -> bool:
+        """
+        Check if the given event is next to a forward gap of missing events.
+
+        By default when `ignore_gap_after_latest = True`, the gap in front of the
+        latest events is not considered a gap.
+
         <latest messages> A(False)--->B(False)--->C(False)--->  <gap, unknown events> <oldest messages>
         <latest messages> A(False)--->B(False)--->  <gap, unknown events>  --->D(True)--->E(False) <oldest messages>
 
+        When `ignore_gap_after_latest = False`, `A` would be considered next to a gap.
+
         Args:
-            room_id: room where the event lives
             event: event to check (can't be an `outlier`)
+            ignore_gap_after_latest: Whether the gap after the latest events (forward
+                extremeties) in the room should be considered as an actual gap.
 
         Returns:
             Boolean indicating whether it's an extremity
@@ -2335,38 +2375,39 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
         def is_event_next_to_gap_txn(txn: LoggingTransaction) -> bool:
-            # If the event in question is a forward extremity, we will just
-            # consider any potential forward gap as not a gap since it's one of
-            # the latest events in the room.
-            #
-            # `event_forward_extremities` does not include backfilled or outlier
-            # events so we can't rely on it to find forward gaps. We can only
-            # use it to determine whether a message is the latest in the room.
-            #
-            # We can't combine this query with the `forward_edge_query` below
-            # because if the event in question has no forward edges (isn't
-            # referenced by any other event's prev_events) but is in
-            # `event_forward_extremities`, we don't want to return 0 rows and
-            # say it's next to a gap.
-            forward_extremity_query = """
-                SELECT 1 FROM event_forward_extremities
-                WHERE
-                    room_id = ?
-                    AND event_id = ?
-                LIMIT 1
-            """
+            if ignore_gap_after_latest:
+                # If the event in question is a forward extremity, we will just
+                # consider any potential forward gap as not a gap since it's one of
+                # the latest events in the room.
+                #
+                # `event_forward_extremities` does not include backfilled or outlier
+                # events so we can't rely on it to find forward gaps. We can only
+                # use it to determine whether a message is the latest in the room.
+                #
+                # We can't combine this query with the `forward_edge_query` below
+                # because if the event in question has no forward edges (isn't
+                # referenced by any other event's prev_events) but is in
+                # `event_forward_extremities`, we don't want to return 0 rows and
+                # say it's next to a gap.
+                forward_extremity_query = """
+                    SELECT 1 FROM event_forward_extremities
+                    WHERE
+                        room_id = ?
+                        AND event_id = ?
+                    LIMIT 1
+                """
 
-            # We consider any forward extremity as the latest in the room and
-            # not a forward gap.
-            #
-            # To expand, even though there is technically a gap at the front of
-            # the room where the forward extremities are, we consider those the
-            # latest messages in the room so asking other homeservers for more
-            # is useless. The new latest messages will just be federated as
-            # usual.
-            txn.execute(forward_extremity_query, (event.room_id, event.event_id))
-            if txn.fetchone():
-                return False
+                # We consider any forward extremity as the latest in the room and
+                # not a forward gap.
+                #
+                # To expand, even though there is technically a gap at the front of
+                # the room where the forward extremities are, we consider those the
+                # latest messages in the room so asking other homeservers for more
+                # is useless. The new latest messages will just be federated as
+                # usual.
+                txn.execute(forward_extremity_query, (event.room_id, event.event_id))
+                if txn.fetchone():
+                    return False
 
             # Check to see whether the event in question is already referenced
             # by another event. If we don't see any edges, we're next to a
@@ -2397,6 +2438,61 @@ class EventsWorkerStore(SQLBaseStore):
             "is_event_next_to_gap_txn",
             is_event_next_to_gap_txn,
         )
+
+    async def get_events_next_to_gaps(
+        self, events: Sequence[EventBase], direction: Direction
+    ) -> Sequence[EventGapEntry]:
+        """
+        Find all of the events that have gaps next to them.
+
+        When going backwards, we look for backward gaps (i.e. missing prev_events).
+
+        When going forwards, we look for forward gaps (i.e. events that aren't
+        referenced by any other events).
+
+        Args:
+            events: topological ordered list of events
+            direction: which side of the events to check for gaps. This should match the
+                direction we're paginating in.
+        """
+
+        gaps = []
+        for event in events:
+            # FIXME: We should use a bulk look-up instead of N+1 queries.
+            if direction == Direction.BACKWARDS:
+                is_next_to_gap = await self.is_event_next_to_backward_gap(event)
+            elif direction == Direction.FORWARDS:
+                is_next_to_gap = await self.is_event_next_to_forward_gap(
+                    event, ignore_gap_after_latest=False
+                )
+            else:
+                assert_never(direction)
+
+            if not is_next_to_gap:
+                continue
+
+            stream_ordering = event.internal_metadata.stream_ordering
+            assert stream_ordering is not None, (
+                "persisted events should have stream_ordering"
+            )
+
+            gaps.append(
+                EventGapEntry(
+                    prev_token=generate_next_token(
+                        direction=Direction.BACKWARDS,
+                        last_topo_ordering=event.depth,
+                        last_stream_ordering=stream_ordering,
+                    ),
+                    event_id=event.event_id,
+                    next_token=generate_next_token(
+                        direction=Direction.FORWARDS,
+                        last_topo_ordering=event.depth,
+                        last_stream_ordering=stream_ordering,
+                    ),
+                )
+            )
+
+        return gaps
 
     async def get_event_id_for_timestamp(
         self, room_id: str, timestamp: int, direction: Direction

@@ -1739,8 +1739,8 @@ class RoomJoinRatelimitTestCase(RoomBase):
         self.assertEqual(len(rooms), 4)
 
 
-class RoomMessagesTestCase(RoomBase):
-    """Tests /rooms/$room_id/messages/$user_id/$msg_id REST events."""
+class RoomSendMessagesTestCase(RoomBase):
+    """Tests /rooms/{roomId}/send/{eventType}/{txnId} REST events."""
 
     user_id = "@sid1:red"
 

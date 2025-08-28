@@ -622,6 +622,7 @@ class PaginationHandler:
         if not events:
             return {
                 "chunk": [],
+                "gaps": [],
                 "start": await from_token.to_string(self.store),
             }
 
@@ -641,6 +642,7 @@ class PaginationHandler:
         if not events:
             return {
                 "chunk": [],
+                "gaps": [],
                 "start": await from_token.to_string(self.store),
                 "end": await next_token.to_string(self.store),
             }
@@ -666,6 +668,10 @@ class PaginationHandler:
             events, user_id
         )
 
+        gaps = await self.store.get_events_next_to_gaps(
+            events=events, direction=pagin_config.direction
+        )
+
         time_now = self.clock.time_msec()
 
         serialize_options = SerializeEventConfig(
@@ -681,6 +687,18 @@ class PaginationHandler:
                     bundle_aggregations=aggregations,
                 )
             ),
+            "gaps": [
+                {
+                    "prev_pagination_token": await from_token.copy_and_replace(
+                        StreamKeyType.ROOM, gap.prev_token
+                    ).to_string(self.store),
+                    "event_id": gap.event_id,
+                    "next_pagination_token": await from_token.copy_and_replace(
+                        StreamKeyType.ROOM, gap.next_token
+                    ).to_string(self.store),
+                }
+                for gap in gaps
+            ],
             "start": await from_token.to_string(self.store),
             "end": await next_token.to_string(self.store),
         }
