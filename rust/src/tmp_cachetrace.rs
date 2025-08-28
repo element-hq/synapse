@@ -25,6 +25,7 @@ struct Row {
 }
 
 enum Op {
+    Register { cache_name: String },
     New { key_size: u64, value_size: u64 },
     Request,
     Invalidate,
@@ -77,6 +78,17 @@ impl CacheTracer {
         } else {
             let new = self.cache_names.len() as u16;
             self.cache_names.insert(cache.to_owned(), new);
+            let _ = self.tx.try_send(Row {
+                cache: new,
+                op: Op::Register {
+                    cache_name: cache.to_owned(),
+                },
+                hash: 0,
+                time_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+            });
             new
         };
 
@@ -105,6 +117,17 @@ impl CacheTracer {
         } else {
             let new = self.cache_names.len() as u16;
             self.cache_names.insert(cache.to_owned(), new);
+            let _ = self.tx.try_send(Row {
+                cache: new,
+                op: Op::Register {
+                    cache_name: cache.to_owned(),
+                },
+                hash: 0,
+                time_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+            });
             new
         };
 
@@ -130,6 +153,17 @@ impl CacheTracer {
         } else {
             let new = self.cache_names.len() as u16;
             self.cache_names.insert(cache.to_owned(), new);
+            let _ = self.tx.try_send(Row {
+                cache: new,
+                op: Op::Register {
+                    cache_name: cache.to_owned(),
+                },
+                hash: 0,
+                time_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+            });
             new
         };
 
@@ -155,6 +189,17 @@ impl CacheTracer {
         } else {
             let new = self.cache_names.len() as u16;
             self.cache_names.insert(cache.to_owned(), new);
+            let _ = self.tx.try_send(Row {
+                cache: new,
+                op: Op::Register {
+                    cache_name: cache.to_owned(),
+                },
+                hash: 0,
+                time_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+            });
             new
         };
 
@@ -210,6 +255,11 @@ fn receive_and_log_traces(rx: Receiver<Row>, error_flag: Arc<AtomicBool>) -> any
         bw.write_all(&row.hash.to_be_bytes())?;
 
         match row.op {
+            Op::Register { cache_name } => {
+                bw.write_all(b"*")?;
+                bw.write_all(&(cache_name.len() as u32).to_be_bytes())?;
+                bw.write_all(cache_name.as_bytes())?;
+            }
             Op::New {
                 key_size,
                 value_size,
