@@ -15,6 +15,7 @@
 from typing import Optional
 from unittest import mock
 
+from synapse.crypto.event_signing import compute_event_signature
 from twisted.internet.testing import MemoryReactor
 
 from synapse.events import EventBase, make_event_from_dict
@@ -27,6 +28,8 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection
+import signedjson
+from signedjson.key import encode_verify_key_base64, get_verify_key
 
 
 class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
@@ -62,6 +65,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             room_creator=self.creator, tok=self.creator_token
         )
         room_version = self.get_success(main_store.get_room_version(self.room_id))
+        self.room_version = room_version
 
         # Create some sample events
         self.spammy_event = make_event_from_dict(
@@ -110,7 +114,7 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
 
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu.side_effect = get_policy_recommendation_for_pdu
 
-    def _add_policy_server_to_room(self) -> None:
+    def _add_policy_server_to_room(self, public_key=None) -> None:
         # Inject a member event into the room
         policy_user_id = f"@policy:{self.OTHER_SERVER_NAME}"
         self.get_success(
@@ -118,12 +122,15 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
                 self.hs, self.room_id, policy_user_id, "join"
             )
         )
+        content = {
+            "via": self.OTHER_SERVER_NAME,
+        }
+        if public_key is not None:
+            content["public_key"] = public_key
         self.helper.send_state(
             self.room_id,
             "org.matrix.msc4284.policy",
-            {
-                "via": self.OTHER_SERVER_NAME,
-            },
+            content,
             tok=self.creator_token,
             state_key="",
         )
@@ -218,9 +225,32 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.assertEqual(ok, False)
         self.assertEqual(self.call_count, 1)
 
-    def test_not_spammy_event_is_not_spam(self) -> None:
-        self._add_policy_server_to_room()
+    def test_signed_event_is_not_spam(self) -> None:
+        signing_key = signedjson.key.generate_signing_key("policy_server")
+        verify_key_str = encode_verify_key_base64(get_verify_key(signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        event = make_event_from_dict(
+            room_version=self.room_version,
+            internal_metadata_dict={},
+            event_dict={
+                "room_id": self.room_id,
+                "type": "m.room.message",
+                "sender": "@spammy:example.org",
+                "content": {
+                    "msgtype": "m.text",
+                    "body": "This is a signed event.",
+                },
+            },
+        )
 
-        ok = self.get_success(self.handler.is_event_allowed(self.not_spammy_event))
+        # We're going to sign the event and check it marks the event as not-spam, without hitting the
+        # policy server
+        sigs = compute_event_signature(
+            event.room_version, event.get_dict(), self.OTHER_SERVER_NAME, signing_key,
+        )
+        event.signatures.update(sigs)
+
+        ok = self.get_success(self.handler.is_event_allowed(event))
         self.assertEqual(ok, True)
-        self.assertEqual(self.call_count, 1)
+        # Make sure we did not make an HTTP hit to get_policy_recommendation_for_pdu
+        self.assertEqual(self.call_count, 0)

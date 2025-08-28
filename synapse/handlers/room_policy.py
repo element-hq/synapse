@@ -17,9 +17,12 @@
 import logging
 from typing import TYPE_CHECKING
 
+from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK
 from synapse.util.stringutils import parse_and_validate_server_name
+from signedjson.key import decode_verify_key_bytes
+from unpaddedbase64 import decode_base64
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -80,6 +83,26 @@ class RoomPolicyHandler:
         )
         if not is_in_room:
             return True  # policy server not in room == default allow
+
+        # Check if the event has been signed with the public key in the policy server state event.
+        # If it is, we can save an HTTP hit.
+        public_key = policy_event.content.get("public_key", "")
+        if public_key is not None and isinstance(public_key, str):
+            # check the event is signed with this (via, public_key).
+            # TODO: we actually want to get the policy server state event BEFORE THE EVENT rather than
+            # the current state value, else changing the public key will cause all of these checks to fail.
+            verify_json_req = VerifyJsonRequest.from_event(policy_server, event, 0)
+            try:
+                key_bytes = decode_base64(public_key)
+                verify_key = decode_verify_key_bytes("ed25519:policy_server", key_bytes)
+                # We would normally use KeyRing.verify_event_for_server but we can't here as we don't
+                # want to fetch the server key, and instead want to use the public key in the state event.
+                await self._hs.get_keyring()._process_json(verify_key, verify_json_req)
+                # if the event is correctly signed by the public key in the policy server state event = Allow
+                return True
+            except Exception as ex:
+                logger.warning("failed to verify event using public key in policy server event: %s", ex)
+                # fallthrough to hit /check manually
 
         # At this point, the server appears valid and is in the room, so ask it to check
         # the event.
