@@ -223,10 +223,9 @@ def run_as_background_process(
     This should be used to wrap processes which are fired off to run in the
     background, instead of being associated with a particular request.
 
-    It returns a Deferred which completes when the function completes, but it doesn't
-    follow the synapse logcontext rules, which makes it appropriate for passing to
-    clock.looping_call and friends (or for firing-and-forgetting in the middle of a
-    normal synapse async function).
+    It returns a Deferred which completes when the function completes, which makes it
+    appropriate for passing to clock.looping_call and friends (or for
+    firing-and-forgetting in the middle of a normal synapse async function).
 
     Args:
         desc: a description for this background process type
@@ -241,8 +240,6 @@ def run_as_background_process(
 
     Returns:
         Deferred which returns the result of func, or `None` if func raises.
-        Note that the returned Deferred does not follow the synapse logcontext
-        rules.
     """
 
     async def run() -> Optional[R]:

@@ -868,9 +868,6 @@ def defer_to_thread(
     logcontext (so its CPU usage metrics will get attributed to the current
     logcontext). `f` should preserve the logcontext it is given.
 
-    The result deferred follows the Synapse logcontext rules: you should `yield`
-    on it.
-
     Args:
         reactor: The reactor in whose main thread the Deferred will be invoked,
             and whose threadpool we should use for the function.
@@ -907,9 +904,6 @@ def defer_to_threadpool(
     Creates a new logcontext for `f`, which is created as a child of the current
     logcontext (so its CPU usage metrics will get attributed to the current
     logcontext). `f` should preserve the logcontext it is given.
-
-    The result deferred follows the Synapse logcontext rules: you should `yield`
-    on it.
 
     Args:
         reactor: The reactor in whose main thread the Deferred will be invoked.

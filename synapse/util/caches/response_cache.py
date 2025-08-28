@@ -234,11 +234,9 @@ class ResponseCache(Generic[KV]):
     ) -> RV:
         """Wrap together a *get* and *set* call, taking care of logcontexts
 
-        First looks up the key in the cache, and if it is present makes it
-        follow the synapse logcontext rules and returns it.
+        First looks up the key in the cache, and if present, returns it.
 
-        Otherwise, makes a call to *callback(*args, **kwargs)*, which should
-        follow the synapse logcontext rules, and adds the result to the cache.
+        Otherwise, makes a call to *callback(*args, **kwargs)* and adds the result to the cache.
 
         Example usage:
 

@@ -237,10 +237,9 @@ def run_as_background_process(
     This should be used to wrap processes which are fired off to run in the
     background, instead of being associated with a particular request.
 
-    It returns a Deferred which completes when the function completes, but it doesn't
-    follow the synapse logcontext rules, which makes it appropriate for passing to
-    clock.looping_call and friends (or for firing-and-forgetting in the middle of a
-    normal synapse async function).
+    It returns a Deferred which completes when the function completes, which makes it
+    appropriate for passing to clock.looping_call and friends (or for
+    firing-and-forgetting in the middle of a normal synapse async function).
 
     Args:
         desc: a description for this background process type
@@ -255,8 +254,6 @@ def run_as_background_process(
 
     Returns:
         Deferred which returns the result of func, or `None` if func raises.
-        Note that the returned Deferred does not follow the synapse logcontext
-        rules.
     """
 
     logger.warning(
@@ -1375,9 +1372,7 @@ class ModuleApi:
 
         Args:
             f: The function to call repeatedly. f can be either synchronous or
-                asynchronous, and must follow Synapse's logcontext rules.
-                More info about logcontexts is available at
-                https://element-hq.github.io/synapse/latest/log_contexts.html
+                asynchronous.
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             desc: The background task's description. Default to the function's name.
@@ -1431,9 +1426,7 @@ class ModuleApi:
         Args:
             msec: How long to wait before calling, in milliseconds.
             f: The function to call once. f can be either synchronous or
-                asynchronous, and must follow Synapse's logcontext rules.
-                More info about logcontexts is available at
-                https://element-hq.github.io/synapse/latest/log_contexts.html
+                asynchronous.
             *args: Positional arguments to pass to function.
             desc: The background task's description. Default to the function's name.
             **kwargs: Keyword arguments to pass to function.
@@ -1668,10 +1661,9 @@ class ModuleApi:
         This should be used to wrap processes which are fired off to run in the
         background, instead of being associated with a particular request.
 
-        It returns a Deferred which completes when the function completes, but it doesn't
-        follow the synapse logcontext rules, which makes it appropriate for passing to
-        clock.looping_call and friends (or for firing-and-forgetting in the middle of a
-        normal synapse async function).
+        It returns a Deferred which completes when the function completes, which makes
+        it appropriate for passing to clock.looping_call and friends (or for
+        firing-and-forgetting in the middle of a normal synapse async function).
 
         Args:
             desc: a description for this background process type
@@ -1686,8 +1678,6 @@ class ModuleApi:
 
         Returns:
             Deferred which returns the result of func, or `None` if func raises.
-            Note that the returned Deferred does not follow the synapse logcontext
-            rules.
         """
         return _run_as_background_process(
             desc, self.server_name, func, *args, bg_start_span=bg_start_span, **kwargs

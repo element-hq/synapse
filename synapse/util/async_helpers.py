@@ -84,9 +84,6 @@ class AbstractObservableDeferred(Generic[_T], metaclass=abc.ABCMeta):
         This returns a brand new deferred that is resolved when the underlying
         deferred is resolved. Interacting with the returned deferred does not
         effect the underlying deferred.
-
-        Note that the returned Deferred doesn't follow the Synapse logcontext rules -
-        you will probably want to `make_deferred_yieldable` it.
         """
         ...
 
@@ -100,11 +97,6 @@ class ObservableDeferred(Generic[_T], AbstractObservableDeferred[_T]):
 
     Cancelling or otherwise resolving an observer will not affect the original
     ObservableDeferred.
-
-    NB that it does not attempt to do anything with logcontexts; in general
-    you should probably make_deferred_yieldable the deferreds
-    returned by `observe`, and ensure that the original deferred runs its
-    callbacks in the sentinel logcontext.
     """
 
     __slots__ = ["_deferred", "_observers", "_result"]
@@ -861,16 +853,12 @@ def stop_cancellation(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]":
     """Prevent a `Deferred` from being cancelled by wrapping it in another `Deferred`.
 
     Args:
-        deferred: The `Deferred` to protect against cancellation. Must not follow the
-            Synapse logcontext rules.
+        deferred: The `Deferred` to protect against cancellation.
 
     Returns:
         A new `Deferred`, which will contain the result of the original `Deferred`.
         The new `Deferred` will not propagate cancellation through to the original.
         When cancelled, the new `Deferred` will fail with a `CancelledError`.
-
-        The new `Deferred` will not follow the Synapse logcontext rules and should be
-        wrapped with `make_deferred_yieldable`.
     """
     new_deferred: "defer.Deferred[T]" = defer.Deferred()
     deferred.chainDeferred(new_deferred)
@@ -896,8 +884,7 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
     resolve with a `CancelledError` until the original awaitable resolves.
 
     Args:
-        deferred: The coroutine or `Deferred` to protect against cancellation. May
-            optionally follow the Synapse logcontext rules.
+        deferred: The coroutine or `Deferred` to protect against cancellation.
 
     Returns:
         A new `Deferred`, which will contain the result of the original coroutine or
@@ -906,10 +893,6 @@ def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
 
         When cancelled, the new `Deferred` will wait until the original coroutine or
         `Deferred` resolves before failing with a `CancelledError`.
-
-        The new `Deferred` will follow the Synapse logcontext rules if `awaitable`
-        follows the Synapse logcontext rules. Otherwise the new `Deferred` should be
-        wrapped with `make_deferred_yieldable`.
     """
 
     # First, convert the awaitable into a `Deferred`.
