@@ -23,8 +23,9 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.errors import SynapseError
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase, make_event_from_dict
+from synapse.handlers.room_policy import POLICY_SERVER_KEY_ID
 from synapse.rest import admin
-from synapse.rest.client import login, room
+from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
@@ -41,6 +42,8 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        filter.register_servlets,
+        sync.register_servlets,
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -414,3 +417,51 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             self.handler.ask_policy_server_to_sign_event(verified_event, verify=True),
             SynapseError,
         )
+
+    def test_policy_server_signatures_end_to_end(self) -> None:
+        verify_key_str = encode_verify_key_base64(get_verify_key(self.signing_key))
+        self._add_policy_server_to_room(public_key=verify_key_str)
+        self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
+        # Send an event and ensure we get a policy server signature on it.
+        resp = self.helper.send_event(
+            self.room_id,
+            "m.room.message",
+            {"body": "honk", "msgtype": "m.text"},
+            tok=self.creator_token,
+        )
+        ev = self._fetch_federation_event(resp["event_id"])
+        assert ev is not None
+        sig = (
+            ev.get("signatures", {})
+            .get(self.OTHER_SERVER_NAME, {})
+            .get(POLICY_SERVER_KEY_ID, None)
+        )
+        self.assertNotEquals(
+            sig,
+            None,
+            f"event did not include policy server signature, signature block = {ev.get('signatures', None)}",
+        )
+
+    def _fetch_federation_event(self, event_id: str) -> Optional[JsonDict]:
+        # Request federation events to see the signatures
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user/%s/filter" % (self.creator),
+            {"event_format": "federation"},
+            self.creator_token,
+        )
+        self.assertEqual(channel.code, 200)
+        filter_id = channel.json_body["filter_id"]
+        channel = self.make_request(
+            "GET",
+            "/sync?filter=%s" % filter_id,
+            access_token=self.creator_token,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        for ev in channel.json_body["rooms"]["join"][self.room_id]["timeline"][
+            "events"
+        ]:
+            if ev["event_id"] == event_id:
+                return ev
+        return None
