@@ -849,6 +849,7 @@ def run_coroutine_in_background(
 T = TypeVar("T")
 
 
+# TODO: This function is a no-op now and should be removed in a follow-up PR.
 def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]":
     return deferred
 
