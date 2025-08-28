@@ -278,7 +278,7 @@ class ApplicationServiceApi(SimpleHttpClient):
             url = f"{service.url}{APP_SERVICE_PREFIX}/profile/{urllib.parse.quote(user_id)}"
 
             if key:
-                url += f"/{key}"
+                url += f"/{urllib.parse.quote(key)}"
 
             response = await self.get_json(
                 url,

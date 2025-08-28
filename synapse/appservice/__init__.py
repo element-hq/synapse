@@ -88,6 +88,7 @@ class ApplicationService:
         supports_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
         msc4190_device_management: bool = False,
+        supports_profile_lookup: bool = False,
     ):
         self.token = token
         self.url = (
@@ -100,6 +101,7 @@ class ApplicationService:
         self.id = id
         self.ip_range_whitelist = ip_range_whitelist
         self.supports_ephemeral = supports_ephemeral
+        self.supports_profile_lookup = supports_profile_lookup
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
         self.msc4190_device_management = msc4190_device_management
 

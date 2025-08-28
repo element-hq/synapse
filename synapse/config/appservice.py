@@ -171,6 +171,7 @@ def _load_appservice(
         ip_range_whitelist = IPSet(as_info.get("ip_range_whitelist"))
 
     supports_ephemeral = as_info.get("de.sorunome.msc2409.push_ephemeral", False)
+    lookup_profiles = as_info.get("uk.half-shot.lookup_profile", False)
 
     # Opt-in flag for the MSC3202-specific transactional behaviour.
     # When enabled, appservice transactions contain the following information:
@@ -206,6 +207,7 @@ def _load_appservice(
         rate_limited=rate_limited,
         ip_range_whitelist=ip_range_whitelist,
         supports_ephemeral=supports_ephemeral,
+        supports_profile_lookup=lookup_profiles,
         msc3202_transaction_extensions=msc3202_transaction_extensions,
         msc4190_device_management=msc4190_enabled,
     )
