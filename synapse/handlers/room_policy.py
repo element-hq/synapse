@@ -17,6 +17,7 @@
 import logging
 from typing import TYPE_CHECKING
 
+from synapse.api.errors import SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+POLICY_SERVER_EVENT_TYPE = "org.matrix.msc4284.policy"
+POLICY_SERVER_KEY_ID = "ed25519:policy_server"
 
 class RoomPolicyHandler:
     def __init__(self, hs: "HomeServer"):
@@ -57,11 +60,11 @@ class RoomPolicyHandler:
         Returns:
             bool: True if the event is allowed in the room, False otherwise.
         """
-        if event.type == "org.matrix.msc4284.policy" and event.state_key is not None:
+        if event.type == POLICY_SERVER_EVENT_TYPE and event.state_key is not None:
             return True  # always allow policy server change events
 
         policy_event = await self._storage_controllers.state.get_current_state_event(
-            event.room_id, "org.matrix.msc4284.policy", ""
+            event.room_id, POLICY_SERVER_EVENT_TYPE, ""
         )
         if not policy_event:
             return True  # no policy server == default allow
@@ -86,23 +89,14 @@ class RoomPolicyHandler:
 
         # Check if the event has been signed with the public key in the policy server state event.
         # If it is, we can save an HTTP hit.
+        # TODO: we actually want to get the policy server state event BEFORE THE EVENT rather than
+        # the current state value, else changing the public key will cause all of these checks to fail.
         public_key = policy_event.content.get("public_key", "")
         if public_key is not None and isinstance(public_key, str):
-            # check the event is signed with this (via, public_key).
-            # TODO: we actually want to get the policy server state event BEFORE THE EVENT rather than
-            # the current state value, else changing the public key will cause all of these checks to fail.
-            verify_json_req = VerifyJsonRequest.from_event(policy_server, event, 0)
-            try:
-                key_bytes = decode_base64(public_key)
-                verify_key = decode_verify_key_bytes("ed25519:policy_server", key_bytes)
-                # We would normally use KeyRing.verify_event_for_server but we can't here as we don't
-                # want to fetch the server key, and instead want to use the public key in the state event.
-                await self._hs.get_keyring()._process_json(verify_key, verify_json_req)
-                # if the event is correctly signed by the public key in the policy server state event = Allow
+            valid = await self._verify_policy_server_signature(event, policy_server, public_key)
+            if valid:
                 return True
-            except Exception as ex:
-                logger.warning("failed to verify event using public key in policy server event: %s", ex)
-                # fallthrough to hit /check manually
+            # fallthrough to hit /check manually
 
         # At this point, the server appears valid and is in the room, so ask it to check
         # the event.
@@ -113,3 +107,57 @@ class RoomPolicyHandler:
             return False
 
         return True  # default allow
+
+    async def _verify_policy_server_signature(self, event: EventBase, policy_server: str, public_key: str) -> bool:
+        # check the event is signed with this (via, public_key).
+        verify_json_req = VerifyJsonRequest.from_event(policy_server, event, 0)
+        try:
+            key_bytes = decode_base64(public_key)
+            verify_key = decode_verify_key_bytes(POLICY_SERVER_KEY_ID, key_bytes)
+            # We would normally use KeyRing.verify_event_for_server but we can't here as we don't
+            # want to fetch the server key, and instead want to use the public key in the state event.
+            await self._hs.get_keyring()._process_json(verify_key, verify_json_req)
+            # if the event is correctly signed by the public key in the policy server state event = Allow
+            return True
+        except Exception as ex:
+            logger.warning("failed to verify event using public key in policy server event: %s", ex)
+        return False
+
+    async def ask_policy_server_to_sign_event(self, event: EventBase, verify=False) -> None:
+        """Ask the policy server to sign this event. The signature is added to the event signatures block.
+
+        Does nothing if there is no policy server state event in the room. If the policy server
+        refuses to sign the event (as it's marked as spam) does nothing.
+
+        Args:
+            event: The event to sign
+            verify: If True, verify that the signature is correctly signed by the public_key in the
+            policy server state event.
+        Raises:
+            if verify=True and the policy server signed the event with an invalid signature. Does
+            not raise if the policy server refuses to sign the event.
+        """
+        policy_event = await self._storage_controllers.state.get_current_state_event(
+            event.room_id, POLICY_SERVER_EVENT_TYPE, ""
+        )
+        if not policy_event:
+            return
+        policy_server = policy_event.content.get("via", "")
+        if policy_server is None or not isinstance(policy_server, str):
+            return
+        # Only ask to sign events if the policy state event has a public_key (so they can be subsequently verified)
+        public_key = policy_event.content.get("public_key", "")
+        if public_key is None or not isinstance(public_key, str):
+            return
+
+        # Ask the policy server to sign this event.
+        # We set a smallish timeout here as we don't want to block event sending too long.
+        signature = await self._federation_client.ask_policy_server_to_sign_event(
+            policy_server, event, timeout=3000,
+        )
+        if signature and len(signature) > 0: # the policy server returns {} if it refuses to sign the event.
+            event.signatures.update(signature)
+            if verify:
+                is_valid = await self._verify_policy_server_signature(event, policy_server, public_key)
+                if not is_valid:
+                    raise SynapseError(500, f"policy server {policy_server} failed to sign event correctly")

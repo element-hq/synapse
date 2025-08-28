@@ -170,6 +170,32 @@ class TransportLayerClient:
             timeout=timeout,
         )
 
+    async def ask_policy_server_to_sign_event(
+        self, destination: str, event: EventBase, timeout: Optional[int] = None
+    ) -> JsonDict:
+        """Requests that the destination server (typically a policy server)
+        sign the event as not spam.
+
+        If the policy server could not be contacted or the policy server
+        returned an error, this returns no signature.
+
+        Args:
+            destination: The host name of the policy server / homeserver.
+            event: The event to sign.
+            timeout: How long to try (in ms) the destination for before giving up.
+                None indicates no timeout.
+        Returns:
+            The signature from the policy server, structured in the same was as the 'signatures'
+            JSON in the event e.g { "$policy_server_via_domain" : { "ed25519:policy_server": "signature_base64" }}
+        """
+        return await self.client.post_json(
+            destination=destination,
+            path=f"/_matrix/policy/unstable/org.matrix.msc4284/sign",
+            data=event.get_pdu_json(),
+            ignore_backoff=True,
+            timeout=timeout,
+        )
+
     async def backfill(
         self, destination: str, room_id: str, event_tuples: Collection[str], limit: int
     ) -> Optional[Union[JsonDict, list]]:
