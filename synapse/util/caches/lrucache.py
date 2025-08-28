@@ -21,6 +21,7 @@
 
 import logging
 import math
+import os
 import threading
 import weakref
 from enum import Enum
@@ -64,6 +65,7 @@ from synapse.util.linked_list import ListNode
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+    from synapse.synapse_rust.tmp_cachetrace import CacheTracer
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +103,24 @@ VT = TypeVar("VT")
 
 # a general type var, distinct from either KT or VT
 T = TypeVar("T")
+
+_tracer: Optional["CacheTracer"] = None
+_should_trace = "SYNTRACE" in os.environ
+
+
+def get_tracer() -> Optional["CacheTracer"]:
+    from synapse.synapse_rust.tmp_cachetrace import CacheTracer
+
+    global _tracer
+
+    if _tracer:
+        return _tracer
+
+    if _should_trace:
+        _tracer = CacheTracer()
+        return _tracer
+
+    return None
 
 
 class _TimedListNode(ListNode[T]):
@@ -493,6 +513,7 @@ class LruCache(Generic[KT, VT]):
 
                 Note: The new key does not have to be unique.
         """
+
         # Default `clock` to something sensible. Note that we rename it to
         # `real_clock` so that mypy doesn't think its still `Optional`.
         if clock is None:
@@ -503,6 +524,11 @@ class LruCache(Generic[KT, VT]):
         cache: Union[Dict[KT, _Node[KT, VT]], TreeCache] = cache_type()
         self.cache = cache  # Used for introspection.
         self.apply_cache_factor_from_config = apply_cache_factor_from_config
+
+        if not isinstance(cache, TreeCache):
+            self._tracer = get_tracer()
+        else:
+            self._tracer = None
 
         # Save the original max size, and apply the default size factor.
         self._original_max_size = max_size
@@ -542,6 +568,8 @@ class LruCache(Generic[KT, VT]):
 
         extra_index: Dict[KT, Set[KT]] = {}
 
+        self._cache_name = cache_name or str(id(self))
+
         def evict() -> None:
             while cache_len() > self.max_size:
                 # Get the last node in the list (i.e. the oldest node).
@@ -559,6 +587,10 @@ class LruCache(Generic[KT, VT]):
 
                 evicted_len = delete_node(node)
                 cache.pop(node.key, None)
+
+                if self._tracer:
+                    self._tracer.on_evict(self._cache_name, node.key)
+
                 if metrics:
                     metrics.inc_evictions(EvictionReason.size, evicted_len)
 
@@ -675,6 +707,10 @@ class LruCache(Generic[KT, VT]):
                     to False if this fetch should *not* prevent a node from
                     being expired.
             """
+
+            if self._tracer:
+                self._tracer.on_request(self._cache_name, key)
+
             node = cache.get(key, None)
             if node is not None:
                 if update_last_access:
@@ -750,6 +786,10 @@ class LruCache(Generic[KT, VT]):
             key: KT, value: VT, callbacks: Collection[Callable[[], None]] = ()
         ) -> None:
             node = cache.get(key, None)
+
+            if self._tracer:
+                self._tracer.on_new(self._cache_name, key, value)
+
             if node is not None:
                 # We sometimes store large objects, e.g. dicts, which cause
                 # the inequality check to take a long time. So let's only do
@@ -792,6 +832,8 @@ class LruCache(Generic[KT, VT]):
 
         @synchronized
         def cache_pop(key: KT, default: Optional[T] = None) -> Union[None, T, VT]:
+            if self._tracer:
+                self._tracer.on_invalidate(self._cache_name, key)
             node = cache.get(key, None)
             if node:
                 evicted_len = delete_node(node)
@@ -813,6 +855,8 @@ class LruCache(Generic[KT, VT]):
             may be of lower cardinality than the TreeCache - in which case the whole
             subtree is deleted.
             """
+            if self._tracer:
+                self._tracer.on_invalidate(self._cache_name, key)
             popped = cache.pop(key, None)
             if popped is None:
                 return
@@ -824,6 +868,8 @@ class LruCache(Generic[KT, VT]):
         @synchronized
         def cache_clear() -> None:
             for node in cache.values():
+                if self._tracer:
+                    self._tracer.on_invalidate(self._cache_name, node.key)
                 node.run_and_clear_callbacks()
                 node.drop_from_lists()
 
@@ -841,6 +887,8 @@ class LruCache(Generic[KT, VT]):
 
         @synchronized
         def cache_contains(key: KT) -> bool:
+            if self._tracer:
+                self._tracer.on_request(self._cache_name, key)
             return key in cache
 
         @synchronized
@@ -857,6 +905,8 @@ class LruCache(Generic[KT, VT]):
                 return
 
             for key in keys:
+                if self._tracer:
+                    self._tracer.on_invalidate(self._cache_name, key)
                 node = cache.pop(key, None)
                 if not node:
                     continue
