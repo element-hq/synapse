@@ -64,7 +64,7 @@ class RedactionsTestCase(HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(
-            self.mod_user_id, tok=self.mod_access_token
+            self.mod_user_id, tok=self.mod_access_token, room_version="10"
         )
 
         # Invite the other user
