@@ -17,13 +17,14 @@
 import logging
 from typing import TYPE_CHECKING
 
+from signedjson.key import decode_verify_key_bytes
+from unpaddedbase64 import decode_base64
+
 from synapse.api.errors import SynapseError
 from synapse.crypto.keyring import VerifyJsonRequest
 from synapse.events import EventBase
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK
 from synapse.util.stringutils import parse_and_validate_server_name
-from signedjson.key import decode_verify_key_bytes
-from unpaddedbase64 import decode_base64
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 POLICY_SERVER_EVENT_TYPE = "org.matrix.msc4284.policy"
 POLICY_SERVER_KEY_ID = "ed25519:policy_server"
+
 
 class RoomPolicyHandler:
     def __init__(self, hs: "HomeServer"):
@@ -93,7 +95,9 @@ class RoomPolicyHandler:
         # the current state value, else changing the public key will cause all of these checks to fail.
         public_key = policy_event.content.get("public_key", "")
         if public_key is not None and isinstance(public_key, str):
-            valid = await self._verify_policy_server_signature(event, policy_server, public_key)
+            valid = await self._verify_policy_server_signature(
+                event, policy_server, public_key
+            )
             if valid:
                 return True
             # fallthrough to hit /check manually
@@ -108,7 +112,9 @@ class RoomPolicyHandler:
 
         return True  # default allow
 
-    async def _verify_policy_server_signature(self, event: EventBase, policy_server: str, public_key: str) -> bool:
+    async def _verify_policy_server_signature(
+        self, event: EventBase, policy_server: str, public_key: str
+    ) -> bool:
         # check the event is signed with this (via, public_key).
         verify_json_req = VerifyJsonRequest.from_event(policy_server, event, 0)
         try:
@@ -120,10 +126,14 @@ class RoomPolicyHandler:
             # if the event is correctly signed by the public key in the policy server state event = Allow
             return True
         except Exception as ex:
-            logger.warning("failed to verify event using public key in policy server event: %s", ex)
+            logger.warning(
+                "failed to verify event using public key in policy server event: %s", ex
+            )
         return False
 
-    async def ask_policy_server_to_sign_event(self, event: EventBase, verify=False) -> None:
+    async def ask_policy_server_to_sign_event(
+        self, event: EventBase, verify: bool = False
+    ) -> None:
         """Ask the policy server to sign this event. The signature is added to the event signatures block.
 
         Does nothing if there is no policy server state event in the room. If the policy server
@@ -153,11 +163,20 @@ class RoomPolicyHandler:
         # Ask the policy server to sign this event.
         # We set a smallish timeout here as we don't want to block event sending too long.
         signature = await self._federation_client.ask_policy_server_to_sign_event(
-            policy_server, event, timeout=3000,
+            policy_server,
+            event,
+            timeout=3000,
         )
-        if signature and len(signature) > 0: # the policy server returns {} if it refuses to sign the event.
+        if (
+            signature and len(signature) > 0
+        ):  # the policy server returns {} if it refuses to sign the event.
             event.signatures.update(signature)
             if verify:
-                is_valid = await self._verify_policy_server_signature(event, policy_server, public_key)
+                is_valid = await self._verify_policy_server_signature(
+                    event, policy_server, public_key
+                )
                 if not is_valid:
-                    raise SynapseError(500, f"policy server {policy_server} failed to sign event correctly")
+                    raise SynapseError(
+                        500,
+                        f"policy server {policy_server} failed to sign event correctly",
+                    )

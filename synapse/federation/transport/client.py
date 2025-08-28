@@ -190,7 +190,7 @@ class TransportLayerClient:
         """
         return await self.client.post_json(
             destination=destination,
-            path=f"/_matrix/policy/unstable/org.matrix.msc4284/sign",
+            path="/_matrix/policy/unstable/org.matrix.msc4284/sign",
             data=event.get_pdu_json(),
             ignore_backoff=True,
             timeout=timeout,

@@ -15,10 +15,13 @@
 from typing import Optional
 from unittest import mock
 
-from synapse.api.errors import SynapseError
-from synapse.crypto.event_signing import compute_event_signature
+import signedjson
+from signedjson.key import encode_verify_key_base64, get_verify_key
+
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import SynapseError
+from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase, make_event_from_dict
 from synapse.rest import admin
 from synapse.rest.client import login, room
@@ -29,8 +32,6 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection
-import signedjson
-from signedjson.key import encode_verify_key_base64, get_verify_key
 
 
 class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
@@ -45,7 +46,10 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         # mock out the federation transport client
         self.mock_federation_transport_client = mock.Mock(
-            spec=["get_policy_recommendation_for_pdu", "ask_policy_server_to_sign_event"]
+            spec=[
+                "get_policy_recommendation_for_pdu",
+                "ask_policy_server_to_sign_event",
+            ]
         )
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu = (
             mock.AsyncMock()
@@ -120,28 +124,47 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         self.mock_federation_transport_client.get_policy_recommendation_for_pdu.side_effect = get_policy_recommendation_for_pdu
 
         # Mock policy server actions on signing events
-        async def policy_server_signs_event(destination: str, pdu: EventBase, timeout: Optional[int] = None) -> Optional[JsonDict]:
+        async def policy_server_signs_event(
+            destination: str, pdu: EventBase, timeout: Optional[int] = None
+        ) -> Optional[JsonDict]:
             sigs = compute_event_signature(
-                pdu.room_version, pdu.get_dict(), self.OTHER_SERVER_NAME, self.signing_key,
+                pdu.room_version,
+                pdu.get_dict(),
+                self.OTHER_SERVER_NAME,
+                self.signing_key,
             )
             return sigs
-        async def policy_server_signs_event_with_wrong_key(destination: str, pdu: EventBase, timeout: Optional[int] = None) -> Optional[JsonDict]:
+
+        async def policy_server_signs_event_with_wrong_key(
+            destination: str, pdu: EventBase, timeout: Optional[int] = None
+        ) -> Optional[JsonDict]:
             sk = signedjson.key.generate_signing_key("policy_server")
             sigs = compute_event_signature(
-                pdu.room_version, pdu.get_dict(), self.OTHER_SERVER_NAME, sk,
+                pdu.room_version,
+                pdu.get_dict(),
+                self.OTHER_SERVER_NAME,
+                sk,
             )
             return sigs
-        async def policy_server_refuses_to_sign_event(destination: str, pdu: EventBase, timeout: Optional[int] = None) -> Optional[JsonDict]:
-            return dict()
-        async def policy_server_event_sign_error(destination: str, pdu: EventBase, timeout: Optional[int] = None) -> Optional[JsonDict]:
+
+        async def policy_server_refuses_to_sign_event(
+            destination: str, pdu: EventBase, timeout: Optional[int] = None
+        ) -> Optional[JsonDict]:
+            return {}
+
+        async def policy_server_event_sign_error(
+            destination: str, pdu: EventBase, timeout: Optional[int] = None
+        ) -> Optional[JsonDict]:
             return None
 
         self.policy_server_signs_event = policy_server_signs_event
         self.policy_server_refuses_to_sign_event = policy_server_refuses_to_sign_event
         self.policy_server_event_sign_error = policy_server_event_sign_error
-        self.policy_server_signs_event_with_wrong_key = policy_server_signs_event_with_wrong_key
+        self.policy_server_signs_event_with_wrong_key = (
+            policy_server_signs_event_with_wrong_key
+        )
 
-    def _add_policy_server_to_room(self, public_key=None) -> None:
+    def _add_policy_server_to_room(self, public_key: Optional[str] = None) -> None:
         # Inject a member event into the room
         policy_user_id = f"@policy:{self.OTHER_SERVER_NAME}"
         self.get_success(
@@ -272,7 +295,10 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         # We're going to sign the event and check it marks the event as not-spam, without hitting the
         # policy server
         sigs = compute_event_signature(
-            event.room_version, event.get_dict(), self.OTHER_SERVER_NAME, self.signing_key,
+            event.room_version,
+            event.get_dict(),
+            self.OTHER_SERVER_NAME,
+            self.signing_key,
         )
         event.signatures.update(sigs)
 
@@ -298,7 +324,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_signs_event
-        self.get_success(self.handler.ask_policy_server_to_sign_event(event, verify=True))
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
         self.assertEqual(len(event.signatures), 1)
 
     def test_ask_policy_server_to_sign_event_refuses(self) -> None:
@@ -318,7 +346,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_refuses_to_sign_event
-        self.get_success(self.handler.ask_policy_server_to_sign_event(event, verify=True))
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
         self.assertEqual(len(event.signatures), 0)
 
     def test_ask_policy_server_to_sign_event_cannot_reach(self) -> None:
@@ -338,7 +368,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         self.mock_federation_transport_client.ask_policy_server_to_sign_event.side_effect = self.policy_server_event_sign_error
-        self.get_success(self.handler.ask_policy_server_to_sign_event(event, verify=True))
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(event, verify=True)
+        )
         self.assertEqual(len(event.signatures), 0)
 
     def test_ask_policy_server_to_sign_event_wrong_sig(self) -> None:
@@ -359,7 +391,9 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
             },
         )
         # verify=False so it passes
-        self.get_success(self.handler.ask_policy_server_to_sign_event(unverified_event, verify=False))
+        self.get_success(
+            self.handler.ask_policy_server_to_sign_event(unverified_event, verify=False)
+        )
         self.assertEqual(len(unverified_event.signatures), 1)
 
         verified_event = make_event_from_dict(
