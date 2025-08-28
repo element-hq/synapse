@@ -624,9 +624,9 @@ class ProfileHandler:
             await self.clock.sleep(random.randint(1, 10))
             return TaskStatus.COMPLETE, None, None
 
-        room_ids = await self.store.get_rooms_for_user(target_user.to_string())
-        # TODO order list based on some sort of recent usage heuristic so that the fact
-        # the changes are not happening instantly is less obvious.
+        room_ids = await self.store.get_rooms_for_user_by_read_receipts(
+            target_user.to_string()
+        )
         for room_id in room_ids:
             handler = self.hs.get_room_member_handler()
             try:

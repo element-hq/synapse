@@ -810,3 +810,119 @@ class CurrentStateMembershipUpdateTestCase(unittest.HomeserverTestCase):
 
         # Now let's actually drive the updates to completion
         self.wait_for_background_updates()
+
+
+class RoomMemberReadReceiptOrderingTestCase(unittest.HomeserverTestCase):
+    """Tests for ordering rooms by read receipt activity in get_rooms_for_user_by_read_receipts"""
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        super().prepare(reactor, clock, homeserver)
+        self.store = homeserver.get_datastores().main
+        self.room_creator = homeserver.get_room_creation_handler()
+
+        persist_event_storage_controller = self.hs.get_storage_controllers().persistence
+        assert persist_event_storage_controller is not None
+        self.persist_event_storage_controller = persist_event_storage_controller
+        # Create test users and rooms in prepare()
+        self.alice = UserID("alice", "test")
+        self.alice_id = self.alice.to_string()
+        self.alice_requester = create_requester(self.alice)
+
+        # Create test rooms
+        self.room1, _, _ = self.get_success(
+            self.room_creator.create_room(self.alice_requester, {}), by=1.0
+        )
+        self.room2, _, _ = self.get_success(
+            self.room_creator.create_room(self.alice_requester, {}), by=1.0
+        )
+        self.room3, _, _ = self.get_success(
+            self.room_creator.create_room(self.alice_requester, {}), by=1.0
+        )
+
+    def test_get_rooms_for_user_by_read_receipts_ordering(self) -> None:
+        """Test that rooms are ordered by read receipt recency."""
+        # Create events in each room to have something to point read receipts at
+        event1 = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room1,
+                type="m.room.message",
+                sender=self.alice_id,
+                content={"msgtype": "m.text", "body": "Message 1"},
+            )
+        )
+        self.get_success(
+            self.persist_event_storage_controller.persist_event(event1[0], event1[1])
+        )
+
+        event2 = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room2,
+                type="m.room.message",
+                sender=self.alice_id,
+                content={"msgtype": "m.text", "body": "Message 2"},
+            )
+        )
+        self.get_success(
+            self.persist_event_storage_controller.persist_event(event2[0], event2[1])
+        )
+
+        event3 = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room3,
+                type="m.room.message",
+                sender=self.alice_id,
+                content={"msgtype": "m.text", "body": "Message 3"},
+            )
+        )
+        self.get_success(
+            self.persist_event_storage_controller.persist_event(event3[0], event3[1])
+        )
+
+        # Insert read receipts with different timestamps
+        # room2 should be first (most recent: stream_ordering ~300)
+        self.get_success(
+            self.store.insert_receipt(
+                self.room2, "m.read", self.alice_id, [event2[0].event_id], None, {}
+            )
+        )
+
+        # room1 should be second (older: stream_ordering ~100)
+        # Advance clock to ensure different timestamp
+        self.reactor.advance(1000)
+        self.get_success(
+            self.store.insert_receipt(
+                self.room1, "m.read", self.alice_id, [event1[0].event_id], None, {}
+            )
+        )
+
+        # room3 has no read receipt, should be last
+
+        # Test the ordering
+        room_ids = self.get_success(
+            self.store.get_rooms_for_user_by_read_receipts(self.alice_id)
+        )
+
+        # room2 should be first (first receipt, higher stream_ordering)
+        # room1 should be second (second receipt, lower stream_ordering)
+        # room3 should be last (no receipt)
+        self.assertEqual(len(room_ids), 3)
+        self.assertEqual(room_ids[0], self.room2)  # Most recent receipt
+        self.assertEqual(room_ids[1], self.room1)  # Older receipt
+        self.assertEqual(room_ids[2], self.room3)  # No receipt
+
+    def test_get_rooms_for_user_by_read_receipts_no_receipts(self) -> None:
+        """Test that rooms without read receipts are returned in deterministic order."""
+        # Use alice's existing rooms but don't add any read receipts
+        room_ids = self.get_success(
+            self.store.get_rooms_for_user_by_read_receipts(self.alice_id)
+        )
+
+        # Should return all rooms in deterministic order (by room_id since no receipts)
+        self.assertEqual(len(room_ids), 3)
+        expected_order = sorted([self.room1, self.room2, self.room3])
+        self.assertEqual(room_ids, expected_order)
