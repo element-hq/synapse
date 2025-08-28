@@ -252,13 +252,18 @@ class ProfileHandler:
         )
 
         if propagate:
-            await self._task_scheduler.schedule_task(
-                UPDATE_JOIN_STATES_TASK_NAME,
-                params={
-                    "requester": requester.serialize(),
-                    "target_user": target_user.to_string(),
-                },
-            )
+            if deactivation:
+                # During deactivation, run profile updates synchronously to ensure
+                # they complete before room forgetting logic runs
+                await self._update_join_states_direct(requester, target_user)
+            else:
+                await self._task_scheduler.schedule_task(
+                    UPDATE_JOIN_STATES_TASK_NAME,
+                    params={
+                        "requester": requester.serialize(),
+                        "target_user": target_user.to_string(),
+                    },
+                )
 
     async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
         """
@@ -360,13 +365,18 @@ class ProfileHandler:
         )
 
         if propagate:
-            await self._task_scheduler.schedule_task(
-                UPDATE_JOIN_STATES_TASK_NAME,
-                params={
-                    "requester": requester.serialize(),
-                    "target_user": target_user.to_string(),
-                },
-            )
+            if deactivation:
+                # During deactivation, run profile updates synchronously to ensure
+                # they complete before room forgetting logic runs
+                await self._update_join_states_direct(requester, target_user)
+            else:
+                await self._task_scheduler.schedule_task(
+                    UPDATE_JOIN_STATES_TASK_NAME,
+                    params={
+                        "requester": requester.serialize(),
+                        "target_user": target_user.to_string(),
+                    },
+                )
 
     @cached()
     async def check_avatar_size_and_mime_type(self, mxc: str) -> bool:
@@ -594,27 +604,34 @@ class ProfileHandler:
 
         return response
 
-    async def _update_join_states(
-        self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
-        """
-        Update the membership events of each room the user is joined to with the
-        new profile information.
+    async def _perform_join_state_updates(
+        self, requester: Requester, target_user: UserID
+    ) -> None:
+        """Perform join state updates for a user's profile change across all their rooms.
 
-        Note that this stomps over any custom display name or avatar URL in member events.
+        This method handles the core logic for updating membership events when a user's
+        profile (displayname, avatar_url, etc.) changes. It includes validation, rate
+        limiting, and special handling for shadow-banned users.
 
         Args:
-            target_user: The owner of the queried profile. This is a str rather
-            than a UserID because the task_scheduler requires JSON serializable
-            parameters
-            requester: The user querying for the profile.
-        """
-        assert task.params is not None
-        requester = Requester.deserialize(self.store, task.params["requester"])
-        target_user = UserID.from_string(task.params["target_user"])
+            requester: The user requesting the profile update. Used for rate limiting
+                and authentication checks.
+            target_user: The user whose profile is being updated. Must be a local user.
 
+        Returns:
+            None. The method completes silently on success.
+
+        Raises:
+            Does not raise exceptions directly, but underlying room membership updates
+            may fail and are logged as warnings.
+
+        Note:
+            - Returns early if target_user is not local to this homeserver
+            - Shadow-banned users get a random delay but no actual updates
+            - Rate limiting is applied per requester
+        """
         if not self.hs.is_mine(target_user):
-            return TaskStatus.COMPLETE, None, None
+            return
 
         await self.request_ratelimiter.ratelimit(requester)
 
@@ -622,17 +639,46 @@ class ProfileHandler:
         if requester.shadow_banned:
             # We randomly sleep a bit just to annoy the requester.
             await self.clock.sleep(random.randint(1, 10))
-            return TaskStatus.COMPLETE, None, None
+            return
 
+        await self._update_rooms_for_profile_change(requester, target_user)
+
+    async def _update_rooms_for_profile_change(
+        self, requester: Requester, target_user: UserID
+    ) -> None:
+        """Update membership events in all rooms where user is joined.
+
+        Iterates through all rooms where the target user is currently joined and
+        updates their membership event to reflect the new profile information.
+        Uses read receipt ordering to prioritize recently viewed rooms first.
+
+        Args:
+            requester: The user requesting the update, used for membership operations.
+            target_user: The user whose membership events should be updated.
+
+        Returns:
+            None. Individual room update failures are logged but don't stop processing.
+
+        Implementation Details:
+            - Rooms are processed in read receipt order (most recently viewed first)
+            - Each membership update is treated as a "join" event with new profile data
+            - Rate limiting is disabled for these updates to hide that they're not atomic
+            - Failures in individual rooms are logged but don't affect other rooms
+            - Assumes target_user is not a guest (guests can't set profile data)
+
+        Note:
+            This stomps over any custom display name or avatar URL in member events.
+        """
         room_ids = await self.store.get_rooms_for_user_by_read_receipts(
             target_user.to_string()
         )
+
+        room_member_handler = self.hs.get_room_member_handler()
         for room_id in room_ids:
-            handler = self.hs.get_room_member_handler()
             try:
                 # Assume the target_user isn't a guest,
                 # because we don't let guests set profile or avatar data.
-                await handler.update_membership(
+                await room_member_handler.update_membership(
                     requester,
                     target_user,
                     room_id,
@@ -643,7 +689,36 @@ class ProfileHandler:
                 logger.warning(
                     "Failed to update join event for room %s - %s", room_id, str(e)
                 )
+
+    async def _update_join_states(
+        self, task: ScheduledTask
+    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        """
+        Task scheduler wrapper for join state updates.
+
+        Update the membership events of each room the user is joined to with the
+        new profile information.
+
+        Note that this stomps over any custom display name or avatar URL in member events.
+
+        Args:
+            task: Scheduled task containing requester and target_user parameters
+        """
+        assert task.params is not None
+        requester = Requester.deserialize(self.store, task.params["requester"])
+        target_user = UserID.from_string(task.params["target_user"])
+
+        await self._perform_join_state_updates(requester, target_user)
         return TaskStatus.COMPLETE, None, None
+
+    async def _update_join_states_direct(
+        self, requester: Requester, target_user: UserID
+    ) -> None:
+        """
+        Direct version for synchronous execution (e.g., during deactivation).
+        Runs the same logic as _update_join_states without task scheduler wrapper.
+        """
+        await self._perform_join_state_updates(requester, target_user)
 
     async def check_profile_query_allowed(
         self, target_user: UserID, requester: Optional[UserID] = None
