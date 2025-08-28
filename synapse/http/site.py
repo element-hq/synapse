@@ -299,6 +299,7 @@ class SynapseRequest(Request):
         return None, None
 
     def render(self, resrc: Resource) -> None:
+        logger.info("asdf->SynapseRequest.render")
         # this is called once a Resource has been found to serve the request; in our
         # case the Resource in question will normally be a JsonResource.
 
@@ -318,6 +319,11 @@ class SynapseRequest(Request):
                 protocol=self.clientproto.decode("ascii", errors="replace"),
                 user_agent=get_request_user_agent(self),
             ),
+        )
+        logger.info(
+            "asdf request logcontext=%s logcontext.previous_context=%s",
+            self.logcontext,
+            self.logcontext.previous_context,
         )
 
         # override the Server header which is set by twisted
@@ -342,6 +348,7 @@ class SynapseRequest(Request):
                 servlet=self.request_metrics.name,
                 **{SERVER_NAME_LABEL: self.our_server_name},
             ).inc()
+        logger.info("asdf->SynapseRequest.render done")
 
     @contextlib.contextmanager
     def processing(self) -> Generator[None, None, None]:
