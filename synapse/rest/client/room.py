@@ -811,6 +811,17 @@ class RoomMessageListRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, room_id: str
     ) -> Tuple[int, JsonDict]:
+        """
+        Query paremeters:
+            dir
+            from
+            to
+            limit
+            filter
+            backfill: If false, we skip backfill altogether. When true, we backfill as a
+                best effort.
+        """
+
         processing_start_time = self.clock.time_msec()
         # Fire off and hope that we get a result by the end.
         #
@@ -840,12 +851,15 @@ class RoomMessageListRestServlet(RestServlet):
         ):
             as_client_event = False
 
+        backfill = parse_boolean(request, "backfill", default=True)
+
         msgs = await self.pagination_handler.get_messages(
             room_id=room_id,
             requester=requester,
             pagin_config=pagination_config,
             as_client_event=as_client_event,
             event_filter=event_filter,
+            backfill=backfill,
         )
 
         processing_end_time = self.clock.time_msec()

@@ -414,12 +414,14 @@ class PaginationHandler:
     @trace
     async def get_messages(
         self,
+        *,
         requester: Requester,
         room_id: str,
         pagin_config: PaginationConfig,
         as_client_event: bool = True,
         event_filter: Optional[Filter] = None,
         use_admin_priviledge: bool = False,
+        backfill: bool = True,
     ) -> JsonDict:
         """Get messages in a room.
 
@@ -432,6 +434,8 @@ class PaginationHandler:
             use_admin_priviledge: if `True`, return all events, regardless
                 of whether `user` has access to them. To be used **ONLY**
                 from the admin API.
+            backfill: If false, we skip backfill altogether. When true, we backfill as a
+                best effort.
 
         Returns:
             Pagination API results
@@ -522,7 +526,7 @@ class PaginationHandler:
             event_filter=event_filter,
         )
 
-        if pagin_config.direction == Direction.BACKWARDS:
+        if backfill and pagin_config.direction == Direction.BACKWARDS:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
