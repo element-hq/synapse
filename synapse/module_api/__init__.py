@@ -50,6 +50,7 @@ from synapse.api.constants import ProfileFields
 from synapse.api.errors import SynapseError
 from synapse.api.presence import UserPresenceState
 from synapse.config import ConfigError
+from synapse.config.repository import MediaUploadLimit
 from synapse.events import EventBase
 from synapse.events.presence_router import (
     GET_INTERESTED_USERS_CALLBACK,
@@ -94,7 +95,9 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
 )
 from synapse.module_api.callbacks.media_repository_callbacks import (
     GET_MEDIA_CONFIG_FOR_USER_CALLBACK,
+    GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK,
     IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK,
+    ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK,
 )
 from synapse.module_api.callbacks.ratelimit_callbacks import (
     GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
@@ -205,6 +208,7 @@ __all__ = [
     "RoomAlias",
     "UserProfile",
     "RatelimitOverride",
+    "MediaUploadLimit",
 ]
 
 logger = logging.getLogger(__name__)
@@ -462,6 +466,12 @@ class ModuleApi:
         is_user_allowed_to_upload_media_of_size: Optional[
             IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
         ] = None,
+        get_media_upload_limits_for_user: Optional[
+            GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
+        ] = None,
+        on_media_upload_limit_exceeded: Optional[
+            ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
+        ] = None,
     ) -> None:
         """Registers callbacks for media repository capabilities.
         Added in Synapse v1.132.0.
@@ -469,6 +479,8 @@ class ModuleApi:
         return self._callbacks.media_repository.register_callbacks(
             get_media_config_for_user=get_media_config_for_user,
             is_user_allowed_to_upload_media_of_size=is_user_allowed_to_upload_media_of_size,
+            get_media_upload_limits_for_user=get_media_upload_limits_for_user,
+            on_media_upload_limit_exceeded=on_media_upload_limit_exceeded,
         )
 
     def register_third_party_rules_callbacks(
