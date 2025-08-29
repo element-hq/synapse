@@ -100,6 +100,10 @@ class ProfileFieldRestServlet(RestServlet):
         re.compile(
             r"^/_matrix/client/v3/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
         ),
+        if hs.config.experimental.msc4133_enabled:
+            re.compile(
+                r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
+            )
     ]
 
     CATEGORY = "Event sending requests"
