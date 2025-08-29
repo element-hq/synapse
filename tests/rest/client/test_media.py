@@ -44,7 +44,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
-from synapse.api.errors import HttpResponseException
+from synapse.api.errors import Codes, HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
@@ -2921,7 +2921,10 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         channel = self.upload_media(800)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.MSC4335_USER_LIMIT_EXCEEDED
+        )
 
     def test_under_daily_limit(self) -> None:
         """Test that uploading media under the daily limit fails."""
@@ -2959,7 +2962,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
 
         # This will fail as the weekly limit has been exceeded
         channel = self.upload_media(900)
-        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.code, 403)
 
         # Reset the weekly limit by advancing a week
         self.reactor.advance(7 * 60 * 60 * 24)  # Advance by 7 days

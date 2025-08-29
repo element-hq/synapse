@@ -146,6 +146,9 @@ class Codes(str, Enum):
     )
     MSC4306_NOT_IN_THREAD = "IO.ELEMENT.MSC4306.M_NOT_IN_THREAD"
 
+    # MSC4335 introduces error code for user (as opposed to server) limits being exceeded
+    MSC4335_USER_LIMIT_EXCEEDED = "ORG.MATRIX.MSC4335.M_USER_LIMIT_EXCEEDED"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.

@@ -364,7 +364,9 @@ class MediaRepository:
 
             if uploaded_media_size + content_length > limit.max_bytes:
                 raise SynapseError(
-                    400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
+                    403,
+                    "Media upload limit exceeded",
+                    Codes.MSC4335_USER_LIMIT_EXCEEDED,
                 )
 
         if is_new_media:
