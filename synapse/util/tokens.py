@@ -39,4 +39,9 @@ def generate_next_token(
         # when we are going backwards so we subtract one from the
         # stream part.
         last_stream_ordering -= 1
+
+        # TODO: Is this okay to do? Kinda seems more correct
+        if last_topo_ordering is not None:
+            last_topo_ordering -= 1
+
     return RoomStreamToken(topological=last_topo_ordering, stream=last_stream_ordering)

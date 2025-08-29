@@ -229,19 +229,23 @@ class EventGapEntry:
     From MSC3871: Gappy timeline
     """
 
-    prev_token: RoomStreamToken
-    """
-    The token position before the target `event_id`
-    """
-
     event_id: str
     """
     The target event ID which we see a gap before or after.
     """
 
+    prev_token: RoomStreamToken
+    """
+    The token position before the target `event_id`
+
+    Remember: tokens are positions between events
+    """
+
     next_token: RoomStreamToken
     """
     The token position after the target `event_id`
+
+    Remember: tokens are positions between events
     """
 
 
