@@ -3036,7 +3036,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         sent_bytes: int,
         attempted_bytes: int,
     ) -> None:
-        self.last_media_upload_limit_exceeded = {
+        self.last_media_upload_limit_exceeded: Optional[dict[str, object]] = {
             "user_id": user_id,
             "limit": limit,
             "sent_bytes": sent_bytes,
@@ -3103,6 +3103,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # User 1 attempts to upload 4000 bytes taking it over the limit
         channel = self.upload_media(4000, self.tok1)
         self.assertEqual(channel.code, 400)
+        assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
@@ -3129,6 +3130,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # User 3 uploads 800 bytes which is over the limit
         channel = self.upload_media(800, self.tok3)
         self.assertEqual(channel.code, 400)
+        assert self.last_media_upload_limit_exceeded is not None
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user3)
         self.assertEqual(
             self.last_media_upload_limit_exceeded["limit"],
