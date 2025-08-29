@@ -33,7 +33,9 @@ GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK = Callable[
     [str], Awaitable[Optional[List[MediaUploadLimit]]]
 ]
 
-ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK = Callable[[str, MediaUploadLimit, int, int], Awaitable[None]]
+ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK = Callable[
+    [str, MediaUploadLimit, int, int], Awaitable[None]
+]
 
 
 class MediaRepositoryModuleApiCallbacks:
@@ -62,7 +64,9 @@ class MediaRepositoryModuleApiCallbacks:
         get_media_upload_limits_for_user: Optional[
             GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
         ] = None,
-        on_media_upload_limit_exceeded: Optional[ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK] = None,
+        on_media_upload_limit_exceeded: Optional[
+            ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
+        ] = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if get_media_config_for_user is not None:
@@ -129,7 +133,11 @@ class MediaRepositoryModuleApiCallbacks:
         return None
 
     async def on_media_upload_limit_exceeded(
-        self, user_id: str, limit: MediaUploadLimit, sent_bytes: int, attempted_bytes: int
+        self,
+        user_id: str,
+        limit: MediaUploadLimit,
+        sent_bytes: int,
+        attempted_bytes: int,
     ) -> None:
         for callback in self._on_media_upload_limit_exceeded_callbacks:
             with Measure(
@@ -138,5 +146,9 @@ class MediaRepositoryModuleApiCallbacks:
                 server_name=self.server_name,
             ):
                 # Use a copy of the data in case the module modifies it
-                limit_copy = MediaUploadLimit(max_bytes=limit.max_bytes, time_period_ms=limit.time_period_ms)
-                await delay_cancellation(callback(user_id, limit_copy, sent_bytes, attempted_bytes))
+                limit_copy = MediaUploadLimit(
+                    max_bytes=limit.max_bytes, time_period_ms=limit.time_period_ms
+                )
+                await delay_cancellation(
+                    callback(user_id, limit_copy, sent_bytes, attempted_bytes)
+                )
