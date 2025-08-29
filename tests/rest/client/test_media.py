@@ -3034,13 +3034,13 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         user_id: str,
         limit: MediaUploadLimit,
         sent_bytes: int,
-        attempted_bytes: int
+        attempted_bytes: int,
     ) -> None:
         self.last_media_upload_limit_exceeded = {
             "user_id": user_id,
             "limit": limit,
             "sent_bytes": sent_bytes,
-            "attempted_bytes": attempted_bytes
+            "attempted_bytes": attempted_bytes,
         }
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -3056,7 +3056,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         self.last_media_upload_limit_exceeded = None
         self.hs.get_module_api().register_media_repository_callbacks(
             get_media_upload_limits_for_user=self._get_media_upload_limits_for_user,
-            on_media_upload_limit_exceeded=self._on_media_upload_limit_exceeded
+            on_media_upload_limit_exceeded=self._on_media_upload_limit_exceeded,
         )
 
     def create_resource_dict(self) -> Dict[str, Resource]:
@@ -3104,7 +3104,12 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         channel = self.upload_media(4000, self.tok1)
         self.assertEqual(channel.code, 400)
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
-        self.assertEqual(self.last_media_upload_limit_exceeded["limit"], MediaUploadLimit(max_bytes=5000, time_period_ms=Config.parse_duration("1d")))
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["limit"],
+            MediaUploadLimit(
+                max_bytes=5000, time_period_ms=Config.parse_duration("1d")
+            ),
+        )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 4000)
 
@@ -3125,6 +3130,11 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         channel = self.upload_media(800, self.tok3)
         self.assertEqual(channel.code, 400)
         self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user3)
-        self.assertEqual(self.last_media_upload_limit_exceeded["limit"], MediaUploadLimit(max_bytes=1024, time_period_ms=Config.parse_duration("1d")))
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["limit"],
+            MediaUploadLimit(
+                max_bytes=1024, time_period_ms=Config.parse_duration("1d")
+            ),
+        )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 500)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 800)

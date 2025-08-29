@@ -377,7 +377,10 @@ class MediaRepository:
 
             if uploaded_media_size + content_length > limit.max_bytes:
                 await self.media_repository_callbacks.on_media_upload_limit_exceeded(
-                    user_id=auth_user.to_string(), limit=limit, sent_bytes=uploaded_media_size, attempted_bytes=content_length
+                    user_id=auth_user.to_string(),
+                    limit=limit,
+                    sent_bytes=uploaded_media_size,
+                    attempted_bytes=content_length,
                 )
                 raise SynapseError(
                     400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
