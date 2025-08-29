@@ -100,7 +100,7 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-# list of tuples of function, args list, kwargs dict
+# dict of server_name to tuples of function, args list, kwargs dict
 _sighup_callbacks: Dict[
     str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
 ] = {}
