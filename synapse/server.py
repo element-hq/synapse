@@ -410,7 +410,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             process.cancel()
         self._background_processes.clear()
 
-        CACHE_METRIC_REGISTRY.clear(self.config.server.server_name)
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver_instance_id(self.config.server.server_name)
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:

@@ -308,8 +308,9 @@ class DynamicCollectorRegistry(CollectorRegistry):
         Registers a hook that is called before metric collection.
         """
 
+        assert self._pre_update_hooks.get(server_name) is None
         server_hooks = self._pre_update_hooks.setdefault(server_name, [])
         server_hooks.append(hook)
 
-    def clear(self, server_name: str) -> None:
+    def unregister_hooks_for_homeserver_instance_id(self, server_name: str) -> None:
         self._pre_update_hooks.pop(server_name)
