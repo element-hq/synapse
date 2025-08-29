@@ -1,1 +1,1 @@
-Set `room_config` param to `None` when the `user_may_create_room` spam-checker callback was called for room upgrades.
+Fix `room_config` `initial_state` being mangled when the `user_may_create_room` spam-checker callback was called for room upgrades.
