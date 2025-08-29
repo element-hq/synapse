@@ -1,1 +1,1 @@
-Fix `room_config` `initial_state` being mangled when the `user_may_create_room` spam-checker callback was called for room upgrades.
+Fix room upgrade `room_config` argument and documentation for `user_may_create_room` spam-checker callback.
