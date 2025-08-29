@@ -26,6 +26,7 @@ from prometheus_client import Counter, Histogram
 
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util import json_decoder, json_encoder
 
 if TYPE_CHECKING:
@@ -36,19 +37,19 @@ if TYPE_CHECKING:
 set_counter = Counter(
     "synapse_external_cache_set",
     "Number of times we set a cache",
-    labelnames=["cache_name"],
+    labelnames=["cache_name", SERVER_NAME_LABEL],
 )
 
 get_counter = Counter(
     "synapse_external_cache_get",
     "Number of times we get a cache",
-    labelnames=["cache_name", "hit"],
+    labelnames=["cache_name", "hit", SERVER_NAME_LABEL],
 )
 
 response_timer = Histogram(
     "synapse_external_cache_response_time_seconds",
     "Time taken to get a response from Redis for a cache get/set request",
-    labelnames=["method"],
+    labelnames=["method", SERVER_NAME_LABEL],
     buckets=(
         0.001,
         0.002,
@@ -69,6 +70,8 @@ class ExternalCache:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
+
         if hs.config.redis.redis_enabled:
             self._redis_connection: Optional["ConnectionHandler"] = (
                 hs.get_outbound_redis_connection()
@@ -93,7 +96,9 @@ class ExternalCache:
         if self._redis_connection is None:
             return
 
-        set_counter.labels(cache_name).inc()
+        set_counter.labels(
+            cache_name=cache_name, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # txredisapi requires the value to be string, bytes or numbers, so we
         # encode stuff in JSON.
@@ -105,7 +110,9 @@ class ExternalCache:
             "ExternalCache.set",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels("set").time():
+            with response_timer.labels(
+                method="set", **{SERVER_NAME_LABEL: self.server_name}
+            ).time():
                 return await make_deferred_yieldable(
                     self._redis_connection.set(
                         self._get_redis_key(cache_name, key),
@@ -124,14 +131,20 @@ class ExternalCache:
             "ExternalCache.get",
             tags={opentracing.SynapseTags.CACHE_NAME: cache_name},
         ):
-            with response_timer.labels("get").time():
+            with response_timer.labels(
+                method="get", **{SERVER_NAME_LABEL: self.server_name}
+            ).time():
                 result = await make_deferred_yieldable(
                     self._redis_connection.get(self._get_redis_key(cache_name, key))
                 )
 
         logger.debug("Got cache result %s %s: %r", cache_name, key, result)
 
-        get_counter.labels(cache_name, result is not None).inc()
+        get_counter.labels(
+            cache_name=cache_name,
+            hit=result is not None,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         if not result:
             return None

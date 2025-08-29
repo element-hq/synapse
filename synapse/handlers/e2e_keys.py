@@ -32,10 +32,9 @@ from twisted.internet import defer
 
 from synapse.api.constants import EduTypes
 from synapse.api.errors import CodeMessageException, Codes, NotFoundError, SynapseError
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceWriterHandler
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import log_kv, set_tag, tag_args, trace
-from synapse.replication.http.devices import ReplicationUploadKeysForUserRestServlet
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -76,8 +75,10 @@ class E2eKeysHandler:
 
         federation_registry = hs.get_federation_registry()
 
-        is_master = hs.config.worker.worker_app is None
-        if is_master:
+        # Only the first writer in the list should handle EDUs for signing key
+        # updates, so that we can use an in-memory linearizer instead of worker locks.
+        edu_writer = hs.config.worker.writers.device_lists[0]
+        if hs.get_instance_name() == edu_writer:
             edu_updater = SigningKeyEduUpdater(hs)
 
             # Only register this edu handler on master as it requires writing
@@ -92,11 +93,14 @@ class E2eKeysHandler:
                 EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
                 edu_updater.incoming_signing_key_update,
             )
-
-            self.device_key_uploader = self.upload_device_keys_for_user
         else:
-            self.device_key_uploader = (
-                ReplicationUploadKeysForUserRestServlet.make_client(hs)
+            federation_registry.register_instances_for_edu(
+                EduTypes.SIGNING_KEY_UPDATE,
+                [edu_writer],
+            )
+            federation_registry.register_instances_for_edu(
+                EduTypes.UNSTABLE_SIGNING_KEY_UPDATE,
+                [edu_writer],
             )
 
         # doesn't really work as part of the generic query API, because the
@@ -847,7 +851,7 @@ class E2eKeysHandler:
         # TODO: Validate the JSON to make sure it has the right keys.
         device_keys = keys.get("device_keys", None)
         if device_keys:
-            await self.device_key_uploader(
+            await self.upload_device_keys_for_user(
                 user_id=user_id,
                 device_id=device_id,
                 keys={"device_keys": device_keys},
@@ -904,9 +908,6 @@ class E2eKeysHandler:
             device_keys: the `device_keys` of an /keys/upload request.
 
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         time_now = self.clock.time_msec()
 
         device_keys = keys["device_keys"]
@@ -998,9 +999,6 @@ class E2eKeysHandler:
             user_id: the user uploading the keys
             keys: the signing keys
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         # if a master key is uploaded, then check it.  Otherwise, load the
         # stored master key, to check signatures on other keys
         if "master_key" in keys:
@@ -1091,9 +1089,6 @@ class E2eKeysHandler:
         Raises:
             SynapseError: if the signatures dict is not valid.
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         failures = {}
 
         # signatures to be stored.  Each item will be a SignatureListItem
@@ -1467,9 +1462,6 @@ class E2eKeysHandler:
             A tuple of the retrieved key content, the key's ID and the matching VerifyKey.
             If the key cannot be retrieved, all values in the tuple will instead be None.
         """
-        # This can only be called from the main process.
-        assert isinstance(self.device_handler, DeviceHandler)
-
         try:
             remote_result = await self.federation.query_user_devices(
                 user.domain, user.to_string()
@@ -1770,7 +1762,7 @@ class SigningKeyEduUpdater:
         self.clock = hs.get_clock()
 
         device_handler = hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         self._device_handler = device_handler
 
         self._remote_edu_linearizer = Linearizer(name="remote_signing_key")

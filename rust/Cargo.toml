@@ -7,7 +7,7 @@ name = "synapse"
 version = "0.1.0"
 
 edition = "2021"
-rust-version = "1.81.0"
+rust-version = "1.82.0"
 
 [lib]
 name = "synapse"
@@ -23,7 +23,7 @@ name = "synapse.synapse_rust"
 
 [dependencies]
 anyhow = "1.0.63"
-base64 = "0.21.7"
+base64 = "0.22.1"
 bytes = "1.6.0"
 headers = "0.4.0"
 http = "1.1.0"
@@ -52,6 +52,7 @@ reqwest = { version = "0.12.15", default-features = false, features = [
 http-body-util = "0.1.3"
 futures = "0.3.31"
 tokio = { version = "1.44.2", features = ["rt", "rt-multi-thread"] }
+once_cell = "1.18.0"
 
 [features]
 extension-module = ["pyo3/extension-module"]

@@ -535,11 +535,15 @@ class ExperimentalConfig(Config):
             "msc4108_delegation_endpoint", None
         )
 
+        auth_delegated = self.msc3861.enabled or (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False)
+
         if (
             self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
-        ) and not self.msc3861.enabled:
+        ) and not auth_delegated:
             raise ConfigError(
-                "MSC4108 requires MSC3861 to be enabled",
+                "MSC4108 requires MSC3861 or matrix_authentication_service to be enabled",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
@@ -581,3 +585,10 @@ class ExperimentalConfig(Config):
 
         # MSC4155: Invite filtering
         self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)
+
+        # MSC4293: Redact on Kick/Ban
+        self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)
+
+        # MSC4306: Thread Subscriptions
+        # (and MSC4308: sliding sync extension for thread subscriptions)
+        self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)

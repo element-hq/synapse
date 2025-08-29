@@ -59,7 +59,7 @@ from synapse.api.errors import (
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventPersistencePair
 from synapse.federation.federation_base import (
     FederationBase,
     InvalidEventSignatureError,
@@ -82,6 +82,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEduRestServlet,
@@ -104,23 +105,30 @@ TRANSACTION_CONCURRENCY_LIMIT = 10
 
 logger = logging.getLogger(__name__)
 
-received_pdus_counter = Counter("synapse_federation_server_received_pdus", "")
+received_pdus_counter = Counter(
+    "synapse_federation_server_received_pdus", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-received_edus_counter = Counter("synapse_federation_server_received_edus", "")
+received_edus_counter = Counter(
+    "synapse_federation_server_received_edus", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 received_queries_counter = Counter(
-    "synapse_federation_server_received_queries", "", ["type"]
+    "synapse_federation_server_received_queries",
+    "",
+    labelnames=["type", SERVER_NAME_LABEL],
 )
 
 pdu_process_time = Histogram(
     "synapse_federation_server_pdu_process_time",
     "Time taken to process an event",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 last_pdu_ts_metric = Gauge(
     "synapse_federation_last_received_pdu_time",
     "The timestamp of the last PDU which was successfully received from the given domain",
-    labelnames=("server_name",),
+    labelnames=("origin_server_name", SERVER_NAME_LABEL),
 )
 
 
@@ -159,7 +167,10 @@ class FederationServer(FederationBase):
 
         # We cache results for transaction with the same ID
         self._transaction_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "fed_txn_handler", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="fed_txn_handler",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self.transaction_actions = TransactionActions(self.store)
@@ -169,10 +180,18 @@ class FederationServer(FederationBase):
         # We cache responses to state queries, as they take a while and often
         # come in waves.
         self._state_resp_cache: ResponseCache[Tuple[str, Optional[str]]] = (
-            ResponseCache(hs.get_clock(), "state_resp", timeout_ms=30000)
+            ResponseCache(
+                clock=hs.get_clock(),
+                name="state_resp",
+                server_name=self.server_name,
+                timeout_ms=30000,
+            )
         )
         self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
-            hs.get_clock(), "state_ids_resp", timeout_ms=30000
+            clock=hs.get_clock(),
+            name="state_ids_resp",
+            server_name=self.server_name,
+            timeout_ms=30000,
         )
 
         self._federation_metrics_domains = (
@@ -423,7 +442,9 @@ class FederationServer(FederationBase):
             report back to the sending server.
         """
 
-        received_pdus_counter.inc(len(transaction.pdus))
+        received_pdus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+            len(transaction.pdus)
+        )
 
         origin_host, _ = parse_server_name(origin)
 
@@ -534,7 +555,9 @@ class FederationServer(FederationBase):
         )
 
         if newest_pdu_ts and origin in self._federation_metrics_domains:
-            last_pdu_ts_metric.labels(server_name=origin).set(newest_pdu_ts / 1000)
+            last_pdu_ts_metric.labels(
+                origin_server_name=origin, **{SERVER_NAME_LABEL: self.server_name}
+            ).set(newest_pdu_ts / 1000)
 
         return pdu_results
 
@@ -542,7 +565,7 @@ class FederationServer(FederationBase):
         """Process the EDUs in a received transaction."""
 
         async def _process_edu(edu_dict: JsonDict) -> None:
-            received_edus_counter.inc()
+            received_edus_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
             edu = Edu(
                 origin=origin,
@@ -657,7 +680,10 @@ class FederationServer(FederationBase):
     async def on_query_request(
         self, query_type: str, args: Dict[str, str]
     ) -> Tuple[int, Dict[str, Any]]:
-        received_queries_counter.labels(query_type).inc()
+        received_queries_counter.labels(
+            type=query_type,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
         resp = await self.registry.on_query(query_type, args)
         return 200, resp
 
@@ -888,7 +914,7 @@ class FederationServer(FederationBase):
 
     async def _on_send_membership_event(
         self, origin: str, content: JsonDict, membership_type: str, room_id: str
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> EventPersistencePair:
         """Handle an on_send_{join,leave,knock} request
 
         Does some preliminary validation before passing the request on to the
@@ -1299,9 +1325,9 @@ class FederationServer(FederationBase):
                     origin, event.event_id
                 )
                 if received_ts is not None:
-                    pdu_process_time.observe(
-                        (self._clock.time_msec() - received_ts) / 1000
-                    )
+                    pdu_process_time.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).observe((self._clock.time_msec() - received_ts) / 1000)
 
             next = await self._get_next_nonspam_staged_event_for_room(
                 room_id, room_version

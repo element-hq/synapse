@@ -26,12 +26,12 @@ from unittest import mock
 from parameterized import parameterized
 from signedjson import key as key, sign as sign
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomEncryptionAlgorithms
 from synapse.api.errors import Codes, SynapseError
 from synapse.appservice import ApplicationService
-from synapse.handlers.device import DeviceHandler
+from synapse.handlers.device import DeviceWriterHandler
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import JsonDict, UserID
@@ -856,7 +856,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.get_success(self.handler.upload_signing_keys_for_user(local_user, keys1))
 
         device_handler = self.hs.get_device_handler()
-        assert isinstance(device_handler, DeviceHandler)
+        assert isinstance(device_handler, DeviceWriterHandler)
         e = self.get_failure(
             device_handler.check_device_registered(
                 user_id=local_user,
@@ -1457,7 +1457,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -1525,7 +1525,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(
@@ -1751,7 +1751,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             id="1234",
             namespaces={"users": [{"regex": r"@boris:.+", "exclusive": True}]},
             # Note: this user does not have to match the regex above
-            sender="@as_main:test",
+            sender=UserID.from_string("@as_main:test"),
         )
         self.hs.get_datastores().main.services_cache = [appservice]
         self.hs.get_datastores().main.exclusive_user_regex = _make_exclusive_regex(

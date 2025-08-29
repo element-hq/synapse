@@ -140,6 +140,12 @@ class Codes(str, Enum):
     # Part of MSC4155
     INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
 
+    # Part of MSC4306: Thread Subscriptions
+    MSC4306_CONFLICTING_UNSUBSCRIPTION = (
+        "IO.ELEMENT.MSC4306.M_CONFLICTING_UNSUBSCRIPTION"
+    )
+    MSC4306_NOT_IN_THREAD = "IO.ELEMENT.MSC4306.M_NOT_IN_THREAD"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.

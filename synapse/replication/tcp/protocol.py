@@ -39,7 +39,7 @@ from twisted.protocols.basic import LineOnlyReceiver
 from twisted.python.failure import Failure
 
 from synapse.logging.context import PreserveLoggingContext
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
     run_as_background_process,
@@ -64,19 +64,21 @@ if TYPE_CHECKING:
 
 
 connection_close_counter = Counter(
-    "synapse_replication_tcp_protocol_close_reason", "", ["reason_type"]
+    "synapse_replication_tcp_protocol_close_reason",
+    "",
+    labelnames=["reason_type", SERVER_NAME_LABEL],
 )
 
 tcp_inbound_commands_counter = Counter(
     "synapse_replication_tcp_protocol_inbound_commands",
     "Number of commands received from replication, by command and name of process connected to",
-    ["command", "name"],
+    labelnames=["command", "name", SERVER_NAME_LABEL],
 )
 
 tcp_outbound_commands_counter = Counter(
     "synapse_replication_tcp_protocol_outbound_commands",
     "Number of commands sent to replication, by command and name of process connected to",
-    ["command", "name"],
+    labelnames=["command", "name", SERVER_NAME_LABEL],
 )
 
 # A list of all connected protocols. This allows us to send metrics about the
@@ -137,7 +139,10 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
 
     max_line_buffer = 10000
 
-    def __init__(self, clock: Clock, handler: "ReplicationCommandHandler"):
+    def __init__(
+        self, server_name: str, clock: Clock, handler: "ReplicationCommandHandler"
+    ):
+        self.server_name = server_name
         self.clock = clock
         self.command_handler = handler
 
@@ -166,7 +171,9 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
             # capture the sentinel context as its containing context and won't prevent
             # GC of / unintentionally reactivate what would be the current context.
             self._logging_context = BackgroundProcessLoggingContext(
-                "replication-conn", self.conn_id
+                name="replication-conn",
+                server_name=self.server_name,
+                instance_id=self.conn_id,
             )
 
     def connectionMade(self) -> None:
@@ -244,7 +251,11 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
 
         self.last_received_command = self.clock.time_msec()
 
-        tcp_inbound_commands_counter.labels(cmd.NAME, self.name).inc()
+        tcp_inbound_commands_counter.labels(
+            command=cmd.NAME,
+            name=self.name,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         self.handle_command(cmd)
 
@@ -280,7 +291,9 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
 
             if isawaitable(res):
                 run_as_background_process(
-                    "replication-" + cmd.get_logcontext_id(), lambda: res
+                    "replication-" + cmd.get_logcontext_id(),
+                    self.server_name,
+                    lambda: res,
                 )
 
             handled = True
@@ -318,7 +331,11 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
             self._queue_command(cmd)
             return
 
-        tcp_outbound_commands_counter.labels(cmd.NAME, self.name).inc()
+        tcp_outbound_commands_counter.labels(
+            command=cmd.NAME,
+            name=self.name,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc()
 
         string = "%s %s" % (cmd.NAME, cmd.to_line())
         if "\n" in string:
@@ -390,9 +407,15 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         logger.info("[%s] Replication connection closed: %r", self.id(), reason)
         if isinstance(reason, Failure):
             assert reason.type is not None
-            connection_close_counter.labels(reason.type.__name__).inc()
+            connection_close_counter.labels(
+                reason_type=reason.type.__name__,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
         else:
-            connection_close_counter.labels(reason.__class__.__name__).inc()  # type: ignore[unreachable]
+            connection_close_counter.labels(  # type: ignore[unreachable]
+                reason_type=reason.__class__.__name__,
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
 
         try:
             # Remove us from list of connections to be monitored
@@ -449,7 +472,7 @@ class ServerReplicationStreamProtocol(BaseReplicationStreamProtocol):
     def __init__(
         self, server_name: str, clock: Clock, handler: "ReplicationCommandHandler"
     ):
-        super().__init__(clock, handler)
+        super().__init__(server_name, clock, handler)
 
         self.server_name = server_name
 
@@ -474,7 +497,7 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
         clock: Clock,
         command_handler: "ReplicationCommandHandler",
     ):
-        super().__init__(clock, command_handler)
+        super().__init__(server_name, clock, command_handler)
 
         self.client_name = client_name
         self.server_name = server_name
@@ -501,10 +524,12 @@ class ClientReplicationStreamProtocol(BaseReplicationStreamProtocol):
 # The following simply registers metrics for the replication connections
 
 pending_commands = LaterGauge(
-    "synapse_replication_tcp_protocol_pending_commands",
-    "",
-    ["name"],
-    lambda: {(p.name,): len(p.pending_commands) for p in connected_connections},
+    name="synapse_replication_tcp_protocol_pending_commands",
+    desc="",
+    labelnames=["name", SERVER_NAME_LABEL],
+    caller=lambda: {
+        (p.name, p.server_name): len(p.pending_commands) for p in connected_connections
+    },
 )
 
 
@@ -516,10 +541,12 @@ def transport_buffer_size(protocol: BaseReplicationStreamProtocol) -> int:
 
 
 transport_send_buffer = LaterGauge(
-    "synapse_replication_tcp_protocol_transport_send_buffer",
-    "",
-    ["name"],
-    lambda: {(p.name,): transport_buffer_size(p) for p in connected_connections},
+    name="synapse_replication_tcp_protocol_transport_send_buffer",
+    desc="",
+    labelnames=["name", SERVER_NAME_LABEL],
+    caller=lambda: {
+        (p.name, p.server_name): transport_buffer_size(p) for p in connected_connections
+    },
 )
 
 
@@ -541,22 +568,22 @@ def transport_kernel_read_buffer_size(
 
 
 tcp_transport_kernel_send_buffer = LaterGauge(
-    "synapse_replication_tcp_protocol_transport_kernel_send_buffer",
-    "",
-    ["name"],
-    lambda: {
-        (p.name,): transport_kernel_read_buffer_size(p, False)
+    name="synapse_replication_tcp_protocol_transport_kernel_send_buffer",
+    desc="",
+    labelnames=["name", SERVER_NAME_LABEL],
+    caller=lambda: {
+        (p.name, p.server_name): transport_kernel_read_buffer_size(p, False)
         for p in connected_connections
     },
 )
 
 
 tcp_transport_kernel_read_buffer = LaterGauge(
-    "synapse_replication_tcp_protocol_transport_kernel_read_buffer",
-    "",
-    ["name"],
-    lambda: {
-        (p.name,): transport_kernel_read_buffer_size(p, True)
+    name="synapse_replication_tcp_protocol_transport_kernel_read_buffer",
+    desc="",
+    labelnames=["name", SERVER_NAME_LABEL],
+    caller=lambda: {
+        (p.name, p.server_name): transport_kernel_read_buffer_size(p, True)
         for p in connected_connections
     },
 )

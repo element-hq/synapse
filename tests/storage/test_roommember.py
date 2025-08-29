@@ -22,7 +22,7 @@
 import logging
 from typing import List, Optional, Tuple, cast
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions

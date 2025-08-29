@@ -42,6 +42,7 @@ from synapse.http.servlet import (
     parse_strings_from_args,
 )
 from synapse.http.site import SynapseRequest
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.rest.admin._base import (
     admin_patterns,
     assert_requester_is_admin,
@@ -58,6 +59,25 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+original_logger_class = logging.getLoggerClass()
+# Because this can log sensitive information, use a custom logger class that only allows
+# logging if the logger is explicitly configured.
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+user_registration_sensitive_debug_logger = logging.getLogger(
+    "synapse.rest.admin.users.registration_debug"
+)
+"""
+A logger for debugging the user registration process.
+
+Because this can log sensitive information (such as passwords and
+`registration_shared_secret`), we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitly setting `synapse.rest.admin.users.registration_debug`
+in the logging configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 
 class UsersRestServletV2(RestServlet):
@@ -89,7 +109,9 @@ class UsersRestServletV2(RestServlet):
         self.auth = hs.get_auth()
         self.admin_handler = hs.get_admin_handler()
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
-        self._msc3861_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
@@ -101,10 +123,10 @@ class UsersRestServletV2(RestServlet):
         name = parse_string(request, "name", encoding="utf-8")
 
         guests = parse_boolean(request, "guests", default=True)
-        if self._msc3861_enabled and guests:
+        if self._auth_delegation_enabled and guests:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
-                "The guests parameter is not supported when MSC3861 is enabled.",
+                "The guests parameter is not supported when delegating to MAS.",
                 errcode=Codes.INVALID_PARAM,
             )
 
@@ -635,6 +657,34 @@ class UserRegisterServlet(RestServlet):
         want_mac = want_mac_builder.hexdigest()
 
         if not hmac.compare_digest(want_mac.encode("ascii"), got_mac.encode("ascii")):
+            # If the sensitive debug logger is enabled, log the full details.
+            #
+            # For reference, the `user_registration_sensitive_debug_logger.debug(...)`
+            # call is enough to gate the logging of sensitive information unless
+            # explicitly enabled. We only have this if-statement to avoid logging the
+            # suggestion to enable the debug logger if you already have it enabled.
+            if user_registration_sensitive_debug_logger.isEnabledFor(logging.DEBUG):
+                user_registration_sensitive_debug_logger.debug(
+                    "UserRegisterServlet: Incorrect HMAC digest: actual=%s, expected=%s, registration_shared_secret=%s, body=%s",
+                    got_mac,
+                    want_mac,
+                    self.hs.config.registration.registration_shared_secret,
+                    body,
+                )
+            else:
+                # Otherwise, just log the non-sensitive essentials and advertise the
+                # debug logger for sensitive information.
+                logger.debug(
+                    (
+                        "UserRegisterServlet: HMAC incorrect (username=%s): actual=%s, expected=%s - "
+                        "If you need more information, explicitly enable the `synapse.rest.admin.users.registration_debug` "
+                        "logger at the `DEBUG` level to log things like the full request body and "
+                        "`registration_shared_secret` used to calculate the HMAC."
+                    ),
+                    username,
+                    got_mac,
+                    want_mac,
+                )
             raise SynapseError(HTTPStatus.FORBIDDEN, "HMAC incorrect")
 
         should_issue_refresh_token = body.get("refresh_token", False)
@@ -950,7 +1000,7 @@ class UserAdminServlet(RestServlet):
                 "Only local users can be admins of this homeserver",
             )
 
-        is_admin = await self.store.is_server_admin(target_user)
+        is_admin = await self.store.is_server_admin(target_user.to_string())
 
         return HTTPStatus.OK, {"admin": is_admin}
 
@@ -1414,7 +1464,7 @@ class RedactUser(RestServlet):
     """
     Redact all the events of a given user in the given rooms or if empty dict is provided
     then all events in all rooms user is member of. Kicks off a background process and
-    returns an id that can be used to check on the progress of the redaction progress
+    returns an id that can be used to check on the progress of the redaction progress.
     """
 
     PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
@@ -1428,6 +1478,7 @@ class RedactUser(RestServlet):
         rooms: List[StrictStr]
         reason: Optional[StrictStr]
         limit: Optional[StrictInt]
+        use_admin: Optional[StrictBool]
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str
@@ -1455,8 +1506,12 @@ class RedactUser(RestServlet):
             )
             rooms = current_rooms + banned_rooms
 
+        use_admin = body.use_admin
+        if not use_admin:
+            use_admin = False
+
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, rooms, requester.serialize(), body.reason, limit
+            user_id, rooms, requester.serialize(), use_admin, body.reason, limit
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}
