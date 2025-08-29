@@ -349,7 +349,7 @@ def setup_logging(
     from synapse.app import _base as appbase
 
     appbase.register_sighup(
-        config.server.server_name, _reload_logging_config, log_config_path
+        hs.get_instance_id(), _reload_logging_config, log_config_path
     )
 
     # Log immediately so we can grep backwards.

@@ -108,7 +108,7 @@ P = ParamSpec("P")
 
 
 def register_sighup(
-    server_name: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs
+    instance_id: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs
 ) -> None:
     """
     Register a function to be called when a SIGHUP occurs.
@@ -118,11 +118,11 @@ def register_sighup(
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
 
-    _sighup_callbacks.setdefault(server_name, []).append((func, args, kwargs))
+    _sighup_callbacks.setdefault(instance_id, []).append((func, args, kwargs))
 
 
-def unregister_sighups(server_name: str) -> None:
-    _sighup_callbacks.pop(server_name, [])
+def unregister_sighups(instance_id: str) -> None:
+    _sighup_callbacks.pop(instance_id, [])
 
 
 def start_worker_reactor(
@@ -581,8 +581,8 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
 
         signal.signal(signal.SIGHUP, run_sighup)
 
-        register_sighup(hs.config.server.server_name, refresh_certificate, hs)
-        register_sighup(hs.config.server.server_name, reload_cache_config, hs.config)
+        register_sighup(hs.get_instance_id(), refresh_certificate, hs)
+        register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()

@@ -432,7 +432,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 pass
         self._sync_shutdown_handlers.clear()
 
-        unregister_sighups(self.config.server.server_name)
+        unregister_sighups(self._instance_id)
 
     def register_async_shutdown_handler(
         self,
