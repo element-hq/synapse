@@ -40,7 +40,7 @@ from synapse.federation.units import Edu
 from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.opentracing import SynapseTags, set_tag
-from synapse.metrics import sent_transactions_counter
+from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
@@ -56,13 +56,15 @@ logger = logging.getLogger(__name__)
 
 
 sent_edus_counter = Counter(
-    "synapse_federation_client_sent_edus", "Total number of EDUs successfully sent"
+    "synapse_federation_client_sent_edus",
+    "Total number of EDUs successfully sent",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 sent_edus_by_type = Counter(
     "synapse_federation_client_sent_edus_by_type",
     "Number of sent EDUs successfully sent, by event type",
-    ["type"],
+    labelnames=["type", SERVER_NAME_LABEL],
 )
 
 
@@ -91,7 +93,7 @@ class PerDestinationQueue:
         transaction_manager: "synapse.federation.sender.TransactionManager",
         destination: str,
     ):
-        self._server_name = hs.hostname
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
         self._store = hs.get_datastores().main
@@ -311,6 +313,7 @@ class PerDestinationQueue:
 
         run_as_background_process(
             "federation_transaction_transmission_loop",
+            self.server_name,
             self._transaction_transmission_loop,
         )
 
@@ -322,7 +325,12 @@ class PerDestinationQueue:
             # This will throw if we wouldn't retry. We do this here so we fail
             # quickly, but we will later check this again in the http client,
             # hence why we throw the result away.
-            await get_retry_limiter(self._destination, self._clock, self._store)
+            await get_retry_limiter(
+                destination=self._destination,
+                our_server_name=self.server_name,
+                clock=self._clock,
+                store=self._store,
+            )
 
             if self._catching_up:
                 # we potentially need to catch-up first
@@ -362,10 +370,17 @@ class PerDestinationQueue:
                         self._destination, pending_pdus, pending_edus
                     )
 
-                    sent_transactions_counter.inc()
-                    sent_edus_counter.inc(len(pending_edus))
+                    sent_transactions_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc()
+                    sent_edus_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(pending_edus))
                     for edu in pending_edus:
-                        sent_edus_by_type.labels(edu.edu_type).inc()
+                        sent_edus_by_type.labels(
+                            type=edu.edu_type,
+                            **{SERVER_NAME_LABEL: self.server_name},
+                        ).inc()
 
         except NotRetryingDestination as e:
             logger.debug(
@@ -566,7 +581,7 @@ class PerDestinationQueue:
                     new_pdus = await filter_events_for_server(
                         self._storage_controllers,
                         self._destination,
-                        self._server_name,
+                        self.server_name,
                         new_pdus,
                         redact=False,
                         filter_out_erased_senders=True,
@@ -590,7 +605,9 @@ class PerDestinationQueue:
                     self._destination, room_catchup_pdus, []
                 )
 
-                sent_transactions_counter.inc()
+                sent_transactions_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
 
                 # We pulled this from the DB, so it'll be non-null
                 assert pdu.internal_metadata.stream_ordering
@@ -613,7 +630,7 @@ class PerDestinationQueue:
         # Send at most limit EDUs for receipts.
         for content in self._pending_receipt_edus[:limit]:
             yield Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=EduTypes.RECEIPT,
                 content=content,
@@ -639,7 +656,7 @@ class PerDestinationQueue:
         )
         edus = [
             Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=edu_type,
                 content=content,
@@ -666,7 +683,7 @@ class PerDestinationQueue:
 
         edus = [
             Edu(
-                origin=self._server_name,
+                origin=self.server_name,
                 destination=self._destination,
                 edu_type=EduTypes.DIRECT_TO_DEVICE,
                 content=content,
@@ -739,7 +756,7 @@ class _TransactionQueueManager:
 
             pending_edus.append(
                 Edu(
-                    origin=self.queue._server_name,
+                    origin=self.queue.server_name,
                     destination=self.queue._destination,
                     edu_type=EduTypes.PRESENCE,
                     content={"push": presence_to_add},

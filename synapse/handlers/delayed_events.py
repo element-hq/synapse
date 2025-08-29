@@ -22,7 +22,7 @@ from synapse.api.errors import ShadowBanError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
-from synapse.metrics import event_processing_positions
+from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
@@ -110,12 +110,13 @@ class DelayedEventsHandler:
                 # Can send the events in background after having awaited on marking them as processed
                 run_as_background_process(
                     "_send_events",
+                    self.server_name,
                     self._send_events,
                     events,
                 )
 
             self._initialized_from_db = run_as_background_process(
-                "_schedule_db_events", _schedule_db_events
+                "_schedule_db_events", self.server_name, _schedule_db_events
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
@@ -140,7 +141,9 @@ class DelayedEventsHandler:
             finally:
                 self._event_processing = False
 
-        run_as_background_process("delayed_events.notify_new_event", process)
+        run_as_background_process(
+            "delayed_events.notify_new_event", self.server_name, process
+        )
 
     async def _unsafe_process_new_event(self) -> None:
         # If self._event_pos is None then means we haven't fetched it from the DB yet
@@ -188,7 +191,9 @@ class DelayedEventsHandler:
                 self._event_pos = max_pos
 
                 # Expose current event processing position to prometheus
-                event_processing_positions.labels("delayed_events").set(max_pos)
+                event_processing_positions.labels(
+                    name="delayed_events", **{SERVER_NAME_LABEL: self.server_name}
+                ).set(max_pos)
 
                 await self._store.update_delayed_events_stream_pos(max_pos)
 
@@ -210,9 +215,9 @@ class DelayedEventsHandler:
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
 
-            event = await self._store.get_event(
-                delta.event_id, check_room_id=delta.room_id
-            )
+            event = await self._store.get_event(delta.event_id, allow_none=True)
+            if not event:
+                continue
             sender = UserID.from_string(event.sender)
 
             next_send_ts = await self._store.cancel_delayed_state_events(
@@ -450,6 +455,7 @@ class DelayedEventsHandler:
                 delay_sec,
                 run_as_background_process,
                 "_send_on_timeout",
+                self.server_name,
                 self._send_on_timeout,
             )
         else:

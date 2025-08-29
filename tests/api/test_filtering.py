@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 import jsonschema
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes, EventContentFields
 from synapse.api.errors import SynapseError

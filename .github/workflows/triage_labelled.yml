@@ -11,11 +11,15 @@ jobs:
     if: >
       contains(github.event.issue.labels.*.name, 'X-Needs-Info')
     steps:
-      - uses: actions/add-to-project@5b1a254a3546aef88e0a7724a77a623fa2e47c36 # main (v1.0.2 + 10 commits)
+      - uses: actions/add-to-project@4515659e2b458b27365e167605ac44f219494b66 # v1.0.2
         id: add_project
         with:
           project-url: "https://github.com/orgs/matrix-org/projects/67"
           github-token: ${{ secrets.ELEMENT_BOT_TOKEN }}
+        # This action will error if the issue already exists on the project. Which is
+        # common as `X-Needs-Info` will often be added to issues that are already in
+        # the triage queue. Prevent the whole job from failing in this case.
+        continue-on-error: true
       - name: Set status
         env:
           GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}

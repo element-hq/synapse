@@ -21,7 +21,7 @@
 
 """Tests REST events for /rooms paths."""
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes
 from synapse.rest.client import room

@@ -1,7 +1,6 @@
 from http import HTTPStatus
-from typing import Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
-from synapse._pydantic_compat import StrictBool
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -10,9 +9,12 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomID
 from synapse.types.rest import RequestBodyModel
+from synapse.util.pydantic_models import AnyEventId
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 
 class ThreadSubscriptionsRestServlet(RestServlet):
@@ -30,7 +32,12 @@ class ThreadSubscriptionsRestServlet(RestServlet):
         self.handler = hs.get_thread_subscriptions_handler()
 
     class PutBody(RequestBodyModel):
-        automatic: StrictBool
+        automatic: Optional[AnyEventId]
+        """
+        If supplied, the event ID of an event giving rise to this automatic subscription.
+
+        If omitted, this subscription is a manual subscription.
+        """
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str, thread_root_id: str
@@ -61,15 +68,15 @@ class ThreadSubscriptionsRestServlet(RestServlet):
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Invalid event ID", errcode=Codes.INVALID_PARAM
             )
-        requester = await self.auth.get_user_by_req(request)
-
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
+
+        requester = await self.auth.get_user_by_req(request)
 
         await self.handler.subscribe_user_to_thread(
             requester.user,
             room_id,
             thread_root_id,
-            automatic=body.automatic,
+            automatic_event_id=body.automatic,
         )
 
         return HTTPStatus.OK, {}

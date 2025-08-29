@@ -27,7 +27,6 @@ from typing import (
     Any,
     Callable,
     Dict,
-    Generator,
     Iterator,
     Mapping,
     Optional,
@@ -42,7 +41,6 @@ from matrix_common.versionstring import get_distribution_version_string
 from typing_extensions import ParamSpec
 
 from twisted.internet import defer, task
-from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IDelayedCall, IReactorTime
 from twisted.internet.task import LoopingCall
 from twisted.python.failure import Failure
@@ -121,13 +119,11 @@ class Clock:
 
     _reactor: IReactorTime = attr.ib()
 
-    @defer.inlineCallbacks
-    def sleep(self, seconds: float) -> "Generator[Deferred[float], Any, Any]":
+    async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         with context.PreserveLoggingContext():
             self._reactor.callLater(seconds, d.callback, seconds)
-            res = yield d
-        return res
+            await d
 
     def time(self) -> float:
         """Returns the current system time in seconds since epoch."""

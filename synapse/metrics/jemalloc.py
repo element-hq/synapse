@@ -188,7 +188,8 @@ def _setup_jemalloc_stats() -> None:
         def collect(self) -> Iterable[Metric]:
             stats.refresh_stats()
 
-            g = GaugeMetricFamily(
+            # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+            g = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
                 "jemalloc_stats_app_memory_bytes",
                 "The stats reported by jemalloc",
                 labels=["type"],
@@ -230,7 +231,8 @@ def _setup_jemalloc_stats() -> None:
 
             yield g
 
-    REGISTRY.register(JemallocCollector())
+    # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+    REGISTRY.register(JemallocCollector())  # type: ignore[missing-server-name-label]
 
     logger.debug("Added jemalloc stats")
 

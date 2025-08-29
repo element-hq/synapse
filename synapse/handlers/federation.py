@@ -71,6 +71,7 @@ from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
@@ -90,7 +91,7 @@ logger = logging.getLogger(__name__)
 backfill_processing_before_timer = Histogram(
     "synapse_federation_backfill_processing_before_time_seconds",
     "sec",
-    [],
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(
         0.1,
         0.5,
@@ -187,7 +188,9 @@ class FederationHandler:
         # were shut down.
         if not hs.config.worker.worker_app:
             run_as_background_process(
-                "resume_sync_partial_state_room", self._resume_partial_state_room_sync
+                "resume_sync_partial_state_room",
+                self.server_name,
+                self._resume_partial_state_room_sync,
             )
 
     @trace
@@ -316,6 +319,7 @@ class FederationHandler:
             )
             run_as_background_process(
                 "_maybe_backfill_inner_anyway_with_max_depth",
+                self.server_name,
                 self.maybe_backfill,
                 room_id=room_id,
                 # We use `MAX_DEPTH` so that we find all backfill points next
@@ -530,9 +534,9 @@ class FederationHandler:
         # backfill points regardless of `current_depth`.
         if processing_start_time is not None:
             processing_end_time = self.clock.time_msec()
-            backfill_processing_before_timer.observe(
-                (processing_end_time - processing_start_time) / 1000
-            )
+            backfill_processing_before_timer.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe((processing_end_time - processing_start_time) / 1000)
 
         success = await try_backfill(likely_domains)
         if success:
@@ -798,7 +802,10 @@ class FederationHandler:
             # have. Hence we fire off the background task, but don't wait for it.
 
             run_as_background_process(
-                "handle_queued_pdus", self._handle_queued_pdus, room_queue
+                "handle_queued_pdus",
+                self.server_name,
+                self._handle_queued_pdus,
+                room_queue,
             )
 
     async def do_knock(
@@ -1870,7 +1877,9 @@ class FederationHandler:
                         )
 
         run_as_background_process(
-            desc="sync_partial_state_room", func=_sync_partial_state_room_wrapper
+            desc="sync_partial_state_room",
+            server_name=self.server_name,
+            func=_sync_partial_state_room_wrapper,
         )
 
     async def _sync_partial_state_room(

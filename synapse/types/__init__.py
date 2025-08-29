@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from synapse.appservice.api import ApplicationService
+    from synapse.events import EventBase
     from synapse.storage.databases.main import DataStore, PurgeEventsStore
     from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
     from synapse.storage.util.id_generators import MultiWriterIdGenerator
@@ -354,10 +355,76 @@ class RoomAlias(DomainSpecificString):
 
 
 @attr.s(slots=True, frozen=True, repr=False)
-class RoomID(DomainSpecificString):
-    """Structure representing a room id."""
+class RoomIdWithDomain(DomainSpecificString):
+    """Structure representing a room ID with a domain suffix."""
 
     SIGIL = "!"
+
+
+# the set of urlsafe base64 characters, no padding.
+ROOM_ID_PATTERN_DOMAINLESS = re.compile(r"^[A-Za-z0-9\-_]{43}$")
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True, repr=False)
+class RoomID:
+    """Structure representing a room id without a domain.
+    There are two forms of room IDs:
+      - "!localpart:domain" used in most room versions prior to MSC4291.
+      - "!event_id_base_64" used in room versions post MSC4291.
+    This class will accept any room ID which meets either of these two criteria.
+    """
+
+    SIGIL = "!"
+    id: str
+    room_id_with_domain: Optional[RoomIdWithDomain]
+
+    @classmethod
+    def is_valid(cls: Type["RoomID"], s: str) -> bool:
+        if ":" in s:
+            return RoomIdWithDomain.is_valid(s)
+        try:
+            cls.from_string(s)
+            return True
+        except Exception:
+            return False
+
+    def get_domain(self) -> Optional[str]:
+        if not self.room_id_with_domain:
+            return None
+        return self.room_id_with_domain.domain
+
+    def to_string(self) -> str:
+        if self.room_id_with_domain:
+            return self.room_id_with_domain.to_string()
+        return self.id
+
+    __repr__ = to_string
+
+    @classmethod
+    def from_string(cls: Type["RoomID"], s: str) -> "RoomID":
+        # sigil check
+        if len(s) < 1 or s[0] != cls.SIGIL:
+            raise SynapseError(
+                400,
+                "Expected %s string to start with '%s'" % (cls.__name__, cls.SIGIL),
+                Codes.INVALID_PARAM,
+            )
+
+        room_id_with_domain: Optional[RoomIdWithDomain] = None
+        if ":" in s:
+            room_id_with_domain = RoomIdWithDomain.from_string(s)
+        else:
+            # MSC4291 room IDs must be valid urlsafe unpadded base64
+            val = s[1:]
+            if not ROOM_ID_PATTERN_DOMAINLESS.match(val):
+                raise SynapseError(
+                    400,
+                    "Expected %s string to be valid urlsafe unpadded base64 '%s'"
+                    % (cls.__name__, val),
+                    Codes.INVALID_PARAM,
+                )
+
+        return cls(id=s, room_id_with_domain=room_id_with_domain)
 
 
 @attr.s(slots=True, frozen=True, repr=False)
@@ -1464,3 +1531,31 @@ class ScheduledTask:
     result: Optional[JsonMapping]
     # Optional error that should be assigned a value when the status is FAILED
     error: Optional[str]
+
+
+@attr.s(auto_attribs=True, frozen=True, slots=True)
+class EventOrderings:
+    stream: int
+    """
+    The stream_ordering of the event.
+    Negative numbers mean the event was backfilled.
+    """
+
+    topological: int
+    """
+    The topological_ordering of the event.
+    Currently this is equivalent to the `depth` attributes of
+    the PDU.
+    """
+
+    @staticmethod
+    def from_event(event: "EventBase") -> "EventOrderings":
+        """
+        Get the orderings from an event.
+
+        Preconditions:
+        - the event must have been persisted (otherwise it won't have a stream ordering)
+        """
+        stream = event.internal_metadata.stream_ordering
+        assert stream is not None
+        return EventOrderings(stream, event.depth)

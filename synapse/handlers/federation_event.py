@@ -66,7 +66,11 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    EventContext,
+    EventPersistencePair,
+    UnpersistedEventContextBase,
+)
 from synapse.federation.federation_client import InvalidResponseError, PulledPduInfo
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import (
@@ -76,6 +80,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
@@ -105,13 +110,14 @@ logger = logging.getLogger(__name__)
 soft_failed_event_counter = Counter(
     "synapse_federation_soft_failed_events_total",
     "Events received over federation that we marked as soft_failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # Added to debug performance and track progress on optimizations
 backfill_processing_after_timer = Histogram(
     "synapse_federation_backfill_processing_after_time_seconds",
     "sec",
-    [],
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(
         0.1,
         0.25,
@@ -146,6 +152,7 @@ class FederationEventHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
@@ -170,7 +177,6 @@ class FederationEventHandler:
 
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
-        self._server_name = hs.hostname
         self._instance_name = hs.get_instance_name()
 
         self._config = hs.config
@@ -249,7 +255,7 @@ class FederationEventHandler:
         # Note that if we were never in the room then we would have already
         # dropped the event, since we wouldn't know the room version.
         is_in_room = await self._event_auth_handler.is_host_in_room(
-            room_id, self._server_name
+            room_id, self.server_name
         )
         if not is_in_room:
             logger.info(
@@ -339,7 +345,7 @@ class FederationEventHandler:
 
     async def on_send_membership_event(
         self, origin: str, event: EventBase
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> EventPersistencePair:
         """
         We have received a join/leave/knock event for a room via send_join/leave/knock.
 
@@ -690,7 +696,9 @@ class FederationEventHandler:
         if not events:
             return
 
-        with backfill_processing_after_timer.time():
+        with backfill_processing_after_timer.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).time():
             # if there are any events in the wrong room, the remote server is buggy and
             # should not be trusted.
             for ev in events:
@@ -930,6 +938,7 @@ class FederationEventHandler:
         if len(events_with_failed_pull_attempts) > 0:
             run_as_background_process(
                 "_process_new_pulled_events_with_failed_pull_attempts",
+                self.server_name,
                 _process_new_pulled_events,
                 events_with_failed_pull_attempts,
             )
@@ -1523,6 +1532,7 @@ class FederationEventHandler:
             if resync:
                 run_as_background_process(
                     "resync_device_due_to_pdu",
+                    self.server_name,
                     self._resync_device,
                     event.sender,
                 )
@@ -1706,7 +1716,7 @@ class FederationEventHandler:
             )
             auth_map.update(persisted_events)
 
-        events_and_contexts_to_persist: List[Tuple[EventBase, EventContext]] = []
+        events_and_contexts_to_persist: List[EventPersistencePair] = []
 
         async def prep(event: EventBase) -> None:
             with nested_logging_context(suffix=event.event_id):
@@ -1722,6 +1732,9 @@ class FederationEventHandler:
                             event,
                             auth_event_id,
                         )
+                        # Drop the event from the auth_map too, else we may incorrectly persist
+                        # events which depend on this dropped event.
+                        auth_map.pop(event.event_id, None)
                         return
                     auth.append(ae)
 
@@ -2049,7 +2062,9 @@ class FederationEventHandler:
                     "hs": origin,
                 },
             )
-            soft_failed_event_counter.inc()
+            soft_failed_event_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
             event.internal_metadata.soft_failed = True
 
     async def _load_or_fetch_auth_events_for_event(
@@ -2214,7 +2229,7 @@ class FederationEventHandler:
     async def persist_events_and_notify(
         self,
         room_id: str,
-        event_and_contexts: Sequence[Tuple[EventBase, EventContext]],
+        event_and_contexts: Sequence[EventPersistencePair],
         backfilled: bool = False,
     ) -> int:
         """Persists events and tells the notifier/pushers about them, if

@@ -42,14 +42,14 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.event_auth import get_named_level, get_power_level_event
-from synapse.events import EventBase
+from synapse.events import EventBase, is_creator
 from synapse.events.snapshot import EventContext
 from synapse.handlers.pagination import PURGE_ROOM_ACTION_NAME
 from synapse.handlers.profile import MAX_AVATAR_URL_LEN, MAX_DISPLAYNAME_LEN
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
-from synapse.metrics import event_processing_positions
+from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
@@ -746,35 +746,41 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             and requester.user.to_string() == self._server_notices_mxid
         )
 
-        requester_suspended = await self.store.get_user_suspended_status(
-            requester.user.to_string()
-        )
-        if action == Membership.INVITE and requester_suspended:
-            raise SynapseError(
-                403,
-                "Sending invites while account is suspended is not allowed.",
-                Codes.USER_ACCOUNT_SUSPENDED,
-            )
+        # The requester may be a regular user, but puppeted by the server.
+        request_by_server = requester.authenticated_entity == self._server_name
 
-        if target.to_string() != requester.user.to_string():
-            target_suspended = await self.store.get_user_suspended_status(
-                target.to_string()
+        # If the request is initiated by the server, ignore whether the
+        # requester or target is suspended.
+        if not request_by_server:
+            requester_suspended = await self.store.get_user_suspended_status(
+                requester.user.to_string()
             )
-        else:
-            target_suspended = requester_suspended
+            if action == Membership.INVITE and requester_suspended:
+                raise SynapseError(
+                    403,
+                    "Sending invites while account is suspended is not allowed.",
+                    Codes.USER_ACCOUNT_SUSPENDED,
+                )
 
-        if action == Membership.JOIN and target_suspended:
-            raise SynapseError(
-                403,
-                "Joining rooms while account is suspended is not allowed.",
-                Codes.USER_ACCOUNT_SUSPENDED,
-            )
-        if action == Membership.KNOCK and target_suspended:
-            raise SynapseError(
-                403,
-                "Knocking on rooms while account is suspended is not allowed.",
-                Codes.USER_ACCOUNT_SUSPENDED,
-            )
+            if target.to_string() != requester.user.to_string():
+                target_suspended = await self.store.get_user_suspended_status(
+                    target.to_string()
+                )
+            else:
+                target_suspended = requester_suspended
+
+            if action == Membership.JOIN and target_suspended:
+                raise SynapseError(
+                    403,
+                    "Joining rooms while account is suspended is not allowed.",
+                    Codes.USER_ACCOUNT_SUSPENDED,
+                )
+            if action == Membership.KNOCK and target_suspended:
+                raise SynapseError(
+                    403,
+                    "Knocking on rooms while account is suspended is not allowed.",
+                    Codes.USER_ACCOUNT_SUSPENDED,
+                )
 
         if (
             not self.allow_per_room_profiles and not is_requester_server_notices_user
@@ -1154,9 +1160,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         elif effective_membership_state == Membership.KNOCK:
             if not is_host_in_room:
-                # The knock needs to be sent over federation instead
-                remote_room_hosts.append(get_domain_from_id(room_id))
-
+                # we used to add the domain of the room ID to remote_room_hosts.
+                # This is not safe in MSC4291 rooms which do not have a domain.
                 content["membership"] = Membership.KNOCK
 
                 try:
@@ -1915,7 +1920,7 @@ class RoomMemberMasterHandler(RoomMemberHandler):
             check_complexity
             and self.hs.config.server.limit_remote_rooms.admins_can_join
         ):
-            check_complexity = not await self.store.is_server_admin(user)
+            check_complexity = not await self.store.is_server_admin(user.to_string())
 
         if check_complexity:
             # Fetch the room complexity
@@ -2164,6 +2169,7 @@ class RoomForgetterHandler(StateDeltasHandler):
         super().__init__(hs)
 
         self._hs = hs
+        self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self._clock = hs.get_clock()
@@ -2195,7 +2201,9 @@ class RoomForgetterHandler(StateDeltasHandler):
             finally:
                 self._is_processing = False
 
-        run_as_background_process("room_forgetter.notify_new_event", process)
+        run_as_background_process(
+            "room_forgetter.notify_new_event", self.server_name, process
+        )
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB
@@ -2252,7 +2260,9 @@ class RoomForgetterHandler(StateDeltasHandler):
             self.pos = max_pos
 
             # Expose current event processing position to prometheus
-            event_processing_positions.labels("room_forgetter").set(max_pos)
+            event_processing_positions.labels(
+                name="room_forgetter", **{SERVER_NAME_LABEL: self.server_name}
+            ).set(max_pos)
 
             await self._store.update_room_forgetter_stream_pos(max_pos)
 
@@ -2313,6 +2323,7 @@ def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[s
 
     # Check which members are able to invite by ensuring they're joined and have
     # the necessary power level.
+    create_event = auth_events[(EventTypes.Create, "")]
     for (event_type, state_key), event in auth_events.items():
         if event_type != EventTypes.Member:
             continue
@@ -2320,8 +2331,12 @@ def get_users_which_can_issue_invite(auth_events: StateMap[EventBase]) -> List[s
         if event.membership != Membership.JOIN:
             continue
 
+        if create_event.room_version.msc4289_creator_power_enabled and is_creator(
+            create_event, state_key
+        ):
+            result.append(state_key)
         # Check if the user has a custom power level.
-        if users.get(state_key, users_default_level) >= invite_level:
+        elif users.get(state_key, users_default_level) >= invite_level:
             result.append(state_key)
 
     return result

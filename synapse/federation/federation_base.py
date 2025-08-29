@@ -174,6 +174,7 @@ class FederationBase:
                 "Event not allowed by policy server, soft-failing %s", pdu.event_id
             )
             pdu.internal_metadata.soft_failed = True
+            pdu.internal_metadata.policy_server_spammy = True
             # Note: we don't redact the event so admins can inspect the event after the
             # fact. Other processes may redact the event, but that won't be applied to
             # the database copy of the event until the server's config requires it.
@@ -342,6 +343,21 @@ def event_from_pdu_json(pdu_json: JsonDict, room_version: RoomVersion) -> EventB
     if room_version.strict_canonicaljson:
         validate_canonicaljson(pdu_json)
 
+    # enforce that MSC4291 auth events don't include the create event.
+    # N.B. if they DO include a spurious create event, it'll fail auth checks elsewhere, so we don't
+    # need to do expensive DB lookups to find which event ID is the create event here.
+    if room_version.msc4291_room_ids_as_hashes:
+        room_id = pdu_json.get("room_id")
+        if room_id:
+            create_event_id = "$" + room_id[1:]
+            auth_events = pdu_json.get("auth_events")
+            if auth_events:
+                if create_event_id in auth_events:
+                    raise SynapseError(
+                        400,
+                        "auth_events must not contain the create event",
+                        Codes.BAD_JSON,
+                    )
     event = make_event_from_dict(pdu_json, room_version)
     return event
 
