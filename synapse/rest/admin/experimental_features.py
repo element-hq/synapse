@@ -92,9 +92,9 @@ class ExperimentalFeaturesRestServlet(RestServlet):
         user_features = {}
         for feature in ExperimentalFeature:
             if feature in enabled_features:
-                user_features[feature] = True
+                user_features[feature.value] = True
             else:
-                user_features[feature] = False
+                user_features[feature.value] = False
         return HTTPStatus.OK, {"features": user_features}
 
     async def on_PUT(
