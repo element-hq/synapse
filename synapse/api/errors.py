@@ -513,6 +513,24 @@ class ResourceLimitError(SynapseError):
         )
 
 
+class MSC4335UserLimitExceededError(SynapseError):
+    """
+    Experimental implementation of MSC4335 M_USER_LIMIT_EXCEEDED error
+    """
+
+    def __init__(
+        self,
+        code: int,
+        msg: str,
+        info_url: str,
+    ):
+        additional_fields = {
+            "org.matrix.msc4335.info_url": info_url,
+            "org.matrix.msc4335.errcode": "M_USER_LIMIT_EXCEEDED",
+        }
+        super().__init__(code, msg, Codes.UNKNOWN, additional_fields=additional_fields)
+
+
 class EventSizeError(SynapseError):
     """An error raised when an event is too big."""
 

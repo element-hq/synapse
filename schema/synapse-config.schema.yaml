@@ -2426,20 +2426,30 @@ properties:
       module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
-      time_period:
-        type: "#/$defs/duration"
-        description: >-
-          The time period over which the limit applies. Required.
-      max_size:
-        type: "#/$defs/bytes"
-        description: >-
-          Amount of data that can be uploaded in the time period by the user.
-          Required.
+      type: object
+      required:
+        - time_period
+        - max_size
+      properties:
+        time_period:
+          $ref: "#/$defs/duration"
+          description: >-
+            The time period over which the limit applies. Required.
+        max_size:
+          $ref: "#/$defs/bytes"
+          description: >-
+            Amount of data that can be uploaded in the time period by the user.
+            Required.
+        msc4335_info_url:
+          type: string
+          description: >-
+            Experimental MSC4335 URL to a page with more information about the upload limit. Optional.
     examples:
       - - time_period: 1h
           max_size: 100M
         - time_period: 1w
           max_size: 500M
+          msc4335_info_url: https://example.com/quota
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.

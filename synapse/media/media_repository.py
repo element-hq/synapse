@@ -37,6 +37,7 @@ from synapse.api.errors import (
     Codes,
     FederationDeniedError,
     HttpResponseException,
+    MSC4335UserLimitExceededError,
     NotFoundError,
     RequestSendFailed,
     SynapseError,
@@ -68,6 +69,7 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import UserID
 from synapse.util.async_helpers import Linearizer
@@ -382,6 +384,17 @@ class MediaRepository:
                     sent_bytes=uploaded_media_size,
                     attempted_bytes=content_length,
                 )
+                # If the MSC4335 experimental feature is enabled and the media limit
+                # has the info_url configured then we raise the MSC4335 error
+                msc4335_enabled = await self.store.is_feature_enabled(
+                    auth_user.to_string(), ExperimentalFeature.MSC4335
+                )
+                if msc4335_enabled and limit.msc4335_info_url:
+                    raise MSC4335UserLimitExceededError(
+                        403, "Media upload limit exceeded", limit.msc4335_info_url
+                    )
+                # Otherwise we use the current behaviour albeit not spec compliant
+                # See: https://github.com/element-hq/synapse/issues/18749
                 raise SynapseError(
                     400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
                 )
