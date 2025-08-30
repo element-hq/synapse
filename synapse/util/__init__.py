@@ -249,9 +249,7 @@ class Clock:
             self._delayed_calls[id] = call
             return call
 
-    def cancel_call_later(
-        self, timer: IDelayedCall, ignore_errs: bool = False
-    ) -> None:
+    def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         """
         Stop the specified scheduled calls.
 

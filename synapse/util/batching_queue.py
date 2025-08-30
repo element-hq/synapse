@@ -132,12 +132,8 @@ class BatchingQueue(Generic[V, R]):
         Prepares the object for garbage collection by removing any handed out
         references.
         """
-        number_queued.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: 0)
-        number_of_keys.labels(
-            name=self._name, **{SERVER_NAME_LABEL: self.server_name}
-        ).set_function(lambda: 0)
+        number_queued.remove(self._name, self.server_name)
+        number_of_keys.remove(self._name, self.server_name)
 
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result
