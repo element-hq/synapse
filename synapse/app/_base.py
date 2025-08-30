@@ -28,6 +28,7 @@ import sys
 import traceback
 import warnings
 from textwrap import indent
+from threading import Thread
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -40,6 +41,7 @@ from typing import (
     Tuple,
     cast,
 )
+from wsgiref.simple_server import WSGIServer
 
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec
@@ -98,14 +100,16 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-# list of tuples of function, args list, kwargs dict
-_sighup_callbacks: List[
-    Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]
-] = []
+# dict of instance_id to tuples of function, args list, kwargs dict
+_sighup_callbacks: Dict[
+    str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
+] = {}
 P = ParamSpec("P")
 
 
-def register_sighup(func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:
+def register_sighup(
+    instance_id: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs
+) -> None:
     """
     Register a function to be called when a SIGHUP occurs.
 
@@ -113,7 +117,12 @@ def register_sighup(func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) 
         func: Function to be called when sent a SIGHUP signal.
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
-    _sighup_callbacks.append((func, args, kwargs))
+
+    _sighup_callbacks.setdefault(instance_id, []).append((func, args, kwargs))
+
+
+def unregister_sighups(instance_id: str) -> None:
+    _sighup_callbacks.pop(instance_id, [])
 
 
 def start_worker_reactor(
@@ -283,7 +292,9 @@ def register_start(
     reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
 
 
-def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
+def listen_metrics(
+    bind_addresses: StrCollection, port: int
+) -> List[Tuple[WSGIServer, Thread]]:
     """
     Start Prometheus metrics server.
 
@@ -301,9 +312,14 @@ def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
 
     from synapse.metrics import RegistryProxy
 
+    servers: List[Tuple[WSGIServer, Thread]] = []
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
-        start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
+        server, thread = start_http_server_prometheus(
+            port, addr=host, registry=RegistryProxy
+        )
+        servers.append((server, thread))
+    return servers
 
 
 def listen_manhole(
@@ -311,7 +327,7 @@ def listen_manhole(
     port: int,
     manhole_settings: ManholeConfig,
     manhole_globals: dict,
-) -> None:
+) -> List[Port]:
     # twisted.conch.manhole 21.1.0 uses "int_from_bytes", which produces a confusing
     # warning. It's fixed by https://github.com/twisted/twisted/pull/1522), so
     # suppress the warning for now.
@@ -323,7 +339,7 @@ def listen_manhole(
 
     from synapse.util.manhole import manhole
 
-    listen_tcp(
+    return listen_tcp(
         bind_addresses,
         port,
         manhole(settings=manhole_settings, globals=manhole_globals),
@@ -500,7 +516,7 @@ def refresh_certificate(hs: "HomeServer") -> None:
         logger.info("Context factories updated.")
 
 
-async def start(hs: "HomeServer") -> None:
+async def start(hs: "HomeServer", freeze: bool = True) -> None:
     """
     Start a Synapse server or worker.
 
@@ -541,7 +557,8 @@ async def start(hs: "HomeServer") -> None:
                 # we're not using systemd.
                 sdnotify(b"RELOADING=1")
 
-                for i, args, kwargs in _sighup_callbacks:
+            for _, v in _sighup_callbacks.items():
+                for i, args, kwargs in v:
                     i(*args, **kwargs)
 
                 sdnotify(b"READY=1")
@@ -564,8 +581,8 @@ async def start(hs: "HomeServer") -> None:
 
         signal.signal(signal.SIGHUP, run_sighup)
 
-        register_sighup(refresh_certificate, hs)
-        register_sighup(reload_cache_config, hs.config)
+        register_sighup(hs.get_instance_id(), refresh_certificate, hs)
+        register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
@@ -602,8 +619,8 @@ async def start(hs: "HomeServer") -> None:
     hs.get_pusherpool().start()
 
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger(
-        "before", "shutdown", logger.info, "Shutting down..."
+    hs.register_sync_shutdown_handler(
+        "before", "shutdown", "shutdown log entry", logger.info, "Shutting down..."
     )
 
     setup_sentry(hs)
@@ -615,18 +632,19 @@ async def start(hs: "HomeServer") -> None:
         await hs.get_common_usage_metrics_manager().setup()
         start_phone_stats_home(hs)
 
-    # We now freeze all allocated objects in the hopes that (almost)
-    # everything currently allocated are things that will be used for the
-    # rest of time. Doing so means less work each GC (hopefully).
-    #
-    # PyPy does not (yet?) implement gc.freeze()
-    if hasattr(gc, "freeze"):
-        gc.collect()
-        gc.freeze()
+    if freeze:
+        # We now freeze all allocated objects in the hopes that (almost)
+        # everything currently allocated are things that will be used for the
+        # rest of time. Doing so means less work each GC (hopefully).
+        #
+        # PyPy does not (yet?) implement gc.freeze()
+        if hasattr(gc, "freeze"):
+            gc.collect()
+            gc.freeze()
 
-        # Speed up shutdowns by freezing all allocated objects. This moves everything
-        # into the permanent generation and excludes them from the final GC.
-        atexit.register(gc.freeze)
+            # Speed up shutdowns by freezing all allocated objects. This moves everything
+            # into the permanent generation and excludes them from the final GC.
+            atexit.register(gc.freeze)
 
 
 def reload_cache_config(config: HomeServerConfig) -> None:

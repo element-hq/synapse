@@ -127,6 +127,14 @@ class BatchingQueue(Generic[V, R]):
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
 
+    def shutdown(self) -> None:
+        """
+        Prepares the object for garbage collection by removing any handed out
+        references.
+        """
+        number_queued.remove(self._name, self.server_name)
+        number_of_keys.remove(self._name, self.server_name)
+
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result
         of the processing function for the batch that included the given value.

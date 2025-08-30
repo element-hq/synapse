@@ -337,7 +337,7 @@ class ReplicationDataHandler:
         # to wedge here forever.
         deferred: "Deferred[None]" = Deferred()
         deferred = timeout_deferred(
-            deferred, _WAIT_FOR_REPLICATION_TIMEOUT_SECONDS, self._reactor
+            deferred, _WAIT_FOR_REPLICATION_TIMEOUT_SECONDS, self._clock
         )
 
         waiting_list = self._streams_to_waiters.setdefault(
@@ -429,7 +429,9 @@ class FederationSenderHandler:
         # to. This is always set before we use it.
         self.federation_position: Optional[int] = None
 
-        self._fed_position_linearizer = Linearizer(name="_fed_position_linearizer")
+        self._fed_position_linearizer = Linearizer(
+            name="_fed_position_linearizer", clock=hs.get_clock()
+        )
 
     async def process_replication_rows(
         self, stream_name: str, token: int, rows: list

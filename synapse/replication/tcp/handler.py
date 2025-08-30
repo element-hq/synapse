@@ -243,11 +243,13 @@ class ReplicationCommandHandler:
         # outgoing replication commands to.)
         self._connections: List[IReplicationConnection] = []
 
-        LaterGauge(
-            name="synapse_replication_tcp_resource_total_connections",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self._connections)},
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_replication_tcp_resource_total_connections",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self._connections)},
+            )
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -266,14 +268,16 @@ class ReplicationCommandHandler:
         # from that connection.
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
-        LaterGauge(
-            name="synapse_replication_tcp_command_queue",
-            desc="Number of inbound RDATA/POSITION commands queued for processing",
-            labelnames=["stream_name", SERVER_NAME_LABEL],
-            caller=lambda: {
-                (stream_name, self.server_name): len(queue)
-                for stream_name, queue in self._command_queues_by_stream.items()
-            },
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_replication_tcp_command_queue",
+                desc="Number of inbound RDATA/POSITION commands queued for processing",
+                labelnames=["stream_name", SERVER_NAME_LABEL],
+                caller=lambda: {
+                    (stream_name, self.server_name): len(queue)
+                    for stream_name, queue in self._command_queues_by_stream.items()
+                },
+            )
         )
 
         self._is_master = hs.config.worker.worker_app is None

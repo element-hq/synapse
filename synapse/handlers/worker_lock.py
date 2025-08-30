@@ -37,12 +37,12 @@ from weakref import WeakSet
 import attr
 
 from twisted.internet import defer
-from twisted.internet.interfaces import IReactorTime
 
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
+from synapse.util import Clock
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.constants import ONE_MINUTE_SECONDS
 
@@ -69,7 +69,7 @@ class WorkerLocksHandler:
         self.server_name = (
             hs.hostname
         )  # nb must be called this for @wrap_as_background_process
-        self._reactor = hs.get_reactor()
+        self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._notifier = hs.get_notifier()
@@ -98,7 +98,7 @@ class WorkerLocksHandler:
         """
 
         lock = WaitingLock(
-            reactor=self._reactor,
+            clock=self._clock,
             store=self._store,
             handler=self,
             lock_name=lock_name,
@@ -129,7 +129,7 @@ class WorkerLocksHandler:
         """
 
         lock = WaitingLock(
-            reactor=self._reactor,
+            clock=self._clock,
             store=self._store,
             handler=self,
             lock_name=lock_name,
@@ -160,7 +160,7 @@ class WorkerLocksHandler:
         lock = WaitingMultiLock(
             lock_names=lock_names,
             write=write,
-            reactor=self._reactor,
+            clock=self._clock,
             store=self._store,
             handler=self,
         )
@@ -207,7 +207,7 @@ class WorkerLocksHandler:
 
 @attr.s(auto_attribs=True, eq=False)
 class WaitingLock:
-    reactor: IReactorTime
+    clock: Clock
     store: LockStore
     handler: WorkerLocksHandler
     lock_name: str
@@ -249,7 +249,7 @@ class WaitingLock:
                         await timeout_deferred(
                             deferred=self.deferred,
                             timeout=self._get_next_retry_interval(),
-                            reactor=self.reactor,
+                            clock=self.clock,
                         )
                 except Exception:
                     pass
@@ -290,7 +290,7 @@ class WaitingMultiLock:
 
     write: bool
 
-    reactor: IReactorTime
+    clock: Clock
     store: LockStore
     handler: WorkerLocksHandler
 
@@ -326,7 +326,7 @@ class WaitingMultiLock:
                         await timeout_deferred(
                             deferred=self.deferred,
                             timeout=self._get_next_retry_interval(),
-                            reactor=self.reactor,
+                            clock=self.clock,
                         )
                 except Exception:
                     pass

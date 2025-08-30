@@ -174,7 +174,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self.site.buildProtocol((host, port))
+        channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
@@ -186,7 +186,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
             requests.append(request)
             return request
 
-        channel.requestFactory = request_factory
+        channel.requestFactory = request_factory  # type: ignore[method-assign]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -428,7 +428,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self._hs_to_site[hs].buildProtocol((host, port))
+        channel = self._hs_to_site[hs].buildProtocol((host, port))  # type: ignore[arg-type]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(

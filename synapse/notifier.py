@@ -281,28 +281,34 @@ class Notifier:
                 )
             }
 
-        LaterGauge(
-            name="synapse_notifier_listeners",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=count_listeners,
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_notifier_listeners",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=count_listeners,
+            )
         )
 
-        LaterGauge(
-            name="synapse_notifier_rooms",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
-                (self.server_name,): count(
-                    bool, list(self.room_to_user_streams.values())
-                )
-            },
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_notifier_rooms",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {
+                    (self.server_name,): count(
+                        bool, list(self.room_to_user_streams.values())
+                    )
+                },
+            )
         )
-        LaterGauge(
-            name="synapse_notifier_users",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
+        hs.register_later_gauge(
+            LaterGauge(
+                name="synapse_notifier_users",
+                desc="",
+                labelnames=[SERVER_NAME_LABEL],
+                caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
+            )
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
@@ -667,7 +673,7 @@ class Notifier:
                         listener = timeout_deferred(
                             listener,
                             (end_time - now) / 1000.0,
-                            self.hs.get_reactor(),
+                            self.hs.get_clock(),
                         )
 
                         log_kv(

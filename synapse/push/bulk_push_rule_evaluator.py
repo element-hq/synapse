@@ -150,7 +150,7 @@ class BulkPushRuleEvaluator:
             cache_name="room_push_rule_cache",
             cache=[],  # Meaningless size, as this isn't a cache that stores values,
             resizable=False,
-            server_name=self.server_name,
+            server_name=self.hs.get_instance_id(),
         )
 
     async def _get_rules_for_event(
