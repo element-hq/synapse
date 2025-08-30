@@ -33,13 +33,15 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
 from synapse.rest import admin
-from synapse.rest.client import account, login, profile, room
+from synapse.rest.client import account, login, profile, room, user_directory
 from synapse.server import HomeServer
-from synapse.types import JsonDict, Requester, StateMap
+from synapse.storage.databases.main.user_directory import SearchResult
+from synapse.types import JsonDict, Requester, StateMap, UserProfile
 from synapse.util import Clock
 from synapse.util.frozenutils import unfreeze
 
 from tests import unittest
+from tests.unittest import override_config
 
 if TYPE_CHECKING:
     from synapse.module_api import ModuleApi
@@ -100,6 +102,7 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         room.register_servlets,
         profile.register_servlets,
         account.register_servlets,
+        user_directory.register_servlets,
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
@@ -1074,3 +1077,97 @@ class ThirdPartyRulesTestCase(unittest.FederatingHomeserverTestCase):
         on_remove_user_third_party_identifier_callback_mock.assert_called_once()
         args = on_remove_user_third_party_identifier_callback_mock.call_args[0]
         self.assertEqual(args, (user_id, "email", "foo@example.com"))
+
+    @override_config({"user_directory": {"enabled": True, "search_all_users": True}})
+    def test_on_user_search(self) -> None:
+        """Tests that the on_user_search module callback is correctly called on
+        searches in the user directory.
+        """
+
+        # Register a mock callback.
+        m = AsyncMock(return_value=None)
+        self.hs.get_module_api_callbacks().third_party_event_rules._on_user_search_callbacks.append(
+            m
+        )
+
+        # make a search request
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user_directory/search",
+            {"search_term": "foo"},
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check that the callback has been called once.
+        m.assert_called_once()
+
+    @override_config({"user_directory": {"enabled": True, "search_all_users": True}})
+    def test_on_user_search_modify_results(self) -> None:
+        """Tests that the on_user_search module callback is correctly returning
+        the modified results list.
+        """
+
+        result_list = [
+            UserProfile(
+                user_id="@foo:bar.com",
+                display_name="Foo",
+                avatar_url="mxc://bar.com/foo",
+            )
+        ]
+
+        # patch the search callback so that it will modify the search result
+        async def search(
+            requester: Requester,
+            results: SearchResult,
+        ) -> None:
+            results["results"] = result_list
+
+        self.hs.get_module_api_callbacks().third_party_event_rules._on_user_search_callbacks.append(
+            search
+        )
+
+        # now send a search request
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user_directory/search",
+            {"limit": 10, "search_term": "foo"},
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # ... and check that it got modified
+        results = channel.json_body["results"]
+        self.assertEqual(results, result_list)
+
+        self.assertIn("results", channel.json_body)
+        self.assertEqual(1, len(channel.json_body["results"]))
+
+    @override_config({"user_directory": {"enabled": True, "search_all_users": True}})
+    def test_on_user_search_deny_request(self) -> None:
+        """Tests that the on_user_search module returns the SynapseError to the API
+        when it is raised in the module.
+        """
+
+        # patch the search so that it will raise an exception
+        async def search(requester: Requester, results: SearchResult) -> None:
+            raise SynapseError(401, "Unauthorized user search", "M_UNAUTHORIZED")
+
+        self.hs.get_module_api_callbacks().third_party_event_rules._on_user_search_callbacks.append(
+            search
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/user_directory/search",
+            {"search_term": "something"},
+            access_token=self.tok,
+        )
+
+        # Check the error code
+        self.assertEqual(channel.code, 401, channel.json_body)
+        # Check the JSON body has the correct error message
+        self.assertEqual(
+            channel.json_body,
+            {"errcode": "M_UNAUTHORIZED", "error": "Unauthorized user search"},
+        )

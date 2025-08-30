@@ -315,6 +315,28 @@ identifier from an identity server (via a call to [`POST
 
 If multiple modules implement this callback, Synapse runs them all in order.
 
+### `on_user_search`
+
+_First introduced in Synapse v1.xxx.0_
+
+```python
+async def on_user_search(results: SearchResult) -> None:
+```
+
+Called after a search in the user directory has been performed. The module is given
+the search results in the SearchResult data format.
+
+Modules can modify the `results` (e.g. by adding the address of a chatbot by default, filtering
+the results for some criteria or grouping the results in a special manner. Be aware that altering
+the results structure can affect the compatibility with the matrix specification and matrix clients),
+or completely deny the user search by raising a `module_api.errors.SynapseError`.
+
+If multiple modules implement this callback, they will be considered in order. If a
+callback returns without raising an exception, Synapse falls through to the next one. The
+user search will be forbidden as soon as one of the callbacks raises an exception. If
+this happens, Synapse will not call any of the subsequent implementations of this
+callback.
+
 ## Example
 
 The example below is a module that implements the third-party rules callback
