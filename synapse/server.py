@@ -259,7 +259,15 @@ def cache_in_self(builder: F) -> F:
 
 @dataclass
 class ShutdownInfo:
-    """Information for callable functions called at time of shutdown."""
+    """Information for callable functions called at time of shutdown.
+
+    Attributes:
+        desc: a short description of the event trigger.
+        func: the object to call before shutdown.
+        trigger_id: an ID returned when registering this event trigger.
+        args: the arguments to call the function with.
+        kwargs: the keyword arguments to call the function with.
+    """
 
     desc: str
     func: Callable[..., Any]
