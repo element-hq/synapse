@@ -21,7 +21,7 @@
 
 import enum
 from functools import cache
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 import attr
 import attr.validators
@@ -555,6 +555,18 @@ class ExperimentalConfig(Config):
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        self.msc4133_key_allowlist: Optional[List[str]] = experimental.get(
+            "msc4133_key_allowlist"
+        )
+        if self.msc4133_key_allowlist is not None:
+            if not isinstance(self.msc4133_key_allowlist, list) or not all(
+                isinstance(k, str) for k in self.msc4133_key_allowlist
+            ):
+                raise ConfigError(
+                    "experimental_features.msc4133_key_allowlist must be a list of strings",
+                    ("experimental", "msc4133_key_allowlist"),
+                )
 
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
