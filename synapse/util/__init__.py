@@ -250,7 +250,7 @@ class Clock:
             return call
 
     def cancel_call_later(
-        self, timer: IDelayedCall, consumeErrors: bool = False
+        self, timer: IDelayedCall, ignore_errs: bool = False
     ) -> None:
         """
         Stop the specified scheduled calls.
@@ -263,7 +263,7 @@ class Clock:
         try:
             timer.cancel()
         except Exception:
-            if not consumeErrors:
+            if not ignore_errs:
                 raise
 
     def cancel_all_delayed_calls(self, ignore_errs: bool = True) -> None:
