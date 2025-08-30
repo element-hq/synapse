@@ -47,6 +47,7 @@ from attr import dataclass
 from typing_extensions import TypeAlias
 
 from twisted.internet import defer
+from twisted.internet.base import _SystemEventID
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
@@ -271,7 +272,7 @@ class ShutdownInfo:
 
     desc: str
     func: Callable[..., Any]
-    trigger_id: Any
+    trigger_id: _SystemEventID
     args: Tuple[object, ...]
     kwargs: Dict[str, object]
 
