@@ -91,7 +91,7 @@ def _rule_to_template(rule: PushRule) -> Optional[Dict[str, Any]]:
     unscoped_rule_id = _rule_id_from_namespaced(rule.rule_id)
 
     template_name = _priority_class_to_template_name(rule.priority_class)
-    if template_name in ["override", "underride"]:
+    if template_name in ["override", "underride", "postcontent"]:
         templaterule = {"conditions": rule.conditions, "actions": rule.actions}
     elif template_name in ["sender", "room"]:
         templaterule = {"actions": rule.actions}
