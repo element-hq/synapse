@@ -918,7 +918,7 @@ class SlidingSyncExtensionHandler:
             from_token: The point in the stream to sync from.
 
         Returns:
-            the response (or None if empty)
+            the response (None if empty or thread subscriptions are disabled)
         """
         if not thread_subscriptions_request.enabled:
             return None
