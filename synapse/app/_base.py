@@ -601,6 +601,12 @@ async def start(hs: "HomeServer") -> None:
     hs.get_datastores().main.db_pool.start_profiling()
     hs.get_pusherpool().start()
 
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
     # Log when we start the shut down process.
     hs.get_reactor().addSystemEventTrigger(
         "before", "shutdown", logger.info, "Shutting down..."
