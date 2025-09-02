@@ -400,7 +400,7 @@ class SlidingSyncThreadSubscriptionsExtensionTestCase(SlidingSyncBase):
         # Get our pos for the next sync
         first_sync_pos = sync_resp["pos"]
 
-        # Create 4 more thread subsrciptions and subscribe to each
+        # Create 5 more thread subscriptions and subscribe to each
         for _ in range(5):
             make_subscription()
 
