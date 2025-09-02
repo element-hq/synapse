@@ -51,7 +51,7 @@ from twisted.internet import defer
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.logging.opentracing import (
@@ -144,7 +144,7 @@ class _PersistEventsTask:
 
     name: ClassVar[str] = "persist_event_batch"  # used for opentracing
 
-    events_and_contexts: List[Tuple[EventBase, EventContext]]
+    events_and_contexts: List[EventPersistencePair]
     backfilled: bool
 
     def try_merge(self, task: "_EventPersistQueueTask") -> bool:
@@ -391,7 +391,7 @@ class EventsPersistenceStorageController:
     @trace
     async def persist_events(
         self,
-        events_and_contexts: Iterable[Tuple[EventBase, EventContext]],
+        events_and_contexts: Iterable[EventPersistencePair],
         backfilled: bool = False,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
         """
@@ -414,7 +414,7 @@ class EventsPersistenceStorageController:
                 a room that has been un-partial stated.
         """
         event_ids: List[str] = []
-        partitioned: Dict[str, List[Tuple[EventBase, EventContext]]] = {}
+        partitioned: Dict[str, List[EventPersistencePair]] = {}
         for event, ctx in events_and_contexts:
             partitioned.setdefault(event.room_id, []).append((event, ctx))
             event_ids.append(event.event_id)
@@ -430,7 +430,7 @@ class EventsPersistenceStorageController:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "backfilled", str(backfilled))
 
         async def enqueue(
-            item: Tuple[str, List[Tuple[EventBase, EventContext]]],
+            item: Tuple[str, List[EventPersistencePair]],
         ) -> Dict[str, str]:
             room_id, evs_ctxs = item
             return await self._event_persist_queue.add_to_queue(
@@ -677,7 +677,7 @@ class EventsPersistenceStorageController:
         return replaced_events
 
     async def _calculate_new_forward_extremities_and_state_delta(
-        self, room_id: str, ev_ctx_rm: List[Tuple[EventBase, EventContext]]
+        self, room_id: str, ev_ctx_rm: List[EventPersistencePair]
     ) -> Tuple[Optional[Set[str]], Optional[DeltaState]]:
         """Calculates the new forward extremities and state delta for a room
         given events to persist.
@@ -802,7 +802,7 @@ class EventsPersistenceStorageController:
     async def _calculate_new_extremities(
         self,
         room_id: str,
-        event_contexts: List[Tuple[EventBase, EventContext]],
+        event_contexts: List[EventPersistencePair],
         latest_event_ids: AbstractSet[str],
     ) -> Set[str]:
         """Calculates the new forward extremities for a room given events to
@@ -862,7 +862,7 @@ class EventsPersistenceStorageController:
     async def _get_new_state_after_events(
         self,
         room_id: str,
-        events_context: List[Tuple[EventBase, EventContext]],
+        events_context: List[EventPersistencePair],
         old_latest_event_ids: AbstractSet[str],
         new_latest_event_ids: Set[str],
     ) -> Tuple[Optional[StateMap[str]], Optional[StateMap[str]], Set[str]]:
@@ -1039,7 +1039,7 @@ class EventsPersistenceStorageController:
         new_latest_event_ids: Set[str],
         resolved_state_group: int,
         event_id_to_state_group: Dict[str, int],
-        events_context: List[Tuple[EventBase, EventContext]],
+        events_context: List[EventPersistencePair],
     ) -> Set[str]:
         """See if we can prune any of the extremities after calculating the
         resolved state.
@@ -1176,7 +1176,7 @@ class EventsPersistenceStorageController:
     async def _is_server_still_joined(
         self,
         room_id: str,
-        ev_ctx_rm: List[Tuple[EventBase, EventContext]],
+        ev_ctx_rm: List[EventPersistencePair],
         delta: DeltaState,
     ) -> bool:
         """Check if the server will still be joined after the given events have
