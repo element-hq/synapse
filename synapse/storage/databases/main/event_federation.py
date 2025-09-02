@@ -1212,6 +1212,30 @@ class EventFederationWorkerStore(
         equal to the `current_depth`. Sorted by depth, highest to lowest (descending)
         so the closest events to the `current_depth` are first in the list.
 
+        Note: We can only do approximate depth comparisons. Backwards extremeties are
+        the oldest events we know of in the room but we only know of them because some
+        other event referenced them by prev_event and aren't persisted in our database
+        yet (meaning we don't know their depth specifically). So we need to look for the
+        approximate depth from the events connected to the current backwards
+        extremeties.
+
+        It's best to pad the `current_depth` by the number of messages you plan to
+        backfill from these points.
+
+        Example:
+
+         - Your pagination token represents a scroll position at `depth` of `100`.
+         - We have a backfill point at an approximate depth of `125`
+         - You plan to backfill `50` events from that backfill point.
+
+        When we pad our `current_depth`, `100` + `50` = `150`, we pick up the backfill
+        point at `125` (because <= `150`, our `current_depth`), backfill `50` events to
+        a depth of `75` in the timeline (exposing new events that we can return `100` ->
+        `75`).
+
+        When we don't pad our `current_depth`, `100` is lower than any of the backfill
+        points so we don't pick any and miss out on backfilling any events.
+
         We ignore extremities that are newer than the user's current scroll position
         (ie, those with depth greater than `current_depth`) as:
             1. we don't really care about getting events that have happened
@@ -1223,7 +1247,7 @@ class EventFederationWorkerStore(
 
         Args:
             room_id: Room where we want to find the oldest events
-            current_depth: The depth at the user's current scrollback position
+            current_depth: The depth at the user's current scrollback position (see notes above).
             limit: The max number of backfill points to return
 
         Returns:
