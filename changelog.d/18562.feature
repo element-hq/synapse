@@ -1,0 +1,1 @@
+Add `msc4133_key_allowlist` experimental option to configure a list of custom profile keys that users may set.
