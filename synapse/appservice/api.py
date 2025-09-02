@@ -268,6 +268,7 @@ class ApplicationServiceApi(SimpleHttpClient):
         user_id: str,
         from_user_id: Optional[UserID] = None,
         key: Optional[str] = None,
+        origin_server: Optional[str] = None,
     ) -> Optional[JsonDict]:
         if service.url is None:
             return None
@@ -281,6 +282,8 @@ class ApplicationServiceApi(SimpleHttpClient):
                 args["access_token"] = service.hs_token
             if from_user_id:
                 args["from_user_id"] = from_user_id.to_string()
+            if origin_server:
+                args["origin_server"] = origin_server
 
             url = f"{service.url}{APP_SERVICE_PREFIX}/profile/{urllib.parse.quote(user_id)}"
 

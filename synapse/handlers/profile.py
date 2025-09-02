@@ -139,6 +139,8 @@ class ProfileHandler:
                 raise e.to_synapse_error()
 
         # Check whether the appservice has any information about the user.
+
+        logger.info(f"query_profile {user_id} {from_user_id}")
         as_profile = await self._as.query_profile(user_id, from_user_id)
         ret.update(as_profile)
 
@@ -464,6 +466,7 @@ class ProfileHandler:
             The value for the profile field or None if the field does not exist.
         """
 
+        logger.info(f"get_profile_field {field_name} {from_user_id}")
         # Check whether the appservice has any information about the user.
         as_profile = await self._as.query_profile(
             target_user.to_string(), from_user_id, field_name
@@ -576,9 +579,12 @@ class ProfileHandler:
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         just_field = args.get("field")
+        origin_server = args.get("origin")
+
+        assert origin_server
 
         # Check whether the appservice has any information about the user.
-        as_profile = await self._as.query_profile(user.to_string(), key=just_field)
+        as_profile = await self._as.query_profile(user.to_string(), key=just_field, origin_server=origin_server)
         if just_field and just_field in as_profile:
             return as_profile[just_field]
 

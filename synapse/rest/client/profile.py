@@ -113,11 +113,8 @@ class ProfileFieldRestServlet(RestServlet):
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> Tuple[int, JsonDict]:
-        requester_user = None
-
-        if self.hs.config.server.require_auth_for_profile_requests:
-            requester = await self.auth.get_user_by_req(request)
-            requester_user = requester.user
+        requester = await self.auth.get_user_by_req(request)
+        requester_user = requester.user
 
         if not UserID.is_valid(user_id):
             raise SynapseError(
@@ -137,7 +134,7 @@ class ProfileFieldRestServlet(RestServlet):
             )
 
         user = UserID.from_string(user_id)
-        await self.profile_handler.check_profile_query_allowed(user, requester_user)
+        await self.profile_handler.check_profile_query_allowed(user, requester_user if self.hs.config.server.require_auth_for_profile_requests else None)
 
         if field_name == ProfileFields.DISPLAYNAME:
             field_value: JsonValue = await self.profile_handler.get_displayname(

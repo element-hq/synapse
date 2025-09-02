@@ -737,7 +737,7 @@ class ApplicationServicesHandler:
         return False
 
     async def query_profile(
-        self, user_id: str, from_user_id: Optional[UserID] = None, key: Optional[str] = None
+        self, user_id: str, from_user_id: Optional[UserID] = None, key: Optional[str] = None, origin_server: Optional[str] = None
     ) -> Optional[JsonDict]:
         """Check if any application service knows this user_id exists.
 
@@ -751,7 +751,7 @@ class ApplicationServicesHandler:
         for user_service in user_query_services:
             if user_service.supports_profile_lookup:
                 profile = await self.appservice_api.query_profile(
-                    user_service, user_id, from_user_id, key
+                    user_service, user_id, from_user_id, key, origin_server
                 )
                 if profile:
                     accumulated_profile.update(profile)
