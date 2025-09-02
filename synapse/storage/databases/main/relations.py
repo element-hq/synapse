@@ -48,13 +48,13 @@ from synapse.storage.database import (
     make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.stream import (
-    generate_next_token,
     generate_pagination_bounds,
     generate_pagination_where_clause,
 )
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, MultiWriterStreamToken, StreamKeyType, StreamToken
 from synapse.util.caches.descriptors import cached, cachedList
+from synapse.util.tokens import generate_next_token
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

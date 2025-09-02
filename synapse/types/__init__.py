@@ -604,7 +604,7 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
         return self.instance_map.get(instance_name, self.stream)
 
     def is_before_or_eq(self, other_token: Self) -> bool:
-        """Wether this token is before the other token, i.e. every constituent
+        """Whether this token is before the other token, i.e. every constituent
         part is before the other.
 
         Essentially it is `self <= other`.
@@ -694,7 +694,7 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
     ---
 
-    Historic tokens start with a "t" followed by the `depth`
+    Historical tokens start with a "t" followed by the `depth`
     (`topological_ordering` in the event graph) of the event that comes before
     the position of the token, followed by "-", followed by the
     `stream_ordering` of the event that comes before the position of the token.
@@ -827,17 +827,15 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
         return self.topological, self.stream
 
-    def get_stream_pos_for_instance(self, instance_name: str) -> int:
-        """Get the stream position that the given writer was at at this token.
+    def is_before_or_eq(self, other_token: Self) -> bool:
+        is_before_or_eq_stream_ordering = super().is_before_or_eq(other_token)
+        if not is_before_or_eq_stream_ordering:
+            return False
 
-        This only makes sense for "live" tokens that may have a vector clock
-        component, and so asserts that this is a "live" token.
-        """
-        assert self.topological is None
+        if self.topological is not None and other_token.topological is not None:
+            return self.topological <= other_token.topological
 
-        # If we don't have an entry for the instance we can assume that it was
-        # at `self.stream`.
-        return self.instance_map.get(instance_name, self.stream)
+        return True
 
     async def to_string(self, store: "DataStore") -> str:
         """See class level docstring for information about the format."""

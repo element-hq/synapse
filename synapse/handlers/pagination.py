@@ -414,12 +414,14 @@ class PaginationHandler:
     @trace
     async def get_messages(
         self,
+        *,
         requester: Requester,
         room_id: str,
         pagin_config: PaginationConfig,
         as_client_event: bool = True,
         event_filter: Optional[Filter] = None,
         use_admin_priviledge: bool = False,
+        backfill: bool = True,
     ) -> JsonDict:
         """Get messages in a room.
 
@@ -432,6 +434,8 @@ class PaginationHandler:
             use_admin_priviledge: if `True`, return all events, regardless
                 of whether `user` has access to them. To be used **ONLY**
                 from the admin API.
+            backfill: If false, we skip backfill altogether. When true, we backfill as a
+                best effort.
 
         Returns:
             Pagination API results
@@ -522,7 +526,7 @@ class PaginationHandler:
             event_filter=event_filter,
         )
 
-        if pagin_config.direction == Direction.BACKWARDS:
+        if backfill and pagin_config.direction == Direction.BACKWARDS:
             # We use a `Set` because there can be multiple events at a given depth
             # and we only care about looking at the unique continum of depths to
             # find gaps.
@@ -622,6 +626,7 @@ class PaginationHandler:
         if not events:
             return {
                 "chunk": [],
+                "gaps": [],
                 "start": await from_token.to_string(self.store),
             }
 
@@ -641,6 +646,7 @@ class PaginationHandler:
         if not events:
             return {
                 "chunk": [],
+                "gaps": [],
                 "start": await from_token.to_string(self.store),
                 "end": await next_token.to_string(self.store),
             }
@@ -666,6 +672,10 @@ class PaginationHandler:
             events, user_id
         )
 
+        gaps = await self.store.get_events_next_to_gaps(
+            events=events, direction=pagin_config.direction
+        )
+
         time_now = self.clock.time_msec()
 
         serialize_options = SerializeEventConfig(
@@ -681,6 +691,18 @@ class PaginationHandler:
                     bundle_aggregations=aggregations,
                 )
             ),
+            "gaps": [
+                {
+                    "prev_pagination_token": await from_token.copy_and_replace(
+                        StreamKeyType.ROOM, gap.prev_token
+                    ).to_string(self.store),
+                    "event_id": gap.event_id,
+                    "next_pagination_token": await from_token.copy_and_replace(
+                        StreamKeyType.ROOM, gap.next_token
+                    ).to_string(self.store),
+                }
+                for gap in gaps
+            ],
             "start": await from_token.to_string(self.store),
             "end": await next_token.to_string(self.store),
         }

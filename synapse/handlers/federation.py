@@ -259,7 +259,9 @@ class FederationHandler:
             _BackfillPoint(event_id, depth, _BackfillPointType.BACKWARDS_EXTREMITY)
             for event_id, depth in await self.store.get_backfill_points_in_room(
                 room_id=room_id,
-                current_depth=current_depth,
+                # Per the docstring, it's best to pad the `current_depth` by the
+                # number of messages you plan to backfill from these points.
+                current_depth=current_depth + limit,
                 # We only need to end up with 5 extremities combined with the
                 # insertion event extremities to make the `/backfill` request
                 # but fetch an order of magnitude more to make sure there is

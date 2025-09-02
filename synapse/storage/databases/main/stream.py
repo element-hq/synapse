@@ -86,6 +86,7 @@ from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.tokens import generate_next_token
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -292,30 +293,6 @@ def generate_pagination_bounds(
             )
 
     return order, from_bound, to_bound
-
-
-def generate_next_token(
-    direction: Direction, last_topo_ordering: Optional[int], last_stream_ordering: int
-) -> RoomStreamToken:
-    """
-    Generate the next room stream token based on the currently returned data.
-
-    Args:
-        direction: Whether pagination is going forwards or backwards.
-        last_topo_ordering: The last topological ordering being returned.
-        last_stream_ordering: The last stream ordering being returned.
-
-    Returns:
-        A new RoomStreamToken to return to the client.
-    """
-    if direction == Direction.BACKWARDS:
-        # Tokens are positions between events.
-        # This token points *after* the last event in the chunk.
-        # We need it to point to the event before it in the chunk
-        # when we are going backwards so we subtract one from the
-        # stream part.
-        last_stream_ordering -= 1
-    return RoomStreamToken(topological=last_topo_ordering, stream=last_stream_ordering)
 
 
 def _make_generic_sql_bound(
