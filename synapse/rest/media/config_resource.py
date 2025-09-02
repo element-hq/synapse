@@ -50,4 +50,4 @@ class MediaConfigResource(RestServlet):
             )
         )
         response = user_specific_config if user_specific_config else self.limits_dict
-        respond_with_json(request, 200, response, send_cors=True)
+        await respond_with_json(request, 200, response, send_cors=True)
