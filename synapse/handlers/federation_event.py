@@ -1306,9 +1306,16 @@ class FederationEventHandler:
             await self._get_state_and_persist(destination, room_id, event_id)
         else:
             logger.debug("Fetching %i events from remote", len(missing_event_ids))
-            await self._get_events_and_persist(
+            persisted_all = await self._get_events_and_persist(
                 destination=destination, room_id=room_id, event_ids=missing_event_ids
             )
+            # We must raise here else we will end up persisting the prev event in question with
+            # known bad room state with missing events. This will cause us to state drift from other
+            # servers.
+            if not persisted_all:
+                raise Exception(
+                    f"Failed to persist all {len(missing_event_ids)} missing events from /state_ids"
+                )
 
         # We now need to fill out the state map, which involves fetching the
         # type and state key for each event ID in the state.
@@ -1598,7 +1605,7 @@ class FederationEventHandler:
     @tag_args
     async def _get_events_and_persist(
         self, destination: str, room_id: str, event_ids: StrCollection
-    ) -> None:
+    ) -> bool:
         """Fetch the given events from a server, and persist them as outliers.
 
         This function *does not* recursively get missing auth events of the
@@ -1606,6 +1613,9 @@ class FederationEventHandler:
         any missing events from the auth chain.
 
         Logs a warning if we can't find the given event.
+
+        Returns:
+            True if all events were persisted.
         """
 
         room_version = await self._store.get_room_version(room_id)
@@ -1640,6 +1650,7 @@ class FederationEventHandler:
         await concurrently_execute(get_event, event_ids, 5)
         logger.info("Fetched %i events of %i requested", len(events), len(event_ids))
         await self._auth_and_persist_outliers(room_id, events)
+        return len(events) == len(event_ids)
 
     @trace
     async def _auth_and_persist_outliers(
