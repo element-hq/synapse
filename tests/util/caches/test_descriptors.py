@@ -355,7 +355,7 @@ class DescriptorTestCase(unittest.TestCase):
                     d = obj.fn(1)
                     self.assertEqual(
                         current_context(),
-                        SENTINEL_CONTEXT,
+                        c1,
                     )
                     yield d
                     self.fail("No exception thrown")
@@ -849,7 +849,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
 
             # start the lookup off
             d1 = obj.list_fn([10, 20], 2)
-            self.assertEqual(current_context(), SENTINEL_CONTEXT)
+            self.assertEqual(current_context(), c1)
             r = yield d1
             self.assertEqual(current_context(), c1)
             obj.mock.assert_called_once_with({10, 20}, 2)
