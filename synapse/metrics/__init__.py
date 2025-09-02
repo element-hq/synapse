@@ -190,7 +190,6 @@ class LaterGauge(Collector):
                     self.name,
                     homeserver_instance_id,
                 )
-                yield g
                 # Continue to return the rest of the metrics that aren't broken
                 continue
 
