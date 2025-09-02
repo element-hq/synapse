@@ -18,11 +18,18 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, Protocol, Tuple
+from typing import Dict, NoReturn, Protocol, Tuple
 
 from prometheus_client.core import Sample
 
-from synapse.metrics import REGISTRY, InFlightGauge, generate_latest
+from synapse.metrics import (
+    REGISTRY,
+    SERVER_NAME_LABEL,
+    InFlightGauge,
+    LaterGauge,
+    all_later_gauges_to_clean_up_on_shutdown,
+    generate_latest,
+)
 from synapse.util.caches.deferred_cache import DeferredCache
 
 from tests import unittest
@@ -283,6 +290,95 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         self.assertEqual(hs2_cache_size_metric_value, "1.0")
         self.assertEqual(hs1_cache_max_size_metric_value, "777.0")
         self.assertEqual(hs2_cache_max_size_metric_value, "777.0")
+
+
+class LaterGaugeTests(unittest.HomeserverTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.later_gauge = LaterGauge(
+            name="foo",
+            desc="",
+            labelnames=[SERVER_NAME_LABEL],
+        )
+
+    def tearDown(self) -> None:
+        super().tearDown()
+
+        REGISTRY.unregister(self.later_gauge)
+        all_later_gauges_to_clean_up_on_shutdown.pop(self.later_gauge.name, None)
+
+    def test_later_gauge_multiple_servers(self) -> None:
+        """
+        Test that LaterGauge metrics are reported correctly across multiple servers. We
+        will have an metrics entry for each homeserver that is labeled with the
+        `server_name` label.
+        """
+        self.later_gauge.register_hook(
+            homeserver_instance_id="123", hook=lambda: {("hs1",): 1}
+        )
+        self.later_gauge.register_hook(
+            homeserver_instance_id="456", hook=lambda: {("hs2",): 2}
+        )
+
+        metrics_map = get_latest_metrics()
+
+        # Find the metrics from both homeservers
+        hs1_metric = 'foo{server_name="hs1"}'
+        hs1_metric_value = metrics_map.get(hs1_metric)
+        self.assertIsNotNone(
+            hs1_metric_value,
+            f"Missing metric {hs1_metric} in metrics {metrics_map}",
+        )
+        self.assertEqual(hs1_metric_value, "1.0")
+
+        hs2_metric = 'foo{server_name="hs2"}'
+        hs2_metric_value = metrics_map.get(hs2_metric)
+        self.assertIsNotNone(
+            hs2_metric_value,
+            f"Missing metric {hs2_metric} in metrics {metrics_map}",
+        )
+        self.assertEqual(hs2_metric_value, "2.0")
+
+    def test_later_gauge_hook_exception(self) -> None:
+        """
+        Test that LaterGauge metrics are collected across multiple servers even if one
+        hooks is throwing an exception.
+        """
+
+        def raise_exception() -> NoReturn:
+            raise Exception("fake error generating data")
+
+        # Make the hook for hs1 throw an exception
+        self.later_gauge.register_hook(
+            homeserver_instance_id="123", hook=raise_exception
+        )
+        # Metrics from hs2 still work fine
+        self.later_gauge.register_hook(
+            homeserver_instance_id="456", hook=lambda: {("hs2",): 2}
+        )
+
+        metrics_map = get_latest_metrics()
+
+        # Since we encountered an exception while trying to collect metrics from hs1, we
+        # don't expect to see it here.
+        hs1_metric = 'foo{server_name="hs1"}'
+        hs1_metric_value = metrics_map.get(hs1_metric)
+        self.assertIsNone(
+            hs1_metric_value,
+            (
+                "Since we encountered an exception while trying to collect metrics from hs1"
+                f"we don't expect to see it the metrics_map {metrics_map}"
+            ),
+        )
+
+        # We should still see metrics from hs2 though
+        hs2_metric = 'foo{server_name="hs2"}'
+        hs2_metric_value = metrics_map.get(hs2_metric)
+        self.assertIsNotNone(
+            hs2_metric_value,
+            f"Missing metric {hs2_metric} in cache metrics {metrics_map}",
+        )
+        self.assertEqual(hs2_metric_value, "2.0")
 
 
 def get_latest_metrics() -> Dict[str, str]:
