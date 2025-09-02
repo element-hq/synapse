@@ -57,7 +57,7 @@ from synapse.util.async_helpers import (
 
 _ThreadSubscription: TypeAlias = (
     SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadSubscription
-)  #
+)
 _ThreadUnsubscription: TypeAlias = (
     SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadUnsubscription
 )
