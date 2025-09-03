@@ -73,8 +73,6 @@ logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
 
-all_gauges: Dict[str, Collector] = {}
-
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 SERVER_NAME_LABEL = "server_name"
@@ -163,47 +161,110 @@ class LaterGauge(Collector):
     name: str
     desc: str
     labelnames: Optional[StrSequence] = attr.ib(hash=False)
-    # callback: should either return a value (if there are no labels for this metric),
-    # or dict mapping from a label tuple to a value
-    caller: Callable[
-        [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
-    ]
+    _instance_id_to_hook_map: Dict[
+        Optional[str],  # instance_id
+        Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ] = attr.ib(factory=dict, hash=False)
+    """
+    Map from homeserver instance_id to a callback. Each callback should either return a
+    value (if there are no labels for this metric), or dict mapping from a label tuple
+    to a value.
+
+    We use `instance_id` instead of `server_name` because it's possible to have multiple
+    workers running in the same process with the same `server_name`.
+    """
 
     def collect(self) -> Iterable[Metric]:
         # The decision to add `SERVER_NAME_LABEL` is from the `LaterGauge` usage itself
         # (we don't enforce it here, one level up).
         g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
-        try:
-            calls = self.caller()
-        except Exception:
-            logger.exception("Exception running callback for LaterGauge(%s)", self.name)
-            yield g
-            return
+        for homeserver_instance_id, hook in self._instance_id_to_hook_map.items():
+            try:
+                hook_result = hook()
+            except Exception:
+                logger.exception(
+                    "Exception running callback for LaterGauge(%s) for homeserver_instance_id=%s",
+                    self.name,
+                    homeserver_instance_id,
+                )
+                # Continue to return the rest of the metrics that aren't broken
+                continue
 
-        if isinstance(calls, (int, float)):
-            g.add_metric([], calls)
-        else:
-            for k, v in calls.items():
-                g.add_metric(k, v)
+            if isinstance(hook_result, (int, float)):
+                g.add_metric([], hook_result)
+            else:
+                for k, v in hook_result.items():
+                    g.add_metric(k, v)
 
         yield g
 
+    def register_hook(
+        self,
+        *,
+        homeserver_instance_id: Optional[str],
+        hook: Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ) -> None:
+        """
+        Register a callback/hook that will be called to generate a metric samples for
+        the gauge.
+
+        Args:
+            homeserver_instance_id: The unique ID for this Synapse process instance
+                (`hs.get_instance_id()`) that this hook is associated with. This can be used
+                later to lookup all hooks associated with a given server name in order to
+                unregister them. This should only be omitted for global hooks that work
+                across all homeservers.
+            hook: A callback that should either return a value (if there are no
+                labels for this metric), or dict mapping from a label tuple to a value
+        """
+        # We shouldn't have multiple hooks registered for the same homeserver `instance_id`.
+        existing_hook = self._instance_id_to_hook_map.get(homeserver_instance_id)
+        assert existing_hook is None, (
+            f"LaterGauge(name={self.name}) hook already registered for homeserver_instance_id={homeserver_instance_id}. "
+            "This is likely a Synapse bug and you forgot to unregister the previous hooks for "
+            "the server (especially in tests)."
+        )
+
+        self._instance_id_to_hook_map[homeserver_instance_id] = hook
+
+    def unregister_hooks_for_homeserver_instance_id(
+        self, homeserver_instance_id: str
+    ) -> None:
+        """
+        Unregister all hooks associated with the given homeserver `instance_id`. This should be
+        called when a homeserver is shutdown to avoid extra hooks sitting around.
+
+        Args:
+            homeserver_instance_id: The unique ID for this Synapse process instance to
+                unregister hooks for (`hs.get_instance_id()`).
+        """
+        self._instance_id_to_hook_map.pop(homeserver_instance_id, None)
+
     def __attrs_post_init__(self) -> None:
-        self._register()
-
-    def _register(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
-
         REGISTRY.register(self)
-        all_gauges[self.name] = self
 
-    def unregister(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s unregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
+        # We shouldn't have multiple metrics with the same name. Typically, metrics
+        # should be created globally so you shouldn't be running into this and this will
+        # catch any stupid mistakes. The `REGISTRY.register(self)` call above will also
+        # raise an error if the metric already exists but to make things explicit, we'll
+        # also check here.
+        existing_gauge = all_later_gauges_to_clean_up_on_shutdown.get(self.name)
+        assert existing_gauge is None, f"LaterGauge(name={self.name}) already exists. "
+
+        # Keep track of the gauge so we can clean it up later.
+        all_later_gauges_to_clean_up_on_shutdown[self.name] = self
+
+
+all_later_gauges_to_clean_up_on_shutdown: Dict[str, LaterGauge] = {}
+"""
+Track all `LaterGauge` instances so we can remove any associated hooks during homeserver
+shutdown.
+"""
 
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,
@@ -255,7 +316,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         # Protects access to _registrations
         self._lock = threading.Lock()
 
-        self._register_with_collector()
+        REGISTRY.register(self)
 
     def register(
         self,
@@ -345,14 +406,6 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
             for key, metrics in metrics_by_key.items():
                 gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
-
-    def _register_with_collector(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
-
-        REGISTRY.register(self)
-        all_gauges[self.name] = self
 
 
 class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):

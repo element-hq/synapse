@@ -106,6 +106,18 @@ user_ip_cache_counter = Counter(
     "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
 )
 
+tcp_resource_total_connections_gauge = LaterGauge(
+    name="synapse_replication_tcp_resource_total_connections",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+tcp_command_queue_gauge = LaterGauge(
+    name="synapse_replication_tcp_command_queue",
+    desc="Number of inbound RDATA/POSITION commands queued for processing",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
+)
+
 
 # the type of the entries in _command_queues_by_stream
 _StreamCommandQueue = Deque[
@@ -243,13 +255,9 @@ class ReplicationCommandHandler:
         # outgoing replication commands to.)
         self._connections: List[IReplicationConnection] = []
 
-        hs.register_later_gauge(
-            LaterGauge(
-                name="synapse_replication_tcp_resource_total_connections",
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {(self.server_name,): len(self._connections)},
-            )
+        tcp_resource_total_connections_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self._connections)},
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -268,16 +276,12 @@ class ReplicationCommandHandler:
         # from that connection.
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
-        hs.register_later_gauge(
-            LaterGauge(
-                name="synapse_replication_tcp_command_queue",
-                desc="Number of inbound RDATA/POSITION commands queued for processing",
-                labelnames=["stream_name", SERVER_NAME_LABEL],
-                caller=lambda: {
-                    (stream_name, self.server_name): len(queue)
-                    for stream_name, queue in self._command_queues_by_stream.items()
-                },
-            )
+        tcp_command_queue_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (stream_name, self.server_name): len(queue)
+                for stream_name, queue in self._command_queues_by_stream.items()
+            },
         )
 
         self._is_master = hs.config.worker.worker_app is None

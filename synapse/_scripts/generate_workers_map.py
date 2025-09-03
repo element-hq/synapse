@@ -153,9 +153,13 @@ def get_registered_paths_for_default(
     """
 
     hs = MockHomeserver(base_config, worker_app)
+
     # TODO We only do this to avoid an error, but don't need the database etc
     hs.setup()
-    return get_registered_paths_for_hs(hs)
+    registered_paths = get_registered_paths_for_hs(hs)
+    hs.shutdown()
+
+    return registered_paths
 
 
 def elide_http_methods_if_unconflicting(

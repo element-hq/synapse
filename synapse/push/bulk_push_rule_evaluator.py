@@ -49,7 +49,7 @@ from synapse.api.constants import (
 from synapse.api.room_versions import PushRuleRoomFlag
 from synapse.event_auth import auth_types_for_event, get_user_power_level
 from synapse.events import EventBase, relation_from_event
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.state import CREATE_KEY, POWER_KEY
@@ -352,7 +352,7 @@ class BulkPushRuleEvaluator:
         return related_events
 
     async def action_for_events_by_user(
-        self, events_and_context: List[Tuple[EventBase, EventContext]]
+        self, events_and_context: List[EventPersistencePair]
     ) -> None:
         """Given a list of events and their associated contexts, evaluate the push rules
         for each event, check if the message should increment the unread count, and

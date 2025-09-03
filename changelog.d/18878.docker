@@ -1,0 +1,1 @@
+Suppress "Applying schema" log noise bulk when `SYNAPSE_LOG_TESTING` is set.

@@ -146,7 +146,10 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import LaterGauge, register_threadpool
+from synapse.metrics import (
+    all_later_gauges_to_clean_up_on_shutdown,
+    register_threadpool,
+)
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
@@ -355,7 +358,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
-        self._later_gauges: List[LaterGauge] = []
         self._background_processes: List[defer.Deferred] = []
         self._async_shutdown_handlers: List[ShutdownInfo] = []
         self._sync_shutdown_handlers: List[ShutdownInfo] = []
@@ -402,9 +404,16 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         self.get_keyring().shutdown()
 
-        for later_gauge in self._later_gauges:
-            later_gauge.unregister()
-        self._later_gauges.clear()
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver_instance_id(
+            self.config.server.server_name
+        )
+
         # TODO: What about the other gauge types?
         # from synapse.metrics import all_gauges
         # all_gauges.clear()
@@ -416,12 +425,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.get_clock().cancel_all_delayed_calls()
 
         for process in self._background_processes:
-            process.cancel()
+            try:
+                process.cancel()
+            except:
+                pass
         self._background_processes.clear()
-
-        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver_instance_id(
-            self.config.server.server_name
-        )
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:
@@ -498,13 +506,6 @@ class HomeServer(metaclass=abc.ABCMeta):
             )
         )
 
-    def register_later_gauge(self, later_gauge: LaterGauge) -> None:
-        """
-        Register a LaterGauge specific to this instance with the HomeServer so it
-        can be cleanly removed when the HomeServer is shutdown.
-        """
-        self._later_gauges.append(later_gauge)
-
     def register_background_process(self, process: defer.Deferred) -> None:
         """
         Register a background process with the HomeServer so it can be cleanly
@@ -568,6 +569,20 @@ class HomeServer(metaclass=abc.ABCMeta):
         # unless handlers are instantiated.
         if self.config.worker.run_background_tasks:
             self.setup_background_tasks()
+
+    # def __del__(self) -> None:
+    #    """
+    #    Called when an the homeserver is garbage collected.
+    #
+    #    Make sure we actually do some clean-up, rather than leak data.
+    #    """
+    #
+    #    # NOTE: This is a chicken an egg problem.
+    #    # __del__ will never be called since the HomeServer cannot be garbage collected
+    #    # until the shutdown function has been called. So it makes no sense to call
+    #    # shutdown inside of __del__, even though that is a logical place to assume it
+    #    # should be called.
+    #    self.shutdown()
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners

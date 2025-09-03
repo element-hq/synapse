@@ -199,6 +199,24 @@ sent_pdus_destination_dist_total = Counter(
     labelnames=[SERVER_NAME_LABEL],
 )
 
+transaction_queue_pending_destinations_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_destinations",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_pdus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_pdus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_edus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_edus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
 # Time (in s) to wait before trying to wake up destinations that have
 # catch-up outstanding.
 # Please note that rate limiting still applies, so while the loop is
@@ -398,46 +416,31 @@ class FederationSender(AbstractFederationSender):
         # map from destination to PerDestinationQueue
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
-        hs.register_later_gauge(
-            LaterGauge(
-                name="synapse_federation_transaction_queue_pending_destinations",
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {
-                    (self.server_name,): sum(
-                        1
-                        for d in self._per_destination_queues.values()
-                        if d.transmission_loop_running
-                    )
-                },
-            )
+        transaction_queue_pending_destinations_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): sum(
+                    1
+                    for d in self._per_destination_queues.values()
+                    if d.transmission_loop_running
+                )
+            },
         )
-
-        hs.register_later_gauge(
-            LaterGauge(
-                name="synapse_federation_transaction_queue_pending_pdus",
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {
-                    (self.server_name,): sum(
-                        d.pending_pdu_count()
-                        for d in self._per_destination_queues.values()
-                    )
-                },
-            )
+        transaction_queue_pending_pdus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): sum(
+                    d.pending_pdu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
-        hs.register_later_gauge(
-            LaterGauge(
-                name="synapse_federation_transaction_queue_pending_edus",
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {
-                    (self.server_name,): sum(
-                        d.pending_edu_count()
-                        for d in self._per_destination_queues.values()
-                    )
-                },
-            )
+        transaction_queue_pending_edus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): sum(
+                    d.pending_edu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
 
         self._is_processing = False

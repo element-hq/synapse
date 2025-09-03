@@ -66,7 +66,11 @@ from synapse.event_auth import (
     validate_event_for_room_version,
 )
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    EventContext,
+    EventPersistencePair,
+    UnpersistedEventContextBase,
+)
 from synapse.federation.federation_client import InvalidResponseError, PulledPduInfo
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import (
@@ -342,7 +346,7 @@ class FederationEventHandler:
 
     async def on_send_membership_event(
         self, origin: str, event: EventBase
-    ) -> Tuple[EventBase, EventContext]:
+    ) -> EventPersistencePair:
         """
         We have received a join/leave/knock event for a room via send_join/leave/knock.
 
@@ -1713,7 +1717,7 @@ class FederationEventHandler:
             )
             auth_map.update(persisted_events)
 
-        events_and_contexts_to_persist: List[Tuple[EventBase, EventContext]] = []
+        events_and_contexts_to_persist: List[EventPersistencePair] = []
 
         async def prep(event: EventBase) -> None:
             with nested_logging_context(suffix=event.event_id):
@@ -2226,7 +2230,7 @@ class FederationEventHandler:
     async def persist_events_and_notify(
         self,
         room_id: str,
-        event_and_contexts: Sequence[Tuple[EventBase, EventContext]],
+        event_and_contexts: Sequence[EventPersistencePair],
         backfilled: bool = False,
     ) -> int:
         """Persists events and tells the notifier/pushers about them, if
