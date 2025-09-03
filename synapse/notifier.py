@@ -532,6 +532,7 @@ class Notifier:
             StreamKeyType.TO_DEVICE,
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            StreamKeyType.THREAD_SUBSCRIPTIONS,
         ],
         new_token: int,
         users: Optional[Collection[Union[str, UserID]]] = None,

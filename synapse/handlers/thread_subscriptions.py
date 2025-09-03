@@ -9,7 +9,7 @@ from synapse.storage.databases.main.thread_subscriptions import (
     AutomaticSubscriptionConflicted,
     ThreadSubscription,
 )
-from synapse.types import EventOrderings, UserID
+from synapse.types import EventOrderings, StreamKeyType, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -22,6 +22,7 @@ class ThreadSubscriptionsHandler:
         self.store = hs.get_datastores().main
         self.event_handler = hs.get_event_handler()
         self.auth = hs.get_auth()
+        self._notifier = hs.get_notifier()
 
     async def get_thread_subscription_settings(
         self,
@@ -132,6 +133,15 @@ class ThreadSubscriptionsHandler:
                 errcode=Codes.MSC4306_CONFLICTING_UNSUBSCRIPTION,
             )
 
+        if outcome is not None:
+            # wake up user streams (e.g. sliding sync) on the same worker
+            self._notifier.on_new_event(
+                StreamKeyType.THREAD_SUBSCRIPTIONS,
+                # outcome is a stream_id
+                outcome,
+                users=[user_id.to_string()],
+            )
+
         return outcome
 
     async def unsubscribe_user_from_thread(
@@ -162,8 +172,19 @@ class ThreadSubscriptionsHandler:
             logger.info("rejecting thread subscriptions change (thread not accessible)")
             raise NotFoundError("No such thread root")
 
-        return await self.store.unsubscribe_user_from_thread(
+        outcome = await self.store.unsubscribe_user_from_thread(
             user_id.to_string(),
             event.room_id,
             thread_root_event_id,
         )
+
+        if outcome is not None:
+            # wake up user streams (e.g. sliding sync) on the same worker
+            self._notifier.on_new_event(
+                StreamKeyType.THREAD_SUBSCRIPTIONS,
+                # outcome is a stream_id
+                outcome,
+                users=[user_id.to_string()],
+            )
+
+        return outcome

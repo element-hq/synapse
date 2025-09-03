@@ -27,7 +27,7 @@ from typing import (
     cast,
 )
 
-from typing_extensions import assert_never
+from typing_extensions import TypeAlias, assert_never
 
 from synapse.api.constants import AccountDataTypes, EduTypes
 from synapse.handlers.receipts import ReceiptEventSource
@@ -40,6 +40,7 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
+    ThreadSubscriptionsToken,
 )
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
@@ -52,6 +53,13 @@ from synapse.types.handlers.sliding_sync import (
 from synapse.util.async_helpers import (
     concurrently_execute,
     gather_optional_coroutines,
+)
+
+_ThreadSubscription: TypeAlias = (
+    SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadSubscription
+)
+_ThreadUnsubscription: TypeAlias = (
+    SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadUnsubscription
 )
 
 if TYPE_CHECKING:
@@ -68,6 +76,7 @@ class SlidingSyncExtensionHandler:
         self.event_sources = hs.get_event_sources()
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
+        self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
 
     @trace
     async def get_extensions_response(
@@ -93,7 +102,7 @@ class SlidingSyncExtensionHandler:
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
             actual_room_response_map: A map of room ID to room results in the the
                 Sliding Sync response.
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
 
@@ -156,18 +165,32 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        thread_subs_coro = None
+        if (
+            sync_config.extensions.thread_subscriptions is not None
+            and self._enable_thread_subscriptions
+        ):
+            thread_subs_coro = self.get_thread_subscriptions_extension_response(
+                sync_config=sync_config,
+                thread_subscriptions_request=sync_config.extensions.thread_subscriptions,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         (
             to_device_response,
             e2ee_response,
             account_data_response,
             receipts_response,
             typing_response,
+            thread_subs_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
             account_data_coro,
             receipts_coro,
             typing_coro,
+            thread_subs_coro,
         )
 
         return SlidingSyncResult.Extensions(
@@ -176,6 +199,7 @@ class SlidingSyncExtensionHandler:
             account_data=account_data_response,
             receipts=receipts_response,
             typing=typing_response,
+            thread_subscriptions=thread_subs_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -876,4 +900,73 @@ class SlidingSyncExtensionHandler:
 
         return SlidingSyncResult.Extensions.TypingExtension(
             room_id_to_typing_map=room_id_to_typing_map,
+        )
+
+    async def get_thread_subscriptions_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        thread_subscriptions_request: SlidingSyncConfig.Extensions.ThreadSubscriptionsExtension,
+        to_token: StreamToken,
+        from_token: Optional[SlidingSyncStreamToken],
+    ) -> Optional[SlidingSyncResult.Extensions.ThreadSubscriptionsExtension]:
+        """Handle Thread Subscriptions extension (MSC4308)
+
+        Args:
+            sync_config: Sync configuration
+            thread_subscriptions_request: The thread_subscriptions extension from the request
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+
+        Returns:
+            the response (None if empty or thread subscriptions are disabled)
+        """
+        if not thread_subscriptions_request.enabled:
+            return None
+
+        limit = thread_subscriptions_request.limit
+
+        if from_token:
+            from_stream_id = from_token.stream_token.thread_subscriptions_key
+        else:
+            from_stream_id = StreamToken.START.thread_subscriptions_key
+
+        to_stream_id = to_token.thread_subscriptions_key
+
+        updates = await self.store.get_latest_updated_thread_subscriptions_for_user(
+            user_id=sync_config.user.to_string(),
+            from_id=from_stream_id,
+            to_id=to_stream_id,
+            limit=limit,
+        )
+
+        if len(updates) == 0:
+            return None
+
+        subscribed_threads: Dict[str, Dict[str, _ThreadSubscription]] = {}
+        unsubscribed_threads: Dict[str, Dict[str, _ThreadUnsubscription]] = {}
+        for stream_id, room_id, thread_root_id, subscribed, automatic in updates:
+            if subscribed:
+                subscribed_threads.setdefault(room_id, {})[thread_root_id] = (
+                    _ThreadSubscription(
+                        automatic=automatic,
+                        bump_stamp=stream_id,
+                    )
+                )
+            else:
+                unsubscribed_threads.setdefault(room_id, {})[thread_root_id] = (
+                    _ThreadUnsubscription(bump_stamp=stream_id)
+                )
+
+        prev_batch = None
+        if len(updates) == limit:
+            # Tell the client about a potential gap where there may be more
+            # thread subscriptions for it to backpaginate.
+            # We subtract one because the 'later in the stream' bound is inclusive,
+            # and we already saw the element at index 0.
+            prev_batch = ThreadSubscriptionsToken(updates[0][0] - 1)
+
+        return SlidingSyncResult.Extensions.ThreadSubscriptionsExtension(
+            subscribed=subscribed_threads,
+            unsubscribed=unsubscribed_threads,
+            prev_batch=prev_batch,
         )
