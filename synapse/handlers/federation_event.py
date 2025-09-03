@@ -1309,13 +1309,14 @@ class FederationEventHandler:
             persisted_all = await self._get_events_and_persist(
                 destination=destination, room_id=room_id, event_ids=missing_event_ids
             )
-            # We must raise here else we will end up persisting the prev event in question with
+            # We cannot continue else we will end up persisting the prev event in question with
             # known bad room state with missing events. This will cause us to state drift from other
-            # servers.
+            # servers. Fallback to just requesting the entire state.
             if not persisted_all:
-                raise Exception(
-                    f"Failed to persist all {len(missing_event_ids)} missing events from /state_ids"
+                logger.warning(
+                    "Failed to fetch missed state via /event calls, requesting complete state"
                 )
+                await self._get_state_and_persist(destination, room_id, event_id)
 
         # We now need to fill out the state map, which involves fetching the
         # type and state key for each event ID in the state.
@@ -1406,9 +1407,11 @@ class FederationEventHandler:
 
         # we also need the event itself.
         if not await self._store.have_seen_event(room_id, event_id):
-            await self._get_events_and_persist(
+            persisted = await self._get_events_and_persist(
                 destination=destination, room_id=room_id, event_ids=(event_id,)
             )
+            if not persisted:
+                raise Exception(f"failed to retrieve and persist event {event_id}")
 
     @trace
     async def _process_received_pdu(
