@@ -617,7 +617,11 @@ class EventsPersistenceStorageController:
             if not events_and_contexts:
                 return replaced_events
 
-        await assign_stitched_orders(room_id, [ev for (ev, _) in events_and_contexts], self.main_store)
+        # TODO massive hack
+        if events_and_contexts[0][0].stitched_ordering is None:
+            await assign_stitched_orders(
+                room_id, [ev for (ev, _) in events_and_contexts], self.main_store
+            )
 
         chunks = [
             events_and_contexts[x : x + 100]
@@ -1347,9 +1351,7 @@ async def assign_stitched_orders(
             )
 
         remaining_batch = still_remaining_batch
-        logger.debug(
-            "Remaining events: %s", [ev.event_id for ev in remaining_batch]
-        )
+        logger.debug("Remaining events: %s", [ev.event_id for ev in remaining_batch])
 
     logger.debug(
         "Remaining events after processing gap matches: %s",

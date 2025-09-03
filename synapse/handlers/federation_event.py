@@ -86,6 +86,7 @@ from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
 from synapse.state import StateResolutionStore
+from synapse.storage.controllers.persist_events import assign_stitched_orders
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -895,7 +896,10 @@ class FederationEventHandler:
         )
 
         @trace
-        async def _process_new_pulled_events(new_events: Collection[EventBase]) -> None:
+        async def _process_new_pulled_events(new_events: List[EventBase]) -> None:
+            room_id = new_events[0].room_id
+            await assign_stitched_orders(room_id, new_events, self._store)
+
             # We want to sort these by depth so we process them and tell clients about
             # them in order. It's also more efficient to backfill this way (`depth`
             # ascending) because one backfill event is likely to be the `prev_event` of

@@ -561,8 +561,6 @@ class AssignStitchedOrderingTestCase(HomeserverTestCase):
             RoomVersions.V12,
         )
 
-        self.get_success(
-            assign_stitched_orders(room_id, [test_event], self.store)
-        )
+        self.get_success(assign_stitched_orders(room_id, [test_event], self.store))
 
         self.assertEqual(test_event.stitched_ordering, 6 * 2**16)
