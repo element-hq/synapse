@@ -900,11 +900,20 @@ class FederationEventHandler:
             room_id = new_events[0].room_id
             await assign_stitched_orders(room_id, new_events, self._store)
 
-            # We want to sort these by depth so we process them and tell clients about
-            # them in order. It's also more efficient to backfill this way (`depth`
-            # ascending) because one backfill event is likely to be the `prev_event` of
-            # the next event we're going to process.
-            sorted_events = sorted(new_events, key=lambda x: x.depth)
+            # We want to sort these by stitched ordering, so that events that will
+            # be sent on to clients over /sync will receive stream_orderings that
+            # are consistent with stitched orderings (i.e. we will serve them to clients
+            # in the same order as stitched_order).
+            #
+            # It's also more efficient to backfill this way, because one backfill event
+            # is likely to be the `prev_event` of the next event we're going to process.
+            #
+            # Outliers will not yet have received a stitched ordering, but it doesn't
+            # really matter what order they get persisted in, because they don't get
+            # sent to clients and we don't do so much state resolution for them. We just
+            # persist them before any other events.
+
+            sorted_events = sorted(new_events, key=lambda x: (x.stitched_ordering or 0))
             for ev in sorted_events:
                 with nested_logging_context(ev.event_id):
                     await self._process_pulled_event(origin, ev, backfilled=backfilled)
