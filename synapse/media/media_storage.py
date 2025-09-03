@@ -59,7 +59,7 @@ from synapse.util import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict
-from ._base import FileInfo, Responder
+from ._base import CRLF, FileInfo, Responder
 from .filepath import MediaFilePaths
 
 if TYPE_CHECKING:
@@ -67,8 +67,6 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-CRLF = b"\r\n"
 
 
 class SHA256TransparentIOWriter:
