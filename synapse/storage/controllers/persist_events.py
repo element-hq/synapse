@@ -1298,7 +1298,7 @@ async def assign_stitched_orders(
     gap_events = await store.db_pool.simple_select_many_batch(
         "event_backward_extremities",
         "event_id",
-        (ev.event_id for (ev, _) in events_and_contexts),
+        (ev.event_id for ev in remaining_batch),
         ["event_id", "before_gap_event_id"],
     )
 

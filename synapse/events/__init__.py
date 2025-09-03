@@ -208,7 +208,7 @@ class EventBase(metaclass=abc.ABCMeta):
 
         self.internal_metadata = EventInternalMetadata(internal_metadata_dict)
 
-        self._stitched_ordering = None
+        self._stitched_ordering: Optional[int] = None
 
     depth: DictProperty[int] = DictProperty("depth")
     content: DictProperty[JsonDict] = DictProperty("content")
