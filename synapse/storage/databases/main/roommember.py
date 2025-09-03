@@ -774,6 +774,40 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return frozenset(room_ids)
 
+    async def get_rooms_for_user_by_read_receipts(self, user_id: str) -> List[str]:
+        """Returns room_ids ordered by most recent read receipt activity.
+
+        Rooms with recent read receipts appear first (most recent first),
+        rooms without read receipts appear after in arbitrary order.
+
+        Args:
+            user_id: The ID of the user.
+
+        Returns:
+            List of room_ids ordered by read receipt activity.
+        """
+
+        def _get_rooms_txn(txn: LoggingTransaction) -> List[str]:
+            sql = """
+                SELECT cse.room_id
+                FROM current_state_events cse
+                LEFT JOIN receipts_linearized rl ON (
+                    rl.room_id = cse.room_id
+                    AND rl.user_id = ?
+                    AND rl.receipt_type = 'm.read'
+                )
+                WHERE cse.type = 'm.room.member'
+                  AND cse.membership = 'join'
+                  AND cse.state_key = ?
+                ORDER BY rl.event_stream_ordering DESC NULLS LAST, cse.room_id
+            """
+            txn.execute(sql, (user_id, user_id))
+            return [row[0] for row in txn.fetchall()]
+
+        return await self.db_pool.runInteraction(
+            "get_rooms_for_user_by_read_receipts", _get_rooms_txn
+        )
+
     @cachedList(
         cached_method_name="get_rooms_for_user",
         list_name="user_ids",
