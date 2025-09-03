@@ -2387,9 +2387,8 @@ class FederationEventHandler:
             )
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Too many auth_events")
 
-def find_predecessors(
-    event_ids: Iterable[str], batch: List[EventBase]
-) -> Set[str]:
+
+def find_predecessors(event_ids: Iterable[str], batch: List[EventBase]) -> Set[str]:
     """
     Walk the tree of dependencies (in batch), and return every event that is
     in batch, and is an ancestor of one of the supplied events.
