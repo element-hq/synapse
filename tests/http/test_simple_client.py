@@ -24,7 +24,7 @@ from netaddr import IPSet
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.http import RequestTimedOutError
 from synapse.http.client import SimpleHttpClient

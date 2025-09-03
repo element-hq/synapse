@@ -80,7 +80,9 @@ class FollowerTypingHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self.server_name = hs.config.server.server_name
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @wrap_as_background_process
         self.clock = hs.get_clock()
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name
@@ -143,7 +145,11 @@ class FollowerTypingHandler:
             last_fed_poke = self._member_last_federation_poke.get(member, None)
             if not last_fed_poke or last_fed_poke + FEDERATION_PING_INTERVAL <= now:
                 run_as_background_process(
-                    "typing._push_remote", self._push_remote, member=member, typing=True
+                    "typing._push_remote",
+                    self.server_name,
+                    self._push_remote,
+                    member=member,
+                    typing=True,
                 )
 
         # Add a paranoia timer to ensure that we always have a timer for
@@ -216,6 +222,7 @@ class FollowerTypingHandler:
             if self.federation:
                 run_as_background_process(
                     "_send_changes_in_typing_to_remotes",
+                    self.server_name,
                     self._send_changes_in_typing_to_remotes,
                     row.room_id,
                     prev_typing,
@@ -263,6 +270,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         assert hs.get_instance_name() in hs.config.worker.writers.typing
 
+        self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.notifier = hs.get_notifier()
         self.event_auth_handler = hs.get_event_auth_handler()
@@ -280,7 +288,9 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         # caches which room_ids changed at which serials
         self._typing_stream_change_cache = StreamChangeCache(
-            "TypingStreamChangeCache", self._latest_room_serial
+            name="TypingStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=self._latest_room_serial,
         )
 
     def _handle_timeout_for_member(self, now: int, member: RoomMember) -> None:
@@ -375,7 +385,11 @@ class TypingWriterHandler(FollowerTypingHandler):
         if self.hs.is_mine_id(member.user_id):
             # Only send updates for changes to our own users.
             run_as_background_process(
-                "typing._push_remote", self._push_remote, member, typing
+                "typing._push_remote",
+                self.server_name,
+                self._push_remote,
+                member,
+                typing,
             )
 
         self._push_update_local(member=member, typing=typing)
@@ -503,6 +517,7 @@ class TypingWriterHandler(FollowerTypingHandler):
 
 class TypingNotificationEventSource(EventSource[int, JsonMapping]):
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self._main_store = hs.get_datastores().main
         self.clock = hs.get_clock()
         # We can't call get_typing_handler here because there's a cycle:
@@ -535,7 +550,9 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
                   appservice may be interested in.
                 * The latest known room serial.
         """
-        with Measure(self.clock, "typing.get_new_events_as"):
+        with Measure(
+            self.clock, name="typing.get_new_events_as", server_name=self.server_name
+        ):
             handler = self.get_typing_handler()
 
             events = []
@@ -571,7 +588,9 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         Find typing notifications for given rooms (> `from_token` and <= `to_token`)
         """
 
-        with Measure(self.clock, "typing.get_new_events"):
+        with Measure(
+            self.clock, name="typing.get_new_events", server_name=self.server_name
+        ):
             from_key = int(from_key)
             handler = self.get_typing_handler()
 

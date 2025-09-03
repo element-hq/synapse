@@ -43,7 +43,7 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -84,6 +84,13 @@ _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
 _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
 
 
+federation_known_servers_gauge = LaterGauge(
+    name="synapse_federation_known_servers",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class EventIdMembership:
     """Returned by `get_membership_from_event_ids`"""
@@ -116,11 +123,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 1,
                 self._count_known_servers,
             )
-            LaterGauge(
-                "synapse_federation_known_servers",
-                "",
-                [],
-                lambda: self._known_servers_count,
+            federation_known_servers_gauge.register_hook(
+                homeserver_instance_id=hs.get_instance_id(),
+                hook=lambda: {(self.server_name,): self._known_servers_count},
             )
 
     @wrap_as_background_process("_count_known_servers")
@@ -194,6 +199,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 "membership": Membership.JOIN,
             },
             retcol="state_key",
+        )
+
+    async def get_invited_users_in_room(self, room_id: str) -> StrCollection:
+        """Returns a list of users invited to the room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "type": EventTypes.Member,
+                "room_id": room_id,
+                "membership": Membership.INVITE,
+            },
+            retcol="state_key",
+            desc="get_invited_users_in_room",
         )
 
     @cached()
@@ -983,7 +1001,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         `_get_user_ids_from_membership_event_ids` for any uncached events.
         """
 
-        with Measure(self._clock, "get_joined_user_ids_from_state"):
+        with Measure(
+            self._clock,
+            name="get_joined_user_ids_from_state",
+            server_name=self.server_name,
+        ):
             users_in_room = set()
             member_event_ids = [
                 e_id for key, e_id in state.items() if key[0] == EventTypes.Member
@@ -1843,6 +1865,19 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return await self.db_pool.runInteraction(
             "_get_room_participation_txn", _get_room_participation_txn, user_id, room_id
+        )
+
+    async def get_ban_event_ids_in_room(self, room_id: str) -> StrCollection:
+        """Get all event IDs for ban events in the given room."""
+        return await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "room_id": room_id,
+                "type": EventTypes.Member,
+                "membership": Membership.BAN,
+            },
+            retcol="event_id",
+            desc="get_ban_event_ids_in_room",
         )
 
 

@@ -23,7 +23,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from twisted.internet.defer import succeed
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin

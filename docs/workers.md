@@ -238,7 +238,9 @@ information.
     ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
-    ^/_matrix/client/(r0|v3|unstable)/devices$
+    ^/_matrix/client/(r0|v3|unstable)/account/deactivate$
+    ^/_matrix/client/(r0|v3)/delete_devices$
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
     ^/_matrix/client/versions$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$
     ^/_matrix/client/(api/v1|r0|v3|unstable)/rooms/.*/event/
@@ -250,14 +252,16 @@ information.
     ^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$
     ^/_matrix/client/(r0|v3|unstable)/capabilities$
     ^/_matrix/client/(r0|v3|unstable)/notifications$
-    ^/_synapse/admin/v1/rooms/
+    ^/_synapse/admin/v1/rooms/[^/]+$
 
     # Encryption requests
     ^/_matrix/client/(r0|v3|unstable)/keys/query$
     ^/_matrix/client/(r0|v3|unstable)/keys/changes$
     ^/_matrix/client/(r0|v3|unstable)/keys/claim$
     ^/_matrix/client/(r0|v3|unstable)/room_keys/
-    ^/_matrix/client/(r0|v3|unstable)/keys/upload$
+    ^/_matrix/client/(r0|v3|unstable)/keys/upload
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
     # Registration/login requests
     ^/_matrix/client/(api/v1|r0|v3|unstable)/login$
@@ -282,7 +286,6 @@ Additionally, the following REST endpoints can be handled for GET requests:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
-    ^/_matrix/client/(api/v1|r0|v3|unstable)/devices/
 
     # Account data requests
     ^/_matrix/client/(r0|v3|unstable)/.*/tags
@@ -329,7 +332,6 @@ set to `true`), the following endpoints can be handled by the worker:
     ^/_synapse/admin/v2/users/[^/]+$
     ^/_synapse/admin/v1/username_available$
     ^/_synapse/admin/v1/users/[^/]+/_allow_cross_signing_replacement_without_uia$
-    # Only the GET method:
     ^/_synapse/admin/v1/users/[^/]+/devices$
 
 Note that a [HTTP listener](usage/configuration/config_documentation.md#listeners)
@@ -530,8 +532,9 @@ the stream writer for the `account_data` stream:
 
 ##### The `receipts` stream
 
-The following endpoints should be routed directly to the worker configured as
-the stream writer for the `receipts` stream:
+The `receipts` stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the `receipts` stream:
 
     ^/_matrix/client/(r0|v3|unstable)/rooms/.*/receipt
     ^/_matrix/client/(r0|v3|unstable)/rooms/.*/read_markers
@@ -549,6 +552,18 @@ The following endpoints should be routed directly to the worker configured as
 the stream writer for the `push_rules` stream:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
+
+##### The `device_lists` stream
+
+The `device_lists` stream supports multiple writers. The following endpoints
+can be handled by any worker, but should be routed directly to one of the workers
+configured as stream writer for the `device_lists` stream:
+
+    ^/_matrix/client/(r0|v3)/delete_devices$
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)
+    ^/_matrix/client/(r0|v3|unstable)/keys/upload
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$
 
 #### Restrict outbound federation traffic to a specific set of workers
 

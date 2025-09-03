@@ -99,6 +99,7 @@ from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
 from synapse.util import SYNAPSE_VERSION, Clock
+from synapse.util.stringutils import random_string
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -136,6 +137,7 @@ BOOLEAN_COLUMNS = {
         "has_known_state",
         "is_encrypted",
     ],
+    "thread_subscriptions": ["subscribed", "automatic"],
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],
     "users_who_share_rooms": ["share_private"],
@@ -190,13 +192,18 @@ APPEND_ONLY_TABLES = [
     "users",
 ]
 
+# These tables declare their id column with "PRIMARY KEY AUTOINCREMENT" on sqlite side
+# and with "PRIMARY KEY GENERATED ALWAYS AS IDENTITY" on postgres side. This creates an
+# implicit sequence that needs its value to be migrated separately. Additionally,
+# inserting on postgres side needs to use the "OVERRIDING SYSTEM VALUE" modifier.
+AUTOINCREMENT_TABLES = {
+    "sliding_sync_connections",
+    "sliding_sync_connection_positions",
+    "sliding_sync_connection_required_state",
+    "state_groups_pending_deletion",
+}
 
 IGNORED_TABLES = {
-    # Porting the auto generated sequence in this table is non-trivial.
-    # None of the entries in this list are mandatory for Synapse to keep working.
-    # If state group disk space is an issue after the port, the
-    # `mark_unreferenced_state_groups_for_deletion_bg_update` background task can be run again.
-    "state_groups_pending_deletion",
     # We don't port these tables, as they're a faff and we can regenerate
     # them anyway.
     "user_directory",
@@ -284,11 +291,17 @@ class Store(
         return self.db_pool.runInteraction("execute_sql", r)
 
     def insert_many_txn(
-        self, txn: LoggingTransaction, table: str, headers: List[str], rows: List[Tuple]
+        self,
+        txn: LoggingTransaction,
+        table: str,
+        headers: List[str],
+        rows: List[Tuple],
+        override_system_value: bool = False,
     ) -> None:
-        sql = "INSERT INTO %s (%s) VALUES (%s)" % (
+        sql = "INSERT INTO %s (%s) %s VALUES (%s)" % (
             table,
             ", ".join(k for k in headers),
+            "OVERRIDING SYSTEM VALUE" if override_system_value else "",
             ", ".join("%s" for _ in headers),
         )
 
@@ -311,12 +324,16 @@ class MockHomeserver:
         self.config = config
         self.hostname = config.server.server_name
         self.version_string = SYNAPSE_VERSION
+        self.instance_id = random_string(5)
 
     def get_clock(self) -> Clock:
         return self.clock
 
     def get_reactor(self) -> ISynapseReactor:
         return reactor
+
+    def get_instance_id(self) -> str:
+        return self.instance_id
 
     def get_instance_name(self) -> str:
         return "master"
@@ -532,7 +549,13 @@ class Porter:
 
                 def insert(txn: LoggingTransaction) -> None:
                     assert headers is not None
-                    self.postgres_store.insert_many_txn(txn, table, headers[1:], rows)
+                    self.postgres_store.insert_many_txn(
+                        txn,
+                        table,
+                        headers[1:],
+                        rows,
+                        override_system_value=table in AUTOINCREMENT_TABLES,
+                    )
 
                     self.postgres_store.db_pool.simple_update_one_txn(
                         txn,
@@ -654,14 +677,28 @@ class Porter:
         engine = create_engine(db_config.config)
 
         hs = MockHomeserver(self.hs_config)
+        server_name = hs.hostname
 
-        with make_conn(db_config, engine, "portdb") as db_conn:
+        with make_conn(
+            db_config=db_config,
+            engine=engine,
+            default_txn_name="portdb",
+            server_name=server_name,
+        ) as db_conn:
             engine.check_database(
                 db_conn, allow_outdated_version=allow_outdated_version
             )
             prepare_database(db_conn, engine, config=self.hs_config)
             # Type safety: ignore that we're using Mock homeservers here.
-            store = Store(DatabasePool(hs, db_config, engine), db_conn, hs)  # type: ignore[arg-type]
+            store = Store(
+                DatabasePool(
+                    hs,  # type: ignore[arg-type]
+                    db_config,
+                    engine,
+                ),
+                db_conn,
+                hs,  # type: ignore[arg-type]
+            )
             db_conn.commit()
 
         return store
@@ -882,6 +919,19 @@ class Porter:
                     ("pushers", "id"),
                     ("deleted_pushers", "stream_id"),
                 ],
+            )
+
+            await self._setup_autoincrement_sequence(
+                "sliding_sync_connection_positions", "connection_position"
+            )
+            await self._setup_autoincrement_sequence(
+                "sliding_sync_connection_required_state", "required_state_id"
+            )
+            await self._setup_autoincrement_sequence(
+                "sliding_sync_connections", "connection_key"
+            )
+            await self._setup_autoincrement_sequence(
+                "state_groups_pending_deletion", "sequence_number"
             )
 
             # Step 3. Get tables.
@@ -1214,6 +1264,49 @@ class Porter:
 
         await self.postgres_store.db_pool.runInteraction(
             "_setup_%s" % (sequence_name,), r
+        )
+
+    async def _setup_autoincrement_sequence(
+        self,
+        sqlite_table_name: str,
+        sqlite_id_column_name: str,
+    ) -> None:
+        """Set a sequence to the correct value. Use where id column was declared with PRIMARY KEY AUTOINCREMENT."""
+        seq_name = await self._pg_get_serial_sequence(
+            sqlite_table_name, sqlite_id_column_name
+        )
+        if seq_name is None:
+            raise Exception(
+                "implicit sequence not found for table " + sqlite_table_name
+            )
+
+        seq_value = await self.sqlite_store.db_pool.simple_select_one_onecol(
+            table="sqlite_sequence",
+            keyvalues={"name": sqlite_table_name},
+            retcol="seq",
+            allow_none=True,
+        )
+        if seq_value is None:
+            return
+
+        def r(txn: LoggingTransaction) -> None:
+            sql = "ALTER SEQUENCE %s RESTART WITH" % (seq_name,)
+            txn.execute(sql + " %s", (seq_value + 1,))
+
+        await self.postgres_store.db_pool.runInteraction("_setup_%s" % (seq_name,), r)
+
+    async def _pg_get_serial_sequence(self, table: str, column: str) -> Optional[str]:
+        """Returns the name of the postgres sequence associated with a column, or NULL."""
+
+        def r(txn: LoggingTransaction) -> Optional[str]:
+            txn.execute("SELECT pg_get_serial_sequence('%s', '%s')" % (table, column))
+            result = txn.fetchone()
+            if not result:
+                return None
+            return result[0]
+
+        return await self.postgres_store.db_pool.runInteraction(
+            "_pg_get_serial_sequence", r
         )
 
     async def _setup_auth_chain_sequence(self) -> None:

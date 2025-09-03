@@ -37,6 +37,7 @@ Events are replicated via a separate events stream.
 """
 
 import logging
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -54,7 +55,7 @@ from sortedcontainers import SortedDict
 
 from synapse.api.presence import UserPresenceState
 from synapse.federation.sender import AbstractFederationSender, FederationSender
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.replication.tcp.streams.federation import FederationStream
 from synapse.types import JsonDict, ReadReceipt, RoomStreamToken, StrCollection
 from synapse.util.metrics import Measure
@@ -65,6 +66,25 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class QueueNames(str, Enum):
+    PRESENCE_MAP = "presence_map"
+    KEYED_EDU = "keyed_edu"
+    KEYED_EDU_CHANGED = "keyed_edu_changed"
+    EDUS = "edus"
+    POS_TIME = "pos_time"
+    PRESENCE_DESTINATIONS = "presence_destinations"
+
+
+queue_name_to_gauge_map: Dict[QueueNames, LaterGauge] = {}
+
+for queue_name in QueueNames:
+    queue_name_to_gauge_map[queue_name] = LaterGauge(
+        name=f"synapse_federation_send_queue_{queue_name.value}_size",
+        desc="",
+        labelnames=[SERVER_NAME_LABEL],
+    )
 
 
 class FederationRemoteSendQueue(AbstractFederationSender):
@@ -111,23 +131,16 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # we make a new function, so we need to make a new function so the inner
         # lambda binds to the queue rather than to the name of the queue which
         # changes. ARGH.
-        def register(name: str, queue: Sized) -> None:
-            LaterGauge(
-                "synapse_federation_send_queue_%s_size" % (queue_name,),
-                "",
-                [],
-                lambda: len(queue),
+        def register(queue_name: QueueNames, queue: Sized) -> None:
+            queue_name_to_gauge_map[queue_name].register_hook(
+                homeserver_instance_id=hs.get_instance_id(),
+                hook=lambda: {(self.server_name,): len(queue)},
             )
 
-        for queue_name in [
-            "presence_map",
-            "keyed_edu",
-            "keyed_edu_changed",
-            "edus",
-            "pos_time",
-            "presence_destinations",
-        ]:
-            register(queue_name, getattr(self, queue_name))
+        for queue_name in QueueNames:
+            queue = getattr(self, queue_name.value)
+            assert isinstance(queue, Sized)
+            register(queue_name, queue=queue)
 
         self.clock.looping_call(self._clear_queue, 30 * 1000)
 
@@ -156,7 +169,9 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     def _clear_queue_before_pos(self, position_to_delete: int) -> None:
         """Clear all the queues from before a given position"""
-        with Measure(self.clock, "send_queue._clear"):
+        with Measure(
+            self.clock, name="send_queue._clear", server_name=self.server_name
+        ):
             # Delete things out of presence maps
             keys = self.presence_destinations.keys()
             i = self.presence_destinations.bisect_left(position_to_delete)

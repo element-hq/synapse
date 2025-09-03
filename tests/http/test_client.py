@@ -27,8 +27,8 @@ from netaddr import IPSet
 
 from twisted.internet.defer import Deferred
 from twisted.internet.error import DNSLookupError
+from twisted.internet.testing import AccumulatingProtocol
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import AccumulatingProtocol
 from twisted.web.client import Agent, ResponseDone
 from twisted.web.iweb import UNKNOWN_LENGTH
 

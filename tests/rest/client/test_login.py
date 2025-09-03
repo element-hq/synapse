@@ -37,7 +37,7 @@ from urllib.parse import urlencode
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -51,7 +51,7 @@ from synapse.rest.client import account, devices, login, logout, profile, regist
 from synapse.rest.client.account import WhoamiRestServlet
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
-from synapse.types import JsonDict, create_requester
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 
 from tests import unittest
@@ -1484,7 +1484,7 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         self.service = ApplicationService(
             id="unique_identifier",
             token="some_token",
-            sender="@asbot:example.com",
+            sender=UserID.from_string("@asbot:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [
                     {"regex": r"@as_user.*", "exclusive": False}
@@ -1496,7 +1496,7 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         self.another_service = ApplicationService(
             id="another__identifier",
             token="another_token",
-            sender="@as2bot:example.com",
+            sender=UserID.from_string("@as2bot:example.com"),
             namespaces={
                 ApplicationService.NS_USERS: [
                     {"regex": r"@as2_user.*", "exclusive": False}
@@ -1530,7 +1530,10 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
 
         params = {
             "type": login.LoginRestServlet.APPSERVICE_TYPE,
-            "identifier": {"type": "m.id.user", "user": self.service.sender},
+            "identifier": {
+                "type": "m.id.user",
+                "user": self.service.sender.to_string(),
+            },
         }
         channel = self.make_request(
             b"POST", LOGIN_URL, params, access_token=self.service.token

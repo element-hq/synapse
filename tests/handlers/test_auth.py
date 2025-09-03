@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import AuthError, ResourceLimitError
 from synapse.rest import admin

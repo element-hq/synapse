@@ -138,6 +138,8 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
+            "recaptcha_private_key_path: /does/not/exist",
+            "recaptcha_public_key_path: /does/not/exist",
             "form_secret_path: /does/not/exist",
             "worker_replication_secret_path: /does/not/exist",
             "experimental_features:\n  msc3861:\n    client_secret_path: /does/not/exist",
@@ -166,6 +168,14 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "macaroon_secret_key_path: {}",
                 lambda c: c.key.macaroon_secret_key,
+            ),
+            (
+                "recaptcha_private_key_path: {}",
+                lambda c: c.captcha.recaptcha_private_key.encode("utf-8"),
+            ),
+            (
+                "recaptcha_public_key_path: {}",
+                lambda c: c.captcha.recaptcha_public_key.encode("utf-8"),
             ),
             (
                 "form_secret_path: {}",

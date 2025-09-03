@@ -314,7 +314,9 @@ class LoginRestServlet(RestServlet):
             should_issue_refresh_token=should_issue_refresh_token,
             # The user represented by an appservice's configured sender_localpart
             # is not actually created in Synapse.
-            should_check_deactivated_or_locked=qualified_user_id != appservice.sender,
+            should_check_deactivated_or_locked=(
+                qualified_user_id != appservice.sender.to_string()
+            ),
             request_info=request_info,
         )
 
@@ -713,7 +715,7 @@ class CasTicketServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
         return
 
     LoginRestServlet(hs).register(http_server)

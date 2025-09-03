@@ -24,7 +24,7 @@ from typing import Iterable, Optional
 
 from matrix_common.types.mxc_uri import MXCUri
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import login, register, room
@@ -78,7 +78,7 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
             # If the meda
             random_content = bytes(random_string(24), "utf-8")
             mxc_uri: MXCUri = self.get_success(
-                media_repository.create_content(
+                media_repository.create_or_update_content(
                     media_type="text/plain",
                     upload_name=None,
                     content=io.BytesIO(random_content),

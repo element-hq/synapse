@@ -22,7 +22,7 @@
 import logging
 from typing import List, Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
@@ -66,6 +66,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         body = self.helper.send(self.room_id, body="Test", tok=self.token)
         local_message_event_id = body["event_id"]
 
+        current_state = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a remote event and persist it. This will be the extremity before
         # the gap.
         self.remote_event_1 = event_from_pdu_json(
@@ -77,7 +81,11 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other",
                 "depth": 5,
                 "prev_events": [local_message_event_id],
-                "auth_events": [],
+                "auth_events": [
+                    current_state.get((EventTypes.Create, "")),
+                    current_state.get((EventTypes.PowerLevels, "")),
+                    current_state.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
@@ -113,6 +121,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         the same domain.
         """
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
@@ -125,14 +137,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other",
                 "depth": 50,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -145,6 +157,15 @@ class ExtremPruneTestCase(HomeserverTestCase):
         state is different.
         """
 
+        # Now we persist it with state with a dropped history visibility
+        # setting. The state resolution across the old and new event will then
+        # include it, and so the resolved state won't match the new state.
+        state_before_gap = dict(
+            self.get_success(
+                self._state_storage_controller.get_current_state_ids(self.room_id)
+            )
+        )
+
         # Fudge a second event which points to an event we don't have.
         remote_event_2 = event_from_pdu_json(
             {
@@ -155,20 +176,15 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other",
                 "depth": 10,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
         )
 
-        # Now we persist it with state with a dropped history visibility
-        # setting. The state resolution across the old and new event will then
-        # include it, and so the resolved state won't match the new state.
-        state_before_gap = dict(
-            self.get_success(
-                self._state_storage_controller.get_current_state_ids(self.room_id)
-            )
-        )
         state_before_gap.pop(("m.room.history_visibility", ""))
 
         context = self.get_success(
@@ -193,6 +209,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # also set the depth to "lots".
         self.reactor.advance(7 * 24 * 60 * 60)
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
@@ -205,14 +225,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -224,6 +244,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         """Test that we do not drop extremities after a gap when we see an event
         from a different domain.
         """
+
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
 
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
@@ -237,14 +261,13 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -267,6 +290,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # also set the depth to "lots".
         self.reactor.advance(7 * 24 * 60 * 60)
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
@@ -279,14 +306,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -311,6 +338,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         # also set the depth to "lots".
         self.reactor.advance(7 * 24 * 60 * 60)
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
@@ -323,14 +354,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)
@@ -347,6 +378,10 @@ class ExtremPruneTestCase(HomeserverTestCase):
         local_message_event_id = body["event_id"]
         self.assert_extremities([local_message_event_id])
 
+        state_before_gap = self.get_success(
+            self._state_storage_controller.get_current_state_ids(self.room_id)
+        )
+
         # Fudge a second event which points to an event we don't have. This is a
         # state event so that the state changes (otherwise we won't prune the
         # extremity as they'll have the same state group).
@@ -359,14 +394,14 @@ class ExtremPruneTestCase(HomeserverTestCase):
                 "sender": "@user:other2",
                 "depth": 10000,
                 "prev_events": ["$some_unknown_message"],
-                "auth_events": [],
+                "auth_events": [
+                    state_before_gap.get((EventTypes.Create, "")),
+                    state_before_gap.get((EventTypes.PowerLevels, "")),
+                    state_before_gap.get((EventTypes.JoinRules, "")),
+                ],
                 "origin_server_ts": self.clock.time_msec(),
             },
             RoomVersions.V6,
-        )
-
-        state_before_gap = self.get_success(
-            self._state_storage_controller.get_current_state_ids(self.room_id)
         )
 
         self.persist_event(remote_event_2, state=state_before_gap)

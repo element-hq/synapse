@@ -40,6 +40,7 @@ from twisted.web.resource import Resource
 
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
@@ -69,7 +70,7 @@ from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
 from synapse.handlers.delayed_events import DelayedEventsHandler
-from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
+from synapse.handlers.device import DeviceHandler, DeviceWriterHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.e2e_keys import E2eKeysHandler
@@ -117,6 +118,7 @@ from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
+from synapse.handlers.thread_subscriptions import ThreadSubscriptionsHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
 from synapse.handlers.user_directory import UserDirectoryHandler
 from synapse.handlers.worker_lock import WorkerLocksHandler
@@ -127,7 +129,10 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import (
+    all_later_gauges_to_clean_up_on_shutdown,
+    register_threadpool,
+)
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -367,6 +372,37 @@ class HomeServer(metaclass=abc.ABCMeta):
         if self.config.worker.run_background_tasks:
             self.setup_background_tasks()
 
+    def __del__(self) -> None:
+        """
+        Called when an the homeserver is garbage collected.
+
+        Make sure we actually do some clean-up, rather than leak data.
+        """
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        """
+        WIP: Clean-up any references to the homeserver and stop any running related
+        processes, timers, loops, replication stream, etc.
+
+        This should be called wherever you care about the HomeServer being completely
+        garbage collected like in tests. It's not necessary to call if you plan to just
+        shut down the whole Python process anyway.
+
+        Can be called multiple times.
+        """
+        logger.info("Received cleanup request for %s.", self.hostname)
+
+        # TODO: Stop background processes, timers, loops, replication stream, etc.
+
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        logger.info("Cleanup complete for %s.", self.hostname)
+
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners
 
@@ -422,7 +458,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor()
+        return Distributor(server_name=self.hostname)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
@@ -450,6 +486,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_auth(self) -> Auth:
+        if self.config.mas.enabled:
+            return MasDelegatedAuth(self)
         if self.config.experimental.msc3861.enabled:
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
@@ -586,11 +624,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
-    def get_device_handler(self) -> DeviceWorkerHandler:
-        if self.config.worker.worker_app:
-            return DeviceWorkerHandler(self)
-        else:
-            return DeviceHandler(self)
+    def get_device_handler(self) -> DeviceHandler:
+        if self.get_instance_name() in self.config.worker.writers.device_lists:
+            return DeviceWriterHandler(self)
+
+        return DeviceHandler(self)
 
     @cache_in_self
     def get_device_message_handler(self) -> DeviceMessageHandler:
@@ -790,6 +828,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return TimestampLookupHandler(self)
 
     @cache_in_self
+    def get_thread_subscriptions_handler(self) -> ThreadSubscriptionsHandler:
+        return ThreadSubscriptionsHandler(self)
+
+    @cache_in_self
     def get_registration_handler(self) -> RegistrationHandler:
         return RegistrationHandler(self)
 
@@ -844,7 +886,8 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_ratelimiter(self) -> FederationRateLimiter:
         return FederationRateLimiter(
-            self.get_clock(),
+            our_server_name=self.hostname,
+            clock=self.get_clock(),
             config=self.config.ratelimiting.rc_federation,
             metrics_name="federation_servlets",
         )
@@ -975,7 +1018,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         # Register the threadpool with our metrics.
-        register_threadpool("media", media_threadpool)
+        server_name = self.hostname
+        register_threadpool(
+            name="media", server_name=server_name, threadpool=media_threadpool
+        )
 
         return media_threadpool
 

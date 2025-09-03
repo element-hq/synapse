@@ -112,6 +112,7 @@ class VersionsRestServlet(RestServlet):
                     "v1.9",
                     "v1.10",
                     "v1.11",
+                    "v1.12",
                 ],
                 # as per MSC1497:
                 "unstable_features": {
@@ -176,6 +177,8 @@ class VersionsRestServlet(RestServlet):
                     "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
                     # MSC4155: Invite filtering
                     "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
+                    # MSC4306: Support for thread subscriptions
+                    "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
                 },
             },
         )

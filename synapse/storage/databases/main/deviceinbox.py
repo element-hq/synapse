@@ -94,6 +94,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             Tuple[str, Optional[str]], int
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
+            server_name=self.server_name,
             clock=self._clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
@@ -108,6 +109,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="to_device",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("device_inbox", "instance_name", "stream_id"),
@@ -127,8 +129,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_inbox_stream_cache = StreamChangeCache(
-            "DeviceInboxStreamChangeCache",
-            min_device_inbox_id,
+            name="DeviceInboxStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_inbox_id,
             prefilled_cache=device_inbox_prefill,
         )
 
@@ -143,8 +146,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             limit=1000,
         )
         self._device_federation_outbox_stream_cache = StreamChangeCache(
-            "DeviceFederationOutboxStreamChangeCache",
-            min_device_outbox_id,
+            name="DeviceFederationOutboxStreamChangeCache",
+            server_name=self.server_name,
+            current_stream_pos=min_device_outbox_id,
             prefilled_cache=device_outbox_prefill,
         )
 
@@ -153,6 +157,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 run_as_background_process,
                 DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
+                self.server_name,
                 self._delete_old_federation_inbox_rows,
             )
 
@@ -1026,7 +1031,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
-            self._clock.sleep(1)
+            await self._clock.sleep(1)
 
     async def get_devices_with_messages(
         self, user_id: str, device_ids: StrCollection

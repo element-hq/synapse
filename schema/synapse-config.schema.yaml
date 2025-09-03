@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.133/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.138/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -629,6 +629,70 @@ properties:
         password: mypassword
         ssh_priv_key_path: CONFDIR/id_rsa
         ssh_pub_key_path: CONFDIR/id_rsa.pub
+  http_proxy:
+    type: ["string", "null"]
+    description: >-
+      Proxy server to use for HTTP requests.
+
+      For more details, see the [forward proxy documentation](../../setup/forward_proxy.md).
+    examples:
+      - "http://USERNAME:PASSWORD@10.0.1.1:8080/"
+  https_proxy:
+    type: ["string", "null"]
+    description: >-
+      Proxy server to use for HTTPS requests.
+
+      For more details, see the [forward proxy documentation](../../setup/forward_proxy.md).
+    examples:
+      - "http://USERNAME:PASSWORD@proxy.example.com:8080/"
+  no_proxy_hosts:
+    type: array
+    description: >-
+      List of hosts, IP addresses, or IP ranges in CIDR format which should not use the
+      proxy. Synapse will directly connect to these hosts.
+
+      For more details, see the [forward proxy documentation](../../setup/forward_proxy.md).
+    examples:
+      - - master.hostname.example.com
+        - 10.1.0.0/16
+        - 172.30.0.0/16
+  matrix_authentication_service:
+    type: object
+    description: >-
+      The `matrix_authentication_service` setting configures integration with
+      [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service).
+    properties:
+      enabled:
+        type: boolean
+        description: >-
+          Whether or not to enable the MAS integration. If this is set to
+          `false`, Synapse will use its legacy internal authentication API.
+        default: false
+
+      endpoint:
+        type: string
+        format: uri
+        description: >-
+          The URL where Synapse can reach MAS. This *must* have the `discovery`
+          and `oauth` resources mounted.
+        default: http://localhost:8080
+
+      secret:
+        type: ["string", "null"]
+        description: >-
+          A shared secret that will be used to authenticate requests from and to MAS.
+
+      secret_path:
+        type: ["string", "null"]
+        description: >-
+          Alternative to `secret`, reading the shared secret from a file.
+          The file should be a plain text file, containing only the secret.
+          Synapse reads the secret from the given file once at startup.
+
+    examples:
+      - enabled: true
+        secret: someverysecuresecret
+        endpoint: http://localhost:8080
   dummy_events_threshold:
     type: integer
     description: >-
@@ -2179,9 +2243,8 @@ properties:
       with a short timeout, or restarting several different delayed events all
       at once) without the risk of being ratelimited.
     default:
-      per_user:
-        per_second: 1.0
-        burst_count: 5.0
+      per_second: 1.0
+      burst_count: 5.0
     examples:
       - per_second: 2.0
         burst_count: 20.0
@@ -2202,6 +2265,17 @@ properties:
     examples:
       - per_second: 2.0
         burst_count: 20.0
+  rc_room_creation:
+    $ref: "#/$defs/rc"
+    description: >-
+      Sets rate limits for how often users are able to create rooms.
+    default:
+      per_user:
+        per_second: 0.016
+        burst_count: 10.0
+    examples:
+      - per_second: 1.0
+        burst_count: 5.0
   federation_rr_transactions_per_room_per_second:
     type: integer
     description: >-
@@ -2335,6 +2409,30 @@ properties:
     default: 50M
     examples:
       - 60M
+  media_upload_limits:
+    type: array
+    description: >-
+      A list of media upload limits defining how much data a given user can
+      upload in a given time period.
+
+
+      An empty list means no limits are applied.
+    default: []
+    items:
+      time_period:
+        type: "#/$defs/duration"
+        description: >-
+          The time period over which the limit applies. Required.
+      max_size:
+        type: "#/$defs/bytes"
+        description: >-
+          Amount of data that can be uploaded in the time period by the user.
+          Required.
+    examples:
+      - - time_period: 1h
+          max_size: 100M
+        - time_period: 1w
+          max_size: 500M
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.
@@ -2668,6 +2766,21 @@ properties:
     default: null
     examples:
       - YOUR_PUBLIC_KEY
+  recaptcha_public_key_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`recaptcha_public_key`](#recaptcha_public_key): allows
+      the public key to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the public key.
+      Synapse reads the public key from the given file once at startup.
+
+
+      _Added in Synapse 1.135.0._
+    default: null
+    examples:
+      - /path/to/key/file
   recaptcha_private_key:
     type: ["string", "null"]
     description: >-
@@ -2676,6 +2789,21 @@ properties:
     default: null
     examples:
       - YOUR_PRIVATE_KEY
+  recaptcha_private_key_path:
+    type: ["string", "null"]
+    description: >-
+      An alternative to [`recaptcha_private_key`](#recaptcha_private_key):
+      allows the private key to be specified in an external file.
+
+
+      The file should be a plain text file, containing only the private key.
+      Synapse reads the private key from the given file once at startup.
+
+
+      _Added in Synapse 1.135.0._
+    default: null
+    examples:
+      - /path/to/key/file
   enable_registration_captcha:
     type: boolean
     description: >-
@@ -4665,8 +4793,15 @@ properties:
       enabled:
         type: boolean
         description: >-
-          Defines whether users can search the user directory. If false then
+          Defines whether users can search the user directory. If `false` then
           empty responses are returned to all queries.
+
+
+          *Warning: While the homeserver may determine which subset of users are
+          searched, the Matrix specification requires homeservers to include (at
+          minimum) users visible in public rooms and users sharing a room with
+          the requester. Using `false` improves performance but violates this
+          requirement.*
         default: true
       search_all_users:
         type: boolean
@@ -5049,7 +5184,7 @@ properties:
 
       "m.room.avatar": 50
 
-      "m.room.tombstone": 100
+      "m.room.tombstone": 100 (150 if MSC4289 is used)
 
       "m.room.server_acl": 100
 
@@ -5323,6 +5458,9 @@ properties:
       push_rules:
         type: string
         description: Name of a worker assigned to the `push_rules` stream.
+      device_lists:
+        type: string
+        description: Name of a worker assigned to the `device_lists` stream.
     default: {}
     examples:
       - events: worker1

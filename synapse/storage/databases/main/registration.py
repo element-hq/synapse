@@ -175,7 +175,7 @@ class ThreepidValidationSession:
     """timestamp of when this session was validated if so"""
 
 
-class RegistrationWorkerStore(CacheInvalidationWorkerStore):
+class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -217,11 +217,166 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
                     self._set_expiration_date_when_missing,
                 )
 
+        # If support for MSC3866 is enabled and configured to require approval for new
+        # account, we will create new users with an 'approved' flag set to false.
+        self._require_approval = (
+            hs.config.experimental.msc3866.enabled
+            and hs.config.experimental.msc3866.require_approval_for_new_accounts
+        )
+
         # Create a background job for culling expired 3PID validity tokens
         if hs.config.worker.run_background_tasks:
             self._clock.looping_call(
                 self.cull_expired_threepid_validation_tokens, THIRTY_MINUTES_IN_MS
             )
+
+    async def register_user(
+        self,
+        user_id: str,
+        password_hash: Optional[str] = None,
+        was_guest: bool = False,
+        make_guest: bool = False,
+        appservice_id: Optional[str] = None,
+        create_profile_with_displayname: Optional[str] = None,
+        admin: bool = False,
+        user_type: Optional[str] = None,
+        shadow_banned: bool = False,
+        approved: bool = False,
+    ) -> None:
+        """Attempts to register an account.
+
+        Args:
+            user_id: The desired user ID to register.
+            password_hash: Optional. The password hash for this user.
+            was_guest: Whether this is a guest account being upgraded to a
+                non-guest account.
+            make_guest: True if the the new user should be guest, false to add a
+                regular user account.
+            appservice_id: The ID of the appservice registering the user.
+            create_profile_with_displayname: Optionally create a profile for
+                the user, setting their displayname to the given value
+            admin: is an admin user?
+            user_type: type of user. One of the values from api.constants.UserTypes,
+                a custom value set in the configuration file, or None for a normal
+                user.
+            shadow_banned: Whether the user is shadow-banned, i.e. they may be
+                told their requests succeeded but we ignore them.
+            approved: Whether to consider the user has already been approved by an
+                administrator.
+
+        Raises:
+            StoreError if the user_id could not be registered.
+        """
+        await self.db_pool.runInteraction(
+            "register_user",
+            self._register_user,
+            user_id,
+            password_hash,
+            was_guest,
+            make_guest,
+            appservice_id,
+            create_profile_with_displayname,
+            admin,
+            user_type,
+            shadow_banned,
+            approved,
+        )
+
+    def _register_user(
+        self,
+        txn: LoggingTransaction,
+        user_id: str,
+        password_hash: Optional[str],
+        was_guest: bool,
+        make_guest: bool,
+        appservice_id: Optional[str],
+        create_profile_with_displayname: Optional[str],
+        admin: bool,
+        user_type: Optional[str],
+        shadow_banned: bool,
+        approved: bool,
+    ) -> None:
+        user_id_obj = UserID.from_string(user_id)
+
+        now = int(self._clock.time())
+
+        user_approved = approved or not self._require_approval
+
+        try:
+            if was_guest:
+                # Ensure that the guest user actually exists
+                # ``allow_none=False`` makes this raise an exception
+                # if the row isn't in the database.
+                self.db_pool.simple_select_one_txn(
+                    txn,
+                    "users",
+                    keyvalues={"name": user_id, "is_guest": 1},
+                    retcols=("name",),
+                    allow_none=False,
+                )
+
+                self.db_pool.simple_update_one_txn(
+                    txn,
+                    "users",
+                    keyvalues={"name": user_id, "is_guest": 1},
+                    updatevalues={
+                        "password_hash": password_hash,
+                        "upgrade_ts": now,
+                        "is_guest": 1 if make_guest else 0,
+                        "appservice_id": appservice_id,
+                        "admin": 1 if admin else 0,
+                        "user_type": user_type,
+                        "shadow_banned": shadow_banned,
+                        "approved": user_approved,
+                    },
+                )
+            else:
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    "users",
+                    values={
+                        "name": user_id,
+                        "password_hash": password_hash,
+                        "creation_ts": now,
+                        "is_guest": 1 if make_guest else 0,
+                        "appservice_id": appservice_id,
+                        "admin": 1 if admin else 0,
+                        "user_type": user_type,
+                        "shadow_banned": shadow_banned,
+                        "approved": user_approved,
+                    },
+                )
+
+        except self.database_engine.module.IntegrityError:
+            raise StoreError(400, "User ID already taken.", errcode=Codes.USER_IN_USE)
+
+        if self._account_validity_enabled:
+            self.set_expiration_date_for_user_txn(txn, user_id)
+
+        if create_profile_with_displayname:
+            # set a default displayname serverside to avoid ugly race
+            # between auto-joins and clients trying to set displaynames
+            #
+            # *obviously* the 'profiles' table uses localpart for user_id
+            # while everything else uses the full mxid.
+            txn.execute(
+                "INSERT INTO profiles(full_user_id, user_id, displayname) VALUES (?,?,?)",
+                (user_id, user_id_obj.localpart, create_profile_with_displayname),
+            )
+
+        if self.hs.config.stats.stats_enabled:
+            # we create a new completed user statistics row
+
+            # we don't strictly need current_token since this user really can't
+            # have any state deltas before now (as it is a new user), but still,
+            # we include it for completeness.
+            current_token = self._get_max_stream_id_in_current_state_deltas_txn(txn)
+
+            self._update_stats_delta_txn(
+                txn, now, "user", user_id, {}, complete_with_stream_id=current_token
+            )
+
+        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
 
     @cached()
     async def get_user_by_id(self, user_id: str) -> Optional[UserInfo]:
@@ -518,7 +673,8 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             desc="delete_account_validity_for_user",
         )
 
-    async def is_server_admin(self, user: UserID) -> bool:
+    @cached(max_entries=100000)
+    async def is_server_admin(self, user: str) -> bool:
         """Determines if a user is an admin of this homeserver.
 
         Args:
@@ -529,7 +685,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         """
         res = await self.db_pool.simple_select_one_onecol(
             table="users",
-            keyvalues={"name": user.to_string()},
+            keyvalues={"name": user},
             retcol="admin",
             allow_none=True,
             desc="is_server_admin",
@@ -551,6 +707,9 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             )
             self._invalidate_cache_and_stream(
                 txn, self.get_user_by_id, (user.to_string(),)
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.is_server_admin, (user.to_string(),)
             )
 
         await self.db_pool.runInteraction("set_server_admin", set_server_admin_txn)
@@ -1938,6 +2097,58 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             "replace_refresh_token", _replace_refresh_token_txn
         )
 
+    async def set_device_for_refresh_token(
+        self, user_id: str, old_device_id: str, device_id: str
+    ) -> None:
+        """Moves refresh tokens from old device to current device
+
+        Args:
+            user_id: The user of the devices.
+            old_device_id: The old device.
+            device_id: The new device ID.
+        Returns:
+            None
+        """
+
+        await self.db_pool.simple_update(
+            "refresh_tokens",
+            keyvalues={"user_id": user_id, "device_id": old_device_id},
+            updatevalues={"device_id": device_id},
+            desc="set_device_for_refresh_token",
+        )
+
+    def _set_device_for_access_token_txn(
+        self, txn: LoggingTransaction, token: str, device_id: str
+    ) -> str:
+        old_device_id = self.db_pool.simple_select_one_onecol_txn(
+            txn, "access_tokens", {"token": token}, "device_id"
+        )
+
+        self.db_pool.simple_update_txn(
+            txn, "access_tokens", {"token": token}, {"device_id": device_id}
+        )
+
+        self._invalidate_cache_and_stream(txn, self.get_user_by_access_token, (token,))
+
+        return old_device_id
+
+    async def set_device_for_access_token(self, token: str, device_id: str) -> str:
+        """Sets the device ID associated with an access token.
+
+        Args:
+            token: The access token to modify.
+            device_id: The new device ID.
+        Returns:
+            The old device ID associated with the access token.
+        """
+
+        return await self.db_pool.runInteraction(
+            "set_device_for_access_token",
+            self._set_device_for_access_token_txn,
+            token,
+            device_id,
+        )
+
     async def add_login_token_to_user(
         self,
         user_id: str,
@@ -2241,507 +2452,6 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
         self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
         self._invalidate_cache_and_stream(txn, self.is_user_approved, (user_id,))
 
-
-class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-
-        self._clock = hs.get_clock()
-        self.config = hs.config
-
-        self.db_pool.updates.register_background_index_update(
-            "access_tokens_device_index",
-            index_name="access_tokens_device_id",
-            table="access_tokens",
-            columns=["user_id", "device_id"],
-        )
-
-        self.db_pool.updates.register_background_index_update(
-            "users_creation_ts",
-            index_name="users_creation_ts",
-            table="users",
-            columns=["creation_ts"],
-        )
-
-        self.db_pool.updates.register_background_update_handler(
-            "users_set_deactivated_flag", self._background_update_set_deactivated_flag
-        )
-
-        self.db_pool.updates.register_background_index_update(
-            "user_external_ids_user_id_idx",
-            index_name="user_external_ids_user_id_idx",
-            table="user_external_ids",
-            columns=["user_id"],
-            unique=False,
-        )
-
-        self.db_pool.updates.register_background_index_update(
-            update_name="access_tokens_refresh_token_id_idx",
-            index_name="access_tokens_refresh_token_id_idx",
-            table="access_tokens",
-            columns=("refresh_token_id",),
-        )
-
-    async def _background_update_set_deactivated_flag(
-        self, progress: JsonDict, batch_size: int
-    ) -> int:
-        """Retrieves a list of all deactivated users and sets the 'deactivated' flag to 1
-        for each of them.
-        """
-
-        last_user = progress.get("user_id", "")
-
-        def _background_update_set_deactivated_flag_txn(
-            txn: LoggingTransaction,
-        ) -> Tuple[bool, int]:
-            txn.execute(
-                """
-                SELECT
-                    users.name,
-                    COUNT(access_tokens.token) AS count_tokens,
-                    COUNT(user_threepids.address) AS count_threepids
-                FROM users
-                    LEFT JOIN access_tokens ON (access_tokens.user_id = users.name)
-                    LEFT JOIN user_threepids ON (user_threepids.user_id = users.name)
-                WHERE (users.password_hash IS NULL OR users.password_hash = '')
-                AND (users.appservice_id IS NULL OR users.appservice_id = '')
-                AND users.is_guest = 0
-                AND users.name > ?
-                GROUP BY users.name
-                ORDER BY users.name ASC
-                LIMIT ?;
-                """,
-                (last_user, batch_size),
-            )
-
-            rows = txn.fetchall()
-
-            if not rows:
-                return True, 0
-
-            rows_processed_nb = 0
-
-            for name, count_tokens, count_threepids in rows:
-                if not count_tokens and not count_threepids:
-                    self.set_user_deactivated_status_txn(txn, name, True)
-                    rows_processed_nb += 1
-
-            logger.info("Marked %d rows as deactivated", rows_processed_nb)
-
-            self.db_pool.updates._background_update_progress_txn(
-                txn, "users_set_deactivated_flag", {"user_id": rows[-1][0]}
-            )
-
-            if batch_size > len(rows):
-                return True, len(rows)
-            else:
-                return False, len(rows)
-
-        end, nb_processed = await self.db_pool.runInteraction(
-            "users_set_deactivated_flag", _background_update_set_deactivated_flag_txn
-        )
-
-        if end:
-            await self.db_pool.updates._end_background_update(
-                "users_set_deactivated_flag"
-            )
-
-        return nb_processed
-
-
-class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-
-        self._ignore_unknown_session_error = (
-            hs.config.server.request_token_inhibit_3pid_errors
-        )
-
-        self._access_tokens_id_gen = IdGenerator(db_conn, "access_tokens", "id")
-        self._refresh_tokens_id_gen = IdGenerator(db_conn, "refresh_tokens", "id")
-
-        # If support for MSC3866 is enabled and configured to require approval for new
-        # account, we will create new users with an 'approved' flag set to false.
-        self._require_approval = (
-            hs.config.experimental.msc3866.enabled
-            and hs.config.experimental.msc3866.require_approval_for_new_accounts
-        )
-
-        # Create a background job for removing expired login tokens
-        if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
-                self._delete_expired_login_tokens, THIRTY_MINUTES_IN_MS
-            )
-
-    async def add_access_token_to_user(
-        self,
-        user_id: str,
-        token: str,
-        device_id: Optional[str],
-        valid_until_ms: Optional[int],
-        puppets_user_id: Optional[str] = None,
-        refresh_token_id: Optional[int] = None,
-    ) -> int:
-        """Adds an access token for the given user.
-
-        Args:
-            user_id: The user ID.
-            token: The new access token to add.
-            device_id: ID of the device to associate with the access token.
-            valid_until_ms: when the token is valid until. None for no expiry.
-            puppets_user_id
-            refresh_token_id: ID of the refresh token generated alongside this
-                access token.
-        Raises:
-            StoreError if there was a problem adding this.
-        Returns:
-            The token ID
-        """
-        next_id = self._access_tokens_id_gen.get_next()
-        now = self._clock.time_msec()
-
-        await self.db_pool.simple_insert(
-            "access_tokens",
-            {
-                "id": next_id,
-                "user_id": user_id,
-                "token": token,
-                "device_id": device_id,
-                "valid_until_ms": valid_until_ms,
-                "puppets_user_id": puppets_user_id,
-                "last_validated": now,
-                "refresh_token_id": refresh_token_id,
-                "used": False,
-            },
-            desc="add_access_token_to_user",
-        )
-
-        return next_id
-
-    async def add_refresh_token_to_user(
-        self,
-        user_id: str,
-        token: str,
-        device_id: Optional[str],
-        expiry_ts: Optional[int],
-        ultimate_session_expiry_ts: Optional[int],
-    ) -> int:
-        """Adds a refresh token for the given user.
-
-        Args:
-            user_id: The user ID.
-            token: The new access token to add.
-            device_id: ID of the device to associate with the refresh token.
-            expiry_ts (milliseconds since the epoch): Time after which the
-                refresh token cannot be used.
-                If None, the refresh token never expires until it has been used.
-            ultimate_session_expiry_ts (milliseconds since the epoch):
-                Time at which the session will end and can not be extended any
-                further.
-                If None, the session can be refreshed indefinitely.
-        Raises:
-            StoreError if there was a problem adding this.
-        Returns:
-            The token ID
-        """
-        next_id = self._refresh_tokens_id_gen.get_next()
-
-        await self.db_pool.simple_insert(
-            "refresh_tokens",
-            {
-                "id": next_id,
-                "user_id": user_id,
-                "device_id": device_id,
-                "token": token,
-                "next_token_id": None,
-                "expiry_ts": expiry_ts,
-                "ultimate_session_expiry_ts": ultimate_session_expiry_ts,
-            },
-            desc="add_refresh_token_to_user",
-        )
-
-        return next_id
-
-    async def set_device_for_refresh_token(
-        self, user_id: str, old_device_id: str, device_id: str
-    ) -> None:
-        """Moves refresh tokens from old device to current device
-
-        Args:
-            user_id: The user of the devices.
-            old_device_id: The old device.
-            device_id: The new device ID.
-        Returns:
-            None
-        """
-
-        await self.db_pool.simple_update(
-            "refresh_tokens",
-            keyvalues={"user_id": user_id, "device_id": old_device_id},
-            updatevalues={"device_id": device_id},
-            desc="set_device_for_refresh_token",
-        )
-
-    def _set_device_for_access_token_txn(
-        self, txn: LoggingTransaction, token: str, device_id: str
-    ) -> str:
-        old_device_id = self.db_pool.simple_select_one_onecol_txn(
-            txn, "access_tokens", {"token": token}, "device_id"
-        )
-
-        self.db_pool.simple_update_txn(
-            txn, "access_tokens", {"token": token}, {"device_id": device_id}
-        )
-
-        self._invalidate_cache_and_stream(txn, self.get_user_by_access_token, (token,))
-
-        return old_device_id
-
-    async def set_device_for_access_token(self, token: str, device_id: str) -> str:
-        """Sets the device ID associated with an access token.
-
-        Args:
-            token: The access token to modify.
-            device_id: The new device ID.
-        Returns:
-            The old device ID associated with the access token.
-        """
-
-        return await self.db_pool.runInteraction(
-            "set_device_for_access_token",
-            self._set_device_for_access_token_txn,
-            token,
-            device_id,
-        )
-
-    async def register_user(
-        self,
-        user_id: str,
-        password_hash: Optional[str] = None,
-        was_guest: bool = False,
-        make_guest: bool = False,
-        appservice_id: Optional[str] = None,
-        create_profile_with_displayname: Optional[str] = None,
-        admin: bool = False,
-        user_type: Optional[str] = None,
-        shadow_banned: bool = False,
-        approved: bool = False,
-    ) -> None:
-        """Attempts to register an account.
-
-        Args:
-            user_id: The desired user ID to register.
-            password_hash: Optional. The password hash for this user.
-            was_guest: Whether this is a guest account being upgraded to a
-                non-guest account.
-            make_guest: True if the the new user should be guest, false to add a
-                regular user account.
-            appservice_id: The ID of the appservice registering the user.
-            create_profile_with_displayname: Optionally create a profile for
-                the user, setting their displayname to the given value
-            admin: is an admin user?
-            user_type: type of user. One of the values from api.constants.UserTypes,
-                a custom value set in the configuration file, or None for a normal
-                user.
-            shadow_banned: Whether the user is shadow-banned, i.e. they may be
-                told their requests succeeded but we ignore them.
-            approved: Whether to consider the user has already been approved by an
-                administrator.
-
-        Raises:
-            StoreError if the user_id could not be registered.
-        """
-        await self.db_pool.runInteraction(
-            "register_user",
-            self._register_user,
-            user_id,
-            password_hash,
-            was_guest,
-            make_guest,
-            appservice_id,
-            create_profile_with_displayname,
-            admin,
-            user_type,
-            shadow_banned,
-            approved,
-        )
-
-    def _register_user(
-        self,
-        txn: LoggingTransaction,
-        user_id: str,
-        password_hash: Optional[str],
-        was_guest: bool,
-        make_guest: bool,
-        appservice_id: Optional[str],
-        create_profile_with_displayname: Optional[str],
-        admin: bool,
-        user_type: Optional[str],
-        shadow_banned: bool,
-        approved: bool,
-    ) -> None:
-        user_id_obj = UserID.from_string(user_id)
-
-        now = int(self._clock.time())
-
-        user_approved = approved or not self._require_approval
-
-        try:
-            if was_guest:
-                # Ensure that the guest user actually exists
-                # ``allow_none=False`` makes this raise an exception
-                # if the row isn't in the database.
-                self.db_pool.simple_select_one_txn(
-                    txn,
-                    "users",
-                    keyvalues={"name": user_id, "is_guest": 1},
-                    retcols=("name",),
-                    allow_none=False,
-                )
-
-                self.db_pool.simple_update_one_txn(
-                    txn,
-                    "users",
-                    keyvalues={"name": user_id, "is_guest": 1},
-                    updatevalues={
-                        "password_hash": password_hash,
-                        "upgrade_ts": now,
-                        "is_guest": 1 if make_guest else 0,
-                        "appservice_id": appservice_id,
-                        "admin": 1 if admin else 0,
-                        "user_type": user_type,
-                        "shadow_banned": shadow_banned,
-                        "approved": user_approved,
-                    },
-                )
-            else:
-                self.db_pool.simple_insert_txn(
-                    txn,
-                    "users",
-                    values={
-                        "name": user_id,
-                        "password_hash": password_hash,
-                        "creation_ts": now,
-                        "is_guest": 1 if make_guest else 0,
-                        "appservice_id": appservice_id,
-                        "admin": 1 if admin else 0,
-                        "user_type": user_type,
-                        "shadow_banned": shadow_banned,
-                        "approved": user_approved,
-                    },
-                )
-
-        except self.database_engine.module.IntegrityError:
-            raise StoreError(400, "User ID already taken.", errcode=Codes.USER_IN_USE)
-
-        if self._account_validity_enabled:
-            self.set_expiration_date_for_user_txn(txn, user_id)
-
-        if create_profile_with_displayname:
-            # set a default displayname serverside to avoid ugly race
-            # between auto-joins and clients trying to set displaynames
-            #
-            # *obviously* the 'profiles' table uses localpart for user_id
-            # while everything else uses the full mxid.
-            txn.execute(
-                "INSERT INTO profiles(full_user_id, user_id, displayname) VALUES (?,?,?)",
-                (user_id, user_id_obj.localpart, create_profile_with_displayname),
-            )
-
-        if self.hs.config.stats.stats_enabled:
-            # we create a new completed user statistics row
-
-            # we don't strictly need current_token since this user really can't
-            # have any state deltas before now (as it is a new user), but still,
-            # we include it for completeness.
-            current_token = self._get_max_stream_id_in_current_state_deltas_txn(txn)
-            self._update_stats_delta_txn(
-                txn, now, "user", user_id, {}, complete_with_stream_id=current_token
-            )
-
-        self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-    async def user_set_password_hash(
-        self, user_id: str, password_hash: Optional[str]
-    ) -> None:
-        """
-        NB. This does *not* evict any cache because the one use for this
-            removes most of the entries subsequently anyway so it would be
-            pointless. Use flush_user separately.
-        """
-
-        def user_set_password_hash_txn(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_update_one_txn(
-                txn, "users", {"name": user_id}, {"password_hash": password_hash}
-            )
-            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-        await self.db_pool.runInteraction(
-            "user_set_password_hash", user_set_password_hash_txn
-        )
-
-    async def user_set_consent_version(
-        self, user_id: str, consent_version: str
-    ) -> None:
-        """Updates the user table to record privacy policy consent
-
-        Args:
-            user_id: full mxid of the user to update
-            consent_version: version of the policy the user has consented to
-
-        Raises:
-            StoreError(404) if user not found
-        """
-
-        def f(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_update_one_txn(
-                txn,
-                table="users",
-                keyvalues={"name": user_id},
-                updatevalues={
-                    "consent_version": consent_version,
-                    "consent_ts": self._clock.time_msec(),
-                },
-            )
-            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-        await self.db_pool.runInteraction("user_set_consent_version", f)
-
-    async def user_set_consent_server_notice_sent(
-        self, user_id: str, consent_version: str
-    ) -> None:
-        """Updates the user table to record that we have sent the user a server
-        notice about privacy policy consent
-
-        Args:
-            user_id: full mxid of the user to update
-            consent_version: version of the policy we have notified the user about
-
-        Raises:
-            StoreError(404) if user not found
-        """
-
-        def f(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_update_one_txn(
-                txn,
-                table="users",
-                keyvalues={"name": user_id},
-                updatevalues={"consent_server_notice_sent": consent_version},
-            )
-            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
-
-        await self.db_pool.runInteraction("user_set_consent_server_notice_sent", f)
-
     async def user_delete_access_tokens(
         self,
         user_id: str,
@@ -2890,13 +2600,24 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
 
         await self.db_pool.runInteraction("delete_access_token", f)
 
-    async def delete_refresh_token(self, refresh_token: str) -> None:
-        def f(txn: LoggingTransaction) -> None:
-            self.db_pool.simple_delete_one_txn(
-                txn, table="refresh_tokens", keyvalues={"token": refresh_token}
-            )
+    async def user_set_password_hash(
+        self, user_id: str, password_hash: Optional[str]
+    ) -> None:
+        """
+        NB. This does *not* evict any cache because the one use for this
+            removes most of the entries subsequently anyway so it would be
+            pointless. Use flush_user separately.
+        """
 
-        await self.db_pool.runInteraction("delete_refresh_token", f)
+        def user_set_password_hash_txn(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn, "users", {"name": user_id}, {"password_hash": password_hash}
+            )
+            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+
+        await self.db_pool.runInteraction(
+            "user_set_password_hash", user_set_password_hash_txn
+        )
 
     async def add_user_pending_deactivation(self, user_id: str) -> None:
         """
@@ -2908,6 +2629,282 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
             values={"user_id": user_id},
             desc="add_user_pending_deactivation",
         )
+
+
+class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self._clock = hs.get_clock()
+        self.config = hs.config
+
+        self.db_pool.updates.register_background_index_update(
+            "access_tokens_device_index",
+            index_name="access_tokens_device_id",
+            table="access_tokens",
+            columns=["user_id", "device_id"],
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            "users_creation_ts",
+            index_name="users_creation_ts",
+            table="users",
+            columns=["creation_ts"],
+        )
+
+        self.db_pool.updates.register_background_update_handler(
+            "users_set_deactivated_flag", self._background_update_set_deactivated_flag
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            "user_external_ids_user_id_idx",
+            index_name="user_external_ids_user_id_idx",
+            table="user_external_ids",
+            columns=["user_id"],
+            unique=False,
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="access_tokens_refresh_token_id_idx",
+            index_name="access_tokens_refresh_token_id_idx",
+            table="access_tokens",
+            columns=("refresh_token_id",),
+        )
+
+    async def _background_update_set_deactivated_flag(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """Retrieves a list of all deactivated users and sets the 'deactivated' flag to 1
+        for each of them.
+        """
+
+        last_user = progress.get("user_id", "")
+
+        def _background_update_set_deactivated_flag_txn(
+            txn: LoggingTransaction,
+        ) -> Tuple[bool, int]:
+            txn.execute(
+                """
+                SELECT
+                    users.name,
+                    COUNT(access_tokens.token) AS count_tokens,
+                    COUNT(user_threepids.address) AS count_threepids
+                FROM users
+                    LEFT JOIN access_tokens ON (access_tokens.user_id = users.name)
+                    LEFT JOIN user_threepids ON (user_threepids.user_id = users.name)
+                WHERE (users.password_hash IS NULL OR users.password_hash = '')
+                AND (users.appservice_id IS NULL OR users.appservice_id = '')
+                AND users.is_guest = 0
+                AND users.name > ?
+                GROUP BY users.name
+                ORDER BY users.name ASC
+                LIMIT ?;
+                """,
+                (last_user, batch_size),
+            )
+
+            rows = txn.fetchall()
+
+            if not rows:
+                return True, 0
+
+            rows_processed_nb = 0
+
+            for name, count_tokens, count_threepids in rows:
+                if not count_tokens and not count_threepids:
+                    self.set_user_deactivated_status_txn(txn, name, True)
+                    rows_processed_nb += 1
+
+            logger.info("Marked %d rows as deactivated", rows_processed_nb)
+
+            self.db_pool.updates._background_update_progress_txn(
+                txn, "users_set_deactivated_flag", {"user_id": rows[-1][0]}
+            )
+
+            if batch_size > len(rows):
+                return True, len(rows)
+            else:
+                return False, len(rows)
+
+        end, nb_processed = await self.db_pool.runInteraction(
+            "users_set_deactivated_flag", _background_update_set_deactivated_flag_txn
+        )
+
+        if end:
+            await self.db_pool.updates._end_background_update(
+                "users_set_deactivated_flag"
+            )
+
+        return nb_processed
+
+
+class RegistrationStore(RegistrationBackgroundUpdateStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+
+        self._ignore_unknown_session_error = (
+            hs.config.server.request_token_inhibit_3pid_errors
+        )
+
+        self._access_tokens_id_gen = IdGenerator(db_conn, "access_tokens", "id")
+        self._refresh_tokens_id_gen = IdGenerator(db_conn, "refresh_tokens", "id")
+
+        # Create a background job for removing expired login tokens
+        if hs.config.worker.run_background_tasks:
+            self._clock.looping_call(
+                self._delete_expired_login_tokens, THIRTY_MINUTES_IN_MS
+            )
+
+    async def add_access_token_to_user(
+        self,
+        user_id: str,
+        token: str,
+        device_id: Optional[str],
+        valid_until_ms: Optional[int],
+        puppets_user_id: Optional[str] = None,
+        refresh_token_id: Optional[int] = None,
+    ) -> int:
+        """Adds an access token for the given user.
+
+        Args:
+            user_id: The user ID.
+            token: The new access token to add.
+            device_id: ID of the device to associate with the access token.
+            valid_until_ms: when the token is valid until. None for no expiry.
+            puppets_user_id
+            refresh_token_id: ID of the refresh token generated alongside this
+                access token.
+        Raises:
+            StoreError if there was a problem adding this.
+        Returns:
+            The token ID
+        """
+        next_id = self._access_tokens_id_gen.get_next()
+        now = self._clock.time_msec()
+
+        await self.db_pool.simple_insert(
+            "access_tokens",
+            {
+                "id": next_id,
+                "user_id": user_id,
+                "token": token,
+                "device_id": device_id,
+                "valid_until_ms": valid_until_ms,
+                "puppets_user_id": puppets_user_id,
+                "last_validated": now,
+                "refresh_token_id": refresh_token_id,
+                "used": False,
+            },
+            desc="add_access_token_to_user",
+        )
+
+        return next_id
+
+    async def add_refresh_token_to_user(
+        self,
+        user_id: str,
+        token: str,
+        device_id: Optional[str],
+        expiry_ts: Optional[int],
+        ultimate_session_expiry_ts: Optional[int],
+    ) -> int:
+        """Adds a refresh token for the given user.
+
+        Args:
+            user_id: The user ID.
+            token: The new access token to add.
+            device_id: ID of the device to associate with the refresh token.
+            expiry_ts (milliseconds since the epoch): Time after which the
+                refresh token cannot be used.
+                If None, the refresh token never expires until it has been used.
+            ultimate_session_expiry_ts (milliseconds since the epoch):
+                Time at which the session will end and can not be extended any
+                further.
+                If None, the session can be refreshed indefinitely.
+        Raises:
+            StoreError if there was a problem adding this.
+        Returns:
+            The token ID
+        """
+        next_id = self._refresh_tokens_id_gen.get_next()
+
+        await self.db_pool.simple_insert(
+            "refresh_tokens",
+            {
+                "id": next_id,
+                "user_id": user_id,
+                "device_id": device_id,
+                "token": token,
+                "next_token_id": None,
+                "expiry_ts": expiry_ts,
+                "ultimate_session_expiry_ts": ultimate_session_expiry_ts,
+            },
+            desc="add_refresh_token_to_user",
+        )
+
+        return next_id
+
+    async def user_set_consent_version(
+        self, user_id: str, consent_version: str
+    ) -> None:
+        """Updates the user table to record privacy policy consent
+
+        Args:
+            user_id: full mxid of the user to update
+            consent_version: version of the policy the user has consented to
+
+        Raises:
+            StoreError(404) if user not found
+        """
+
+        def f(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn,
+                table="users",
+                keyvalues={"name": user_id},
+                updatevalues={
+                    "consent_version": consent_version,
+                    "consent_ts": self._clock.time_msec(),
+                },
+            )
+            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+
+        await self.db_pool.runInteraction("user_set_consent_version", f)
+
+    async def user_set_consent_server_notice_sent(
+        self, user_id: str, consent_version: str
+    ) -> None:
+        """Updates the user table to record that we have sent the user a server
+        notice about privacy policy consent
+
+        Args:
+            user_id: full mxid of the user to update
+            consent_version: version of the policy we have notified the user about
+
+        Raises:
+            StoreError(404) if user not found
+        """
+
+        def f(txn: LoggingTransaction) -> None:
+            self.db_pool.simple_update_one_txn(
+                txn,
+                table="users",
+                keyvalues={"name": user_id},
+                updatevalues={"consent_server_notice_sent": consent_version},
+            )
+            self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
+
+        await self.db_pool.runInteraction("user_set_consent_server_notice_sent", f)
 
     async def validate_threepid_session(
         self, session_id: str, client_secret: str, token: str, current_ts: int

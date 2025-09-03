@@ -29,6 +29,7 @@ from prometheus_client import Counter
 from twisted.internet.interfaces import IAddress
 from twisted.internet.protocol import ServerFactory
 
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.commands import PositionCommand
 from synapse.replication.tcp.protocol import ServerReplicationStreamProtocol
@@ -40,7 +41,9 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 stream_updates_counter = Counter(
-    "synapse_replication_tcp_resource_stream_updates", "", ["stream_name"]
+    "synapse_replication_tcp_resource_stream_updates",
+    "",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,7 @@ class ReplicationStreamer:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.clock = hs.get_clock()
         self.notifier = hs.get_notifier()
@@ -143,7 +147,9 @@ class ReplicationStreamer:
             logger.debug("Notifier poke loop already running")
             return
 
-        run_as_background_process("replication_notifier", self._run_notifier_loop)
+        run_as_background_process(
+            "replication_notifier", self.server_name, self._run_notifier_loop
+        )
 
     async def _run_notifier_loop(self) -> None:
         self.is_looping = True
@@ -155,7 +161,11 @@ class ReplicationStreamer:
             while self.pending_updates:
                 self.pending_updates = False
 
-                with Measure(self.clock, "repl.stream.get_updates"):
+                with Measure(
+                    self.clock,
+                    name="repl.stream.get_updates",
+                    server_name=self.server_name,
+                ):
                     all_streams = self.streams
 
                     if self._replication_torture_level is not None:
@@ -219,7 +229,10 @@ class ReplicationStreamer:
                                 len(updates),
                                 current_token,
                             )
-                            stream_updates_counter.labels(stream.NAME).inc(len(updates))
+                            stream_updates_counter.labels(
+                                stream_name=stream.NAME,
+                                **{SERVER_NAME_LABEL: self.server_name},
+                            ).inc(len(updates))
 
                         else:
                             # The token has advanced but there is no data to

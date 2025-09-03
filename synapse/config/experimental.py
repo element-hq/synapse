@@ -535,11 +535,15 @@ class ExperimentalConfig(Config):
             "msc4108_delegation_endpoint", None
         )
 
+        auth_delegated = self.msc3861.enabled or (
+            config.get("matrix_authentication_service") or {}
+        ).get("enabled", False)
+
         if (
             self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
-        ) and not self.msc3861.enabled:
+        ) and not auth_delegated:
             raise ConfigError(
-                "MSC4108 requires MSC3861 to be enabled",
+                "MSC4108 requires MSC3861 or matrix_authentication_service to be enabled",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
@@ -561,6 +565,12 @@ class ExperimentalConfig(Config):
         # MSC4076: Add `disable_badge_count`` to pusher configuration
         self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)
 
+        # MSC4277: Harmonizing the reporting endpoints
+        #
+        # If enabled, ignore the score parameter and respond with HTTP 200 on
+        # reporting requests regardless of the subject's existence.
+        self.msc4277_enabled: bool = experimental.get("msc4277_enabled", False)
+
         # MSC4235: Add `via` param to hierarchy endpoint
         self.msc4235_enabled: bool = experimental.get("msc4235_enabled", False)
 
@@ -575,3 +585,10 @@ class ExperimentalConfig(Config):
 
         # MSC4155: Invite filtering
         self.msc4155_enabled: bool = experimental.get("msc4155_enabled", False)
+
+        # MSC4293: Redact on Kick/Ban
+        self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)
+
+        # MSC4306: Thread Subscriptions
+        # (and MSC4308: sliding sync extension for thread subscriptions)
+        self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)
