@@ -2596,6 +2596,10 @@ class PersistEventsStore:
                 # scenario. XXX: does this cause bugs? It will mean we won't send such
                 # events down /sync. In general they will be historical events, so that
                 # doesn't matter too much, but that is not always the case.
+                #
+                # On the other hand, we *will* assign a stitched ordering at this point.
+                # Outliers are not assigned stitched orderings when they are first
+                # persisted as outliers.
 
                 logger.info(
                     "_update_outliers_txn: Updating state for ex-outlier event %s",
@@ -2624,8 +2628,8 @@ class PersistEventsStore:
                     },
                 )
 
-                sql = "UPDATE events SET outlier = FALSE WHERE event_id = ?"
-                txn.execute(sql, (event.event_id,))
+                sql = "UPDATE events SET outlier = FALSE, stitched_ordering = ? WHERE event_id = ?"
+                txn.execute(sql, (event.stitched_ordering, event.event_id,))
 
                 # Update the event_backward_extremities table now that this
                 # event isn't an outlier any more.
