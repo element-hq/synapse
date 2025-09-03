@@ -427,7 +427,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         for process in self._background_processes:
             try:
                 process.cancel()
-            except:
+            except Exception:
                 pass
         self._background_processes.clear()
 
