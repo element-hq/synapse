@@ -109,6 +109,12 @@ class ProfileFieldRestServlet(RestServlet):
         self.hs = hs
         self.profile_handler = hs.get_profile_handler()
         self.auth = hs.get_auth()
+        if hs.config.experimental.msc4133_enabled:
+            self.PATTERNS.append(
+                re.compile(
+                    r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
+                )
+            )
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, field_name: str
