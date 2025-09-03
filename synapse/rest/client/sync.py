@@ -1258,10 +1258,8 @@ class SlidingSyncRestServlet(RestServlet):
                 "rooms": extensions.typing.room_id_to_typing_map,
             }
 
-        if (
-            extensions.thread_subscriptions is not None
-            and extensions.thread_subscriptions
-        ):
+        # excludes both None and falsy `thread_subscriptions`
+        if extensions.thread_subscriptions:
             serialized_extensions["io.element.msc4308.thread_subscriptions"] = (
                 _serialise_thread_subscriptions(extensions.thread_subscriptions)
             )
