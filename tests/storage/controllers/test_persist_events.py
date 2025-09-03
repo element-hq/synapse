@@ -22,7 +22,7 @@ from synapse.storage.controllers.persist_events import find_predecessors
 class FindPredecessorsTestCase(TestCase):
     def test_predecessors_finds_nothing_if_event_is_not_in_batch(self) -> None:
         batch = [
-            (FakeEvent(event_id="B", prev_event_ids=["C"]), None),
+            FakeEvent(event_id="B", prev_event_ids=["C"]),
         ]
 
         predecessors = find_predecessors({"A"}, batch)  # type: ignore[arg-type]
@@ -30,8 +30,8 @@ class FindPredecessorsTestCase(TestCase):
 
     def test_predecessors_finds_only_event_if_it_has_no_predecessors(self) -> None:
         batch = [
-            (FakeEvent(event_id="E1", prev_event_ids=[]), None),
-            (FakeEvent(event_id="E2", prev_event_ids=["E3"]), None),
+            FakeEvent(event_id="E1", prev_event_ids=[]),
+            FakeEvent(event_id="E2", prev_event_ids=["E3"]),
         ]
 
         predecessors = find_predecessors({"E1"}, batch)  # type: ignore[arg-type]
@@ -39,21 +39,21 @@ class FindPredecessorsTestCase(TestCase):
 
     def test_predecessors_finds_all_ancestors(self) -> None:
         batch = [
-            (FakeEvent(event_id="A", prev_event_ids=["B", "C"]), None),
-            (FakeEvent(event_id="B", prev_event_ids=["D"]), None),
-            (FakeEvent(event_id="C", prev_event_ids=["D"]), None),
-            (FakeEvent(event_id="D", prev_event_ids=["E"]), None),
-            (FakeEvent(event_id="E", prev_event_ids=[]), None),
-            (FakeEvent(event_id="F", prev_event_ids=["G", "H"]), None),
-            (FakeEvent(event_id="G", prev_event_ids=[]), None),
+            FakeEvent(event_id="A", prev_event_ids=["B", "C"]),
+            FakeEvent(event_id="B", prev_event_ids=["D"]),
+            FakeEvent(event_id="C", prev_event_ids=["D"]),
+            FakeEvent(event_id="D", prev_event_ids=["E"]),
+            FakeEvent(event_id="E", prev_event_ids=[]),
+            FakeEvent(event_id="F", prev_event_ids=["G", "H"]),
+            FakeEvent(event_id="G", prev_event_ids=[]),
         ]
         predecessors = find_predecessors({"A"}, batch)  # type: ignore[arg-type]
         self.assertEqual(predecessors, {"A", "B", "C", "D", "E"})
 
     def test_predecessors_ignores_cycles(self) -> None:
         batch = [
-            (FakeEvent(event_id="E1", prev_event_ids=["E2"]), None),
-            (FakeEvent(event_id="E2", prev_event_ids=["E1"]), None),
+            FakeEvent(event_id="E1", prev_event_ids=["E2"]),
+            FakeEvent(event_id="E2", prev_event_ids=["E1"]),
         ]
 
         predecessors = find_predecessors({"E1"}, batch)  # type: ignore[arg-type]
@@ -61,8 +61,8 @@ class FindPredecessorsTestCase(TestCase):
 
     def test_predecessors_ignores_self_reference_cycles(self) -> None:
         batch = [
-            (FakeEvent(event_id="E1", prev_event_ids=["E2"]), None),
-            (FakeEvent(event_id="E2", prev_event_ids=["E2"]), None),
+            FakeEvent(event_id="E1", prev_event_ids=["E2"]),
+            FakeEvent(event_id="E2", prev_event_ids=["E2"]),
         ]
 
         predecessors = find_predecessors({"E1"}, batch)  # type: ignore[arg-type]
@@ -70,13 +70,13 @@ class FindPredecessorsTestCase(TestCase):
 
     def test_predecessors_finds_ancestors_of_multiple_starting_events(self) -> None:
         batch = [
-            (FakeEvent(event_id="A", prev_event_ids=["B"]), None),
-            (FakeEvent(event_id="B", prev_event_ids=[]), None),
-            (FakeEvent(event_id="C", prev_event_ids=["D"]), None),
-            (FakeEvent(event_id="D", prev_event_ids=["E"]), None),
-            (FakeEvent(event_id="E", prev_event_ids=[]), None),
-            (FakeEvent(event_id="F", prev_event_ids=["G"]), None),
-            (FakeEvent(event_id="G", prev_event_ids=[]), None),
+            FakeEvent(event_id="A", prev_event_ids=["B"]),
+            FakeEvent(event_id="B", prev_event_ids=[]),
+            FakeEvent(event_id="C", prev_event_ids=["D"]),
+            FakeEvent(event_id="D", prev_event_ids=["E"]),
+            FakeEvent(event_id="E", prev_event_ids=[]),
+            FakeEvent(event_id="F", prev_event_ids=["G"]),
+            FakeEvent(event_id="G", prev_event_ids=[]),
         ]
         predecessors = find_predecessors({"A", "C"}, batch)  # type: ignore[arg-type]
         self.assertEqual(predecessors, {"A", "B", "C", "D", "E"})
