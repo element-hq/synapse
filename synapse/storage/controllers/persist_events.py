@@ -745,7 +745,7 @@ class EventsPersistenceStorageController:
 
                 # TODO we may need to reorder existing events
                 previous_event_stitched_order += 1
-                context.stitched_ordering = previous_event_stitched_order
+                event.assign_stitched_ordering(previous_event_stitched_order)
                 logger.debug(
                     "Persisting inserted events with stitched_order=%i",
                     previous_event_stitched_order,
@@ -765,9 +765,9 @@ class EventsPersistenceStorageController:
             await self.main_store.get_room_max_stitched_ordering(room_id) or 0
         )
 
-        for _event, context in remaining_batch:
+        for event, _ in remaining_batch:
             current_max_stream_ordering += 2**16
-            context.stitched_ordering = current_max_stream_ordering
+            event.assign_stitched_ordering(current_max_stream_ordering)
 
     async def _calculate_new_forward_extremities_and_state_delta(
         self, room_id: str, ev_ctx_rm: List[EventPersistencePair]

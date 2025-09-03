@@ -2706,7 +2706,7 @@ class PersistEventsStore:
                     "url" in event.content and isinstance(event.content["url"], str),
                     event.get_state_key(),
                     context.rejected,
-                    context.stitched_ordering,
+                    event.stitched_ordering,
                 )
                 for event, context in events_and_contexts
             ],
@@ -3567,7 +3567,7 @@ class PersistEventsStore:
                 lowest_referring_ordering = potential_backwards_extremities.get(
                     "prev_event"
                 )
-                persisted_event_stitched_ordering = ctx.stitched_ordering
+                persisted_event_stitched_ordering = ev.stitched_ordering
 
                 # If any of the events we persisted did not get assigned a stitched order,
                 # we cannot yet assign a stitched order to the backwards extremity either.

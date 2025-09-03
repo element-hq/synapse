@@ -208,6 +208,8 @@ class EventBase(metaclass=abc.ABCMeta):
 
         self.internal_metadata = EventInternalMetadata(internal_metadata_dict)
 
+        self._stitched_ordering = None
+
     depth: DictProperty[int] = DictProperty("depth")
     content: DictProperty[JsonDict] = DictProperty("content")
     hashes: DictProperty[Dict[str, str]] = DictProperty("hashes")
@@ -322,6 +324,20 @@ class EventBase(metaclass=abc.ABCMeta):
 
         # this will be a no-op if the event dict is already frozen.
         self._dict = freeze(self._dict)
+
+    def assign_stitched_ordering(self, stitched_ordering: int) -> None:
+        """Assign a stitched ordering to this event, if one has not already been assigned.
+
+        TODO: figure out a way to only expose this on events that have not yet been persisted.
+        """
+        if self._stitched_ordering is not None:
+            raise RuntimeError("Attempt to assign stitched ordering twice")
+        self._stitched_ordering = stitched_ordering
+
+    @property
+    def stitched_ordering(self) -> Optional[int]:
+        """Return the stitched ordering for this event. If one has not (yet) been assigned, returns `None`."""
+        return self._stitched_ordering
 
     def __str__(self) -> str:
         return self.__repr__()

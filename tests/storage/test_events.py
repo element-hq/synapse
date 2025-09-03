@@ -565,4 +565,4 @@ class AssignStitchedOrderingTestCase(HomeserverTestCase):
             self._persistence._assign_stitched_orders(room_id, [(test_event, context)])
         )
 
-        self.assertEqual(context.stitched_ordering, 6 * 2**16)
+        self.assertEqual(test_event.stitched_ordering, 6 * 2**16)
