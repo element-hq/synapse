@@ -31,6 +31,7 @@ from synapse.federation.federation_base import event_from_pdu_json
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.controllers.persist_events import assign_stitched_orders
 from synapse.types import StateMap
 from synapse.util import Clock
 
@@ -532,9 +533,9 @@ class AssignStitchedOrderingTestCase(HomeserverTestCase):
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
         self.state = self.hs.get_state_handler()
-        persistence = self.hs.get_storage_controllers().persistence
-        assert persistence is not None
-        self._persistence = persistence
+        # persistence = self.hs.get_storage_controllers().persistence
+        # assert persistence is not None
+        # self._persistence = persistence
         self.store = self.hs.get_datastores().main
 
     def test_insert_events(self) -> None:
@@ -562,7 +563,7 @@ class AssignStitchedOrderingTestCase(HomeserverTestCase):
 
         context = self.get_success(self.state.compute_event_context(test_event))
         self.get_success(
-            self._persistence._assign_stitched_orders(room_id, [(test_event, context)])
+            assign_stitched_orders(room_id, [(test_event, context)], self.store)
         )
 
         self.assertEqual(test_event.stitched_ordering, 6 * 2**16)

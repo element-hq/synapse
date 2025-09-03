@@ -63,6 +63,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.storage import DataStore
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
 from synapse.storage.databases.main.events import DeltaState
@@ -616,8 +617,7 @@ class EventsPersistenceStorageController:
             if not events_and_contexts:
                 return replaced_events
 
-        if not backfilled:
-            await self._assign_stitched_orders(room_id, events_and_contexts)
+        await assign_stitched_orders(room_id, events_and_contexts, self.main_store)
 
         chunks = [
             events_and_contexts[x : x + 100]
@@ -678,96 +678,6 @@ class EventsPersistenceStorageController:
                 )
 
         return replaced_events
-
-    async def _assign_stitched_orders(
-        self,
-        room_id: str,
-        events_and_contexts: List[EventPersistencePair],
-    ) -> None:
-        """
-        Updates the EventContexts within `events_and_contexts`, to assign a
-        stitched_ordering to each event.
-        """
-        # Take a copy of the events we have to process
-        remaining_batch = list(events_and_contexts)
-
-        # Find all events in the current batch which are in a timeline gap
-        gap_events = await self.persist_events_store.db_pool.simple_select_many_batch(
-            "event_backward_extremities",
-            "event_id",
-            (ev.event_id for (ev, _) in events_and_contexts),
-            ["event_id", "before_gap_event_id"],
-        )
-
-        # TODO matching against gaps is pointless here
-        # TODO sort gap_events by DAG;received order
-        for gap_event, before_gap_event_id in gap_events:
-            logger.debug("Processing received gap event %s", gap_event)
-
-            matching_events = [gap_event]  # TODO find other events in the same gap
-
-            # Find all predecessors of those events in the batch
-            to_insert = find_predecessors(matching_events, remaining_batch)
-
-            logger.debug("Processing to_insert set %s", to_insert)
-
-            # Find the stitched order of the event before the gap
-            # TODO consider doing this with a join
-            previous_event_stitched_order = (
-                await self.persist_events_store.db_pool.simple_select_one_onecol(
-                    "events",
-                    {"event_id": before_gap_event_id},
-                    "stitched_ordering",
-                    True,
-                )
-            )
-
-            logger.debug(
-                "Previous event stitched_ordering = %i", previous_event_stitched_order
-            )
-
-            # if previous_event_stitched_order is None, that means we have a room
-            # where there are existing events or gaps without assigned stitched orders.
-            # Let's give up trying to assign stitched orders here.
-            if previous_event_stitched_order is None:
-                # TODO do something better here
-                logger.warning(
-                    "Found gap event %s without assigned stitched order: bailing",
-                    gap_event,
-                )
-                return
-
-            still_remaining_batch = []
-            for event, context in remaining_batch:
-                if event.event_id not in to_insert:
-                    still_remaining_batch.append((event, context))
-                    continue
-
-                # TODO we may need to reorder existing events
-                previous_event_stitched_order += 1
-                event.assign_stitched_ordering(previous_event_stitched_order)
-                logger.debug(
-                    "Persisting inserted events with stitched_order=%i",
-                    previous_event_stitched_order,
-                )
-
-            remaining_batch = still_remaining_batch
-            logger.debug(
-                "Remaining events: %s", [ev.event_id for (ev, _) in remaining_batch]
-            )
-
-        logger.debug(
-            "Remaining events after processing gap matches: %s",
-            [ev.event_id for (ev, _) in remaining_batch],
-        )
-
-        current_max_stream_ordering = (
-            await self.main_store.get_room_max_stitched_ordering(room_id) or 0
-        )
-
-        for event, _ in remaining_batch:
-            current_max_stream_ordering += 2**16
-            event.assign_stitched_ordering(current_max_stream_ordering)
 
     async def _calculate_new_forward_extremities_and_state_delta(
         self, room_id: str, ev_ctx_rm: List[EventPersistencePair]
@@ -1365,3 +1275,97 @@ def find_predecessors(
         unexplored = next_unexplored
 
     return found
+
+
+async def assign_stitched_orders(
+    room_id: str,
+    events_and_contexts: List[EventPersistencePair],
+    store: DataStore,
+) -> None:
+    """
+    Updates the EventContexts within `events_and_contexts`, to assign a
+    stitched_ordering to each event.
+    """
+    # Take a copy of the events we have to process
+    # TODO find a better way to exclude outliers
+    remaining_batch = list(
+        (ev, ctx)
+        for ev, ctx in events_and_contexts
+        if not ev.internal_metadata.is_outlier()
+    )
+
+    # Find all events in the current batch which are in a timeline gap
+    gap_events = await store.db_pool.simple_select_many_batch(
+        "event_backward_extremities",
+        "event_id",
+        (ev.event_id for (ev, _) in events_and_contexts),
+        ["event_id", "before_gap_event_id"],
+    )
+
+    # TODO matching against gaps is pointless here
+    # TODO sort gap_events by DAG;received order
+    for gap_event, before_gap_event_id in gap_events:
+        logger.debug("Processing received gap event %s", gap_event)
+
+        matching_events = [gap_event]  # TODO find other events in the same gap
+
+        # Find all predecessors of those events in the batch
+        to_insert = find_predecessors(matching_events, remaining_batch)
+
+        logger.debug("Processing to_insert set %s", to_insert)
+
+        # Find the stitched order of the event before the gap
+        # TODO consider doing this with a join
+        previous_event_stitched_order = await store.db_pool.simple_select_one_onecol(
+            "events",
+            {"event_id": before_gap_event_id},
+            "stitched_ordering",
+            True,
+        )
+
+        logger.debug(
+            "Previous event stitched_ordering = %i", previous_event_stitched_order
+        )
+
+        # if previous_event_stitched_order is None, that means we have a room
+        # where there are existing events or gaps without assigned stitched orders.
+        # Let's give up trying to assign stitched orders here.
+        if previous_event_stitched_order is None:
+            # TODO do something better here
+            logger.warning(
+                "Found gap event %s without assigned stitched order: bailing",
+                gap_event,
+            )
+            return
+
+        still_remaining_batch = []
+        for event, context in remaining_batch:
+            if event.event_id not in to_insert:
+                still_remaining_batch.append((event, context))
+                continue
+
+            # TODO we may need to reorder existing events
+            previous_event_stitched_order += 1
+            event.assign_stitched_ordering(previous_event_stitched_order)
+            logger.debug(
+                "Persisting inserted events with stitched_order=%i",
+                previous_event_stitched_order,
+            )
+
+        remaining_batch = still_remaining_batch
+        logger.debug(
+            "Remaining events: %s", [ev.event_id for (ev, _) in remaining_batch]
+        )
+
+    logger.debug(
+        "Remaining events after processing gap matches: %s",
+        [ev.event_id for (ev, _) in remaining_batch],
+    )
+
+    current_max_stream_ordering = (
+        await store.get_room_max_stitched_ordering(room_id) or 0
+    )
+
+    for event, _ in remaining_batch:
+        current_max_stream_ordering += 2**16
+        event.assign_stitched_ordering(current_max_stream_ordering)
