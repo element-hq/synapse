@@ -33,7 +33,6 @@ from synapse.logging.opentracing import trace
 from synapse.streams import EventSource
 from synapse.types import (
     AbstractMultiWriterStreamToken,
-    MultiWriterStreamToken,
     StreamKeyType,
     StreamToken,
 )
@@ -198,17 +197,7 @@ class EventSources:
         Returns:
             The current token for pagination.
         """
-        token = StreamToken(
-            room_key=await self.sources.room.get_current_key_for_room(room_id),
-            presence_key=0,
-            typing_key=0,
-            receipt_key=MultiWriterStreamToken(stream=0),
-            account_data_key=0,
-            push_rules_key=0,
-            to_device_key=0,
-            device_list_key=MultiWriterStreamToken(stream=0),
-            groups_key=0,
-            un_partial_stated_rooms_key=0,
-            thread_subscriptions_key=0,
+        return StreamToken.START.copy_and_replace(
+            StreamKeyType.ROOM,
+            await self.sources.room.get_current_key_for_room(room_id),
         )
-        return token
