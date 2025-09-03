@@ -597,7 +597,7 @@ class RoomCreationHandler:
                 new_room_version,
                 additional_creators=additional_creators,
             )
-        initial_state = {}
+        initial_state: MutableStateMap = {}
 
         # Replicate relevant room events
         types_to_copy: List[Tuple[str, Optional[str]]] = [
@@ -700,7 +700,14 @@ class RoomCreationHandler:
             user_id,
             {
                 "creation_content": creation_content,
-                "initial_state": list(initial_state.items()),
+                "initial_state": [
+                    {
+                        "type": state_key[0],
+                        "state_key": state_key[1],
+                        "content": event_content,
+                    }
+                    for state_key, event_content in initial_state.items()
+                ],
             },
         )
         if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
