@@ -47,7 +47,7 @@ from twisted.internet import defer
 from synapse.logging.context import (
     ContextResourceUsage,
     LoggingContext,
-    make_deferred_yieldable,
+    PreserveLoggingContext,
 )
 from synapse.logging.opentracing import SynapseTags, start_active_span
 from synapse.metrics import SERVER_NAME_LABEL
@@ -223,9 +223,10 @@ def run_as_background_process(
     This should be used to wrap processes which are fired off to run in the
     background, instead of being associated with a particular request.
 
-    It returns a Deferred which completes when the function completes, which makes it
-    appropriate for passing to clock.looping_call and friends (or for
-    firing-and-forgetting in the middle of a normal synapse async function).
+    It returns a Deferred which completes when the function completes, but it doesn't
+    follow the synapse logcontext rules, which makes it appropriate for passing to
+    clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+    normal synapse async function).
 
     Args:
         desc: a description for this background process type
@@ -240,6 +241,8 @@ def run_as_background_process(
 
     Returns:
         Deferred which returns the result of func, or `None` if func raises.
+        Note that the returned Deferred does not follow the synapse logcontext
+        rules.
     """
 
     async def run() -> Optional[R]:
@@ -277,9 +280,10 @@ def run_as_background_process(
                     name=desc, **{SERVER_NAME_LABEL: server_name}
                 ).dec()
 
+    with PreserveLoggingContext():
         # Note that we return a Deferred here so that it can be used in a
         # looping_call and other places that expect a Deferred.
-        return make_deferred_yieldable(defer.ensureDeferred(run()))
+        return defer.ensureDeferred(run())
 
 
 P = ParamSpec("P")
