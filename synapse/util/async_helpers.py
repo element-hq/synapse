@@ -47,6 +47,7 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
+    cast,
     overload,
 )
 
@@ -55,6 +56,7 @@ from typing_extensions import Concatenate, ParamSpec, Unpack
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError
+from twisted.internet.interfaces import IReactorTime
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (
@@ -530,9 +532,9 @@ class Linearizer:
 
     def __init__(
         self,
-        clock: Clock,
         name: Optional[str] = None,
         max_count: int = 1,
+        clock: Optional[Clock] = None,
     ):
         """
         Args:
@@ -543,6 +545,10 @@ class Linearizer:
         else:
             self.name = name
 
+        if not clock:
+            from twisted.internet import reactor
+
+            clock = Clock(cast(IReactorTime, reactor))
         self._clock = clock
         self.max_count = max_count
 

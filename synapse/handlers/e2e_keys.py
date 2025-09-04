@@ -112,7 +112,6 @@ class E2eKeysHandler:
 
         # Limit the number of in-flight requests from a single device.
         self._query_devices_linearizer = Linearizer(
-            hs.get_clock(),
             name="query_devices",
             max_count=10,
         )
@@ -1766,9 +1765,7 @@ class SigningKeyEduUpdater:
         assert isinstance(device_handler, DeviceWriterHandler)
         self._device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(
-            hs.get_clock(), name="remote_signing_key"
-        )
+        self._remote_edu_linearizer = Linearizer(name="remote_signing_key")
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[str, List[Tuple[JsonDict, JsonDict]]] = {}

@@ -29,7 +29,6 @@ from synapse.logging.context import LoggingContext, current_context
 from synapse.util.async_helpers import Linearizer
 
 from tests import unittest
-from tests.server import get_clock
 
 
 class UnblockFunction(Protocol):
@@ -37,10 +36,6 @@ class UnblockFunction(Protocol):
 
 
 class LinearizerTestCase(unittest.TestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.reactor, self.clock = get_clock()
-
     def _start_task(
         self, linearizer: Linearizer, key: Hashable
     ) -> Tuple["Deferred[None]", "Deferred[None]", UnblockFunction]:
@@ -79,12 +74,12 @@ class LinearizerTestCase(unittest.TestCase):
     def _pump(self) -> None:
         """Pump the reactor to advance `Linearizer`s."""
         assert isinstance(reactor, ReactorBase)
-        while self.reactor.getDelayedCalls():
-            self.reactor.runUntilCurrent()
+        while reactor.getDelayedCalls():
+            reactor.runUntilCurrent()
 
     def test_linearizer(self) -> None:
         """Tests that a task is queued up behind an earlier task."""
-        linearizer = Linearizer(self.clock)
+        linearizer = Linearizer()
 
         key = object()
 
@@ -105,7 +100,7 @@ class LinearizerTestCase(unittest.TestCase):
 
         Runs through the same scenario as `test_linearizer`.
         """
-        linearizer = Linearizer(self.clock)
+        linearizer = Linearizer()
 
         key = object()
 
@@ -136,7 +131,7 @@ class LinearizerTestCase(unittest.TestCase):
 
         The stack should *not* explode when the slow thing completes.
         """
-        linearizer = Linearizer(self.clock)
+        linearizer = Linearizer()
         key = ""
 
         async def func(i: int) -> None:
@@ -156,7 +151,7 @@ class LinearizerTestCase(unittest.TestCase):
 
     def test_multiple_entries(self) -> None:
         """Tests a `Linearizer` with a concurrency above 1."""
-        limiter = Linearizer(self.clock, max_count=3)
+        limiter = Linearizer(max_count=3)
 
         key = object()
 
@@ -197,7 +192,7 @@ class LinearizerTestCase(unittest.TestCase):
 
     def test_cancellation(self) -> None:
         """Tests cancellation while waiting for a `Linearizer`."""
-        linearizer = Linearizer(self.clock)
+        linearizer = Linearizer()
 
         key = object()
 
@@ -231,7 +226,7 @@ class LinearizerTestCase(unittest.TestCase):
 
     def test_cancellation_during_sleep(self) -> None:
         """Tests cancellation during the sleep just after waiting for a `Linearizer`."""
-        linearizer = Linearizer(self.clock)
+        linearizer = Linearizer()
 
         key = object()
 

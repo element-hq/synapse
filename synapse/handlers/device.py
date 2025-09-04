@@ -1451,11 +1451,9 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.device_handler = device_handler
 
         self._remote_edu_linearizer = Linearizer(
-            hs.get_clock(),
             name="remote_device_list",
         )
         self._resync_linearizer = Linearizer(
-            hs.get_clock(),
             name="remote_device_resync",
         )
 

@@ -115,11 +115,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             self._membership_types_to_include_profile_data_in.add(Membership.INVITE)
 
         self.member_linearizer: Linearizer = Linearizer(
-            hs.get_clock(),
             name="member",
         )
         self.member_as_limiter = Linearizer(
-            hs.get_clock(),
             max_count=10,
             name="member_as_limiter",
         )
