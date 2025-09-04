@@ -667,7 +667,7 @@ class SynapseProtocol(HTTPChannel):
     def __init__(
         self,
         factory: "SynapseSite",
-        server_name: str,
+        our_server_name: str,
         max_request_body_size: int,
         request_id_header: Optional[str],
         request_class: type,
@@ -675,7 +675,7 @@ class SynapseProtocol(HTTPChannel):
         super().__init__()
         self.factory: SynapseSite = factory
         self.site = factory
-        self.server_name = server_name
+        self.our_server_name = our_server_name
         self.max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.request_class = request_class
@@ -702,7 +702,7 @@ class SynapseProtocol(HTTPChannel):
         return self.request_class(
             self,
             self.factory,
-            our_server_name=self.server_name,
+            our_server_name=self.our_server_name,
             max_request_body_size=self.max_request_body_size,
             queued=queued,
             request_id_header=self.request_id_header,
