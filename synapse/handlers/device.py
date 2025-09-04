@@ -1451,10 +1451,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.device_handler = device_handler
 
         self._remote_edu_linearizer = Linearizer(
-            name="remote_device_list", clock=hs.get_clock()
+            hs.get_clock(),
+            name="remote_device_list",
         )
         self._resync_linearizer = Linearizer(
-            name="remote_device_resync", clock=hs.get_clock()
+            hs.get_clock(),
+            name="remote_device_resync",
         )
 
         # user_id -> list of updates waiting to be handled.

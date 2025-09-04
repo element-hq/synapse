@@ -109,7 +109,8 @@ class MediaRepository:
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
         self.remote_media_linearizer = Linearizer(
-            name="media_remote", clock=hs.get_clock()
+            hs.get_clock(),
+            name="media_remote",
         )
 
         self.recently_accessed_remotes: Set[Tuple[str, str]] = set()

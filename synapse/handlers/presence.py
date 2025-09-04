@@ -862,7 +862,8 @@ class PresenceHandler(BasePresenceHandler):
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
         self.external_sync_linearizer = Linearizer(
-            name="external_sync_linearizer", clock=hs.get_clock()
+            hs.get_clock(),
+            name="external_sync_linearizer",
         )
 
         if self._track_presence:

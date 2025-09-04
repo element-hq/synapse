@@ -112,9 +112,9 @@ class E2eKeysHandler:
 
         # Limit the number of in-flight requests from a single device.
         self._query_devices_linearizer = Linearizer(
+            hs.get_clock(),
             name="query_devices",
             max_count=10,
-            clock=hs.get_clock(),
         )
 
         self._query_appservices_for_otks = (
@@ -1767,7 +1767,7 @@ class SigningKeyEduUpdater:
         self._device_handler = device_handler
 
         self._remote_edu_linearizer = Linearizer(
-            name="remote_signing_key", clock=hs.get_clock()
+            hs.get_clock(), name="remote_signing_key"
         )
 
         # user_id -> list of updates waiting to be handled.

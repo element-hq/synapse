@@ -78,7 +78,8 @@ class StateStorageController:
         # Used by `_get_joined_hosts` to ensure only one thing mutates the cache
         # at a time. Keyed by room_id.
         self._joined_host_linearizer = Linearizer(
-            "_JoinedHostsCache", clock=hs.get_clock()
+            hs.get_clock(),
+            "_JoinedHostsCache",
         )
 
     def notify_event_un_partial_stated(self, event_id: str) -> None:

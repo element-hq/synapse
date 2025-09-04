@@ -643,7 +643,8 @@ class StateResolutionHandler:
         self.clock = hs.get_clock()
 
         self.resolve_linearizer = Linearizer(
-            name="state_resolve_lock", clock=hs.get_clock()
+            hs.get_clock(),
+            name="state_resolve_lock",
         )
 
         # dict of set of event_ids -> _StateCacheEntry.

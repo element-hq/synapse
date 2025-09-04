@@ -483,7 +483,7 @@ class MatrixFederationHttpClient:
         )
 
         self.remote_download_linearizer = Linearizer(
-            "remote_download_linearizer", 6, clock=hs.get_clock()
+            hs.get_clock(), "remote_download_linearizer", 6
         )
 
     def wake_destination(self, destination: str) -> None:
