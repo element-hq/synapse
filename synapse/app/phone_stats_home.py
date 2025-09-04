@@ -233,7 +233,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         hs.get_datastores().main.reap_monthly_active_users,
         ONE_HOUR_SECONDS * MILLISECONDS_PER_SECOND,
     )
-    hs.register_background_process(hs.get_datastores().main.reap_monthly_active_users())
+    hs.get_datastores().main.reap_monthly_active_users()
 
     def generate_monthly_active_users() -> "defer.Deferred[None]":
         async def _generate_monthly_active_users() -> None:

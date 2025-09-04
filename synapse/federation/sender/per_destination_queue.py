@@ -118,6 +118,7 @@ class PerDestinationQueue:
 
         self._destination = destination
         self.transmission_loop_running = False
+        self._transmission_loop_enabled = True
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.
@@ -171,6 +172,9 @@ class PerDestinationQueue:
 
     def __str__(self) -> str:
         return "PerDestinationQueue[%s]" % self._destination
+
+    def disable(self) -> None:
+        self._transmission_loop_enabled = False
 
     def pending_pdu_count(self) -> int:
         return len(self._pending_pdus)
@@ -312,12 +316,10 @@ class PerDestinationQueue:
 
         logger.debug("TX [%s] Starting transaction loop", self._destination)
 
-        self._hs.register_background_process(
-            run_as_background_process(
-                "federation_transaction_transmission_loop",
-                self.server_name,
-                self._transaction_transmission_loop,
-            )
+        run_as_background_process(
+            "federation_transaction_transmission_loop",
+            self.server_name,
+            self._transaction_transmission_loop,
         )
 
     async def _transaction_transmission_loop(self) -> None:
@@ -342,7 +344,7 @@ class PerDestinationQueue:
                     # not caught up yet
                     return
 
-            while True:
+            while self._transmission_loop_enabled:
                 self._new_data_to_send = False
 
                 async with _TransactionQueueManager(self) as (
@@ -472,7 +474,7 @@ class PerDestinationQueue:
         last_successful_stream_ordering: int = _tmp_last_successful_stream_ordering
 
         # get at most 50 catchup room/PDUs
-        while True:
+        while self._transmission_loop_enabled:
             event_ids = await self._store.get_catch_up_room_event_ids(
                 self._destination, last_successful_stream_ordering
             )

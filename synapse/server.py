@@ -358,7 +358,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
-        self._background_processes: List[defer.Deferred] = []
         self._async_shutdown_handlers: List[ShutdownInfo] = []
         self._sync_shutdown_handlers: List[ShutdownInfo] = []
 
@@ -421,15 +420,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         for db in self.get_datastores().databases:
             db.stop_background_updates()
 
+        if self.should_send_federation():
+            self.get_federation_sender().shutdown()
+
         self.get_clock().cancel_all_looping_calls()
         self.get_clock().cancel_all_delayed_calls()
-
-        for process in self._background_processes:
-            try:
-                process.cancel()
-            except Exception:
-                pass
-        self._background_processes.clear()
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:
@@ -505,13 +500,6 @@ class HomeServer(metaclass=abc.ABCMeta):
                 desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
             )
         )
-
-    def register_background_process(self, process: defer.Deferred) -> None:
-        """
-        Register a background process with the HomeServer so it can be cleanly
-        removed when the HomeServer is shutdown.
-        """
-        self._background_processes.append(process)
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.

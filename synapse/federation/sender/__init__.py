@@ -232,6 +232,11 @@ WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC = 5
 
 class AbstractFederationSender(metaclass=abc.ABCMeta):
     @abc.abstractmethod
+    def shutdown(self) -> None:
+        """Stops this federation sender instance from sending further transactions."""
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to
         send out to other servers.
@@ -463,6 +468,10 @@ class FederationSender(AbstractFederationSender):
             self.server_name,
             self._wake_destinations_needing_catchup,
         )
+
+    def shutdown(self) -> None:
+        for queue in self._per_destination_queues.values():
+            queue.disable()
 
     def _get_per_destination_queue(
         self, destination: str
