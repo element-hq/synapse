@@ -312,4 +312,4 @@ class DynamicCollectorRegistry(CollectorRegistry):
         server_hooks.append(hook)
 
     def unregister_hooks_for_homeserver_instance_id(self, server_name: str) -> None:
-        self._server_id_to_pre_update_hooks.pop(server_name)
+        self._server_id_to_pre_update_hooks.pop(server_name, None)
