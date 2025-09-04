@@ -666,15 +666,15 @@ class SynapseProtocol(HTTPChannel):
 
     def __init__(
         self,
-        factory: "SynapseSite",
+        site: "SynapseSite",
         our_server_name: str,
         max_request_body_size: int,
         request_id_header: Optional[str],
         request_class: type,
     ):
         super().__init__()
-        self.factory: SynapseSite = factory
-        self.site = factory
+        self.factory: SynapseSite = site
+        self.site = site
         self.our_server_name = our_server_name
         self.max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
