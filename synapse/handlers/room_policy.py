@@ -91,9 +91,12 @@ class RoomPolicyHandler:
 
         # Check if the event has been signed with the public key in the policy server state event.
         # If it is, we can save an HTTP hit.
-        # TODO: we actually want to get the policy server state event BEFORE THE EVENT rather than
+        # We actually want to get the policy server state event BEFORE THE EVENT rather than
         # the current state value, else changing the public key will cause all of these checks to fail.
-        public_key = policy_event.content.get("public_key", "")
+        # However, if we are checking outlier events (which we will due to is_event_allowed being called
+        # near the edges at _check_sigs_and_hash) we won't know the state before the event, so the
+        # only safe option is to use the current state
+        public_key = policy_event.content.get("public_key", None)
         if public_key is not None and isinstance(public_key, str):
             valid = await self._verify_policy_server_signature(
                 event, policy_server, public_key
@@ -152,11 +155,11 @@ class RoomPolicyHandler:
         )
         if not policy_event:
             return
-        policy_server = policy_event.content.get("via", "")
+        policy_server = policy_event.content.get("via", None)
         if policy_server is None or not isinstance(policy_server, str):
             return
         # Only ask to sign events if the policy state event has a public_key (so they can be subsequently verified)
-        public_key = policy_event.content.get("public_key", "")
+        public_key = policy_event.content.get("public_key", None)
         if public_key is None or not isinstance(public_key, str):
             return
 
