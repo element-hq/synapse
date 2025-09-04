@@ -788,6 +788,11 @@ class SynapseSite(ProxySite):
     def stopFactory(self) -> None:
         super().stopFactory()
 
+        # Shutdown any connections which are still active.
+        # These can be long lived HTTP connections which wouldn't normally be closed
+        # when calling `shutdown` on the respective `Port`.
+        # Closing the connections here is required for us to fully shutdown the
+        # `SynapseHomeServer` in order for it to be garbage collected.
         for protocol in self.connections[:]:
             if protocol.transport is not None:
                 protocol.transport.loseConnection()
