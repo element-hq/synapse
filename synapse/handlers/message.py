@@ -1024,7 +1024,14 @@ class EventCreationHandler:
             if room_version.updated_redaction_rules:
                 redacts = event_dict["content"].get("redacts")
             else:
-                redacts = event_dict.get("redacts")
+                # Legacy room versions need the "redacts" field outside of the event's
+                # content. However clients may still send it within the content, so copy
+                # the field if necessary for compatibility.
+                redacts = event_dict.get("redacts") or event_dict["content"].get(
+                    "redacts"
+                )
+                if redacts and "redacts" not in event_dict:
+                    event_dict["redacts"] = redacts
 
             is_admin_redaction = await self.is_admin_redaction(
                 event_type=event_dict["type"],
