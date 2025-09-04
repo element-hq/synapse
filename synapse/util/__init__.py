@@ -113,6 +113,11 @@ class Clock:
     """
     A Clock wraps a Twisted reactor and provides utilities on top of it.
 
+    This clock should be used in place of calls to the base reactor wherever `LoopingCall`
+    or `DelayedCall` are made (such as when calling `reactor.callLater`. This is to
+    ensure the calls made by this `HomeServer` instance are tracked and can be cleaned
+    up during `HomeServer.shutdown()`.
+
     Args:
         reactor: The Twisted reactor to use.
     """
