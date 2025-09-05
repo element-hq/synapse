@@ -644,6 +644,12 @@ class DatabasePool:
             self._check_safe_to_upsert,
         )
 
+    def stop_background_updates(self) -> None:
+        """
+        Stops the database from running any further background updates.
+        """
+        self.updates.enabled = False
+
     def name(self) -> str:
         "Return the name of this database"
         return self._database_config.name

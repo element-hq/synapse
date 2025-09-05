@@ -56,7 +56,7 @@ from zope.interface import implementer
 
 import twisted
 from twisted.enterprise import adbapi
-from twisted.internet import address, tcp, threads, udp
+from twisted.internet import address, defer, tcp, threads, udp
 from twisted.internet._resolver import SimpleResolverComplexifier
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
@@ -1145,8 +1145,10 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
-    # Register the cleanup hook
-    cleanup_func(hs.cleanup)
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
+    cleanup_func(lambda: (defer.ensureDeferred(hs.shutdown()), None)[1])
 
     # Install @cache_in_self attributes
     for key, val in kwargs.items():

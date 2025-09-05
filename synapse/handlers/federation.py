@@ -180,7 +180,7 @@ class FederationHandler:
         # When the lock is held for a given room, no other concurrent code may
         # partial state or un-partial state the room.
         self._is_partial_state_room_linearizer = Linearizer(
-            name="_is_partial_state_room_linearizer"
+            name="_is_partial_state_room_linearizer",
         )
 
         # if this is the main process, fire off a background process to resume

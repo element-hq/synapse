@@ -537,19 +537,13 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self._send_stop_syncing_loop = self.clock.looping_call(
-            self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
+
+        hs.register_async_shutdown_handler(
+            "before", "shutdown", "generic_presence.on_shutdown", self._on_shutdown
         )
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "generic_presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
-        )
-
+    @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_command(
@@ -842,13 +836,8 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
+        hs.register_async_shutdown_handler(
+            "before", "shutdown", "presence.on_shutdown", self._on_shutdown
         )
 
         # Keeps track of the number of *ongoing* syncs on this process. While
@@ -872,7 +861,9 @@ class PresenceHandler(BasePresenceHandler):
         ] = {}
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer")
+        self.external_sync_linearizer = Linearizer(
+            name="external_sync_linearizer",
+        )
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.

@@ -22,7 +22,7 @@
 import logging
 import os
 import sys
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
@@ -69,6 +69,7 @@ from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
+from synapse.types import ISynapseReactor
 from synapse.util.check_dependencies import VERSION, check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
@@ -276,11 +277,13 @@ class SynapseHomeServer(HomeServer):
                 )
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -293,9 +296,11 @@ class SynapseHomeServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -308,10 +313,19 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-def setup(config_options: List[str]) -> SynapseHomeServer:
+def setup(
+    config_options: List[str],
+    reactor: Optional[ISynapseReactor] = None,
+    freeze: bool = True,
+) -> SynapseHomeServer:
     """
     Args:
         config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+        scenarios that you want to control over the reactor, such as tests.
+        freeze: Whether to freeze all objects in the garbage collector. May result in
+        less work for the garbage collector since the `SynapseHomeServer` generally has
+        a static lifetime.
 
     Returns:
         A homeserver instance.
@@ -365,6 +379,7 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
         config.server.server_name,
         config=config,
         version_string=f"Synapse/{VERSION}",
+        reactor=reactor,
     )
 
     synapse.config.logger.setup_logging(hs, config, use_worker_options=False)
@@ -383,7 +398,7 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
             # Loading the provider metadata also ensures the provider config is valid.
             await oidc.load_metadata()
 
-        await _base.start(hs)
+        await _base.start(hs, freeze)
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 

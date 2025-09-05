@@ -28,10 +28,26 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
+from threading import Thread
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    cast,
+)
+from wsgiref.simple_server import WSGIServer
 
+from attr import dataclass
 from typing_extensions import TypeAlias
 
+from twisted.internet import defer
+from twisted.internet.base import _SystemEventID
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.python.threadpool import ThreadPool
@@ -44,6 +60,7 @@ from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
+from synapse.app._base import unregister_sighups
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
@@ -133,6 +150,7 @@ from synapse.metrics import (
     all_later_gauges_to_clean_up_on_shutdown,
     register_threadpool,
 )
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -157,6 +175,7 @@ from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
+from synapse.util.caches import CACHE_METRIC_REGISTRY
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -166,7 +185,9 @@ from synapse.util.task_scheduler import TaskScheduler
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    # Old versions don't have `LiteralString`
     from txredisapi import ConnectionHandler
+    from typing_extensions import LiteralString
 
     from synapse.handlers.jwt import JwtHandler
     from synapse.handlers.oidc import OidcHandler
@@ -219,7 +240,8 @@ def cache_in_self(builder: F) -> F:
     @functools.wraps(builder)
     def _get(self: "HomeServer") -> T:
         try:
-            return getattr(self, depname)
+            dep = getattr(self, depname)
+            return dep
         except AttributeError:
             pass
 
@@ -237,6 +259,25 @@ def cache_in_self(builder: F) -> F:
         return dep
 
     return cast(F, _get)
+
+
+@dataclass
+class ShutdownInfo:
+    """Information for callable functions called at time of shutdown.
+
+    Attributes:
+        desc: a short description of the event trigger.
+        func: the object to call before shutdown.
+        trigger_id: an ID returned when registering this event trigger.
+        args: the arguments to call the function with.
+        kwargs: the keyword arguments to call the function with.
+    """
+
+    desc: str
+    func: Callable[..., Any]
+    trigger_id: _SystemEventID
+    args: Tuple[object, ...]
+    kwargs: Dict[str, object]
 
 
 class HomeServer(metaclass=abc.ABCMeta):
@@ -289,6 +330,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             hostname : The hostname for the server.
             config: The full config for the homeserver.
         """
+
         if not reactor:
             from twisted.internet import reactor as _reactor
 
@@ -300,6 +342,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.signing_key = config.key.signing_key[0]
         self.config = config
         self._listening_services: List[Port] = []
+        self._metrics_listeners: List[Tuple[WSGIServer, Thread]] = []
         self.start_time: Optional[int] = None
 
         self._instance_id = random_string(5)
@@ -314,6 +357,157 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
+
+        self._async_shutdown_handlers: List[ShutdownInfo] = []
+        self._sync_shutdown_handlers: List[ShutdownInfo] = []
+
+    async def shutdown(self) -> None:
+        """
+        Cleanly stops all aspects of the HomeServer and removes any references that
+        have been handed out in order to allow the HomeServer object to be garbage
+        collected.
+
+        You must ensure the HomeServer object to not be frozen in the garbage collector
+        in order for it to be cleaned up. By default, Synapse freezes the HomeServer
+        object in the garbage collector.
+        """
+
+        logger.info(
+            "Received shutdown request for %s (%s).",
+            self.hostname,
+            self.get_instance_id(),
+        )
+
+        unregister_sighups(self._instance_id)
+
+        # TODO: It would be desireable to be able to report an error if the HomeServer
+        # object is frozen in the garbage collector as that would prevent it from being
+        # collected after being shutdown.
+        # In theory the following should work, but it doesn't seem to make a difference
+        # when I test it locally.
+        #
+        # if gc.is_tracked(self):
+        #    logger.error("HomeServer object is tracked by garbage collection so cannot be fully cleaned up")
+
+        for listener in self._listening_services:
+            # During unit tests, an incomplete `twisted.pair.testing._FakePort` is used
+            # for listeners so check listener type here to ensure shutdown procedure is
+            # only applied to actual `Port` instances.
+            if type(listener) is Port:
+                port_shutdown = listener.stopListening()
+                if port_shutdown is not None:
+                    await port_shutdown
+        self._listening_services.clear()
+
+        logger.info("Shutting down metrics listeners")
+        for server, thread in self._metrics_listeners:
+            logger.info("Shutting down metrics listener")
+            server.shutdown()
+            thread.join()
+        self._metrics_listeners.clear()
+
+        # TODO: Cleanup replication pieces
+
+        self.get_keyring().shutdown()
+
+        self.cleanup_metrics()
+
+        for db in self.get_datastores().databases:
+            db.stop_background_updates()
+
+        if self.should_send_federation():
+            self.get_federation_sender().shutdown()
+
+        self.get_clock().cancel_all_looping_calls()
+        self.get_clock().cancel_all_delayed_calls()
+
+        for shutdown_handler in self._async_shutdown_handlers:
+            try:
+                self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+                defer.ensureDeferred(
+                    shutdown_handler.func(
+                        *shutdown_handler.args, **shutdown_handler.kwargs
+                    )
+                )
+            except Exception:
+                pass
+        self._async_shutdown_handlers.clear()
+
+        for shutdown_handler in self._sync_shutdown_handlers:
+            try:
+                self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
+                shutdown_handler.func(*shutdown_handler.args, **shutdown_handler.kwargs)
+            except Exception:
+                pass
+        self._sync_shutdown_handlers.clear()
+
+    def register_async_shutdown_handler(
+        self,
+        phase: str,
+        eventType: str,
+        desc: "LiteralString",
+        shutdown_func: Callable[..., Any],
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        """
+        Register a system event trigger with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
+        id = self.get_reactor().addSystemEventTrigger(
+            phase,
+            eventType,
+            run_as_background_process,
+            desc,
+            self.config.server.server_name,
+            shutdown_func,
+        )
+        self._async_shutdown_handlers.append(
+            ShutdownInfo(
+                desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
+            )
+        )
+
+    def cleanup_metrics(self) -> None:
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver(
+            self.config.server.server_name
+        )
+
+        # TODO: What about the other gauge types?
+        # from synapse.metrics import all_gauges
+        # all_gauges.clear()
+
+    def register_sync_shutdown_handler(
+        self,
+        phase: str,
+        eventType: str,
+        desc: "LiteralString",
+        shutdown_func: Callable[..., Any],
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        """
+        Register a system event trigger with the HomeServer so it can be cleanly
+        removed when the HomeServer is shutdown.
+        """
+        id = self.get_reactor().addSystemEventTrigger(
+            phase,
+            eventType,
+            shutdown_func,
+            args,
+            kwargs,
+        )
+        self._sync_shutdown_handlers.append(
+            ShutdownInfo(
+                desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
+            )
+        )
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
         """Allows a module to register a web resource to be served at the given path.
@@ -372,36 +566,19 @@ class HomeServer(metaclass=abc.ABCMeta):
         if self.config.worker.run_background_tasks:
             self.setup_background_tasks()
 
-    def __del__(self) -> None:
-        """
-        Called when an the homeserver is garbage collected.
-
-        Make sure we actually do some clean-up, rather than leak data.
-        """
-        self.cleanup()
-
-    def cleanup(self) -> None:
-        """
-        WIP: Clean-up any references to the homeserver and stop any running related
-        processes, timers, loops, replication stream, etc.
-
-        This should be called wherever you care about the HomeServer being completely
-        garbage collected like in tests. It's not necessary to call if you plan to just
-        shut down the whole Python process anyway.
-
-        Can be called multiple times.
-        """
-        logger.info("Received cleanup request for %s.", self.hostname)
-
-        # TODO: Stop background processes, timers, loops, replication stream, etc.
-
-        # Cleanup metrics associated with the homeserver
-        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
-            later_gauge.unregister_hooks_for_homeserver_instance_id(
-                self.get_instance_id()
-            )
-
-        logger.info("Cleanup complete for %s.", self.hostname)
+    # def __del__(self) -> None:
+    #    """
+    #    Called when an the homeserver is garbage collected.
+    #
+    #    Make sure we actually do some clean-up, rather than leak data.
+    #    """
+    #
+    #    # NOTE: This is a chicken and egg problem.
+    #    # __del__ will never be called since the HomeServer cannot be garbage collected
+    #    # until the shutdown function has been called. So it makes no sense to call
+    #    # shutdown inside of __del__, even though that is a logical place to assume it
+    #    # should be called.
+    #    self.shutdown()
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners
@@ -1013,8 +1190,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        self.get_reactor().addSystemEventTrigger(
-            "during", "shutdown", media_threadpool.stop
+        self.register_sync_shutdown_handler(
+            "during",
+            "shutdown",
+            "Homeserver media_threadpool.stop",
+            media_threadpool.stop,
         )
 
         # Register the threadpool with our metrics.

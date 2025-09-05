@@ -79,8 +79,9 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
     ) -> HomeServer:
         # we mock out the keyring so as to skip the authentication check on the
         # federation API call.
-        mock_keyring = Mock(spec=["verify_json_for_server"])
+        mock_keyring = Mock(spec=["verify_json_for_server", "shutdown"])
         mock_keyring.verify_json_for_server = AsyncMock(return_value=True)
+        mock_keyring.shutdown = Mock()
 
         # we mock out the federation client too
         self.mock_federation_client = AsyncMock(spec=["put_json"])

@@ -79,6 +79,7 @@ MAX_PRESENCE_STATES_PER_EDU = 50
 class PerDestinationQueue:
     """
     Manages the per-destination transmission queues.
+    Runs until `shutdown()` is called on the queue.
 
     Args:
         hs
@@ -94,6 +95,7 @@ class PerDestinationQueue:
         destination: str,
     ):
         self.server_name = hs.hostname
+        self._hs = hs
         self._clock = hs.get_clock()
         self._storage_controllers = hs.get_storage_controllers()
         self._store = hs.get_datastores().main
@@ -117,6 +119,7 @@ class PerDestinationQueue:
 
         self._destination = destination
         self.transmission_loop_running = False
+        self._transmission_loop_enabled = True
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.
@@ -170,6 +173,10 @@ class PerDestinationQueue:
 
     def __str__(self) -> str:
         return "PerDestinationQueue[%s]" % self._destination
+
+    def shutdown(self) -> None:
+        """Instruct the queue to stop processing any further requests"""
+        self._transmission_loop_enabled = False
 
     def pending_pdu_count(self) -> int:
         return len(self._pending_pdus)
@@ -339,7 +346,7 @@ class PerDestinationQueue:
                     # not caught up yet
                     return
 
-            while True:
+            while self._transmission_loop_enabled:
                 self._new_data_to_send = False
 
                 async with _TransactionQueueManager(self) as (
@@ -469,7 +476,7 @@ class PerDestinationQueue:
         last_successful_stream_ordering: int = _tmp_last_successful_stream_ordering
 
         # get at most 50 catchup room/PDUs
-        while True:
+        while self._transmission_loop_enabled:
             event_ids = await self._store.get_catch_up_room_event_ids(
                 self._destination, last_successful_stream_ordering
             )

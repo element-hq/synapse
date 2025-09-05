@@ -98,7 +98,7 @@ class ApplicationServicesHandler:
         self.is_processing = False
 
         self._ephemeral_events_linearizer = Linearizer(
-            name="appservice_ephemeral_events"
+            name="appservice_ephemeral_events",
         )
 
     def notify_interested_services(self, max_token: RoomStreamToken) -> None:
