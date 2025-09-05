@@ -372,7 +372,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         object in the garbage collector.
         """
 
-        logger.info("Received shutdown request")
+        logger.info("Received shutdown request for %s (%s).", self.hostname, self.get_instance_id())
 
         unregister_sighups(self._instance_id)
 
