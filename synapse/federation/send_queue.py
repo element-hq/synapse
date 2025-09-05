@@ -146,7 +146,6 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     def shutdown(self) -> None:
         """Stops this federation sender instance from sending further transactions."""
-        pass
 
     def _next_pos(self) -> int:
         pos = self.pos
