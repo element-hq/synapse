@@ -49,6 +49,8 @@ from typing import (
     overload,
 )
 
+import secrets
+import string
 import attr
 from typing_extensions import ParamSpec
 from traceback import format_stack
@@ -386,6 +388,10 @@ class LoggingContext:
             self.previous_context,
             format_stack()[-2]
             .replace("/home/eric/Documents/github/element/synapse/", "")
+            .replace(
+                "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+                "",
+            )
             .replace("\n", "->"),
         )
         old_context = set_current_context(self)
@@ -416,6 +422,10 @@ class LoggingContext:
             self.previous_context,
             format_stack()[-2]
             .replace("/home/eric/Documents/github/element/synapse/", "")
+            .replace(
+                "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+                "",
+            )
             .replace("\n", "->"),
         )
         current = set_current_context(self.previous_context)
@@ -635,25 +645,39 @@ class LoggingContextFilter(logging.Filter):
         return True
 
 
+def random_string(length: int) -> str:
+    """Generate a cryptographically secure string of random letters.
+
+    Drawn from the characters: `a-z` and `A-Z`
+    """
+    return "".join(secrets.choice(string.ascii_letters) for _ in range(length))
+
+
 class PreserveLoggingContext:
     """Context manager which replaces the logging context
 
     The previous logging context is restored on exit."""
 
-    __slots__ = ["_old_context", "_new_context"]
+    __slots__ = ["_old_context", "_new_context", "_instance_id"]
 
     def __init__(
         self, new_context: LoggingContextOrSentinel = SENTINEL_CONTEXT
     ) -> None:
         self._new_context = new_context
+        self._instance_id = random_string(5)
 
     def __enter__(self) -> None:
         logger.debug(
-            "PreserveLoggingContext(%s) enter (old_context=%s) (source: %s)",
+            "PreserveLoggingContext(%s) %s enter (old_context=%s) (source: %s)",
             self._new_context,
+            self._instance_id,
             current_context(),
             format_stack()[-2]
             .replace("/home/eric/Documents/github/element/synapse/", "")
+            .replace(
+                "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+                "",
+            )
             .replace("\n", "->"),
         )
         self._old_context = set_current_context(self._new_context)
@@ -665,11 +689,16 @@ class PreserveLoggingContext:
         traceback: Optional[TracebackType],
     ) -> None:
         logger.debug(
-            "PreserveLoggingContext(%s) exit returning to old_context=%s (source: %s)",
+            "PreserveLoggingContext(%s) %s exit returning to old_context=%s (source: %s)",
             self._new_context,
+            self._instance_id,
             self._old_context,
             format_stack()[-2]
             .replace("/home/eric/Documents/github/element/synapse/", "")
+            .replace(
+                "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+                "",
+            )
             .replace("\n", "->"),
         )
         context = set_current_context(self._old_context)
@@ -715,7 +744,16 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
     current = current_context()
 
     logger.debug(
-        "set_current_context(%s) old_context=%s - %s", context, current, format_stack()
+        "|    set_current_context(%s) old_context=%s - %s",
+        context,
+        current,
+        [
+            x.replace("/home/eric/Documents/github/element/synapse/", "").replace(
+                "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+                "",
+            )
+            for x in format_stack()
+        ],
     )
 
     if current is not context:
@@ -837,7 +875,25 @@ def run_in_background(
     CRITICAL error about an unhandled error will be logged without much
     indication about where it came from.
     """
+    instance_id = random_string(5)
+    stack = (
+        format_stack()[-2]
+        .replace("/home/eric/Documents/github/element/synapse/", "")
+        .replace(
+            "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+            "",
+        )
+        .replace("\n", "->")
+    )
+
     current = current_context()
+    logger.info(
+        "asdf run_in_background1 %s start context=%s - %s",
+        instance_id,
+        current,
+        stack,
+    )
+
     try:
         res = f(*args, **kwargs)
     except Exception:
@@ -868,6 +924,12 @@ def run_in_background(
 
     # The function may have reset the context before returning, so
     # we need to restore it now.
+    logger.info(
+        "asdf run_in_background2 %s restore log context=%s - %s",
+        instance_id,
+        current,
+        stack,
+    )
     ctx = set_current_context(current)
 
     # The original context will be restored when the deferred
@@ -882,7 +944,17 @@ def run_in_background(
     # which is supposed to have a single entry and exit point. But
     # by spawning off another deferred, we are effectively
     # adding a new exit point.)
-    d.addBoth(_set_context_cb, ctx)
+
+    def _asdf(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
+        logger.info(
+            "asdf run_in_background3 %s reset log context at end ctx=%s - %s",
+            instance_id,
+            ctx,
+            stack,
+        )
+        return _set_context_cb(result, context)
+
+    d.addBoth(_asdf, ctx)
     return d
 
 
@@ -901,6 +973,15 @@ def run_coroutine_in_background(
     do not run until called, and so calling an async function without awaiting
     cannot change the log contexts.
     """
+    stack = (
+        format_stack()[-2]
+        .replace("/home/eric/Documents/github/element/synapse/", "")
+        .replace(
+            "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+            "",
+        )
+        .replace("\n", "->")
+    )
 
     current = current_context()
     d = defer.ensureDeferred(coroutine)
@@ -921,7 +1002,15 @@ def run_coroutine_in_background(
     # which is supposed to have a single entry and exit point. But
     # by spawning off another deferred, we are effectively
     # adding a new exit point.)
-    d.addBoth(_set_context_cb, ctx)
+    def _asdf(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
+        logger.info(
+            "asdf run_coroutine_in_background reset log context at end ctx=%s - %s",
+            ctx,
+            stack,
+        )
+        return _set_context_cb(result, context)
+
+    d.addBoth(_asdf, ctx)
     return d
 
 
@@ -940,6 +1029,30 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
 
     (This is more-or-less the opposite operation to run_in_background.)
     """
+    instance_id = random_string(5)
+    stack = (
+        format_stack()[-2]
+        .replace("/home/eric/Documents/github/element/synapse/", "")
+        .replace(
+            "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+            "",
+        )
+        .replace("\n", "->")
+    )
+    full_stack = [
+        x.replace("/home/eric/Documents/github/element/synapse/", "").replace(
+            "/home/eric/.cache/pypoetry/virtualenvs/matrix-synapse-xCtC9ulO-py3.13/lib/",
+            "",
+        )
+        for x in format_stack()
+    ]
+    logger.info(
+        "asdf make_deferred_yieldable1 %s start - %s - full stack=%s",
+        instance_id,
+        stack,
+        full_stack,
+    )
+
     if deferred.called and not deferred.paused:
         # it looks like this deferred is ready to run any callbacks we give it
         # immediately. We may as well optimise out the logcontext faffery.
@@ -947,8 +1060,25 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
 
     # ok, we can't be sure that a yield won't block, so let's reset the
     # logcontext, and add a callback to the deferred to restore it.
+    logger.info(
+        "asdf make_deferred_yieldable2 %s reset log context - %s - full stack=%s",
+        instance_id,
+        stack,
+        full_stack,
+    )
     prev_context = set_current_context(SENTINEL_CONTEXT)
-    deferred.addBoth(_set_context_cb, prev_context)
+
+    def _asdf(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
+        logger.info(
+            "asdf make_deferred_yieldable3 %s restore log context at end ctx=%s - %s - full stack=%s",
+            instance_id,
+            prev_context,
+            stack,
+            full_stack,
+        )
+        return _set_context_cb(result, context)
+
+    deferred.addBoth(_asdf, prev_context)
     return deferred
 
 

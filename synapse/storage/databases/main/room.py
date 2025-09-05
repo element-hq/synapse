@@ -1479,26 +1479,26 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         for room_id, joined_via in rows:
             room_servers[room_id] = PartialStateResyncInfo(joined_via=joined_via)
 
-        rows = cast(
-            List[Tuple[str, str]],
-            await self.db_pool.simple_select_list(
-                "partial_state_rooms_servers",
-                keyvalues=None,
-                retcols=("room_id", "server_name"),
-                desc="get_partial_state_rooms",
-            ),
-        )
+        # rows = cast(
+        #     List[Tuple[str, str]],
+        #     await self.db_pool.simple_select_list(
+        #         "partial_state_rooms_servers",
+        #         keyvalues=None,
+        #         retcols=("room_id", "server_name"),
+        #         desc="get_partial_state_rooms",
+        #     ),
+        # )
 
-        for room_id, server_name in rows:
-            entry = room_servers.get(room_id)
-            if entry is None:
-                # There is a foreign key constraint which enforces that every room_id in
-                # partial_state_rooms_servers appears in partial_state_rooms. So we
-                # expect `entry` to be non-null. (This reasoning fails if we've
-                # partial-joined between the two SELECTs, but this is unlikely to happen
-                # in practice.)
-                continue
-            entry.servers_in_room.add(server_name)
+        # for room_id, server_name in rows:
+        #     entry = room_servers.get(room_id)
+        #     if entry is None:
+        #         # There is a foreign key constraint which enforces that every room_id in
+        #         # partial_state_rooms_servers appears in partial_state_rooms. So we
+        #         # expect `entry` to be non-null. (This reasoning fails if we've
+        #         # partial-joined between the two SELECTs, but this is unlikely to happen
+        #         # in practice.)
+        #         continue
+        #     entry.servers_in_room.add(server_name)
 
         return room_servers
 

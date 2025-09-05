@@ -1049,7 +1049,7 @@ class DatabasePool:
             assert not self.engine.in_transaction(conn)
 
             with LoggingContext(
-                str(curr_context), parent_context=parent_context
+                "db-" + str(curr_context), parent_context=parent_context
             ) as context:
                 with opentracing.start_active_span(
                     operation_name="db.connection",

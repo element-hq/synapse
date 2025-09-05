@@ -188,7 +188,8 @@ class FederationHandler:
         # were shut down.
         if not hs.config.worker.worker_app:
             run_as_background_process(
-                "resume_sync_partial_state_room",
+                # "resume_sync_partial_state_room",
+                "rspsr",
                 self.server_name,
                 self._resume_partial_state_room_sync,
             )
@@ -1788,15 +1789,17 @@ class FederationHandler:
 
     async def _resume_partial_state_room_sync(self) -> None:
         """Resumes resyncing of all partial-state rooms after a restart."""
+        logger.info("asdf->_resume_partial_state_room_sync")
         assert not self.config.worker.worker_app
 
         partial_state_rooms = await self.store.get_partial_state_room_resync_info()
-        for room_id, resync_info in partial_state_rooms.items():
-            self._start_partial_state_room_sync(
-                initial_destination=resync_info.joined_via,
-                other_destinations=resync_info.servers_in_room,
-                room_id=room_id,
-            )
+        # for room_id, resync_info in partial_state_rooms.items():
+        #     self._start_partial_state_room_sync(
+        #         initial_destination=resync_info.joined_via,
+        #         other_destinations=resync_info.servers_in_room,
+        #         room_id=room_id,
+        #     )
+        logger.info("asdf->_resume_partial_state_room_sync done")
 
     def _start_partial_state_room_sync(
         self,
