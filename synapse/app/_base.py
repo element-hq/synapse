@@ -573,7 +573,7 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
                 sdnotify(b"RELOADING=1")
 
             for _, v in _sighup_callbacks.items():
-                for i, args, kwargs in v:
+                for func, args, kwargs in v:
                     i(*args, **kwargs)
 
                 sdnotify(b"READY=1")
