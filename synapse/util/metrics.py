@@ -290,14 +290,14 @@ class DynamicCollectorRegistry(CollectorRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        self._server_id_to_pre_update_hooks: Dict[str, List[Callable[[], None]]] = {}
+        self._server_name_to_pre_update_hooks: Dict[str, List[Callable[[], None]]] = {}
 
     def collect(self) -> Generator[Metric, None, None]:
         """
         Collects metrics, calling pre-update hooks first.
         """
 
-        for pre_update_hooks in self._server_id_to_pre_update_hooks.values():
+        for pre_update_hooks in self._server_name_to_pre_update_hooks.values():
             for pre_update_hook in pre_update_hooks:
                 pre_update_hook()
 
@@ -308,8 +308,8 @@ class DynamicCollectorRegistry(CollectorRegistry):
         Registers a hook that is called before metric collection.
         """
 
-        server_hooks = self._server_id_to_pre_update_hooks.setdefault(server_name, [])
+        server_hooks = self._server_name_to_pre_update_hooks.setdefault(server_name, [])
         server_hooks.append(hook)
 
     def unregister_hooks_for_homeserver(self, server_name: str) -> None:
-        self._server_id_to_pre_update_hooks.pop(server_name, None)
+        self._server_name_to_pre_update_hooks.pop(server_name, None)
