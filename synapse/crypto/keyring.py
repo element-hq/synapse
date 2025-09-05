@@ -493,6 +493,9 @@ class KeyFetcher(metaclass=abc.ABCMeta):
         )
 
     def shutdown(self) -> None:
+        """
+        Prepares the KeyFetcher for garbage collection by shutting down it's queue.
+        """
         self._queue.shutdown()
 
     async def get_keys(

@@ -574,7 +574,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     #    Make sure we actually do some clean-up, rather than leak data.
     #    """
     #
-    #    # NOTE: This is a chicken an egg problem.
+    #    # NOTE: This is a chicken and egg problem.
     #    # __del__ will never be called since the HomeServer cannot be garbage collected
     #    # until the shutdown function has been called. So it makes no sense to call
     #    # shutdown inside of __del__, even though that is a logical place to assume it
