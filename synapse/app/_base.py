@@ -310,6 +310,9 @@ def listen_metrics(
     bytecode at a time), this still works because the metrics thread can preempt the
     Twisted reactor thread between bytecode boundaries and the metrics thread gets
     scheduled with roughly equal priority to the Twisted reactor thread.
+
+    Returns:
+        List of WSGIServer with the thread they are running on.
     """
     from prometheus_client import start_http_server as start_http_server_prometheus
 
