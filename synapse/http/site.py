@@ -682,6 +682,11 @@ class SynapseProtocol(HTTPChannel):
 
     def connectionMade(self) -> None:
         """
+        Called when a connection is made.
+
+        This may be considered the initializer of the protocol, because
+        it is called when the connection is completed.
+
         Add the connection to the factory's connection list when it's established.
         """
         super().connectionMade()
@@ -689,6 +694,8 @@ class SynapseProtocol(HTTPChannel):
 
     def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
         """
+        Called when the connection is shut down.
+
         Remove the connection from the factory's connection list, when it's lost.
         """
         super().connectionLost(reason)
@@ -696,6 +703,8 @@ class SynapseProtocol(HTTPChannel):
 
     def requestFactory(self, http_channel: HTTPChannel, queued: bool) -> SynapseRequest:  # type: ignore[override]
         """
+        A callable used to build `twisted.web.iweb.IRequest` objects.
+
         Use our own custom SynapseRequest type instead of the regular
         twisted.web.server.Request.
         """
