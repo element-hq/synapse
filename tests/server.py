@@ -1145,8 +1145,10 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
-    # Register the cleanup hook
-    cleanup_func(hs.shutdown)
+    # Register the cleanup hook for homeserver metrics.
+    # We only need to cleanup homeserver metrics here since they can build up over time
+    # to a point where we run out of memory in CI.
+    cleanup_func(hs.cleanup_metrics)
 
     # Install @cache_in_self attributes
     for key, val in kwargs.items():

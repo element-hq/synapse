@@ -361,7 +361,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._async_shutdown_handlers: List[ShutdownInfo] = []
         self._sync_shutdown_handlers: List[ShutdownInfo] = []
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         """
         Cleanly stops all aspects of the HomeServer and removes any references that
         have been handed out in order to allow the HomeServer object to be garbage
@@ -390,20 +390,12 @@ class HomeServer(metaclass=abc.ABCMeta):
             if type(listener) is Port:
                 port_shutdown = listener.stopListening()
                 if port_shutdown is not None:
-
-                    def on_error(_: T) -> None:
-                        logger.error("Port shutdown with error")
-
-                    def on_success(_: T) -> None:
-                        logger.error("Port shutdown successfully")
-
-                    port_shutdown.addCallback(on_success)
-                    port_shutdown.addErrback(on_error)
+                    await port_shutdown
         self._listening_services.clear()
 
-        logger.error("Shutting down metrics listeners")
+        logger.info("Shutting down metrics listeners")
         for server, thread in self._metrics_listeners:
-            logger.error("Shutting down metrics listener")
+            logger.info("Shutting down metrics listener")
             server.shutdown()
             thread.join()
         self._metrics_listeners.clear()
@@ -412,19 +404,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         self.get_keyring().shutdown()
 
-        # Cleanup metrics associated with the homeserver
-        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
-            later_gauge.unregister_hooks_for_homeserver_instance_id(
-                self.get_instance_id()
-            )
-
-        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver_instance_id(
-            self.config.server.server_name
-        )
-
-        # TODO: What about the other gauge types?
-        # from synapse.metrics import all_gauges
-        # all_gauges.clear()
+        self.cleanup_metrics()
 
         for db in self.get_datastores().databases:
             db.stop_background_updates()
@@ -483,6 +463,21 @@ class HomeServer(metaclass=abc.ABCMeta):
                 desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
             )
         )
+
+    def cleanup_metrics(self) -> None:
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver_instance_id(
+            self.config.server.server_name
+        )
+
+        # TODO: What about the other gauge types?
+        # from synapse.metrics import all_gauges
+        # all_gauges.clear()
 
     def register_sync_shutdown_handler(
         self,
