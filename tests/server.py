@@ -56,7 +56,7 @@ from zope.interface import implementer
 
 import twisted
 from twisted.enterprise import adbapi
-from twisted.internet import address, tcp, threads, udp
+from twisted.internet import address, defer, tcp, threads, udp
 from twisted.internet._resolver import SimpleResolverComplexifier
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
@@ -1148,7 +1148,7 @@ def setup_test_homeserver(
     # Register the cleanup hook for homeserver metrics.
     # We only need to cleanup homeserver metrics here since they can build up over time
     # to a point where we run out of memory in CI.
-    cleanup_func(hs.cleanup_metrics)
+    cleanup_func(lambda: (defer.ensureDeferred(hs.shutdown()), None)[1])
 
     # Install @cache_in_self attributes
     for key, val in kwargs.items():
