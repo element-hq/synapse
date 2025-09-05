@@ -173,6 +173,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
+        # The type ignore is here because mypy doesn't think the host/port tuple is of
+        # the correct type, even though it is the exact example given for
+        # `twisted.internet.interfaces.IAddress`.
+        # Mypy was happy with the type before we overrode `buildProtocol` in
+        # `SynapseSite`, probably because there was enough inheritance indirection before
+        # withe the argument not having a type associated with it.
         channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
 
         # hook into the channel's request factory so that we can keep a record
