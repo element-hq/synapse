@@ -374,6 +374,15 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         logger.info("Received shutdown request")
 
+        # TODO: It would be desireable to be able to report an error if the HomeServer
+        # object is frozen in the garbage collector as that would prevent it from being
+        # collected after being shutdown.
+        # In theory the following should work, but it doesn't seem to make a difference
+        # when I test it locally.
+        #
+        # if gc.is_tracked(self):
+        #    logger.error("HomeServer object is tracked by garbage collection so cannot be fully cleaned up")
+
         for listener in self._listening_services:
             # During unit tests, an incomplete `_FakePort` is used for listeners so
             # check listener type here to ensure shutdown procedure is only applied to
