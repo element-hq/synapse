@@ -100,7 +100,7 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-_sighup_callbacks: Dict[
+_instance_id_to_sighup_callbacks_map: Dict[
     str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
 ] = {}
 """
@@ -121,17 +121,19 @@ def register_sighup(
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
 
-    _sighup_callbacks.setdefault(instance_id, []).append((func, args, kwargs))
+    _instance_id_to_sighup_callbacks_map.setdefault(instance_id, []).append(
+        (func, args, kwargs)
+    )
 
 
 def unregister_sighups(instance_id: str) -> None:
     """
     Unregister all sighup functions associated with this Synapse instance.
-        
+
     Args:
         instance_id: Unique ID for this Synapse process instance.
     """
-    _sighup_callbacks.pop(instance_id, [])
+    _instance_id_to_sighup_callbacks_map.pop(instance_id, [])
 
 
 def start_worker_reactor(
@@ -572,9 +574,9 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
                 # we're not using systemd.
                 sdnotify(b"RELOADING=1")
 
-            for _, v in _sighup_callbacks.items():
+            for _, v in _instance_id_to_sighup_callbacks_map.items():
                 for func, args, kwargs in v:
-                    i(*args, **kwargs)
+                    func(*args, **kwargs)
 
                 sdnotify(b"READY=1")
 
