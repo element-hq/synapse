@@ -79,6 +79,7 @@ MAX_PRESENCE_STATES_PER_EDU = 50
 class PerDestinationQueue:
     """
     Manages the per-destination transmission queues.
+    Runs until `shutdown()` is called on the queue.
 
     Args:
         hs
@@ -173,7 +174,8 @@ class PerDestinationQueue:
     def __str__(self) -> str:
         return "PerDestinationQueue[%s]" % self._destination
 
-    def disable(self) -> None:
+    def shutdown(self) -> None:
+        """Instruct the queue to stop processing any further requests"""
         self._transmission_loop_enabled = False
 
     def pending_pdu_count(self) -> int:

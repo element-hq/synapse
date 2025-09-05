@@ -471,7 +471,7 @@ class FederationSender(AbstractFederationSender):
 
     def shutdown(self) -> None:
         for queue in self._per_destination_queues.values():
-            queue.disable()
+            queue.shutdown()
 
     def _get_per_destination_queue(
         self, destination: str

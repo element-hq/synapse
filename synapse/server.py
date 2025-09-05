@@ -471,7 +471,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                 self.get_instance_id()
             )
 
-        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver_instance_id(
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver(
             self.config.server.server_name
         )
 
