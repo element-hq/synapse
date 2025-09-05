@@ -1145,9 +1145,9 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
-    # Register the cleanup hook for homeserver metrics.
-    # We only need to cleanup homeserver metrics here since they can build up over time
-    # to a point where we run out of memory in CI.
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
     cleanup_func(lambda: (defer.ensureDeferred(hs.shutdown()), None)[1])
 
     # Install @cache_in_self attributes
