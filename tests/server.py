@@ -625,15 +625,6 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
 
         return conn
 
-    def runUntilCurrent(self) -> None:
-        max_time = 0.0
-        for call in self.getDelayedCalls():
-            time_until_call = call.getTime() - self.seconds()
-            if time_until_call > max_time:
-                max_time = time_until_call
-
-        self.advance(max_time)
-
     def advance(self, amount: float) -> None:
         # first advance our reactor's time, and run any "callLater" callbacks that
         # makes ready
