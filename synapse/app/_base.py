@@ -125,6 +125,12 @@ def register_sighup(
 
 
 def unregister_sighups(instance_id: str) -> None:
+    """
+    Unregister all sighup functions associated with this Synapse instance.
+        
+    Args:
+        instance_id: Unique ID for this Synapse process instance.
+    """
     _sighup_callbacks.pop(instance_id, [])
 
 
