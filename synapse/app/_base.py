@@ -533,6 +533,9 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
 
     Args:
         hs: homeserver instance
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+        May improve garbage collection performance by marking objects with an effectively
+        static lifetime as frozen so they don't need to be considered for cleanup.
     """
     server_name = hs.hostname
     reactor = hs.get_reactor()
