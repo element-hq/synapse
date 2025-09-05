@@ -345,9 +345,6 @@ class MockHomeserver:
     def get_replication_notifier(self) -> ReplicationNotifier:
         return ReplicationNotifier()
 
-    def register_later_gauge(self, later_gauge: LaterGauge) -> None:
-        pass
-
 
 class Porter:
     def __init__(
