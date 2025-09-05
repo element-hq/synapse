@@ -384,9 +384,9 @@ class HomeServer(metaclass=abc.ABCMeta):
         #    logger.error("HomeServer object is tracked by garbage collection so cannot be fully cleaned up")
 
         for listener in self._listening_services:
-            # During unit tests, an incomplete `_FakePort` is used for listeners so
-            # check listener type here to ensure shutdown procedure is only applied to
-            # actual `Port` instances.
+            # During unit tests, an incomplete `twisted.pair.testing._FakePort` is used
+            # for listeners so check listener type here to ensure shutdown procedure is
+            # only applied to actual `Port` instances.
             if type(listener) is Port:
                 port_shutdown = listener.stopListening()
                 if port_shutdown is not None:
