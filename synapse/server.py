@@ -374,6 +374,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         logger.info("Received shutdown request")
 
+        unregister_sighups(self._instance_id)
+
         # TODO: It would be desireable to be able to report an error if the HomeServer
         # object is frozen in the garbage collector as that would prevent it from being
         # collected after being shutdown.
@@ -434,8 +436,6 @@ class HomeServer(metaclass=abc.ABCMeta):
             except Exception:
                 pass
         self._sync_shutdown_handlers.clear()
-
-        unregister_sighups(self._instance_id)
 
     def register_async_shutdown_handler(
         self,
