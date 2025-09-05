@@ -100,10 +100,12 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-# dict of instance_id to tuples of function, args list, kwargs dict
 _sighup_callbacks: Dict[
     str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
 ] = {}
+"""
+Mapping from homeserver instance_id to tuples of function, args list, kwargs dict
+"""
 P = ParamSpec("P")
 
 
