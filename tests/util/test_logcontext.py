@@ -28,11 +28,13 @@ from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
     PreserveLoggingContext,
+    _Sentinel,
     current_context,
     make_deferred_yieldable,
     nested_logging_context,
     run_in_background,
 )
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
 
@@ -44,8 +46,12 @@ reactor = cast(ISynapseReactor, _reactor)
 class LoggingContextTestCase(unittest.TestCase):
     def _check_test_key(self, value: str) -> None:
         context = current_context()
-        assert isinstance(context, LoggingContext)
-        self.assertEqual(context.name, value)
+        assert isinstance(context, LoggingContext) or isinstance(context, _Sentinel), (
+            f"Expected LoggingContext({value}) but saw {context}"
+        )
+        self.assertEqual(
+            str(context), value, f"Expected LoggingContext({value}) but saw {context}"
+        )
 
     def test_with_context(self) -> None:
         with LoggingContext("test"):
@@ -186,6 +192,97 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext("foo"):
             nested_context = nested_logging_context(suffix="bar")
             self.assertEqual(nested_context.name, "foo-bar")
+
+    async def test_run_as_background_process(self) -> None:
+        """
+        Test that using `run_as_background_process` doesn't mess with the logging
+        context of the caller.
+        """
+
+        async def test_func() -> None:
+            # We should see the context from the background process throughout this
+            # entire function
+            self._check_test_key("bg_process-0")
+            # Yield to the reactor to ensure that the context is preserved
+            await Clock(reactor).sleep(0)
+            # Context should still be the same
+            self._check_test_key("bg_process-0")
+
+        # Check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        with LoggingContext("main"):
+            # We're in the main context block now
+            self._check_test_key("main")
+
+            # Kick off the background process
+            bg_process_d = run_as_background_process(
+                "bg_process",
+                server_name="test_server",
+                func=test_func,
+            )
+
+            # Doing more work here in the mean-time should be in the main context
+            self._check_test_key("main")
+
+            # Wait for callback_completed
+            await bg_process_d
+
+            # We should still be in the main context
+            self._check_test_key("main")
+
+    async def test_run_as_background_process_make_deferred_yieldable(
+        self,
+    ) -> None:
+        """
+        Test that using `run_as_background_process` with a background task that utilizes
+        `make_deferred_yieldable` doesn't mess with the logging context of the caller.
+        """
+
+        async def test_func() -> None:
+            # We should see the context from the background process throughout this
+            # entire function
+            self._check_test_key("bg_process-0")
+
+            # A function which returns an incomplete deferred, but doesn't follow the
+            # synapse rules.
+            def blocking_function() -> defer.Deferred:
+                # This was run in the background process, so we should still see
+                # the background process context here.
+                self._check_test_key("bg_process-0")
+
+                d: defer.Deferred = defer.Deferred()
+                reactor.callLater(0, d.callback, None)
+                return d
+
+            # Use `make_deferred_yieldable` to make the deferred follow the Synapse rules.
+            await make_deferred_yieldable(blocking_function())
+
+            # Context should still be the same
+            self._check_test_key("bg_process-0")
+
+        # Check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        with LoggingContext("main"):
+            # We're in the main context block now
+            self._check_test_key("main")
+
+            # Kick off the background process
+            bg_process_d = run_as_background_process(
+                "bg_process",
+                server_name="test_server",
+                func=test_func,
+            )
+
+            # Doing more work here in the mean-time should be in the main context
+            self._check_test_key("main")
+
+            # Wait for callback_completed
+            await bg_process_d
+
+            # We should still be in the main context
+            self._check_test_key("main")
 
 
 # a function which returns a deferred which has been "called", but
