@@ -27,12 +27,14 @@ from twisted.internet import defer, reactor as _reactor
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
+    _Sentinel,
     PreserveLoggingContext,
     current_context,
     make_deferred_yieldable,
     nested_logging_context,
     run_in_background,
 )
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
 
@@ -44,8 +46,12 @@ reactor = cast(ISynapseReactor, _reactor)
 class LoggingContextTestCase(unittest.TestCase):
     def _check_test_key(self, value: str) -> None:
         context = current_context()
-        assert isinstance(context, LoggingContext)
-        self.assertEqual(context.name, value)
+        assert isinstance(context, LoggingContext) or isinstance(context, _Sentinel), (
+            f"Expected LoggingContext({value}) but saw {context}"
+        )
+        self.assertEqual(
+            str(context), value, f"Expected LoggingContext({value}) but saw {context}"
+        )
 
     def test_with_context(self) -> None:
         with LoggingContext("test"):
@@ -186,6 +192,48 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext("foo"):
             nested_context = nested_logging_context(suffix="bar")
             self.assertEqual(nested_context.name, "foo-bar")
+
+    async def test_asdf(self) -> defer.Deferred:
+        sentinel_context = current_context()
+        callback_completed = False
+
+        async def testfunc() -> None:
+            print("testfunc1=%s", current_context())
+
+            # a function which returns an incomplete deferred, but doesn't follow
+            # the synapse rules.
+            def blocking_function() -> defer.Deferred:
+                d: defer.Deferred = defer.Deferred()
+                reactor.callLater(0, d.callback, None)
+                return d
+
+            await make_deferred_yieldable(blocking_function())
+            print("testfunc2=%s", current_context())
+            callback_completed = True
+
+        print("1=%s", current_context())
+        self._check_test_key("sentinel")
+        with LoggingContext("main"):
+            print("2=%s", current_context())
+            self._check_test_key("main")
+
+            bg_process_d = run_as_background_process(
+                "bg_process",
+                server_name="test_server",
+                func=testfunc,
+            )
+
+            print("3=%s", current_context())
+            self._check_test_key("main")
+
+            # Wait for callback_completed
+            await bg_process_d
+
+            print("4=%s", current_context())
+            self._check_test_key("main")
+
+        # Test is done when the deferred finishes.
+        return bg_process_d
 
 
 # a function which returns a deferred which has been "called", but

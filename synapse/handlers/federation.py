@@ -39,6 +39,7 @@ from typing import (
     Union,
 )
 
+from twisted.internet import defer
 import attr
 from prometheus_client import Histogram
 from signedjson.key import decode_verify_key_bytes
@@ -69,7 +70,7 @@ from synapse.events.validator import EventValidator
 from synapse.federation.federation_client import InvalidResponseError
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
-from synapse.logging.context import nested_logging_context
+from synapse.logging.context import nested_logging_context, make_deferred_yieldable
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -1792,7 +1793,16 @@ class FederationHandler:
         logger.info("asdf->_resume_partial_state_room_sync")
         assert not self.config.worker.worker_app
 
-        partial_state_rooms = await self.store.get_partial_state_room_resync_info()
+        # a function which returns an incomplete deferred, but doesn't follow
+        # the synapse rules.
+        def blocking_function() -> defer.Deferred:
+            d: defer.Deferred = defer.Deferred()
+            self.hs.get_reactor().callLater(0, d.callback, None)
+            return d
+
+        await make_deferred_yieldable(blocking_function())
+
+        # partial_state_rooms = await self.store.get_partial_state_room_resync_info()
         # for room_id, resync_info in partial_state_rooms.items():
         #     self._start_partial_state_room_sync(
         #         initial_destination=resync_info.joined_via,
