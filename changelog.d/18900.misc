@@ -1,0 +1,1 @@
+Better explain how we manage the logcontext in `run_in_background(...)` and `run_as_background_process(...)`.
