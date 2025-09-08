@@ -123,10 +123,14 @@ class Clock:
     """
 
     _reactor: IReactorTime
-    _call_id: int = 0
+    _delayed_call_id: int = 0
+    """Unique ID used to track delayed calls"""
 
     _looping_calls: List[LoopingCall] = []
-    _delayed_calls: Dict[int, IDelayedCall] = {}
+    """List of active looping calls"""
+
+    _call_id_to_delayed_call: Dict[int, IDelayedCall] = {}
+    """Mapping from unique call ID to delayed call"""
 
     def __init__(self, reactor: IReactorTime) -> None:
         self._reactor = reactor
@@ -134,7 +138,7 @@ class Clock:
     async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         with context.PreserveLoggingContext():
-            self._reactor.callLater(seconds, d.callback, seconds)
+            self.call_later(seconds, d.callback, seconds)
             await d
 
     def time(self) -> float:
@@ -242,16 +246,16 @@ class Clock:
             **kwargs: Key arguments to pass to function.
         """
 
-        id = self._call_id
-        self._call_id += 1
+        id = self._delayed_call_id
+        self._delayed_call_id += 1
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             callback(*args, **kwargs)
-            self._delayed_calls.pop(id)
+            self._call_id_to_delayed_call.pop(id)
 
         with context.PreserveLoggingContext():
             call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
-            self._delayed_calls[id] = call
+            self._call_id_to_delayed_call[id] = call
             return call
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
@@ -277,13 +281,13 @@ class Clock:
             ignore_errs: Whether to re-raise errors encountered when cancelling the
             scheduled call.
         """
-        for call in self._delayed_calls.values():
+        for call in self._call_id_to_delayed_call.values():
             try:
                 call.cancel()
             except Exception:
                 if not ignore_errs:
                     raise
-        self._delayed_calls.clear()
+        self._call_id_to_delayed_call.clear()
 
 
 def log_failure(
