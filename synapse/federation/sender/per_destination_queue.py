@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING, Dict, Hashable, Iterable, List, Optional, Tupl
 import attr
 from prometheus_client import Counter
 
+from twisted.internet import defer
+
 from synapse.api.constants import EduTypes
 from synapse.api.errors import (
     FederationDeniedError,
@@ -120,6 +122,7 @@ class PerDestinationQueue:
         self._destination = destination
         self.transmission_loop_running = False
         self._transmission_loop_enabled = True
+        self.active_transmission_loop: Optional[defer.Deferred] = None
 
         # Flag to signal to any running transmission loop that there is new data
         # queued up to be sent.
@@ -177,6 +180,16 @@ class PerDestinationQueue:
     def shutdown(self) -> None:
         """Instruct the queue to stop processing any further requests"""
         self._transmission_loop_enabled = False
+        # The transaction manager must be shutdown before cancelling the active
+        # transmission loop. Otherwise the transmission loop can enter a new cycle of
+        # sleeping before retrying since the shutdown flag of the _transaction_manager
+        # hasn't been set yet.
+        self._transaction_manager.shutdown()
+        try:
+            if self.active_transmission_loop is not None:
+                self.active_transmission_loop.cancel()
+        except Exception:
+            pass
 
     def pending_pdu_count(self) -> int:
         return len(self._pending_pdus)
@@ -316,9 +329,13 @@ class PerDestinationQueue:
             )
             return
 
+        if not self._transmission_loop_enabled:
+            logger.warning("Shutdown has been requested. Not sending transaction")
+            return
+
         logger.debug("TX [%s] Starting transaction loop", self._destination)
 
-        run_as_background_process(
+        self.active_transmission_loop = run_as_background_process(
             "federation_transaction_transmission_loop",
             self.server_name,
             self._transaction_transmission_loop,
@@ -328,7 +345,6 @@ class PerDestinationQueue:
         pending_pdus: List[EventBase] = []
         try:
             self.transmission_loop_running = True
-
             # This will throw if we wouldn't retry. We do this here so we fail
             # quickly, but we will later check this again in the http client,
             # hence why we throw the result away.
@@ -359,8 +375,8 @@ class PerDestinationQueue:
                         # If we've gotten told about new things to send during
                         # checking for things to send, we try looking again.
                         # Otherwise new PDUs or EDUs might arrive in the meantime,
-                        # but not get sent because we hold the
-                        # `transmission_loop_running` flag.
+                        # but not get sent because we currently have an
+                        # `_active_transmission_loop` running.
                         if self._new_data_to_send:
                             continue
                         else:
@@ -449,6 +465,7 @@ class PerDestinationQueue:
                 )
         finally:
             # We want to be *very* sure we clear this after we stop processing
+            self.active_transmission_loop = None
             self.transmission_loop_running = False
 
     async def _catch_up_transmission_loop(self) -> None:

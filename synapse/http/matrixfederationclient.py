@@ -483,6 +483,10 @@ class MatrixFederationHttpClient:
         )
 
         self.remote_download_linearizer = Linearizer("remote_download_linearizer", 6)
+        self._is_shutdown = False
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
 
     def wake_destination(self, destination: str) -> None:
         """Called when the remote server may have come back online."""
@@ -674,7 +678,7 @@ class MatrixFederationHttpClient:
                 (b"", b"", path_bytes, None, query_bytes, b"")
             )
 
-            while True:
+            while not self._is_shutdown:
                 try:
                     json = request.get_json()
                     if json:
@@ -856,13 +860,23 @@ class MatrixFederationHttpClient:
                             )
                             delay_seconds *= random.uniform(0.8, 1.4)
 
-                        logger.debug(
+                        logger.info(
                             "{%s} [%s] Waiting %ss before re-sending...",
                             request.txn_id,
                             request.destination,
                             delay_seconds,
                         )
 
+                        if self._is_shutdown:
+                            # Immediately fail sending the request instead of starting a
+                            # potentially long sleep after the server has requested
+                            # shutdown.
+                            # This is the code path followed when the
+                            # `federation_transaction_transmission_loop` has been
+                            # cancelled.
+                            raise
+
+                        logger.warning("Sleepy time")
                         # Sleep for the calculated delay, or wake up immediately
                         # if we get notified that the server is back up.
                         await self._sleeper.sleep(

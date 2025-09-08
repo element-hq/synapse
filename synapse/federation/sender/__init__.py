@@ -469,7 +469,10 @@ class FederationSender(AbstractFederationSender):
             self._wake_destinations_needing_catchup,
         )
 
+        self._is_shutdown = False
+
     def shutdown(self) -> None:
+        self._is_shutdown = True
         for queue in self._per_destination_queues.values():
             queue.shutdown()
 
@@ -520,7 +523,7 @@ class FederationSender(AbstractFederationSender):
     async def _process_event_queue_loop(self) -> None:
         try:
             self._is_processing = True
-            while True:
+            while not self._is_shutdown:
                 last_token = await self.store.get_federation_out_pos("events")
                 (
                     next_token,
@@ -1106,7 +1109,7 @@ class FederationSender(AbstractFederationSender):
 
         last_processed: Optional[str] = None
 
-        while True:
+        while not self._is_shutdown:
             destinations_to_wake = (
                 await self.store.get_catch_up_outstanding_destinations(last_processed)
             )

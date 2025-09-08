@@ -416,7 +416,10 @@ class HomeServer(metaclass=abc.ABCMeta):
             db.stop_background_updates()
 
         if self.should_send_federation():
-            self.get_federation_sender().shutdown()
+            try:
+                self.get_federation_sender().shutdown()
+            except Exception:
+                pass
 
         self.get_clock().cancel_all_looping_calls()
         self.get_clock().cancel_all_delayed_calls()
