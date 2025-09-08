@@ -793,6 +793,14 @@ def run_in_background(
     return from the function, and that the sentinel context is set once the
     deferred returned by the function completes.
 
+    To explain how the log contexts work here:
+     - When this function is called, the current context is stored ("original"), we kick
+       off the background task, and we restore that original context before returning
+     - When the background task finishes, we don't want to leak our context into the
+       reactor which would erroneously get attached to the next operation picked up by
+       the event loop. We add a callback to the deferred which will clear the logging
+       context after it finishes and yields control back to the reactor.
+
     Useful for wrapping functions that return a deferred or coroutine, which you don't
     yield or await on (for instance because you want to pass it to
     deferred.gatherResults()).
@@ -850,6 +858,9 @@ def run_in_background(
     # which is supposed to have a single entry and exit point. But
     # by spawning off another deferred, we are effectively
     # adding a new exit point.)
+    #
+    # TODO: Why aren't we using `sentinel` context here. We can't guarantee that `ctx`
+    # is `sentinel` here?
     d.addBoth(_set_context_cb, ctx)
     return d
 
