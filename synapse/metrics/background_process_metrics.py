@@ -47,7 +47,7 @@ from twisted.internet import defer
 from synapse.logging.context import (
     ContextResourceUsage,
     LoggingContext,
-    PreserveLoggingContext,
+    run_in_background,
 )
 from synapse.logging.opentracing import SynapseTags, start_active_span
 from synapse.metrics import SERVER_NAME_LABEL
@@ -285,26 +285,7 @@ def run_as_background_process(
                     name=desc, **{SERVER_NAME_LABEL: server_name}
                 ).dec()
 
-    # To explain how the log contexts work here:
-    #  - When this function is called, the current context is stored (using
-    #    `PreserveLoggingContext`), we kick off the background task, and we restore the
-    #    original context before returning (also part of `PreserveLoggingContext`).
-    #  - When the background task finishes, we don't want to leak our background context
-    #    into the reactor which would erroneously get attached to the next operation
-    #    picked up by the event loop. We use `PreserveLoggingContext` to set the
-    #    `sentinel` context and means the new `BackgroundProcessLoggingContext` will
-    #    remember the `sentinel` context as its previous context to return to when it
-    #    exits and yields control back to the reactor.
-    #
-    # TODO: I think we could simplify this whole block by using `return run_in_background(run)`
-    # which appears to give equivalent behaviour.
-    with PreserveLoggingContext():
-        # The async `run` task is wrapped in a deferred, which will have the side effect
-        # of executing the coroutine.
-        #
-        # Note that we return a Deferred here so that it can be used in a
-        # looping_call and other places that expect a Deferred.
-        return defer.ensureDeferred(run())
+    return run_in_background(run)
 
 
 P = ParamSpec("P")
