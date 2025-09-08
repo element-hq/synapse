@@ -80,6 +80,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
+from synapse.logging.context import PreserveLoggingContext
 from synapse.types import ISynapseReactor, StrCollection
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
@@ -182,7 +183,13 @@ def start_reactor(
         if gc_thresholds:
             gc.set_threshold(*gc_thresholds)
         install_gc_manager()
-        run_command()
+
+        # Reset the logging context when we start the reactor (whenever we yield control
+        # to the reactor, the `sentinel` logging context needs to be set so we don't
+        # leak the current logging context and erroneously apply it to the next task the
+        # reactor event loop picks up)
+        with PreserveLoggingContext():
+            run_command()
 
     if daemonize:
         assert pid_file is not None
@@ -233,6 +240,7 @@ def redirect_stdio_to_logs() -> None:
     print("Redirected stdout/stderr to logs")
 
 
+# TODO: Re-establish log context at this point
 def register_start(
     cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
 ) -> None:
