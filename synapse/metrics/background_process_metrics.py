@@ -295,6 +295,9 @@ def run_as_background_process(
     #    `sentinel` context and means the new `BackgroundProcessLoggingContext` will
     #    remember the `sentinel` context as its previous context to return to when it
     #    exits and yields control back to the reactor.
+    #
+    # TODO: I think we could simplify this whole block by using `return run_in_background(run)`
+    # which appears to give equivalent behaviour.
     with PreserveLoggingContext():
         # The async `run` task is wrapped in a deferred, which will have the side effect
         # of executing the coroutine.
