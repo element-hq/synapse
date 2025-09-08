@@ -63,8 +63,8 @@ def do_request_handling():
 
 The default context is `synapse.logging.context.SENTINEL_CONTEXT`, which is an empty
 sentinel value to represent the root context. This is what is used when there is no
-other context set. The phrase "clear the logcontext" means to set the current context to
-the `sentinel` context.
+other context set. The phrase "clear/reset the logcontext" means to set the current
+context to the `sentinel` context.
 
 No CPU/database usage metrics are recorded against the `sentinel` context.
 
