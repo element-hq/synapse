@@ -230,7 +230,16 @@ LoggingContextOrSentinel = Union["LoggingContext", "_Sentinel"]
 
 
 class _Sentinel:
-    """Sentinel to represent the root context"""
+    """
+    Sentinel to represent the root context
+
+    This should only be used for tasks outside of Synapse like when we yield control
+    back to the Twisted reactor (event loop) so we don't leak the current logging
+    context to other tasks that are scheduled next in the event loop.
+
+    Nothing from the Synapse homeserver should be logged with the sentinel context. i.e.
+    we should always know which server the logs are coming from.
+    """
 
     __slots__ = ["previous_context", "finished", "request", "tag"]
 
