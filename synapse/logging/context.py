@@ -908,24 +908,38 @@ T = TypeVar("T")
 
 
 def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]":
-    """Given a deferred, make it follow the Synapse logcontext rules:
-
-    If the deferred has completed, essentially does nothing (just returns another
-    completed deferred with the result/failure).
-
-    If the deferred has not yet completed, resets the logcontext before
-    returning a deferred. Then, when the deferred completes, restores the
-    current logcontext before running callbacks/errbacks.
-
-    (This is more-or-less the opposite operation to run_in_background.)
     """
+    Given a deferred, make it follow the Synapse logcontext rules:
+
+    - If the deferred has completed, essentially does nothing (just returns another
+      completed deferred with the result/failure).
+    - If the deferred has not yet completed, resets the logcontext before returning a
+      incomplete deferred. Then, when the deferred completes, restores the current
+      logcontext before running callbacks/errbacks.
+
+    This means the resultant deferred can be awaited without leaking the current
+    logcontext to the reactor (which would then get erroneously picked up by the next
+    thing the reactor does), and also means that the logcontext is preserved when the
+    deferred completes.
+
+    (This is more-or-less the opposite operation to run_in_background in terms of how it
+    handles log contexts.)
+    """
+    # The deferred has already completed
     if deferred.called and not deferred.paused:
         # it looks like this deferred is ready to run any callbacks we give it
         # immediately. We may as well optimise out the logcontext faffery.
         return deferred
 
-    # ok, we can't be sure that a yield won't block, so let's reset the
-    # logcontext, and add a callback to the deferred to restore it.
+    # Our goal is to have the caller logcontext unchanged after they yield/await the
+    # returned deferred.
+    #
+    # When the caller yield/await's the returned deferred, it may yield
+    # control back to the reactor. To avoid leaking the current logcontext to the
+    # reactor (which would then get erroneously picked up by the next thing the reactor
+    # does) while the deferred runs in the reactor event loop, we reset the logcontext
+    # and add a callback to the deferred to restore it so the caller's logcontext is
+    # active when the deferred completes.
     prev_context = set_current_context(SENTINEL_CONTEXT)
     deferred.addBoth(_set_context_cb, prev_context)
     return deferred
