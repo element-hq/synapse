@@ -59,6 +59,23 @@ def do_request_handling():
     logger.debug("phew")
 ```
 
+### The `sentinel` context
+
+The default context is `synapse.logging.context.SENTINEL_CONTEXT`, which is an empty
+sentinel value to represent the root context. This is what is used when there is no
+other context set. The phrase "clear the logcontext" means to set the current context to
+the `sentinel` context.
+
+No CPU/database usage metrics are recorded against the `sentinel` context.
+
+Ideally, nothing from the Synapse homeserver would be logged against the `sentinel`
+context as we want to know which server the logs came from. In practice, this is not
+always the case yet especially outside of request handling.
+
+Whenever yielding control back to the reactor (event loop), the `sentinel` logcontext is
+used to avoid leaking the current logcontext into the other reactor which would
+erroneously get attached to the next operation picked up by the event loop.
+
 ## Using logcontexts with awaitables
 
 Awaitables break the linear flow of code so that there is no longer a single entry point
