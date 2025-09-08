@@ -812,57 +812,62 @@ def run_in_background(
     `f` doesn't raise any deferred exceptions, otherwise a scary-looking
     CRITICAL error about an unhandled error will be logged without much
     indication about where it came from.
+
+    Returns:
+        Deferred which returns the result of func, or `None` if func raises.
+        Note that the returned Deferred does not follow the synapse logcontext
+        rules.
     """
-    current = current_context()
-    try:
-        res = f(*args, **kwargs)
-    except Exception:
-        # the assumption here is that the caller doesn't want to be disturbed
-        # by synchronous exceptions, so let's turn them into Failures.
-        return defer.fail()
+    # Our goal is to have the caller logcontext unchanged after firing off the
+    # background task and returning.
+    #
+    #  When this function is called, the current context is stored (using
+    #  `PreserveLoggingContext`), we kick off the background task, and we restore the
+    #  original context before returning (also part of `PreserveLoggingContext`).
+    with PreserveLoggingContext(current_context()):
+        try:
+            res = f(*args, **kwargs)
+        except Exception:
+            # the assumption here is that the caller doesn't want to be disturbed
+            # by synchronous exceptions, so let's turn them into Failures.
+            return defer.fail()
 
-    # `res` may be a coroutine, `Deferred`, some other kind of awaitable, or a plain
-    # value. Convert it to a `Deferred`.
-    d: "defer.Deferred[R]"
-    if isinstance(res, typing.Coroutine):
-        # Wrap the coroutine in a `Deferred`.
-        d = defer.ensureDeferred(res)
-    elif isinstance(res, defer.Deferred):
-        d = res
-    elif isinstance(res, Awaitable):
-        # `res` is probably some kind of completed awaitable, such as a `DoneAwaitable`
-        # or `Future` from `make_awaitable`.
-        d = defer.ensureDeferred(_unwrap_awaitable(res))
-    else:
-        # `res` is a plain value. Wrap it in a `Deferred`.
-        d = defer.succeed(res)
+        # `res` may be a coroutine, `Deferred`, some other kind of awaitable, or a plain
+        # value. Convert it to a `Deferred`.
+        d: "defer.Deferred[R]"
+        if isinstance(res, typing.Coroutine):
+            # Wrap the coroutine in a `Deferred`.
+            d = defer.ensureDeferred(res)
+        elif isinstance(res, defer.Deferred):
+            d = res
+        elif isinstance(res, Awaitable):
+            # `res` is probably some kind of completed awaitable, such as a `DoneAwaitable`
+            # or `Future` from `make_awaitable`.
+            d = defer.ensureDeferred(_unwrap_awaitable(res))
+        else:
+            # `res` is a plain value. Wrap it in a `Deferred`.
+            d = defer.succeed(res)
 
-    if d.called and not d.paused:
-        # The function should have maintained the logcontext, so we can
-        # optimise out the messing about
+        # The deferred has already completed
+        if d.called and not d.paused:
+            # The function should have maintained the logcontext, so we can
+            # optimise out the messing about
+            return d
+
+        # The original logcontext will be restored when the deferred completes, but
+        # there is nothing waiting for it, so it will get leaked into the reactor (which
+        # would then get picked up by the next thing the reactor does). We therefore
+        # need to reset the logcontext here (set the `sentinel` logcontext) before
+        # yielding control back to the reactor.
+        #
+        # (If this feels asymmetric, consider it this way: we are
+        # effectively forking a new thread of execution. We are
+        # probably currently within a ``with LoggingContext()`` block,
+        # which is supposed to have a single entry and exit point. But
+        # by spawning off another deferred, we are effectively
+        # adding a new exit point.)
+        d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
         return d
-
-    # The function may have reset the context before returning, so
-    # we need to restore it now.
-    ctx = set_current_context(current)
-
-    # The original context will be restored when the deferred
-    # completes, but there is nothing waiting for it, so it will
-    # get leaked into the reactor or some other function which
-    # wasn't expecting it. We therefore need to reset the context
-    # here.
-    #
-    # (If this feels asymmetric, consider it this way: we are
-    # effectively forking a new thread of execution. We are
-    # probably currently within a ``with LoggingContext()`` block,
-    # which is supposed to have a single entry and exit point. But
-    # by spawning off another deferred, we are effectively
-    # adding a new exit point.)
-    #
-    # TODO: Why aren't we using `sentinel` context here. We can't guarantee that `ctx`
-    # is `sentinel` here?
-    d.addBoth(_set_context_cb, ctx)
-    return d
 
 
 def run_coroutine_in_background(
@@ -880,28 +885,29 @@ def run_coroutine_in_background(
     do not run until called, and so calling an async function without awaiting
     cannot change the log contexts.
     """
-
-    current = current_context()
-    d = defer.ensureDeferred(coroutine)
-
-    # The function may have reset the context before returning, so
-    # we need to restore it now.
-    ctx = set_current_context(current)
-
-    # The original context will be restored when the deferred
-    # completes, but there is nothing waiting for it, so it will
-    # get leaked into the reactor or some other function which
-    # wasn't expecting it. We therefore need to reset the context
-    # here.
+    # Our goal is to have the caller logcontext unchanged after firing off the
+    # background task and returning.
     #
-    # (If this feels asymmetric, consider it this way: we are
-    # effectively forking a new thread of execution. We are
-    # probably currently within a ``with LoggingContext()`` block,
-    # which is supposed to have a single entry and exit point. But
-    # by spawning off another deferred, we are effectively
-    # adding a new exit point.)
-    d.addBoth(_set_context_cb, ctx)
-    return d
+    #  When this function is called, the current context is stored (using
+    #  `PreserveLoggingContext`), we kick off the background task, and we restore the
+    #  original context before returning (also part of `PreserveLoggingContext`).
+    with PreserveLoggingContext(current_context()):
+        d = defer.ensureDeferred(coroutine)
+
+        # The original logcontext will be restored when the deferred completes, but
+        # there is nothing waiting for it, so it will get leaked into the reactor (which
+        # would then get picked up by the next thing the reactor does). We therefore
+        # need to reset the logcontext here (set the `sentinel` logcontext) before
+        # yielding control back to the reactor.
+        #
+        # (If this feels asymmetric, consider it this way: we are
+        # effectively forking a new thread of execution. We are
+        # probably currently within a ``with LoggingContext()`` block,
+        # which is supposed to have a single entry and exit point. But
+        # by spawning off another deferred, we are effectively
+        # adding a new exit point.)
+        d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
+        return d
 
 
 T = TypeVar("T")
