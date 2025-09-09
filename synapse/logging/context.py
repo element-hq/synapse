@@ -625,9 +625,17 @@ class LoggingContextFilter(logging.Filter):
 
 
 class PreserveLoggingContext:
-    """Context manager which replaces the logging context
+    """
+    Context manager which replaces the logging context
 
-    The previous logging context is restored on exit."""
+    The previous logging context is restored on exit.
+
+    `make_deferred_yieldable` is pretty equivalent to using `with
+    PreserveLoggingContext():` (using the default sentinel context), i.e. it clears the
+    logcontext before awaiting (and so before execution passes back to the reactor) and
+    restores the old context once the awaitable completes (execution passes from the
+    reactor back to the code).
+    """
 
     __slots__ = ["_old_context", "_new_context"]
 
@@ -938,6 +946,11 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
 
     (This is more-or-less the opposite operation to run_in_background in terms of how it
     handles log contexts.)
+
+    Pretty much equivalent to using `with PreserveLoggingContext():`, i.e. it clears the
+    logcontext before awaiting (and so before execution passes back to the reactor) and
+    restores the old context once the awaitable completes (execution passes from the
+    reactor back to the code).
     """
     # The deferred has already completed
     if deferred.called and not deferred.paused:
