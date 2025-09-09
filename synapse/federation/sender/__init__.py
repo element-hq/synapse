@@ -461,6 +461,10 @@ class FederationSender(AbstractFederationSender):
             self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
+        # It is important for `_is_shutdown` to be instantiated before the looping call
+        # for `wake_destinations_needing_catchup`.
+        self._is_shutdown = False
+
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call_now(
             run_as_background_process,
@@ -469,8 +473,6 @@ class FederationSender(AbstractFederationSender):
             self.server_name,
             self._wake_destinations_needing_catchup,
         )
-
-        self._is_shutdown = False
 
     def shutdown(self) -> None:
         self._is_shutdown = True

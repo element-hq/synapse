@@ -876,7 +876,6 @@ class MatrixFederationHttpClient:
                             # cancelled.
                             raise
 
-                        logger.warning("Sleepy time")
                         # Sleep for the calculated delay, or wake up immediately
                         # if we get notified that the server is back up.
                         await self._sleeper.sleep(

@@ -243,7 +243,8 @@ def register_cache(
         server_name=server_name,
         collect_callback=collect_callback,
     )
-    CACHE_METRIC_REGISTRY.register_hook(server_name, metric.collect)
+    metric_name = "cache_%s_%s_%s" % (cache_type, cache_name, server_name)
+    CACHE_METRIC_REGISTRY.register_hook(server_name, metric_name, metric.collect)
     return metric
 
 

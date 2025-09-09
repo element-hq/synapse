@@ -27,7 +27,6 @@ from typing import (
     Callable,
     Dict,
     Generator,
-    List,
     Optional,
     Protocol,
     Type,
@@ -290,7 +289,13 @@ class DynamicCollectorRegistry(CollectorRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        self._server_name_to_pre_update_hooks: Dict[str, List[Callable[[], None]]] = {}
+        self._server_name_to_pre_update_hooks: Dict[
+            str, Dict[str, Callable[[], None]]
+        ] = {}
+        """
+        Mapping of server name to a mapping of metric name to metric pre-update
+        hook
+        """
 
     def collect(self) -> Generator[Metric, None, None]:
         """
@@ -298,18 +303,32 @@ class DynamicCollectorRegistry(CollectorRegistry):
         """
 
         for pre_update_hooks in self._server_name_to_pre_update_hooks.values():
-            for pre_update_hook in pre_update_hooks:
+            for pre_update_hook in pre_update_hooks.values():
                 pre_update_hook()
 
         yield from super().collect()
 
-    def register_hook(self, server_name: str, hook: Callable[[], None]) -> None:
+    def register_hook(
+        self, server_name: str, metric_name: str, hook: Callable[[], None]
+    ) -> None:
         """
         Registers a hook that is called before metric collection.
         """
 
-        server_hooks = self._server_name_to_pre_update_hooks.setdefault(server_name, [])
-        server_hooks.append(hook)
+        server_hooks = self._server_name_to_pre_update_hooks.setdefault(server_name, {})
+        if server_hooks.get(metric_name) is not None:
+            # TODO: This should be an `assert` since registering the same metric name
+            # multiple times will clobber the old metric.
+            # We currently rely on this behaviour as we instantiate multiple
+            # `SyncRestServlet`, one per listener, and in the `__init__` we setup a new
+            # LruCache.
+            # Once the above behaviour is changed, this should be changed to an `assert`.
+            logger.error(
+                "Metric named %s already registered for server %s",
+                metric_name,
+                server_name,
+            )
+        server_hooks[metric_name] = hook
 
     def unregister_hooks_for_homeserver(self, server_name: str) -> None:
         self._server_name_to_pre_update_hooks.pop(server_name, None)
