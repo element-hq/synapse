@@ -637,7 +637,11 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
 
     # Log when we start the shut down process.
     hs.register_sync_shutdown_handler(
-        "before", "shutdown", "shutdown log entry", logger.info, "Shutting down..."
+        phase="before",
+        eventType="shutdown",
+        desc="shutdown log entry",
+        shutdown_func=logger.info,
+        msg="Shutting down...",
     )
 
     setup_sentry(hs)

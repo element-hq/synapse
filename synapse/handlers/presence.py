@@ -540,7 +540,10 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
 
         hs.register_async_shutdown_handler(
-            "before", "shutdown", "generic_presence.on_shutdown", self._on_shutdown
+            phase="before",
+            eventType="shutdown",
+            desc="generic_presence.on_shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
     @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
@@ -837,7 +840,10 @@ class PresenceHandler(BasePresenceHandler):
         self.unpersisted_users_changes: Set[str] = set()
 
         hs.register_async_shutdown_handler(
-            "before", "shutdown", "presence.on_shutdown", self._on_shutdown
+            phase="before",
+            eventType="shutdown",
+            desc="presence.on_shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
         # Keeps track of the number of *ongoing* syncs on this process. While

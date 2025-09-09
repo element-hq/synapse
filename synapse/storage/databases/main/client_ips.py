@@ -454,10 +454,10 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
 
             self._clock.looping_call(self._update_client_ips_batch, 5 * 1000)
             hs.register_async_shutdown_handler(
-                "before",
-                "shutdown",
-                "ClientIpWorkerStore _update_client_ips_batch",
-                self._update_client_ips_batch,
+                phase="before",
+                eventType="shutdown",
+                desc="ClientIpWorkerStore _update_client_ips_batch",
+                shutdown_func=self._update_client_ips_batch,
             )
 
     @wrap_as_background_process("prune_old_user_ips")

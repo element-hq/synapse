@@ -276,7 +276,6 @@ class ShutdownInfo:
     desc: str
     func: Callable[..., Any]
     trigger_id: _SystemEventID
-    args: Tuple[object, ...]
     kwargs: Dict[str, object]
 
 
@@ -427,11 +426,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         for shutdown_handler in self._async_shutdown_handlers:
             try:
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                defer.ensureDeferred(
-                    shutdown_handler.func(
-                        *shutdown_handler.args, **shutdown_handler.kwargs
-                    )
-                )
+                defer.ensureDeferred(shutdown_handler.func(**shutdown_handler.kwargs))
             except Exception:
                 pass
         self._async_shutdown_handlers.clear()
@@ -439,18 +434,18 @@ class HomeServer(metaclass=abc.ABCMeta):
         for shutdown_handler in self._sync_shutdown_handlers:
             try:
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
-                shutdown_handler.func(*shutdown_handler.args, **shutdown_handler.kwargs)
+                shutdown_handler.func(**shutdown_handler.kwargs)
             except Exception:
                 pass
         self._sync_shutdown_handlers.clear()
 
     def register_async_shutdown_handler(
         self,
+        *,
         phase: str,
         eventType: str,
         desc: "LiteralString",
         shutdown_func: Callable[..., Any],
-        *args: object,
         **kwargs: object,
     ) -> None:
         """
@@ -464,11 +459,10 @@ class HomeServer(metaclass=abc.ABCMeta):
             desc,
             self.config.server.server_name,
             shutdown_func,
+            **kwargs,
         )
         self._async_shutdown_handlers.append(
-            ShutdownInfo(
-                desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
-            )
+            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
         )
 
     def cleanup_metrics(self) -> None:
@@ -488,11 +482,11 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     def register_sync_shutdown_handler(
         self,
+        *,
         phase: str,
         eventType: str,
         desc: "LiteralString",
         shutdown_func: Callable[..., Any],
-        *args: object,
         **kwargs: object,
     ) -> None:
         """
@@ -503,13 +497,10 @@ class HomeServer(metaclass=abc.ABCMeta):
             phase,
             eventType,
             shutdown_func,
-            args,
-            kwargs,
+            **kwargs,
         )
         self._sync_shutdown_handlers.append(
-            ShutdownInfo(
-                desc=desc, func=shutdown_func, trigger_id=id, args=args, kwargs=kwargs
-            )
+            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
         )
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
@@ -1194,10 +1185,10 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         media_threadpool.start()
         self.register_sync_shutdown_handler(
-            "during",
-            "shutdown",
-            "Homeserver media_threadpool.stop",
-            media_threadpool.stop,
+            phase="during",
+            eventType="shutdown",
+            desc="Homeserver media_threadpool.stop",
+            shutdown_func=media_threadpool.stop,
         )
 
         # Register the threadpool with our metrics.
