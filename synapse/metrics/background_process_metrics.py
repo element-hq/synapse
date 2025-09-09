@@ -48,7 +48,6 @@ from synapse.logging.context import (
     ContextResourceUsage,
     LoggingContext,
     PreserveLoggingContext,
-    run_in_background,
 )
 from synapse.logging.opentracing import SynapseTags, start_active_span
 from synapse.metrics import SERVER_NAME_LABEL
@@ -245,9 +244,6 @@ def run_as_background_process(
         Note that the returned Deferred does not follow the synapse logcontext
         rules.
     """
-    # TODO: Remove
-    if desc != "rspsr":
-        return
 
     async def run() -> Optional[R]:
         with _bg_metrics_lock:
@@ -262,7 +258,7 @@ def run_as_background_process(
         ).inc()
 
         with BackgroundProcessLoggingContext(
-            name="bg-" + desc, server_name=server_name, instance_id=count
+            name=desc, server_name=server_name, instance_id=count
         ) as context:
             try:
                 if bg_start_span:
@@ -288,8 +284,6 @@ def run_as_background_process(
         # Note that we return a Deferred here so that it can be used in a
         # looping_call and other places that expect a Deferred.
         return defer.ensureDeferred(run())
-
-    # return run_in_background(run)
 
 
 P = ParamSpec("P")
