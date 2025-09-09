@@ -129,7 +129,10 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import (
+    all_later_gauges_to_clean_up_on_shutdown,
+    register_threadpool,
+)
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -363,11 +366,36 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.datastores = Databases(self.DATASTORE_CLASS, self)
         logger.info("Finished setting up.")
 
-        # Register background tasks required by this server. This must be done
-        # somewhat manually due to the background tasks not being registered
-        # unless handlers are instantiated.
-        if self.config.worker.run_background_tasks:
-            self.setup_background_tasks()
+    def __del__(self) -> None:
+        """
+        Called when an the homeserver is garbage collected.
+
+        Make sure we actually do some clean-up, rather than leak data.
+        """
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        """
+        WIP: Clean-up any references to the homeserver and stop any running related
+        processes, timers, loops, replication stream, etc.
+
+        This should be called wherever you care about the HomeServer being completely
+        garbage collected like in tests. It's not necessary to call if you plan to just
+        shut down the whole Python process anyway.
+
+        Can be called multiple times.
+        """
+        logger.info("Received cleanup request for %s.", self.hostname)
+
+        # TODO: Stop background processes, timers, loops, replication stream, etc.
+
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        logger.info("Cleanup complete for %s.", self.hostname)
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners
@@ -376,7 +404,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         appropriate listeners.
         """
 
-    def setup_background_tasks(self) -> None:
+    def start_background_tasks(self) -> None:
         """
         Some handlers have side effects on instantiation (like registering
         background updates). This function causes them to be fetched, and

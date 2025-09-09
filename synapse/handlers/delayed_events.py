@@ -215,9 +215,9 @@ class DelayedEventsHandler:
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
 
-            event = await self._store.get_event(
-                delta.event_id, check_room_id=delta.room_id
-            )
+            event = await self._store.get_event(delta.event_id, allow_none=True)
+            if not event:
+                continue
             sender = UserID.from_string(event.sender)
 
             next_send_ts = await self._store.cancel_delayed_state_events(
