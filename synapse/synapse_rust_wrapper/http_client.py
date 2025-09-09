@@ -21,6 +21,11 @@ from synapse.types import ISynapseReactor
 
 
 class HttpClient:
+    """
+    Wrap `synapse.synapse_rust.http_client.HttpClient` to ensure the returned
+    deferreds follow Synapse logcontext rules.
+    """
+
     def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None:
         self._http_client = RustHttpClient(reactor, user_agent)
 
