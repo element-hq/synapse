@@ -32,6 +32,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.account_keys import AccountKeysStore
 from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.storage.databases.main.thread_subscriptions import (
@@ -163,6 +164,7 @@ class DataStore(
     TaskSchedulerWorkerStore,
     SlidingSyncStore,
     DelayedEventsStore,
+    AccountKeysStore,
 ):
     def __init__(
         self,
