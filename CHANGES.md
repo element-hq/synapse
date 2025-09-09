@@ -1,3 +1,10 @@
+# Synapse 1.138.0 (2025-09-09)
+
+No significant changes since 1.138.0rc1.
+
+
+
+
 # Synapse 1.138.0rc1 (2025-09-02)
 
 ### Features
