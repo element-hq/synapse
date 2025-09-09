@@ -10,26 +10,30 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+
 from typing import Mapping
 
 from twisted.internet.defer import Deferred
 
+from synapse.logging.context import make_deferred_yieldable
+from synapse.synapse_rust.http_client import HttpClient as RustHttpClient
 from synapse.types import ISynapseReactor
 
+
 class HttpClient:
-    """
-    Since the returned deferreds don't follow Synapse logcontext rules,
-    this is not meant to be used by Synapse code directly.
+    def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None:
+        self._http_client = RustHttpClient(reactor, user_agent)
 
-    Use `synapse.synapse_rust_wrapper.http_client.HttpClient` instead.
-    """
+    def get(self, url: str, response_limit: int) -> Deferred[bytes]:
+        deferred = self._http_client.get(url, response_limit)
+        return make_deferred_yieldable(deferred)
 
-    def __init__(self, reactor: ISynapseReactor, user_agent: str) -> None: ...
-    def get(self, url: str, response_limit: int) -> Deferred[bytes]: ...
     def post(
         self,
         url: str,
         response_limit: int,
         headers: Mapping[str, str],
         request_body: str,
-    ) -> Deferred[bytes]: ...
+    ) -> Deferred[bytes]:
+        deferred = self._http_client.post(url, response_limit, headers, request_body)
+        return make_deferred_yieldable(deferred)

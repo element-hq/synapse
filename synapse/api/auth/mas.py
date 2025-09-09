@@ -33,7 +33,6 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import (
     active_span,
     force_tracing,
@@ -41,7 +40,7 @@ from synapse.logging.opentracing import (
     start_active_span,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.synapse_rust.http_client import HttpClient
+from synapse.synapse_rust_wrapper.http_client import HttpClient
 from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
@@ -229,13 +228,12 @@ class MasDelegatedAuth(BaseAuth):
         try:
             with start_active_span("mas-introspect-token"):
                 inject_request_headers(raw_headers)
-                with PreserveLoggingContext():
-                    resp_body = await self._rust_http_client.post(
-                        url=self._introspection_endpoint,
-                        response_limit=1 * 1024 * 1024,
-                        headers=raw_headers,
-                        request_body=body,
-                    )
+                resp_body = await self._rust_http_client.post(
+                    url=self._introspection_endpoint,
+                    response_limit=1 * 1024 * 1024,
+                    headers=raw_headers,
+                    request_body=body,
+                )
         except HttpResponseException as e:
             end_time = self._clock.time()
             introspection_response_timer.labels(
