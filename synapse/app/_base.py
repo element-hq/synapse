@@ -240,7 +240,6 @@ def redirect_stdio_to_logs() -> None:
     print("Redirected stdout/stderr to logs")
 
 
-# TODO: Re-establish log context at this point
 def register_start(
     cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
 ) -> None:
