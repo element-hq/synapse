@@ -1027,7 +1027,7 @@ class EventCreationHandler:
                 # Legacy room versions need the "redacts" field outside of the event's
                 # content. However clients may still send it within the content, so copy
                 # the field if necessary for compatibility.
-                redacts = event_dict.get("redacts") or event_dict["content"].get(
+                redacts = event_dict.get("redacts") or event_dict["content"].pop(
                     "redacts"
                 )
                 if redacts and "redacts" not in event_dict:
