@@ -249,9 +249,10 @@ class FederationEventHandler:
             self.room_queues[room_id].append((pdu, origin))
             return
 
-        # If we're not in the room just ditch the event entirely. This is
-        # probably an old server that has come back and thinks we're still in
-        # the room (or we've been rejoined to the room by a state reset).
+        # If we're not in the room just ditch the event entirely (and not
+        # invited). This is probably an old server that has come back and thinks
+        # we're still in the room (or we've been rejoined to the room by a state
+        # reset).
         #
         # Note that if we were never in the room then we would have already
         # dropped the event, since we wouldn't know the room version.
@@ -259,6 +260,43 @@ class FederationEventHandler:
             room_id, self.server_name
         )
         if not is_in_room:
+            # Check if this is a leave event rescinding an invite
+            if (
+                pdu.type == EventTypes.Member
+                and pdu.membership == Membership.LEAVE
+                and pdu.state_key != pdu.sender
+                and self._is_mine_id(pdu.state_key)
+            ):
+                (
+                    membership,
+                    membership_event_id,
+                ) = await self._store.get_local_current_membership_for_user_in_room(
+                    pdu.state_key, pdu.room_id
+                )
+                if (
+                    membership == Membership.INVITE
+                    and membership_event_id
+                    and membership_event_id
+                    in pdu.auth_event_ids()  # The invite should be in the auth events of the rescission.
+                ):
+                    invite_event = await self._store.get_event(
+                        membership_event_id, allow_none=True
+                    )
+
+                    # We cannot fully auth the rescission event, but we can
+                    # check if the sender of the leave event is the same as the
+                    # invite.
+                    #
+                    # Technically, a room admin could rescind the invite, but we
+                    # have no way of knowing who is and isn't a room admin.
+                    if invite_event and pdu.sender == invite_event.sender:
+                        # Handle the rescission event
+                        pdu.internal_metadata.outlier = True
+                        pdu.internal_metadata.out_of_band_membership = True
+                        context = EventContext.for_outlier(self._storage_controllers)
+                        await self.persist_events_and_notify(room_id, [(pdu, context)])
+                        return
+
             logger.info(
                 "Ignoring PDU from %s as we're not in the room",
                 origin,
