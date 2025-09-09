@@ -123,17 +123,17 @@ class Clock:
     """
 
     _reactor: IReactorTime
-    _delayed_call_id: int = 0
-    """Unique ID used to track delayed calls"""
-
-    _looping_calls: List[LoopingCall] = []
-    """List of active looping calls"""
-
-    _call_id_to_delayed_call: Dict[int, IDelayedCall] = {}
-    """Mapping from unique call ID to delayed call"""
 
     def __init__(self, reactor: IReactorTime) -> None:
         self._reactor = reactor
+        self._delayed_call_id: int = 0
+        """Unique ID used to track delayed calls"""
+
+        self._looping_calls: List[LoopingCall] = []
+        """List of active looping calls"""
+
+        self._call_id_to_delayed_call: Dict[int, IDelayedCall] = {}
+        """Mapping from unique call ID to delayed call"""
 
     async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
@@ -246,16 +246,16 @@ class Clock:
             **kwargs: Key arguments to pass to function.
         """
 
-        id = self._delayed_call_id
-        self._delayed_call_id += 1
+        call_id = self._delayed_call_id
+        self._delayed_call_id = self._delayed_call_id + 1
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             callback(*args, **kwargs)
-            self._call_id_to_delayed_call.pop(id)
+            self._call_id_to_delayed_call.pop(call_id)
 
         with context.PreserveLoggingContext():
             call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
-            self._call_id_to_delayed_call[id] = call
+            self._call_id_to_delayed_call[call_id] = call
             return call
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
