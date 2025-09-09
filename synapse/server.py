@@ -476,10 +476,6 @@ class HomeServer(metaclass=abc.ABCMeta):
             self.config.server.server_name
         )
 
-        # TODO: What about the other gauge types?
-        # from synapse.metrics import all_gauges
-        # all_gauges.clear()
-
     def register_sync_shutdown_handler(
         self,
         *,
