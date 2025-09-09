@@ -1,1 +1,0 @@
-Switch to OpenTracing's `ContextVarsScopeManager` instead of our own custom `LogContextScopeManager`.
