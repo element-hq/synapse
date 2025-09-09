@@ -73,7 +73,7 @@ context as we want to know which server the logs came from. In practice, this is
 always the case yet especially outside of request handling.
 
 Whenever yielding control back to the reactor (event loop), the `sentinel` logcontext is
-set to avoid leaking the current logcontext into the other reactor which would
+used to avoid leaking the current logcontext into the other reactor which would
 erroneously get attached to the next operation picked up by the event loop.
 
 ## Using logcontexts with awaitables
