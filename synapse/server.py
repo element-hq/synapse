@@ -567,7 +567,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         # somewhat manually due to the background tasks not being registered
         # unless handlers are instantiated.
         if self.config.worker.run_background_tasks:
-            self.setup_background_tasks()
+            self.start_background_tasks()
 
     # def __del__(self) -> None:
     #    """
@@ -590,7 +590,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         appropriate listeners.
         """
 
-    def setup_background_tasks(self) -> None:
+    def start_background_tasks(self) -> None:
         """
         Some handlers have side effects on instantiation (like registering
         background updates). This function causes them to be fetched, and

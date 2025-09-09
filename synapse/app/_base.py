@@ -643,10 +643,28 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
     setup_sentry(hs)
     setup_sdnotify(hs)
 
-    # If background tasks are running on the main process or this is the worker in
-    # charge of them, start collecting the phone home stats and shared usage metrics.
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # While we could "start" these before the reactor runs, nothing will happen until
+    # the reactor is running, so we may as well do it here in `start`.
+    #
+    # Additionally, this means we also start them after we daemonize and fork the
+    # process which means we can avoid any potential problems with cputime metrics
+    # getting confused about the per-thread resource usage appearing to go backwards
+    # because we're comparing the resource usage (`rusage`) from the original process to
+    # the forked process.
     if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
+        # TODO: This should be moved to same pattern we use for other background tasks:
+        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
+        # `start_background_tasks` to start it.
         await hs.get_common_usage_metrics_manager().setup()
+
+        # TODO: This feels like another pattern that should refactored as one of the
+        # `REQUIRED_ON_BACKGROUND_TASK_STARTUP`
         start_phone_stats_home(hs)
 
     if freeze:
