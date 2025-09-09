@@ -80,7 +80,7 @@ from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
-from synapse.logging.context import PreserveLoggingContext
+from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.types import ISynapseReactor, StrCollection
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
@@ -599,10 +599,12 @@ async def start(hs: "HomeServer") -> None:
     hs.get_datastores().main.db_pool.start_profiling()
     hs.get_pusherpool().start()
 
+    def log_shutdown() -> None:
+        with LoggingContext("log_shutdown"):
+            logger.info("Shutting down...")
+
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger(
-        "before", "shutdown", logger.info, "Shutting down..."
-    )
+    hs.get_reactor().addSystemEventTrigger("before", "shutdown", log_shutdown)
 
     setup_sentry(hs)
     setup_sdnotify(hs)
