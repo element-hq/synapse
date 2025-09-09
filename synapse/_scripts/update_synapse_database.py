@@ -120,10 +120,6 @@ def main() -> None:
     # DB.
     hs.setup()
 
-    # TODO: Why do we need this here?
-    if hs.config.worker.run_background_tasks:
-        hs.start_background_tasks()
-
     if args.run_background_updates:
         run_background_updates(hs)
 
