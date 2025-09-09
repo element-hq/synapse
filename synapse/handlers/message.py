@@ -1028,7 +1028,7 @@ class EventCreationHandler:
                 # content. However clients may still send it within the content, so copy
                 # the field if necessary for compatibility.
                 redacts = event_dict.get("redacts") or event_dict["content"].pop(
-                    "redacts"
+                    "redacts", None
                 )
                 if redacts and "redacts" not in event_dict:
                     event_dict["redacts"] = redacts
