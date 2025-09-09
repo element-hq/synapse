@@ -1020,7 +1020,6 @@ class EventCreationHandler:
             and "redacts" in event_dict["content"]
             and self.hs.config.experimental.msc4169_enabled
         ):
-
             room_id = event_dict["room_id"]
             try:
                 room_version = await self.store.get_room_version(room_id)
