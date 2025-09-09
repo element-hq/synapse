@@ -146,6 +146,7 @@ class ThreadSubscriptionsPaginationRestServlet(RestServlet):
         _direction = parse_string(request, "dir", required=True, allowed_values=("b",))
 
         if limit <= 0:
+            # condition needed because `negative=False` still allows 0
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "limit must be greater than 0",
