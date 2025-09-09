@@ -1,1 +1,0 @@
-Fix error trying to send redaction events using the `/send` API in room versions prior to v11. Contributed by @SpiritCroc @ Beeper.

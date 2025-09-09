@@ -1023,7 +1023,7 @@ class EventCreationHandler:
 
             if room_version.updated_redaction_rules:
                 redacts = event_dict["content"].get("redacts")
-            else:
+            elif self.hs.config.experimental.msc4169_enabled:
                 # Legacy room versions need the "redacts" field outside of the event's
                 # content. However clients may still send it within the content, so copy
                 # the field if necessary for compatibility.
@@ -1032,6 +1032,8 @@ class EventCreationHandler:
                 )
                 if redacts and "redacts" not in event_dict:
                     event_dict["redacts"] = redacts
+            else:
+                redacts = event_dict.get("redacts")
 
             is_admin_redaction = await self.is_admin_redaction(
                 event_type=event_dict["type"],
