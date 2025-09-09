@@ -67,7 +67,7 @@ available in both the latest [Debian Stable](https://packages.debian.org/stable/
 extra scrutiny or consideration at this point.
 
 We aggressively update Rust dependencies. Since these are statically linked and managed
-entirely by `cargo` during build, they pose no ongoing maintenance burden on others.
+entirely by `cargo` during build, they *can* pose no ongoing maintenance burden on others.
 This allows us to freely upgrade to leverage the latest ecosystem advancements assuming
 they don't have their own system-level dependencies.
 
@@ -85,5 +85,5 @@ downloading and building all libraries to satisfy dependencies, and these librar
 statically linked into the final binary. This means that from a packager's perspective,
 the Rust dependency versions are an internal build detail, not a runtime dependency to
 be managed on the target system. Consequently, we have even greater flexibility to
-upgrade Rust dependencies as needed for the project.
-
+upgrade Rust dependencies as needed for the project. Some distros (e.g. Fedora) do
+package Rust libraries, but this appears to be the outlier rather than the norm.
