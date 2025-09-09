@@ -34,12 +34,15 @@ from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import SynapseError
+from synapse.api.room_versions import RoomVersions
 from synapse.crypto import keyring
+from synapse.crypto.event_signing import compute_event_signature
 from synapse.crypto.keyring import (
     PerspectivesKeyFetcher,
     ServerKeyFetcher,
     StoreKeyFetcher,
 )
+from synapse.events import make_event_from_dict
 from synapse.logging.context import (
     ContextRequest,
     LoggingContext,
@@ -387,6 +390,35 @@ class KeyringTestCase(unittest.HomeserverTestCase):
         # there should have been a single call to each fetcher
         mock_fetcher1.get_keys.assert_called_once()
         mock_fetcher2.get_keys.assert_called_once()
+
+    def test_verify_event_for_account_key(self) -> None:
+        """Test basic functionality of verify_event_for_account_key.
+        - That it parses the user ID correctly.
+        - That it doesn't rely on key fetchers.
+        """
+        room_version = RoomVersions.MSC4243v12
+
+        # Make a signing key and replace the key ID from '1' to be the base64 public key
+        signing_key = signedjson.key.generate_signing_key("1")
+        verify_key_str = encode_verify_key_base64(get_verify_key(signing_key))
+        signing_key.version = verify_key_str
+        domain = "can.be.anything.com"
+        signing_user_id = f"@{verify_key_str}:{domain}"
+
+        event_dict = {
+            "type": "m.room.create",
+            "state_key": "",
+            "sender": signing_user_id,
+            "content": {
+                "room_version": room_version.identifier,
+            },
+        }
+        event_dict["signatures"] = compute_event_signature(
+            room_version, event_dict, signature_name=domain, signing_key=signing_key
+        )
+        event = make_event_from_dict(event_dict, room_version)
+        kr = keyring.Keyring(self.hs, key_fetchers=None)
+        self.get_success(kr.verify_event_for_account_key(signing_user_id, event))
 
 
 @logcontext_clean

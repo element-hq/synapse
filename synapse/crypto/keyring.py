@@ -47,7 +47,7 @@ from synapse.events import EventBase
 from synapse.events.utils import prune_event_dict
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import JsonDict
+from synapse.types import JsonDict, UserID
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import yieldable_gather_results
 from synapse.util.batching_queue import BatchingQueue
@@ -83,6 +83,7 @@ class VerifyJsonRequest:
     get_json_object: Callable[[], JsonDict]
     minimum_valid_until_ts: int
     key_ids: List[str]
+    key_ids_are_public_keys: bool = False
 
     @staticmethod
     def from_json_object(
@@ -118,6 +119,7 @@ class VerifyJsonRequest:
             lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
             minimum_valid_until_ms,
             key_ids=key_ids,
+            key_ids_are_public_keys=False,
         )
 
 
@@ -265,6 +267,38 @@ class Keyring:
             )
         )
 
+    async def verify_event_for_account_key(
+        self,
+        user_id_str: str,
+        event: EventBase,
+    ) -> None:
+        """Verify that the given event has been signed by the provided account key, as determined by
+        the user_id provided.
+
+        Args:
+            user_id_str: The MSC4243 user ID, consisting of an account key localpart and a domain.
+            event: The PDU that should be signed with the account key. Room version must support MSC4243.
+        """
+        assert event.room_version.msc4243_account_keys
+        user_id = UserID.from_string(user_id_str)
+        key_ids = list(event.signatures.get(user_id.domain, []))
+        # only keep the key ID that matches the desired user ID we want to verify as.
+        # Events can be signed by multiple parties e.g invites, restricted joins
+        expected_key_id = "ed25519:" + user_id.localpart
+        key_ids = [key_id for key_id in key_ids if key_id == expected_key_id]
+        assert len(key_ids) == 1  # the user must have signed the event.
+        await self.process_request(
+            VerifyJsonRequest(
+                user_id.domain,
+                # We defer creating the redacted json object, as it uses a lot more
+                # memory than the Event object itself.
+                lambda: prune_event_dict(event.room_version, event.get_pdu_json()),
+                0,  # No validity times
+                key_ids=key_ids,
+                key_ids_are_public_keys=True,
+            )
+        )
+
     async def process_request(self, verify_request: VerifyJsonRequest) -> None:
         """Processes the `VerifyJsonRequest`. Raises if the object is not signed
         by the server, the signatures don't match or we failed to fetch the
@@ -277,6 +311,15 @@ class Keyring:
                 f"Not signed by {verify_request.server_name}",
                 Codes.UNAUTHORIZED,
             )
+
+        if verify_request.key_ids_are_public_keys:
+            # No need to fetch keys as we have them already.
+            assert len(verify_request.key_ids) == 1
+            key_id = verify_request.key_ids[0]
+            key_bytes = decode_base64(key_id.removeprefix("ed25519:"))
+            verify_key = decode_verify_key_bytes(key_id, key_bytes)
+            await self._process_json(verify_key, verify_request)
+            return
 
         found_keys: Dict[str, FetchKeyResult] = {}
 

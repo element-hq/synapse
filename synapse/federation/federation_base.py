@@ -241,16 +241,28 @@ async def _check_sigs_on_pdu(
     sender_domain = get_domain_from_id(pdu.sender)
     if not _is_invite_via_3pid(pdu):
         try:
-            await keyring.verify_event_for_server(
-                sender_domain,
-                pdu,
-                pdu.origin_server_ts if room_version.enforce_key_validity else 0,
-            )
+            if pdu.room_version.msc4243_account_keys:
+                await keyring.verify_event_for_account_key(
+                    pdu.sender,
+                    pdu,
+                )
+            else:
+                await keyring.verify_event_for_server(
+                    sender_domain,
+                    pdu,
+                    pdu.origin_server_ts if room_version.enforce_key_validity else 0,
+                )
         except Exception as e:
-            raise InvalidEventSignatureError(
-                f"unable to verify signature for sender domain {sender_domain}: {e}",
-                pdu.event_id,
-            ) from None
+            if pdu.room_version.msc4243_account_keys:
+                raise InvalidEventSignatureError(
+                    f"unable to verify signature for account key {pdu.sender}: {e}",
+                    pdu.event_id,
+                ) from None
+            else:
+                raise InvalidEventSignatureError(
+                    f"unable to verify signature for sender domain {sender_domain}: {e}",
+                    pdu.event_id,
+                ) from None
 
     # now let's look for events where the sender's domain is different to the
     # event id's domain (normally only the case for joins/leaves), and add additional
@@ -283,11 +295,17 @@ async def _check_sigs_on_pdu(
             pdu.content[EventContentFields.AUTHORISING_USER]
         )
         try:
-            await keyring.verify_event_for_server(
-                authorising_server,
-                pdu,
-                pdu.origin_server_ts if room_version.enforce_key_validity else 0,
-            )
+            if pdu.room_version.msc4243_account_keys:
+                await keyring.verify_event_for_account_key(
+                    pdu.content[EventContentFields.AUTHORISING_USER],
+                    pdu,
+                )
+            else:
+                await keyring.verify_event_for_server(
+                    authorising_server,
+                    pdu,
+                    pdu.origin_server_ts if room_version.enforce_key_validity else 0,
+                )
         except Exception as e:
             raise InvalidEventSignatureError(
                 f"unable to verify signature for authorising serve {authorising_server}: {e}",
