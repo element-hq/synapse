@@ -1145,6 +1145,9 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
+    # Register the cleanup hook
+    cleanup_func(hs.cleanup)
+
     # Install @cache_in_self attributes
     for key, val in kwargs.items():
         setattr(hs, "_" + key, val)
@@ -1156,6 +1159,16 @@ def setup_test_homeserver(
     # synchronous for testing.
     with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
         hs.setup()
+
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
+    # can just start the background tasks straight away after `hs.setup`. (compare this
+    # with where we call `hs.start_background_tasks()` outside of the test environment).
+    if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
 
     # Since we've changed the databases to run DB transactions on the same
     # thread, we need to stop the event fetcher hogging that one thread.

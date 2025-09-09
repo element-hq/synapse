@@ -76,11 +76,17 @@ class AuthMetadataServlet(RestServlet):
     Advertises the OAuth 2.0 server metadata for the homeserver.
     """
 
-    PATTERNS = client_patterns(
-        "/org.matrix.msc2965/auth_metadata$",
-        unstable=True,
-        releases=(),
-    )
+    PATTERNS = [
+        *client_patterns(
+            "/auth_metadata$",
+            releases=("v1",),
+        ),
+        *client_patterns(
+            "/org.matrix.msc2965/auth_metadata$",
+            unstable=True,
+            releases=(),
+        ),
+    ]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()

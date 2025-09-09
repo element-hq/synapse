@@ -57,6 +57,7 @@ from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
 from synapse.events.snapshot import (
     EventContext,
+    EventPersistencePair,
     UnpersistedEventContext,
     UnpersistedEventContextBase,
 )
@@ -1439,7 +1440,7 @@ class EventCreationHandler:
     async def handle_new_client_event(
         self,
         requester: Requester,
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
         ignore_shadow_ban: bool = False,
@@ -1651,7 +1652,7 @@ class EventCreationHandler:
     async def _persist_events(
         self,
         requester: Requester,
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
     ) -> EventBase:
@@ -1737,7 +1738,7 @@ class EventCreationHandler:
             raise
 
     async def cache_joined_hosts_for_events(
-        self, events_and_context: List[Tuple[EventBase, EventContext]]
+        self, events_and_context: List[EventPersistencePair]
     ) -> None:
         """Precalculate the joined hosts at each of the given events, when using Redis, so that
         external federation senders don't have to recalculate it themselves.
@@ -1843,7 +1844,7 @@ class EventCreationHandler:
     async def persist_and_notify_client_events(
         self,
         requester: Requester,
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
     ) -> EventBase:
