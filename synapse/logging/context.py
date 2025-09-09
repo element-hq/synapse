@@ -51,7 +51,6 @@ from typing import (
 
 import attr
 from typing_extensions import ParamSpec
-from traceback import format_stack
 
 from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
@@ -380,14 +379,6 @@ class LoggingContext:
 
     def __enter__(self) -> "LoggingContext":
         """Enters this logging context into thread local storage"""
-        logger.debug(
-            "LoggingContext(%s) enter (previous_context=%s) (source: %s)",
-            self,
-            self.previous_context,
-            format_stack()[-2]
-            .replace("/home/eric/Documents/github/element/synapse/", "")
-            .replace("\n", "->"),
-        )
         old_context = set_current_context(self)
         if self.previous_context != old_context:
             logcontext_error(
@@ -410,24 +401,13 @@ class LoggingContext:
         Returns:
             None to avoid suppressing any exceptions that were thrown.
         """
-        logger.debug(
-            "LoggingContext(%s) exit: returning to previous_context=%s  (source: %s)",
-            self,
-            self.previous_context,
-            format_stack()[-2]
-            .replace("/home/eric/Documents/github/element/synapse/", "")
-            .replace("\n", "->"),
-        )
         current = set_current_context(self.previous_context)
         if current is not self:
             if current is SENTINEL_CONTEXT:
-                logcontext_error(
-                    "LoggingContext: Expected logging context %s was lost" % (self,)
-                )
+                logcontext_error("Expected logging context %s was lost" % (self,))
             else:
                 logcontext_error(
-                    "LoggingContext: Expected logging context %s but found %s"
-                    % (self, current)
+                    "Expected logging context %s but found %s" % (self, current)
                 )
 
         # the fact that we are here suggests that the caller thinks that everything
@@ -648,14 +628,6 @@ class PreserveLoggingContext:
         self._new_context = new_context
 
     def __enter__(self) -> None:
-        logger.debug(
-            "PreserveLoggingContext(%s) enter (old_context=%s) (source: %s)",
-            self._new_context,
-            current_context(),
-            format_stack()[-2]
-            .replace("/home/eric/Documents/github/element/synapse/", "")
-            .replace("\n", "->"),
-        )
         self._old_context = set_current_context(self._new_context)
 
     def __exit__(
@@ -664,25 +636,16 @@ class PreserveLoggingContext:
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
-        logger.debug(
-            "PreserveLoggingContext(%s) exit returning to old_context=%s (source: %s)",
-            self._new_context,
-            self._old_context,
-            format_stack()[-2]
-            .replace("/home/eric/Documents/github/element/synapse/", "")
-            .replace("\n", "->"),
-        )
         context = set_current_context(self._old_context)
 
         if context != self._new_context:
             if not context:
                 logcontext_error(
-                    "PreserveLoggingContext: Expected logging context %s was lost"
-                    % (self._new_context,)
+                    "Expected logging context %s was lost" % (self._new_context,)
                 )
             else:
                 logcontext_error(
-                    "PreserveLoggingContext: Expected logging context %s but found %s"
+                    "Expected logging context %s but found %s"
                     % (
                         self._new_context,
                         context,
@@ -713,10 +676,6 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
         raise TypeError("'context' argument may not be None")
 
     current = current_context()
-
-    logger.debug(
-        "set_current_context(%s) old_context=%s - %s", context, current, format_stack()
-    )
 
     if current is not context:
         rusage = get_thread_resource_usage()

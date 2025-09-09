@@ -415,7 +415,6 @@ def main() -> None:
             redirect_stdio_to_logs()
 
         run(hs)
-    logger.info("asdf outside main")
 
 
 if __name__ == "__main__":
