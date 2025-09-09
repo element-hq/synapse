@@ -896,6 +896,15 @@ def run_coroutine_in_background(
     coroutine directly rather than a function. We can do this because coroutines
     do not run until called, and so calling an async function without awaiting
     cannot change the log contexts.
+
+    This is an ergonomic helper so we can do this:
+    ```python
+    run_coroutine_in_background(func1(arg1))
+    ```
+    Rather than having to do this:
+    ```python
+    run_in_background(lambda: func1(arg1))
+    ```
     """
     calling_context = current_context()
 
