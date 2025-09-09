@@ -328,9 +328,6 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        # TODO: Because the deferred returned by `run_as_background_process` does not
-        # follow the synapse logcontext rules, this probably messes with log contexts.
-        # Use `make_deferred_yieldable`
         await self._initialized_from_db
 
         next_send_ts = await self._store.cancel_delayed_event(
@@ -357,9 +354,6 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        # TODO: Because the deferred returned by `run_as_background_process` does not
-        # follow the synapse logcontext rules, this probably messes with log contexts.
-        # Use `make_deferred_yieldable`
         await self._initialized_from_db
 
         next_send_ts = await self._store.restart_delayed_event(
@@ -386,9 +380,6 @@ class DelayedEventsHandler:
         # Use standard request limiter for sending delayed events on-demand,
         # as an on-demand send is similar to sending a regular event.
         await self._request_ratelimiter.ratelimit(requester)
-        # TODO: Because the deferred returned by `run_as_background_process` does not
-        # follow the synapse logcontext rules, this probably messes with log contexts.
-        # Use `make_deferred_yieldable`
         await self._initialized_from_db
 
         event, next_send_ts = await self._store.process_target_delayed_event(
