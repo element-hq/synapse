@@ -697,22 +697,23 @@ class DatabasePool:
         self._previous_loop_ts = monotonic_time()
 
         def loop() -> None:
-            curr = self._current_txn_total_time
-            prev = self._previous_txn_total_time
-            self._previous_txn_total_time = curr
+            with LoggingContext("db.profiling"):
+                curr = self._current_txn_total_time
+                prev = self._previous_txn_total_time
+                self._previous_txn_total_time = curr
 
-            time_now = monotonic_time()
-            time_then = self._previous_loop_ts
-            self._previous_loop_ts = time_now
+                time_now = monotonic_time()
+                time_then = self._previous_loop_ts
+                self._previous_loop_ts = time_now
 
-            duration = time_now - time_then
-            ratio = (curr - prev) / duration
+                duration = time_now - time_then
+                ratio = (curr - prev) / duration
 
-            top_three_counters = self._txn_perf_counters.interval(duration, limit=3)
+                top_three_counters = self._txn_perf_counters.interval(duration, limit=3)
 
-            perf_logger.debug(
-                "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
-            )
+                perf_logger.debug(
+                    "Total database time: %.3f%% {%s}", ratio * 100, top_three_counters
+                )
 
         self._clock.looping_call(loop, 10000)
 
