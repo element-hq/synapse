@@ -86,13 +86,13 @@ class AccountKeysStore(SQLBaseStore):
             desc="get_or_create_account_key_user_id_for_account_name_user_id.get_key_txn",
         )
         if row is not None:
-            return row[0], decode_account_key(row[1], get_localpart_from_id(row[0]))
+            return row[0], decode_account_key(row[1])
 
         # create a new account key for this account inside a txn to ensure we lock correctly.
         def create_key_txn(txn: LoggingTransaction) -> Tuple[str, str]:
-            key = generate_account_key()
+            key, public_key_str = generate_account_key()
             account_key_user_id = (
-                f"@{key.version}:{get_domain_from_id(account_name_user_id)}"
+                f"@{public_key_str}:{get_domain_from_id(account_name_user_id)}"
             )
 
             # Race to insert the key. The first one to make it will be returned here as we don't clobber
@@ -117,7 +117,7 @@ class AccountKeysStore(SQLBaseStore):
             "get_or_create_account_key_user_id_for_account_name_user_id.create_key_txn",
             create_key_txn,
         )
-        return row[0], decode_account_key(row[1], get_localpart_from_id(row[0]))
+        return row[0], decode_account_key(row[1])
 
     async def get_account_name_user_ids_for_account_key_user_ids(
         self,
@@ -151,16 +151,15 @@ class AccountKeysStore(SQLBaseStore):
         return {row[0]: row[1] for row in rows}
 
 
-def generate_account_key() -> SigningKey:
-    signing_key = generate_signing_key("1")  # '1' will be replaced with the public key
+def generate_account_key() -> Tuple[SigningKey, str]:
+    signing_key = generate_signing_key("1")
     verify_key_str = encode_base64(get_verify_key(signing_key).encode(), urlsafe=True)
-    signing_key.version = verify_key_str
-    return signing_key
+    return signing_key, verify_key_str
 
 
-def decode_account_key(signing_key: str, verify_key: str) -> SigningKey:
+def decode_account_key(signing_key: str) -> SigningKey:
     return decode_signing_key_base64(
         "ed25519",
-        verify_key,
+        "1",
         signing_key,
     )

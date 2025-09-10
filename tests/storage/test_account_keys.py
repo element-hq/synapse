@@ -44,12 +44,10 @@ class AccountKeysTestCase(unittest.HomeserverTestCase):
         )
         # asserts the localpart is unpadded urlsafe base64
         self.assertRegex(key_user_id, r"^@[A-Za-z0-9\-_]{43}:test$")
-        # asserts the key ID is the localpart
-        self.assertEquals(key.version, get_localpart_from_id(key_user_id))
-        # asserts the key ID is the public key
-        self.assertEquals(
-            key.version, encode_base64(get_verify_key(key).encode(), urlsafe=True)
-        )
+        # asserts the public key is the localpart
+        self.assertEquals(encode_base64(get_verify_key(key).encode(), urlsafe=True), get_localpart_from_id(key_user_id))
+        # asserts the key ID is 1
+        self.assertEquals(key.version, "1")
         # assert that repeated calls return the same key
         key_user_id2, key2 = self.get_success(
             self.store.get_or_create_account_key_user_id_for_account_name_user_id(
@@ -60,7 +58,7 @@ class AccountKeysTestCase(unittest.HomeserverTestCase):
         self.assertEquals(key.encode(), key2.encode())
 
     def test_get_account_name_user_ids_for_account_key_user_ids(self) -> None:
-        key_user_id, key = self.get_success(
+        key_user_id, _ = self.get_success(
             self.store.get_or_create_account_key_user_id_for_account_name_user_id(
                 self.user,
             )
