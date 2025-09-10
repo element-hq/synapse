@@ -74,7 +74,7 @@ async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[
 ```
 
 **<span style="color:red">
-Caution: This callback is currently experimental . The method signature or behaviour
+Caution: This callback is currently experimental. The method signature or behaviour
 may change without notice.
 </span>**
 
@@ -86,14 +86,18 @@ The arguments passed to this callback are:
 
 If the callback returns a list then it will be used as the limits to be applied to the request.
 
-If an empty list is returned then no limits are applied.
+If an empty list is returned then no limits are applied (**warning:** users will be able
+to upload as much data as they desire).
 
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `None`, Synapse falls through to the next one. The value of the first
 callback that does not return `None` will be used. If this happens, Synapse will not call
 any of the subsequent implementations of this callback.
 
-If no module returns a non-`None` value then the default [media upload limits config](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits) will be used.
+If there are no registered modules, or if all modules return `None`, then
+the default
+[media upload limits config](../usage/configuration/config_documentation.html#media_upload_limits)
+will be used.
 
 ### `on_media_upload_limit_exceeded`
 
@@ -104,7 +108,7 @@ async def on_media_upload_limit_exceeded(user_id: str, limit: MediaUploadLimit, 
 ```
 
 **<span style="color:red">
-Caution: This callback is currently experimental . The method signature or behaviour
+Caution: This callback is currently experimental. The method signature or behaviour
 may change without notice.
 </span>**
 
