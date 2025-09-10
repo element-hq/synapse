@@ -1,3 +1,51 @@
+# Synapse 1.138.0 (2025-09-09)
+
+No significant changes since 1.138.0rc1.
+
+
+
+
+# Synapse 1.138.0rc1 (2025-09-02)
+
+### Features
+
+- Support for the stable endpoint and scopes of [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) & co. ([\#18549](https://github.com/element-hq/synapse/issues/18549))
+
+### Bugfixes
+
+- Improve database performance of [MSC4293](https://github.com/matrix-org/matrix-spec-proposals/pull/4293) - Redact on Kick/Ban. ([\#18851](https://github.com/element-hq/synapse/issues/18851))
+- Do not throw an error when fetching a rejected delayed state event on startup. ([\#18858](https://github.com/element-hq/synapse/issues/18858))
+
+### Improved Documentation
+
+- Fix worker documentation incorrectly indicating all room Admin API requests were capable of being handled by workers. ([\#18853](https://github.com/element-hq/synapse/issues/18853))
+
+### Internal Changes
+
+- Instrument `_ByteProducer` with tracing to measure potential dead time while writing bytes to the request. ([\#18804](https://github.com/element-hq/synapse/issues/18804))
+- Switch to OpenTracing's `ContextVarsScopeManager` instead of our own custom `LogContextScopeManager`. ([\#18849](https://github.com/element-hq/synapse/issues/18849))
+- Trace how much work is being done while "recursively fetching redactions". ([\#18854](https://github.com/element-hq/synapse/issues/18854))
+- Link [upstream Twisted bug](https://github.com/twisted/twisted/issues/12498) tracking the problem that explains why we have to use a `Producer` to write bytes to the request. ([\#18855](https://github.com/element-hq/synapse/issues/18855))
+- Introduce `EventPersistencePair` type. ([\#18857](https://github.com/element-hq/synapse/issues/18857))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/add-to-project from c0c5949b017d0d4a39f7ba888255881bdac2a823 to 4515659e2b458b27365e167605ac44f219494b66. ([\#18863](https://github.com/element-hq/synapse/issues/18863))
+* Bump actions/checkout from 4.3.0 to 5.0.0. ([\#18834](https://github.com/element-hq/synapse/issues/18834))
+* Bump anyhow from 1.0.98 to 1.0.99. ([\#18841](https://github.com/element-hq/synapse/issues/18841))
+* Bump docker/login-action from 3.4.0 to 3.5.0. ([\#18835](https://github.com/element-hq/synapse/issues/18835))
+* Bump dtolnay/rust-toolchain from b3b07ba8b418998c39fb20f53e8b695cdcc8de1b to e97e2d8cc328f1b50210efc529dca0028893a2d9. ([\#18862](https://github.com/element-hq/synapse/issues/18862))
+* Bump phonenumbers from 9.0.11 to 9.0.12. ([\#18837](https://github.com/element-hq/synapse/issues/18837))
+* Bump regex from 1.11.1 to 1.11.2. ([\#18864](https://github.com/element-hq/synapse/issues/18864))
+* Bump reqwest from 0.12.22 to 0.12.23. ([\#18842](https://github.com/element-hq/synapse/issues/18842))
+* Bump ruff from 0.12.7 to 0.12.10. ([\#18865](https://github.com/element-hq/synapse/issues/18865))
+* Bump serde_json from 1.0.142 to 1.0.143. ([\#18866](https://github.com/element-hq/synapse/issues/18866))
+* Bump types-bleach from 6.2.0.20250514 to 6.2.0.20250809. ([\#18838](https://github.com/element-hq/synapse/issues/18838))
+* Bump types-jsonschema from 4.25.0.20250720 to 4.25.1.20250822. ([\#18867](https://github.com/element-hq/synapse/issues/18867))
+* Bump types-psycopg2 from 2.9.21.20250718 to 2.9.21.20250809. ([\#18836](https://github.com/element-hq/synapse/issues/18836))
+
 # Synapse 1.137.0 (2025-08-26)
 
 No significant changes since 1.137.0rc1.
