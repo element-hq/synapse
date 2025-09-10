@@ -135,11 +135,10 @@ class Clock:
 
     def looping_call(
         self,
-        *,
         description: str,
-        server_name: str,
         f: Callable[P, object],
         msec: float,
+        *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function repeatedly.
@@ -156,29 +155,26 @@ class Clock:
 
         Args:
             description: Description the of the task, for logging purposes.
-            server_name: The homeserver name that this looping task is being run for
-                (this should be `hs.hostname`).
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
         return self._looping_call_common(
-            description=description,
-            server_name=server_name,
-            f=f,
-            msec=msec,
-            now=False,
+            description,
+            f,
+            msec,
+            False,
+            *args,
             **kwargs,
         )
 
     def looping_call_now(
         self,
-        *,
         description: str,
-        server_name: str,
         f: Callable[P, object],
         msec: float,
+        *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function immediately, and then repeatedly thereafter.
@@ -191,30 +187,27 @@ class Clock:
 
         Args:
             description: Description the of the task, for logging purposes.
-            server_name: The homeserver name that this looping task is being run for
-                (this should be `hs.hostname`).
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
         return self._looping_call_common(
-            description=description,
-            server_name=server_name,
-            f=f,
-            msec=msec,
-            now=True,
+            description,
+            f,
+            msec,
+            True,
+            *args,
             **kwargs,
         )
 
     def _looping_call_common(
         self,
-        *,
         description: str,
-        server_name: str,
         f: Callable[P, object],
         msec: float,
         now: bool,
+        *args: P.args,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
@@ -224,7 +217,7 @@ class Clock:
                 with context.LoggingContext(description):
                     return f(*args, **kwargs)
 
-        call = task.LoopingCall(wrapped_f, **kwargs)
+        call = task.LoopingCall(wrapped_f, *args, **kwargs)
         call.clock = self._reactor
         d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
