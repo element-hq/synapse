@@ -420,8 +420,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             except Exception:
                 pass
 
-        self.get_clock().cancel_all_looping_calls()
-        self.get_clock().cancel_all_delayed_calls()
+        self.get_clock().shutdown()
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:

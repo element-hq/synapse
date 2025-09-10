@@ -75,7 +75,7 @@ class StatsHandler:
 
             # We kick this off so that we don't have to wait for a change before
             # we start populating stats
-            self.clock.call_later(0, self.notify_new_event)
+            self.clock.call_later(0, False, self.notify_new_event)
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""

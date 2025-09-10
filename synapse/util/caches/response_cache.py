@@ -198,7 +198,7 @@ class ResponseCache(Generic[KV]):
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
             if self.timeout_sec and context.should_cache:
-                self.clock.call_later(self.timeout_sec, self._entry_timeout, key)
+                self.clock.call_later(self.timeout_sec, False, self._entry_timeout, key)
             else:
                 # otherwise, remove the result immediately.
                 self.unset(key)

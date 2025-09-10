@@ -229,7 +229,7 @@ class EmailPusher(Pusher):
 
         if soonest_due_at is not None:
             self.timed_call = self.hs.get_clock().call_later(
-                self.seconds_until(soonest_due_at), self.on_timer
+                self.seconds_until(soonest_due_at), True, self.on_timer
             )
 
     async def save_last_stream_ordering_and_success(

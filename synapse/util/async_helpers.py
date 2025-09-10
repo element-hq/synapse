@@ -65,7 +65,7 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util import Clock
+from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 logger = logging.getLogger(__name__)
 
@@ -804,7 +804,7 @@ def timeout_deferred(
         if not new_d.called:
             new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
-    delayed_call = clock.call_later(timeout, time_it_out)
+    delayed_call = clock.call_later(timeout, False, time_it_out)
 
     def convert_cancelled(value: Failure) -> Failure:
         # if the original deferred was cancelled, and our timeout has fired, then
@@ -967,7 +967,12 @@ class AwakenableSleeper:
 
         # Create a deferred that gets called in N seconds
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(delay_ms / 1000, sleep_deferred.callback, None)
+        call = self._clock.call_later(
+            delay_ms / 1000,
+            True if delay_ms / 1000 > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
+            sleep_deferred.callback,
+            None,
+        )
 
         # Create a deferred that will get called if `wake` is called with
         # the same `name`.
@@ -1022,7 +1027,12 @@ class DeferredEvent:
 
         # Create a deferred that gets called in N seconds
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._clock.call_later(timeout_seconds, sleep_deferred.callback, None)
+        call = self._clock.call_later(
+            timeout_seconds,
+            True if timeout_seconds > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
+            sleep_deferred.callback,
+            None,
+        )
 
         try:
             await make_deferred_yieldable(

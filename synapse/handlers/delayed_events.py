@@ -43,6 +43,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
 
@@ -90,7 +91,7 @@ class DelayedEventsHandler:
                 hs.get_notifier().add_replication_callback(self.notify_new_event)
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
-                self._clock.call_later(0, self.notify_new_event)
+                self._clock.call_later(0, False, self.notify_new_event)
 
                 # Delayed events that are already marked as processed on startup might not have been
                 # sent properly on the last run of the server, so unmark them to send them again.
@@ -453,6 +454,7 @@ class DelayedEventsHandler:
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
                 delay_sec,
+                True if delay_sec > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
                 run_as_background_process,
                 "_send_on_timeout",
                 self.server_name,

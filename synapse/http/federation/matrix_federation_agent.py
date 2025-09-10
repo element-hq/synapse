@@ -49,7 +49,6 @@ from synapse.http.federation.well_known_resolver import WellKnownResolver
 from synapse.http.proxyagent import ProxyAgent
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +123,6 @@ class MatrixFederationAgent:
         # addresses, to prevent DNS rebinding.
         reactor = BlocklistingReactorWrapper(reactor, ip_allowlist, ip_blocklist)
 
-        self._clock = Clock(reactor)
         self._pool = HTTPConnectionPool(reactor)
         self._pool.retryAutomatically = False
         self._pool.maxPersistentPerHost = 5

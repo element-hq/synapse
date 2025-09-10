@@ -109,6 +109,9 @@ def unwrapFirstError(failure: Failure) -> Failure:
 P = ParamSpec("P")
 
 
+CALL_LATER_DELAY_TRACKING_THRESHOLD_S = 60
+
+
 class Clock:
     """
     A Clock wraps a Twisted reactor and provides utilities on top of it.
@@ -126,6 +129,7 @@ class Clock:
 
     def __init__(self, reactor: IReactorTime) -> None:
         self._reactor = reactor
+
         self._delayed_call_id: int = 0
         """Unique ID used to track delayed calls"""
 
@@ -135,10 +139,18 @@ class Clock:
         self._call_id_to_delayed_call: Dict[int, IDelayedCall] = {}
         """Mapping from unique call ID to delayed call"""
 
-    async def sleep(self, seconds: float) -> None:
+        self._is_shutdown = False
+        """Whether shutdown has been requested by the HomeServer"""
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        self.cancel_all_looping_calls()
+        self.cancel_all_delayed_calls()
+
+    async def sleep(self, seconds: float, track_for_shutdown: bool = False) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         with context.PreserveLoggingContext():
-            self.call_later(seconds, d.callback, seconds)
+            self.call_later(seconds, track_for_shutdown, d.callback, seconds)
             await d
 
     def time(self) -> float:
@@ -208,7 +220,11 @@ class Clock:
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
-        call = task.LoopingCall(f, *args, **kwargs)
+        if self._is_shutdown:
+            raise Exception("Cannot start looping call. Clock has been shutdown")
+        # We can ignore the lint here since this is the one location LoopingCall's
+        # should be created.
+        call = task.LoopingCall(f, *args, **kwargs)  # type: ignore[looping-call-not-tracked]
         call.clock = self._reactor
         d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
@@ -232,7 +248,12 @@ class Clock:
         self._looping_calls.clear()
 
     def call_later(
-        self, delay: float, callback: Callable, *args: Any, **kwargs: Any
+        self,
+        delay: float,
+        track_for_shutdown: bool,
+        callback: Callable,
+        *args: Any,
+        **kwargs: Any,
     ) -> IDelayedCall:
         """Call something later
 
@@ -246,17 +267,27 @@ class Clock:
             **kwargs: Key arguments to pass to function.
         """
 
-        call_id = self._delayed_call_id
-        self._delayed_call_id = self._delayed_call_id + 1
+        if self._is_shutdown:
+            raise Exception("Cannot start delayed call. Clock has been shutdown")
 
-        def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            callback(*args, **kwargs)
-            self._call_id_to_delayed_call.pop(call_id)
+        if track_for_shutdown:
+            call_id = self._delayed_call_id
+            self._delayed_call_id = self._delayed_call_id + 1
 
-        with context.PreserveLoggingContext():
-            call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
-            self._call_id_to_delayed_call[call_id] = call
-            return call
+            def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+                callback(*args, **kwargs)
+                self._call_id_to_delayed_call.pop(call_id)
+
+            with context.PreserveLoggingContext():
+                # We can ignore the lint here since this is the one location callLater
+                # should be called.
+                call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
+                self._call_id_to_delayed_call[call_id] = call
+                return call
+        else:
+            # We can ignore the lint here since this is the one location callLater should
+            # be called.
+            return self._reactor.callLater(delay, callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         """

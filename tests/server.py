@@ -899,7 +899,7 @@ class FakeTransport:
             # some implementations of IProducer (for example, FileSender)
             # don't return a deferred.
             d = maybeDeferred(self.producer.resumeProducing)
-            d.addCallback(lambda: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
+            d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
 
         if not streaming:
             self._reactor.callLater(0.0, _produce)  # type: ignore[call-later-not-tracked]

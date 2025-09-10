@@ -513,6 +513,7 @@ class _Recoverer:
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
         self.scheduled_recovery = self.clock.call_later(
             delay,
+            True,
             run_as_background_process,
             "as-recoverer",
             self.server_name,

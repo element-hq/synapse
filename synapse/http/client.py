@@ -171,7 +171,7 @@ def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCa
     """
 
     def _scheduler(x: Callable[[], object]) -> IDelayedCall:
-        return clock.call_later(_EPSILON, x)
+        return clock.call_later(_EPSILON, False, x)
 
     return _scheduler
 
