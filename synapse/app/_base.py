@@ -72,6 +72,7 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
+from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -80,7 +81,6 @@ from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
-from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.types import ISynapseReactor, StrCollection
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches.lrucache import setup_expire_lru_cache_entries
