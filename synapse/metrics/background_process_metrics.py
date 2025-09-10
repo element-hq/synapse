@@ -228,6 +228,11 @@ def run_as_background_process(
     clock.looping_call and friends (or for firing-and-forgetting in the middle of a
     normal synapse async function).
 
+    Because the returned Deferred does not follow the synapse logcontext rules, awaiting
+    the result of this function will result in the log context being cleared (bad). In
+    order to properly await the result of this function and maintain the current log
+    context, use `make_deferred_yieldable`.
+
     Args:
         desc: a description for this background process type
         server_name: The homeserver name that this background process is being run for
@@ -280,6 +285,18 @@ def run_as_background_process(
                     name=desc, **{SERVER_NAME_LABEL: server_name}
                 ).dec()
 
+    # To explain how the log contexts work here:
+    #  - When this function is called, the current context is stored (using
+    #    `PreserveLoggingContext`), we kick off the background task, and we restore the
+    #    original context before returning (also part of `PreserveLoggingContext`).
+    #  - When the background task finishes, we don't want to leak our background context
+    #    into the reactor which would erroneously get attached to the next operation
+    #    picked up by the event loop. We use `PreserveLoggingContext` to set the
+    #    `sentinel` context and means the new `BackgroundProcessLoggingContext` will
+    #    remember the `sentinel` context as its previous context to return to when it
+    #    exits and yields control back to the reactor.
+    #
+    # TODO: Why can't we simplify to using `return run_in_background(run)`?
     with PreserveLoggingContext():
         # Note that we return a Deferred here so that it can be used in a
         # looping_call and other places that expect a Deferred.
