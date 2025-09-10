@@ -121,6 +121,8 @@ class Clock:
 
     async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
+        # Start task in the `sentinel` logcontext, to avoid leaking the current context
+        # into the reactor once it finishes.
         with context.PreserveLoggingContext():
             self._reactor.callLater(seconds, d.callback, seconds)
             await d
@@ -207,11 +209,15 @@ class Clock:
             with context.LoggingContext("looping_call"):
                 return f(*args, **kwargs)
 
-        call = task.LoopingCall(wrapped_f, *args, **kwargs)
-        call.clock = self._reactor
-        d = call.start(msec / 1000.0, now=now)
-        d.addErrback(log_failure, "Looping call died", consumeErrors=False)
-        return call
+        # Start task in the `sentinel` logcontext, to avoid leaking the current context
+        # into the reactor if `d` ever finishes (perhaps someone cancels the looping
+        # call)
+        with context.PreserveLoggingContext():
+            call = task.LoopingCall(wrapped_f, *args, **kwargs)
+            call.clock = self._reactor
+            d = call.start(msec / 1000.0, now=now)
+            d.addErrback(log_failure, "Looping call died", consumeErrors=False)
+            return call
 
     def call_later(
         self, delay: float, callback: Callable, *args: Any, **kwargs: Any
@@ -241,7 +247,10 @@ class Clock:
             with context.LoggingContext("call_later"):
                 callback(*args, **kwargs)
 
-        return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+        # Start task in the `sentinel` logcontext, to avoid leaking the current context
+        # into the reactor once it finishes.
+        with context.PreserveLoggingContext():
+            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:
