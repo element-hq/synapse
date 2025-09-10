@@ -3001,7 +3001,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
 
         config["media_storage_providers"] = [provider_config]
 
-        # default limits to use  are the limits that we are testing
+        # default limits to use
         config["media_upload_limits"] = [
             {"time_period": "1d", "max_size": "1K"},
             {"time_period": "1w", "max_size": "3K"},
