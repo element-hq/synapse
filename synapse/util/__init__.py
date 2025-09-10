@@ -196,11 +196,12 @@ class Clock:
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> object:
             # Because this is a callback from the reactor, we will be using the
             # `sentinel` log context at this point. We want to log with some logcontext
-            # as we want to know which server the logs came from. This also ensures that
-            # we return to the `sentinel` context when we exit this function and yield
-            # control back to the reactor to avoid leaking the current logcontext to the
-            # reactor (which would then get picked up and associated with the next thing
-            # the reactor does)
+            # as we want to know which server the logs came from.
+            #
+            # This also ensures that we return to the `sentinel` context when we exit
+            # this function and yield control back to the reactor to avoid leaking the
+            # current logcontext to the reactor (which would then get picked up and
+            # associated with the next thing the reactor does)
             with context.LoggingContext("looping_call"):
                 return f(*args, **kwargs)
 
