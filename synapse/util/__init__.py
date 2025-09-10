@@ -135,7 +135,6 @@ class Clock:
 
     def looping_call(
         self,
-        description: str,
         f: Callable[P, object],
         msec: float,
         *args: P.args,
@@ -151,27 +150,18 @@ class Clock:
         `twisted.internet.task.LoopingCall`.
 
         Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in run_as_background_process.
+        other than trivial, you probably want to wrap it in `run_as_background_process`.
 
         Args:
-            description: Description the of the task, for logging purposes.
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(
-            description,
-            f,
-            msec,
-            False,
-            *args,
-            **kwargs,
-        )
+        return self._looping_call_common(f, msec, False, *args, **kwargs)
 
     def looping_call_now(
         self,
-        description: str,
         f: Callable[P, object],
         msec: float,
         *args: P.args,
@@ -186,24 +176,15 @@ class Clock:
         you probably want to wrap it in `run_as_background_process`.
 
         Args:
-            description: Description the of the task, for logging purposes.
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
-        return self._looping_call_common(
-            description,
-            f,
-            msec,
-            True,
-            *args,
-            **kwargs,
-        )
+        return self._looping_call_common(f, msec, True, *args, **kwargs)
 
     def _looping_call_common(
         self,
-        description: str,
         f: Callable[P, object],
         msec: float,
         now: bool,
@@ -213,9 +194,15 @@ class Clock:
         """Common functionality for `looping_call` and `looping_call_now`"""
 
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> object:
-            with context.PreserveLoggingContext():
-                with context.LoggingContext(description):
-                    return f(*args, **kwargs)
+            # Because this is a callback from the reactor, we will be using the
+            # `sentinel` log context at this point. We want to log with some logcontext
+            # as we want to know which server the logs came from. This also ensures that
+            # we return to the `sentinel` context when we exit this function and yield
+            # control back to the reactor to avoid leaking the current logcontext to the
+            # reactor (which would then get picked up and associated with the next thing
+            # the reactor does)
+            with context.LoggingContext("looping_call"):
+                return f(*args, **kwargs)
 
         call = task.LoopingCall(wrapped_f, *args, **kwargs)
         call.clock = self._reactor
