@@ -28,6 +28,7 @@ from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
     PreserveLoggingContext,
+    _Sentinel,
     current_context,
     make_deferred_yieldable,
     nested_logging_context,
@@ -44,26 +45,56 @@ reactor = cast(ISynapseReactor, _reactor)
 class LoggingContextTestCase(unittest.TestCase):
     def _check_test_key(self, value: str) -> None:
         context = current_context()
-        assert isinstance(context, LoggingContext)
-        self.assertEqual(context.name, value)
+        assert isinstance(context, LoggingContext) or isinstance(context, _Sentinel), (
+            f"Expected LoggingContext({value}) but saw {context}"
+        )
+        self.assertEqual(
+            str(context), value, f"Expected LoggingContext({value}) but saw {context}"
+        )
 
     def test_with_context(self) -> None:
         with LoggingContext("test"):
             self._check_test_key("test")
 
     async def test_sleep(self) -> None:
+        """
+        Test `Clock.sleep`
+        """
         clock = Clock(reactor)
 
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
         async def competing_callback() -> None:
+            nonlocal callback_finished
+
+            # A callback from the reactor should start with the sentinel context. In
+            # other words, another task shouldn't have leaked their context to us.
+            self._check_test_key("sentinel")
+
             with LoggingContext("competing"):
                 await clock.sleep(0)
                 self._check_test_key("competing")
+
+            callback_finished = True
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
         with LoggingContext("one"):
             await clock.sleep(0)
             self._check_test_key("one")
+            await clock.sleep(0)
+            self._check_test_key("one")
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
 
     def _test_run_in_background(self, function: Callable[[], object]) -> defer.Deferred:
         sentinel_context = current_context()
