@@ -362,7 +362,7 @@ class MediaRepository:
         for limit in media_upload_limits:
             # We only need to check the amount of media uploaded by the user in
             # this latest (smaller) time period if the amount of media uploaded
-            # in a previous (larger) time period is above the limit.
+            # in a previous (larger) time period is below the limit.
             #
             # This optimization means that in the common case where the user
             # hasn't uploaded much media, we only need to query the database
