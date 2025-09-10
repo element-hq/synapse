@@ -70,7 +70,7 @@ implementations of this callback.
 _First introduced in Synapse v1.139.0_
 
 ```python
-async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[List[MediaUploadLimit]]
+async def get_media_upload_limits_for_user(user_id: str, size: int) -> Optional[List[synapse.module_api.MediaUploadLimit]]
 ```
 
 **<span style="color:red">
@@ -78,13 +78,14 @@ Caution: This callback is currently experimental. The method signature or behavi
 may change without notice.
 </span>**
 
-Called when processing a request to store content in the media repository.
+Called when processing a request to store content in the media repository. This can be used to dynamically override
+the [media upload limits configuration](../usage/configuration/config_documentation.html#media_upload_limits).
 
 The arguments passed to this callback are:
 
 * `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`) making the request.
 
-If the callback returns a list then it will be used as the limits to be applied to the request.
+If the callback returns a list then it will be used as the limits instead of those in the configuration (if any).
 
 If an empty list is returned then no limits are applied (**warning:** users will be able
 to upload as much data as they desire).
@@ -96,7 +97,7 @@ any of the subsequent implementations of this callback.
 
 If there are no registered modules, or if all modules return `None`, then
 the default
-[media upload limits config](../usage/configuration/config_documentation.html#media_upload_limits)
+[media upload limits configuration](../usage/configuration/config_documentation.html#media_upload_limits)
 will be used.
 
 ### `on_media_upload_limit_exceeded`
@@ -104,7 +105,7 @@ will be used.
 _First introduced in Synapse v1.139.0_
 
 ```python
-async def on_media_upload_limit_exceeded(user_id: str, limit: MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -> None
+async def on_media_upload_limit_exceeded(user_id: str, limit: synapse.module_api.MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -> None
 ```
 
 **<span style="color:red">
@@ -112,11 +113,17 @@ Caution: This callback is currently experimental. The method signature or behavi
 may change without notice.
 </span>**
 
-Called when a user attempts to upload media that would exceed a configured media upload limit.
+Called when a user attempts to upload media that would exceed a
+[configured media upload limit](../usage/configuration/config_documentation.html#media_upload_limits).
+
+This callback will only be called a media workers which handle [POST /_matrix/media/v3/upload](https://spec.matrix.org/v1.15/client-server-api/#post_matrixmediav3upload) requests.
+
+This could be used to inform the user that they have reached a media upload limit through through
+some external method.
 
 The arguments passed to this callback are:
 
 * `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`) making the request.
-* `limit`: The `MediaUploadLimit` that was reached.
+* `limit`: The `synapse.module_api.MediaUploadLimit` representing the limit that was reached.
 * `sent_bytes`: The number of bytes already sent during the period of the limit.
 * `attempted_bytes`: The number of bytes that the user attempted to send.
