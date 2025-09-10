@@ -149,8 +149,9 @@ class Clock:
         this functionality thanks to this function being a thin wrapper around
         `twisted.internet.task.LoopingCall`.
 
-        Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in `run_as_background_process`.
+        Note that the function will be called with generic `looping_call` logcontext, so
+        if it is anything other than a trivial task, you probably want to wrap it in
+        `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
             f: The function to call repeatedly.
@@ -172,8 +173,9 @@ class Clock:
         As with `looping_call`: subsequent calls are not scheduled until after the
         the Awaitable returned by a previous call has finished.
 
-        Also as with `looping_call`: the function is called with no logcontext and
-        you probably want to wrap it in `run_as_background_process`.
+        Note that the function will be called with generic `looping_call` logcontext, so
+        if it is anything other than a trivial task, you probably want to wrap it in
+        `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
             f: The function to call repeatedly.
