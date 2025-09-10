@@ -230,7 +230,7 @@ class Clock:
     ) -> IDelayedCall:
         """Call something later
 
-        Note that the function will be called with generic `looping_call` logcontext, so
+        Note that the function will be called with generic `call_later` logcontext, so
         if it is anything other than a trivial task, you probably want to wrap it in
         `run_as_background_process` to give it more specific label and track metrics.
 
