@@ -30,7 +30,6 @@ from types import FrameType, TracebackType
 from typing import NoReturn, Optional, Type
 
 from synapse.logging.context import (
-    SENTINEL_CONTEXT,
     LoggingContext,
     PreserveLoggingContext,
 )
@@ -75,7 +74,7 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
     # because we're comparing the resource usage from the original process to the forked
     # process. `PreserveLoggingContext` already takes care of restarting the original
     # context *after* the block.
-    with PreserveLoggingContext(SENTINEL_CONTEXT):
+    with PreserveLoggingContext():
         # Fork, creating a new process for the child.
         process_id = os.fork()
 
