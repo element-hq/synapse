@@ -2172,7 +2172,7 @@ This is applied in addition to the `max_upload_size` limit above, which applies 
 
 An empty list means no limits are applied.
 
-These settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.html#get_media_upload_limits_for_user).
+These settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
 
 Defaults to `[]`.
 

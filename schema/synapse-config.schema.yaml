@@ -2423,7 +2423,7 @@ properties:
 
 
       These settings can be overridden using the `get_media_upload_limits_for_user`
-      module API [callback](../../modules/media_repository_callbacks.html#get_media_upload_limits_for_user).
+      module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
       time_period:
