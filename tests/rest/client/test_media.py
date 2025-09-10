@@ -3015,6 +3015,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
     ) -> Optional[List[MediaUploadLimit]]:
         # user1 has custom limits
         if user_id == self.user1:
+            # n.b. we return these in increasing duration order and Synapse will need to sort them correctly
             return [
                 MediaUploadLimit(
                     time_period_ms=Config.parse_duration("1d"), max_bytes=5000
@@ -3113,6 +3114,23 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         )
         self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
         self.assertEqual(self.last_media_upload_limit_exceeded["attempted_bytes"], 4000)
+
+        # User 1 attempts to upload 20000 bytes which is over the weekly limit
+        # This tests that the limits have been sorted as expected
+        channel = self.upload_media(20000, self.tok1)
+        self.assertEqual(channel.code, 400)
+        assert self.last_media_upload_limit_exceeded is not None
+        self.assertEqual(self.last_media_upload_limit_exceeded["user_id"], self.user1)
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["limit"],
+            MediaUploadLimit(
+                max_bytes=15000, time_period_ms=Config.parse_duration("1w")
+            ),
+        )
+        self.assertEqual(self.last_media_upload_limit_exceeded["sent_bytes"], 3000)
+        self.assertEqual(
+            self.last_media_upload_limit_exceeded["attempted_bytes"], 20000
+        )
 
     def test_uses_unlimited(self) -> None:
         """Test that unlimited user is not limited when module returns []."""

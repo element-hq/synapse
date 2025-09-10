@@ -118,6 +118,10 @@ class MediaRepositoryModuleApiCallbacks:
     async def get_media_upload_limits_for_user(
         self, user_id: str
     ) -> Optional[List[MediaUploadLimit]]:
+        """
+        Get the the first non-None list of MediaUploadLimits for the user from the registered callbacks.
+        If a list is returned it will be sorted in descending order of duration.
+        """
         for callback in self._get_media_upload_limits_for_user_callbacks:
             with Measure(
                 self.clock,
@@ -128,6 +132,8 @@ class MediaRepositoryModuleApiCallbacks:
                     callback(user_id)
                 )
             if res is not None:  # to allow [] to be returned meaning no limit
+                # We sort them in descending order of time period
+                res.sort(key=lambda limit: limit.time_period_ms, reverse=True)
                 return res
 
         return None
