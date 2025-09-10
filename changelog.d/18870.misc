@@ -1,1 +1,1 @@
-Refactor logging to use specific logging contexts, reserving the `sentinel` context only for Twisted reactor bookkeeping.
+Remove `sentinel` logcontext usage where we log in `setup`, `start` and exit.
