@@ -198,6 +198,12 @@ class Clock:
         """Common functionality for `looping_call` and `looping_call_now`"""
 
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> object:
+            assert context.current_context() is context.SENTINEL_CONTEXT, (
+                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
+                f"but saw {context.current_context()}. In other words, another task shouldn't have "
+                "leaked their logcontext to us."
+            )
+
             # Because this is a callback from the reactor, we will be using the
             # `sentinel` log context at this point. We want to log with some logcontext
             # as we want to know which server the logs came from.
@@ -236,6 +242,12 @@ class Clock:
         """
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+            assert context.current_context() is context.SENTINEL_CONTEXT, (
+                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
+                f"but saw {context.current_context()}. In other words, another task shouldn't have "
+                "leaked their logcontext to us."
+            )
+
             # Because this is a callback from the reactor, we will be using the
             # `sentinel` log context at this point. We want to log with some logcontext
             # as we want to know which server the logs came from.
