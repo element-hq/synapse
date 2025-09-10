@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 def run_on_reactor() -> "Deferred[int]":
     d: "Deferred[int]" = Deferred()
-    cast(IReactorTime, reactor).callLater(0, d.callback, 0)
+    cast(IReactorTime, reactor).callLater(0, d.callback, 0)  # type: ignore[call-later-not-tracked]
     return make_deferred_yieldable(d)
 
 

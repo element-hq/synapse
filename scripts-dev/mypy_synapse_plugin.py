@@ -68,6 +68,18 @@ PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
     category="per-homeserver-tenant-metrics",
 )
 
+INTERNAL_CLOCK_CALL_LATER_NOT_USED = ErrorCode(
+    "call-later-not-tracked",
+    "`synapse.util.Clock.call_later` should be used instead of `reactor.callLater`",
+    category="delayed-call-tracking",
+)
+
+INTERNAL_CLOCK_LOOPING_CALL_NOT_USED = ErrorCode(
+    "looping-call-not-tracked",
+    "`synapse.util.Clock.looping_call` should be used instead of `task.LoopingCall`",
+    category="delayed-call-tracking",
+)
+
 
 class Sentinel(enum.Enum):
     # defining a sentinel in this way allows mypy to correctly handle the
@@ -210,6 +222,9 @@ class SynapsePlugin(Plugin):
             # callback, let's just pass it in while we have it.
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
+        if "twisted.internet.task.LoopingCall" == fullname:
+            return check_looping_call
+
         return None
 
     def get_method_signature_hook(
@@ -229,7 +244,59 @@ class SynapsePlugin(Plugin):
         ):
             return check_is_cacheable_wrapper
 
+        if fullname.startswith(("twisted.internet.interfaces.IReactorTime.callLater",)):
+            return check_call_later
+
         return None
+
+
+def check_call_later(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.callLater` callsites are used intentionally.
+
+    Using `synapse.util.Clock.call_later` should be preferred. This is because the
+    `synapse.util.Clock` tracks delayed calls in order to cancel any outstanding calls
+    during server shutdown. Delayed calls which are either short lived (<~60s) or
+    frequently called and can be tracked via other means could be candidates for using
+    `reactor.callLater` directly. In those cases, use a type ignore comment to disable the
+    check, e.g. `# type: ignore[call-later-not-tracked]`.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+        fullname: The fully qualified name of the function being called,
+            e.g. `"twisted.internet.interfaces.IReactorTime.callLater"`
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all `reactor.callLater` calls to use `synapse.util.Clock.call_later` instead. This is so that long lived calls can be tracked for cancellation during server shutdown",
+        ctx.context,
+        code=INTERNAL_CLOCK_CALL_LATER_NOT_USED,
+    )
+
+    return signature
+
+
+def check_looping_call(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the `task.LoopingCall` callsites are used intentionally.
+
+    Using `synapse.util.Clock.looping_call` should be preferred. This is because the
+    `synapse.util.Clock` tracks looping calls in order to cancel any outstanding calls
+    during server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+        fullname: The fully qualified name of the function being called,
+            e.g. `"twisted.internet.task.LoopingCall"`
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all `task.LoopingCall` instances to use `synapse.util.Clock.looping_call` instead. This is so that long lived calls can be tracked for cancellation during server shutdown",
+        ctx.context,
+        code=INTERNAL_CLOCK_LOOPING_CALL_NOT_USED,
+    )
+
+    return signature
 
 
 def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:
