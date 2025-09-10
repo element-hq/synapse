@@ -218,8 +218,9 @@ class Clock:
     ) -> IDelayedCall:
         """Call something later
 
-        Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in run_as_background_process.
+        Note that the function will be called with generic `looping_call` logcontext, so
+        if it is anything other than a trivial task, you probably want to wrap it in
+        `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
             delay: How long to wait in seconds.
@@ -229,11 +230,18 @@ class Clock:
         """
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            with context.PreserveLoggingContext():
+            # Because this is a callback from the reactor, we will be using the
+            # `sentinel` log context at this point. We want to log with some logcontext
+            # as we want to know which server the logs came from.
+            #
+            # This also ensures that we return to the `sentinel` context when we exit
+            # this function and yield control back to the reactor to avoid leaking the
+            # current logcontext to the reactor (which would then get picked up and
+            # associated with the next thing the reactor does)
+            with context.LoggingContext("call_later"):
                 callback(*args, **kwargs)
 
-        with context.PreserveLoggingContext():
-            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+        return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:
