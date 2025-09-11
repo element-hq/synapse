@@ -525,6 +525,19 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
+    async def shutdown(self) -> None:
+        """Cleanup any outstanding resources referenced by this reactor. Useful when
+        trying to remove any references to the `HomeServer` that may have been
+        registered with this fake reactor"""
+
+        # `MemoryReactorClock.removeSystemEventTrigger` is not implemented.
+        # So manually clear the triggers here.
+        self.triggers.clear()
+
+        # `MemoryReactorClock` never clears the hooks made when `callWhenRunning` is
+        # called. So manually clear the hooks here.
+        self.whenRunningHooks.clear()
+
     def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
         raise NotImplementedError()
 
