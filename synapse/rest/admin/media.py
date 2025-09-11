@@ -18,10 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple, Union
 
 import attr
 
@@ -41,13 +40,57 @@ from synapse.rest.admin._base import (
     assert_requester_is_admin,
     assert_user_is_admin,
 )
-from synapse.storage.databases.main.media_repository import MediaSortOrder
+from synapse.storage.databases.main.media_repository import (
+    LocalMedia,
+    MediaSortOrder,
+    RemoteMedia,
+)
 from synapse.types import JsonDict, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class QueryMediaById(RestServlet):
+    """
+    Fetch info about a given piece of media
+    """
+
+    PATTERNS = admin_patterns("/media/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+        self.server_name = hs.hostname
+
+    async def on_GET(
+        self, request: SynapseRequest, server_name: str, media_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        await assert_user_is_admin(self.auth, requester)
+
+        if self.server_name != server_name:
+            media_info: Optional[
+                Union[LocalMedia, RemoteMedia]
+            ] = await self.store.get_cached_remote_media(server_name, media_id)
+        else:
+            media_info = await self.store.get_local_media(media_id)
+
+        if media_info is None:
+            raise NotFoundError("Unknown media")
+
+        resp = {}
+        attributes = media_info.__slots__
+
+        for attrib in attributes:
+            if attrib.startswith("_"):
+                continue
+            val = getattr(media_info, attrib)
+            resp.update({attrib: val})
+
+        return HTTPStatus.OK, {"media_info": resp}
 
 
 class QuarantineMediaInRoom(RestServlet):
@@ -470,3 +513,4 @@ def register_servlets_for_media_repo(hs: "HomeServer", http_server: HttpServer) 
     DeleteMediaByDateSize(hs).register(http_server)
     DeleteMediaByID(hs).register(http_server)
     UserMediaRestServlet(hs).register(http_server)
+    QueryMediaById(hs).register(http_server)
