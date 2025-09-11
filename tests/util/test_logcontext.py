@@ -84,6 +84,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 await clock.sleep(0)
                 self._check_test_key("competing")
 
+            self._check_test_key("sentinel")
             callback_finished = True
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
@@ -94,13 +95,13 @@ class LoggingContextTestCase(unittest.TestCase):
             await clock.sleep(0)
             self._check_test_key("one")
 
-        # Back to the sentinel context
-        self._check_test_key("sentinel")
-
         self.assertTrue(
             callback_finished,
             "Callback never finished which means the test probably didn't wait long enough",
         )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
 
     @logcontext_clean
     async def test_looping_call(self) -> None:
