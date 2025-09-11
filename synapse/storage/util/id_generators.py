@@ -187,8 +187,12 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     Warning: Streams using this generator start at ID 2, because ID 1 is always assumed
         to have been 'seen as persisted'.
         Unclear if this extant behaviour is desirable for some reason.
-        When creating a new sequence for a new stream,
-        it will be necessary to use `START WITH 2`.
+        When creating a new sequence for a new stream, it will be necessary to advance it
+        so that position 1 is consumed.
+        DO NOT USE `START WITH 2` FOR THIS PURPOSE:
+            see https://github.com/element-hq/synapse/issues/18712
+        Instead, use `SELECT nextval('sequence_name');` immediately after the
+        `CREATE SEQUENCE` statement.
 
     Args:
         db_conn
