@@ -38,7 +38,8 @@ from synapse.logging.context import (
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
 
-from .. import unittest
+from tests import unittest
+from tests.unittest import logcontext_clean
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,12 @@ class LoggingContextTestCase(unittest.TestCase):
             str(context), value, f"Expected LoggingContext({value}) but saw {context}"
         )
 
+    @logcontext_clean
     def test_with_context(self) -> None:
         with LoggingContext("test"):
             self._check_test_key("test")
 
+    @logcontext_clean
     async def test_sleep(self) -> None:
         """
         Test `Clock.sleep`
@@ -99,12 +102,14 @@ class LoggingContextTestCase(unittest.TestCase):
             "Callback never finished which means the test probably didn't wait long enough",
         )
 
+    @logcontext_clean
     async def test_looping_call(self) -> None:
         """
         Test `Clock.looping_call`
         """
         # TODO
 
+    @logcontext_clean
     async def test_looping_call_now(self) -> None:
         """
         Test `Clock.looping_call_now`
@@ -190,12 +195,14 @@ class LoggingContextTestCase(unittest.TestCase):
         # test is done once d2 finishes
         return d2
 
+    @logcontext_clean
     def test_run_in_background_with_blocking_fn(self) -> defer.Deferred:
         async def blocking_function() -> None:
             await Clock(reactor).sleep(0)
 
         return self._test_run_in_background(blocking_function)
 
+    @logcontext_clean
     def test_run_in_background_with_non_blocking_fn(self) -> defer.Deferred:
         @defer.inlineCallbacks
         def nonblocking_function() -> Generator["defer.Deferred[object]", object, None]:
@@ -204,6 +211,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         return self._test_run_in_background(nonblocking_function)
 
+    @logcontext_clean
     def test_run_in_background_with_chained_deferred(self) -> defer.Deferred:
         # a function which returns a deferred which looks like it has been
         # called, but is actually paused
@@ -212,6 +220,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         return self._test_run_in_background(testfunc)
 
+    @logcontext_clean
     def test_run_in_background_with_coroutine(self) -> defer.Deferred:
         async def testfunc() -> None:
             self._check_test_key("one")
@@ -222,12 +231,14 @@ class LoggingContextTestCase(unittest.TestCase):
 
         return self._test_run_in_background(testfunc)
 
+    @logcontext_clean
     def test_run_in_background_with_nonblocking_coroutine(self) -> defer.Deferred:
         async def testfunc() -> None:
             self._check_test_key("one")
 
         return self._test_run_in_background(testfunc)
 
+    @logcontext_clean
     @defer.inlineCallbacks
     def test_make_deferred_yieldable(
         self,
@@ -251,6 +262,7 @@ class LoggingContextTestCase(unittest.TestCase):
             # now it should be restored
             self._check_test_key("one")
 
+    @logcontext_clean
     @defer.inlineCallbacks
     def test_make_deferred_yieldable_with_chained_deferreds(
         self,
@@ -267,6 +279,7 @@ class LoggingContextTestCase(unittest.TestCase):
             # now it should be restored
             self._check_test_key("one")
 
+    @logcontext_clean
     def test_nested_logging_context(self) -> None:
         with LoggingContext("foo"):
             nested_context = nested_logging_context(suffix="bar")
