@@ -260,20 +260,25 @@ class Clock:
             )
 
             # Because this is a callback from the reactor, we will be using the
-            # `sentinel` log context at this point. We want to log with some logcontext
-            # as we want to know which server the logs came from.
+            # `sentinel` log context at this point. We want the function to log with
+            # some logcontext as we want to know which server the logs came from.
+            #
+            # We use `PreserveLoggingContext` to prevent our new `call_later`
+            # logcontext from finishing as soon as we exit this function, in case `f`
+            # returns an awaitable/deferred which would continue running and may try to
+            # restore the `loop_call` context when it's done (because it's trying to
+            # adhere to the Synapse logcontext rules.)
             #
             # This also ensures that we return to the `sentinel` context when we exit
             # this function and yield control back to the reactor to avoid leaking the
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
-            with context.LoggingContext("call_later"):
-                callback(*args, **kwargs)
+            with context.PreserveLoggingContext(context.LoggingContext("call_later")):
+                # We use `run_in_background` to reset the logcontext after `f` (or the
+                # awaitable returned by `f`) completes
+                return context.run_in_background(callback, *args, **kwargs)
 
-        # Start task in the `sentinel` logcontext, to avoid leaking the current context
-        # into the reactor once it finishes.
-        with context.PreserveLoggingContext():
-            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+        return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:

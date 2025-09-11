@@ -180,8 +180,6 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("one")
             await clock.sleep(0)
             self._check_test_key("one")
-            await clock.sleep(0)
-            self._check_test_key("one")
 
         self.assertTrue(
             callback_finished,
@@ -193,6 +191,47 @@ class LoggingContextTestCase(unittest.TestCase):
 
         # Stop the looping call to prevent "Reactor was unclean" errors
         lc.stop()
+
+    @logcontext_clean
+    async def test_call_later(self) -> None:
+        """
+        Test `Clock.call_later`
+        """
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            # A `call_later` callback should have *some* logcontext since we should know
+            # which server spawned this loop and which server the logs came from.
+            self._check_test_key("call_later")
+
+            with LoggingContext("competing"):
+                await clock.sleep(0)
+                self._check_test_key("competing")
+
+            self._check_test_key("call_later")
+            callback_finished = True
+
+        with LoggingContext("one"):
+            clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
+            self._check_test_key("one")
+            await clock.sleep(0)
+            self._check_test_key("one")
+            await clock.sleep(0)
+            self._check_test_key("one")
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
 
     def _test_run_in_background(self, function: Callable[[], object]) -> defer.Deferred:
         sentinel_context = current_context()
