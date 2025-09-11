@@ -97,7 +97,7 @@ class LoginSSORedirectURIBuilder:
         serialized_query_parameters = urlencode({"redirectUrl": client_redirect_url})
 
         if idp_id:
-            # Make this this user-controlled string safe to include in a URL path.
+            # Since this is a user-controlled string, make it safe to include in a URL path.
             url_encoded_idp_id = urllib.parse.quote(
                 idp_id,
                 # Since this defaults to `safe="/"`, we have to override it. We're
