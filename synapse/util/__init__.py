@@ -197,7 +197,7 @@ class Clock:
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
 
-        def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> None:
+        def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> object:
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
                 f"but saw {context.current_context()}. In other words, another task shouldn't have "
@@ -221,7 +221,7 @@ class Clock:
             with context.PreserveLoggingContext(context.LoggingContext("looping_call")):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes
-                context.run_in_background(f, *args, **kwargs)
+                return context.run_in_background(f, *args, **kwargs)
 
         call = task.LoopingCall(wrapped_f, *args, **kwargs)
         call.clock = self._reactor
