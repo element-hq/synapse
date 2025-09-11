@@ -19,6 +19,7 @@
 #
 #
 
+import logging
 from typing import Callable, Generator, cast
 
 import twisted.python.failure
@@ -38,6 +39,8 @@ from synapse.types import ISynapseReactor
 from synapse.util import Clock
 
 from .. import unittest
+
+logger = logging.getLogger(__name__)
 
 reactor = cast(ISynapseReactor, _reactor)
 
@@ -95,6 +98,57 @@ class LoggingContextTestCase(unittest.TestCase):
             callback_finished,
             "Callback never finished which means the test probably didn't wait long enough",
         )
+
+    async def test_looping_call(self) -> None:
+        """
+        Test `Clock.looping_call`
+        """
+        # TODO
+
+    async def test_looping_call_now(self) -> None:
+        """
+        Test `Clock.looping_call_now`
+        """
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            # A `looping_call` callback should have *some* logcontext since we should know
+            # which server spawned this loop and which server the logs came from.
+            self._check_test_key("looping_call")
+
+            with LoggingContext("competing"):
+                await clock.sleep(0)
+                self._check_test_key("competing")
+
+            self._check_test_key("looping_call")
+            callback_finished = True
+
+        with LoggingContext("one"):
+            lc = clock.looping_call_now(
+                lambda: defer.ensureDeferred(competing_callback()), 0
+            )
+            self._check_test_key("one")
+            await clock.sleep(0)
+            self._check_test_key("one")
+            await clock.sleep(0)
+            self._check_test_key("one")
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
+        # Stop the looping call to prevent "Reactor was unclean" errors
+        lc.stop()
 
     def _test_run_in_background(self, function: Callable[[], object]) -> defer.Deferred:
         sentinel_context = current_context()
