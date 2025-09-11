@@ -1,0 +1,1 @@
+Add an Admin API to query a piece of local or cached remote media by ID.
