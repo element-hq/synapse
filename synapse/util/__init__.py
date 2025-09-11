@@ -200,7 +200,7 @@ class Clock:
 
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
             assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
+                "Expected `looping_call` callback from the reactor to start with the sentinel logcontext "
                 f"but saw {context.current_context()}. In other words, another task shouldn't have "
                 "leaked their logcontext to us."
             )
