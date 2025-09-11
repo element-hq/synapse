@@ -281,8 +281,14 @@ class Clock:
             self._delayed_call_id = self._delayed_call_id + 1
 
             def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-                callback(*args, **kwargs)
-                self._call_id_to_delayed_call.pop(call_id)
+                try:
+                    callback(*args, **kwargs)
+                except Exception:
+                    raise
+                finally:
+                    # We still want to remove the call from the tracking map. Even if
+                    # the callback raises an exception.
+                    self._call_id_to_delayed_call.pop(call_id)
 
             with context.PreserveLoggingContext():
                 # We can ignore the lint here since this is the one location callLater
