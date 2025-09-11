@@ -284,6 +284,13 @@ class BackgroundUpdater:
         self.sleep_duration_ms = hs.config.background_updates.sleep_duration_ms
         self.sleep_enabled = hs.config.background_updates.sleep_enabled
 
+    def shutdown(self) -> None:
+        """
+        Stop any further background updates from happening.
+        """
+        self.enabled = False
+        self._background_update_handlers.clear()
+
     def get_status(self) -> UpdaterStatus:
         """An integer summarising the updater status. Used as a metric."""
         if self._aborted:

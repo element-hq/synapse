@@ -649,7 +649,7 @@ class DatabasePool:
         """
         Stops the database from running any further background updates.
         """
-        self.updates.enabled = False
+        self.updates.shutdown()
 
     def name(self) -> str:
         "Return the name of this database"
