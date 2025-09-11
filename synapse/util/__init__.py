@@ -41,6 +41,7 @@ from matrix_common.versionstring import get_distribution_version_string
 from typing_extensions import ParamSpec
 
 from twisted.internet import defer, task
+from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IDelayedCall, IReactorTime
 from twisted.internet.task import LoopingCall
 from twisted.python.failure import Failure
@@ -197,7 +198,7 @@ class Clock:
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
 
-        def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> object:
+        def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
                 f"but saw {context.current_context()}. In other words, another task shouldn't have "
@@ -276,7 +277,7 @@ class Clock:
             with context.PreserveLoggingContext(context.LoggingContext("call_later")):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes
-                return context.run_in_background(callback, *args, **kwargs)
+                context.run_in_background(callback, *args, **kwargs)
 
         return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
 
