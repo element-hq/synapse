@@ -940,38 +940,12 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         self.assertEqual(chan.json_body["user_id"], "@user1:test")
 
     def test_multi_sso_redirect_to_unknown(self) -> None:
-        """An unknown IdP should cause a 404"""
+        """An unknown IdP should cause a 400 bad request error"""
         channel = self.make_request(
             "GET",
             "/_synapse/client/pick_idp?redirectUrl=http://x&idp=xyz",
         )
-        self.assertEqual(channel.code, 302, channel.result)
-        location_headers = channel.headers.getRawHeaders("Location")
-        assert location_headers
-        sso_login_redirect_uri = location_headers[0]
-
-        # it should redirect us to the standard login SSO redirect flow
-        self.assertEqual(
-            sso_login_redirect_uri,
-            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
-                idp_id="xyz", client_redirect_url="http://x"
-            ),
-        )
-
-        # follow the redirect
-        channel = self.make_request(
-            "GET",
-            # We have to make this relative to be compatible with `make_request(...)`
-            get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
-            # We have to set the Host header to match the `public_baseurl` to avoid
-            # the extra redirect in the `SsoRedirectServlet` in order for the
-            # cookies to be visible.
-            custom_headers=[
-                ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
-            ],
-        )
-
-        self.assertEqual(channel.code, 404, channel.result)
+        self.assertEqual(channel.code, 400, channel.result)
 
     def test_client_idp_redirect_to_unknown(self) -> None:
         """If the client tries to pick an unknown IdP, return a 404"""
