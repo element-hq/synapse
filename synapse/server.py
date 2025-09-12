@@ -377,6 +377,8 @@ class HomeServer(metaclass=abc.ABCMeta):
             self.get_instance_id(),
         )
 
+        # Unregister sighups first. If a shutdown was requested we shouldn't be responding
+        # to things like config changes. So it would be best to stop listening to these first.
         unregister_sighups(self._instance_id)
 
         # TODO: It would be desireable to be able to report an error if the HomeServer
