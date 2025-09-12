@@ -286,9 +286,11 @@ def run_as_background_process(
                 ).dec()
 
     # To explain how the log contexts work here:
-    #  - When this function is called, the current context is stored (using
-    #    `PreserveLoggingContext`), we kick off the background task, and we restore the
-    #    original context before returning (also part of `PreserveLoggingContext`).
+    #  - When `run_as_background_process` is called, the current context is stored
+    #    (using `PreserveLoggingContext`), we kick off the background task, and we
+    #    restore the original context before returning (also part of
+    #    `PreserveLoggingContext`).
+    #  - The background task runs in its own new logcontext named after `desc`
     #  - When the background task finishes, we don't want to leak our background context
     #    into the reactor which would erroneously get attached to the next operation
     #    picked up by the event loop. We use `PreserveLoggingContext` to set the
