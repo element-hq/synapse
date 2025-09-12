@@ -320,8 +320,9 @@ async def main():
 
 ...
 
-# Wherever possible, it's best to finish the logcontext by exiting at some point. This
-# allows us to catch bugs if we later try to erroneously restart a finished logcontext.
+# Wherever possible, it's best to finish the logcontext by calling `__exit__` at some
+# point. This allows us to catch bugs if we later try to erroneously restart a finished
+# logcontext.
 #
 # Since the "main" logcontext stores the `LoggingContext.previous_context` when it is
 # created, we can wrap this call in `PreserveLoggingContext()` to restore the correct
