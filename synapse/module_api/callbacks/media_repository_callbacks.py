@@ -119,7 +119,7 @@ class MediaRepositoryModuleApiCallbacks:
         self, user_id: str
     ) -> Optional[List[MediaUploadLimit]]:
         """
-        Get the the first non-None list of MediaUploadLimits for the user from the registered callbacks.
+        Get the first non-None list of MediaUploadLimits for the user from the registered callbacks.
         If a list is returned it will be sorted in descending order of duration.
         """
         for callback in self._get_media_upload_limits_for_user_callbacks:

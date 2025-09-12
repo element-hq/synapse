@@ -116,9 +116,11 @@ may change without notice.
 Called when a user attempts to upload media that would exceed a
 [configured media upload limit](../usage/configuration/config_documentation.html#media_upload_limits).
 
-This callback will only be called a media workers which handle [POST /_matrix/media/v3/upload](https://spec.matrix.org/v1.15/client-server-api/#post_matrixmediav3upload) requests.
+This callback will only be called on workers which handle
+[POST /_matrix/media/v3/upload](https://spec.matrix.org/v1.15/client-server-api/#post_matrixmediav3upload)
+requests.
 
-This could be used to inform the user that they have reached a media upload limit through through
+This could be used to inform the user that they have reached a media upload limit through
 some external method.
 
 The arguments passed to this callback are:
