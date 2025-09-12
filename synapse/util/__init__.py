@@ -156,7 +156,7 @@ class Clock:
         with context.PreserveLoggingContext():
             # We can ignore the lint here since this class is the one location callLater should
             # be called.
-            self._reactor.callLater(seconds, d.callback)  # type: ignore[call-later-not-tracked]
+            self._reactor.callLater(seconds, d.callback, seconds)  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:
