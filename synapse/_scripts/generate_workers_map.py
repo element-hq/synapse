@@ -157,7 +157,6 @@ def get_registered_paths_for_default(
     # TODO We only do this to avoid an error, but don't need the database etc
     hs.setup()
     registered_paths = get_registered_paths_for_hs(hs)
-    hs.cleanup_metrics()
 
     return registered_paths
 

@@ -411,7 +411,15 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         self.get_keyring().shutdown()
 
-        self.cleanup_metrics()
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver(
+            self.config.server.server_name
+        )
 
         for db in self.get_datastores().databases:
             db.stop_background_updates()
@@ -464,17 +472,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
         self._async_shutdown_handlers.append(
             ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
-        )
-
-    def cleanup_metrics(self) -> None:
-        # Cleanup metrics associated with the homeserver
-        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
-            later_gauge.unregister_hooks_for_homeserver_instance_id(
-                self.get_instance_id()
-            )
-
-        CACHE_METRIC_REGISTRY.unregister_hooks_for_homeserver(
-            self.config.server.server_name
         )
 
     def register_sync_shutdown_handler(
