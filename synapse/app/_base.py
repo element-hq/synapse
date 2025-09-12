@@ -684,12 +684,17 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
         # everything currently allocated are things that will be used for the
         # rest of time. Doing so means less work each GC (hopefully).
         #
+        # Note that freezing the homeserver object means that it won't be able to be
+        # garbage collected in the case of attempting an in-memory `shutdown`. This only
+        # needs to be considered if such a case is desirable. Exiting the entire Python
+        # process will function expectedly either way.
+        #
         # PyPy does not (yet?) implement gc.freeze()
         if hasattr(gc, "freeze"):
             gc.collect()
             gc.freeze()
 
-            # Speed up shutdowns by freezing all allocated objects. This moves everything
+            # Speed up process exit by freezing all allocated objects. This moves everything
             # into the permanent generation and excludes them from the final GC.
             atexit.register(gc.freeze)
 
