@@ -6,43 +6,48 @@ on:
 
 jobs:
   move_needs_info:
-    name: Move X-Needs-Info on the triage board
     runs-on: ubuntu-latest
     if: >
       contains(github.event.issue.labels.*.name, 'X-Needs-Info')
+    permissions:
+      contents: read
+    env:
+      # This token must have the following scopes: ["repo:public_repo", "admin:org->read:org", "user->read:user", "project"]
+      GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
+      PROJECT_OWNER: matrix-org
+      # Backend issue triage board
+      PROJECT_NUMBER: 67
+      ISSUE_URL: ${{ github.event.issue.html_url }}
+      # This field is case-sensitive.
+      TARGET_STATUS: Needs info
     steps:
-      - uses: actions/add-to-project@4515659e2b458b27365e167605ac44f219494b66 # v1.0.2
-        id: add_project
-        with:
-          project-url: "https://github.com/orgs/matrix-org/projects/67"
-          github-token: ${{ secrets.ELEMENT_BOT_TOKEN }}
-        # This action will error if the issue already exists on the project. Which is
-        # common as `X-Needs-Info` will often be added to issues that are already in
-        # the triage queue. Prevent the whole job from failing in this case.
-        continue-on-error: true
-      - name: Set status
-        env:
-          GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
+      - name: Ensure item exists, then set Status
         run: |
-          gh api graphql -f query='
-          mutation(
-              $project: ID!
-              $item: ID!
-              $fieldid: ID!
-              $columnid: String!
-            )  {
-            updateProjectV2ItemFieldValue(
-              input: {
-               projectId: $project
-                itemId: $item
-                fieldId: $fieldid
-                value: { 
-                  singleSelectOptionId: $columnid
-                  }
-              }
-            ) {
-              projectV2Item {
-                id
-              }
-            }
-          }' -f project="PVT_kwDOAIB0Bs4AFDdZ" -f item=${{ steps.add_project.outputs.itemId }} -f fieldid="PVTSSF_lADOAIB0Bs4AFDdZzgC6ZA4" -f columnid=ba22e43c --silent
+          set -euo pipefail
+
+          # 1) Resolve project ID.
+          PROJECT_ID=$(gh project view "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json | jq -r '.id')
+
+          # 2) Find existing item (project card) for this issue.
+          ITEM_ID=$(
+            gh project item-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json \
+            | jq -r --arg url "$ISSUE_URL" '.items[] | select(.content.url==$url) | .id' | head -n1
+          )
+
+          # 3) If one doesn't exist, add this issue to the project.
+          if [ -z "${ITEM_ID:-}" ]; then
+            ITEM_ID=$(gh project item-add "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --url "$ISSUE_URL" --format json | jq -r '.id')
+          fi
+
+          # 4) Get Status field id + the option id for TARGET_STATUS.
+          FIELDS_JSON=$(gh project field-list "$PROJECT_NUMBER" --owner "$PROJECT_OWNER" --format json)
+          STATUS_FIELD=$(echo "$FIELDS_JSON" | jq -r '.fields[] | select(.name=="Status")')
+          STATUS_FIELD_ID=$(echo "$STATUS_FIELD" | jq -r '.id')
+          OPTION_ID=$(echo "$STATUS_FIELD" | jq -r --arg name "$TARGET_STATUS" '.options[] | select(.name==$name) | .id')
+
+          if [ -z "${OPTION_ID:-}" ]; then
+            echo "No Status option named \"$TARGET_STATUS\" found"; exit 1
+          fi
+
+          # 5) Set Status (moves item to the matching column in the board view).
+          gh project item-edit --id "$ITEM_ID" --project-id "$PROJECT_ID" --field-id "$STATUS_FIELD_ID" --single-select-option-id "$OPTION_ID"
