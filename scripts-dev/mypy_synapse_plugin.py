@@ -244,7 +244,7 @@ class SynapsePlugin(Plugin):
         ):
             return check_is_cacheable_wrapper
 
-        if fullname.startswith(("twisted.internet.interfaces.IReactorTime.callLater",)):
+        if fullname == "twisted.internet.interfaces.IReactorTime.callLater":
             return check_call_later
 
         return None
