@@ -133,7 +133,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         ):
             self.hs.get_clock().call_later(
                 CATCH_UP_CLEANUP_INTERVAL_MS / 1000,
-                True,
+                True,  # We track this call to speedup shutdown
                 self._clean_up_cache_invalidation_wrapper,
             )
 
@@ -797,7 +797,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             next_interval = REGULAR_CLEANUP_INTERVAL_MS
 
         self.hs.get_clock().call_later(
-            next_interval / 1000, True, self._clean_up_cache_invalidation_wrapper
+            next_interval / 1000,
+            True,  # We track this call to speedup shutdown
+            self._clean_up_cache_invalidation_wrapper,
         )
 
     async def _clean_up_batch_of_old_cache_invalidations(

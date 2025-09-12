@@ -197,7 +197,12 @@ class WorkerLocksHandler:
                 if not deferred.called:
                     deferred.callback(None)
 
-        self._clock.call_later(0, False, _wake_all_locks, locks)
+        self._clock.call_later(
+            0,
+            False,  # We don't track this call since it's short
+            _wake_all_locks,
+            locks,
+        )
 
     @wrap_as_background_process("_cleanup_locks")
     async def _cleanup_locks(self) -> None:

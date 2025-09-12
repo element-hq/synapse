@@ -138,7 +138,11 @@ class UserDirectoryHandler(StateDeltasHandler):
 
             # We kick this off so that we don't have to wait for a change before
             # we start populating the user directory
-            self.clock.call_later(0, False, self.notify_new_event)
+            self.clock.call_later(
+                0,
+                False,  # We don't track this call since it's short
+                self.notify_new_event,
+            )
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
@@ -626,7 +630,7 @@ class UserDirectoryHandler(StateDeltasHandler):
             # Come back later.
             self._refresh_remote_profiles_call_later = self.clock.call_later(
                 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES,
-                False,
+                False,  # We don't track this call since it's short
                 self.kick_off_remote_profile_refresh_process,
             )
             return

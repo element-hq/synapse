@@ -91,7 +91,11 @@ class DelayedEventsHandler:
                 hs.get_notifier().add_replication_callback(self.notify_new_event)
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
-                self._clock.call_later(0, False, self.notify_new_event)
+                self._clock.call_later(
+                    0,
+                    False,  # We don't track this call since it's short
+                    self.notify_new_event,
+                )
 
                 # Delayed events that are already marked as processed on startup might not have been
                 # sent properly on the last run of the server, so unmark them to send them again.

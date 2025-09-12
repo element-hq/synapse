@@ -121,7 +121,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             )
             self.hs.get_clock().call_later(
                 1,
-                False,
+                False,  # We don't track this call since it's short
                 self._count_known_servers,
             )
             federation_known_servers_gauge.register_hook(
