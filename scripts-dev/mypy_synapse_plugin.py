@@ -222,7 +222,7 @@ class SynapsePlugin(Plugin):
             # callback, let's just pass it in while we have it.
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
-        if "twisted.internet.task.LoopingCall" == fullname:
+        if fullname == "twisted.internet.task.LoopingCall":
             return check_looping_call
 
         return None
