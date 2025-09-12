@@ -273,8 +273,8 @@ We could also fix this by surrounding the call to `d.callback` with a
 `PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
 the callback, and restore the "foo" logcontext afterwards before continuing the `main`
 function. This solves the problem because when the "competing" logcontext exits, it will
-restore the sentinel logcontext which is not finished, so there is no warning and no
-leakage into the reactor.
+restore the sentinel logcontext which is never finished by its nature, so there is no
+warning and no leakage into the reactor.
 
 ```python
 async def main():
@@ -283,15 +283,25 @@ async def main():
         d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
         d.callback(None)
         with PreserveLoggingContext():
+            # Call the callback with the sentinel logcontext.
             d.callback(None)
         # Good: This will be logged against the "main" logcontext
         logger.debug("phew")
 ```
 
-Another way to extend the lifetime of the "main" logcontext is to avoid calling the
-context manager lifetime methods of `LoggingContext` (`__enter__`/`__exit__`). We can
-still set the current logcontext by using `PreserveLoggingContext` and passing in the
-"main" logcontext.
+But let's say you *do* want to run the deferred callback in the current context without
+running into issues:
+
+We can solve the first issue by using `run_in_background(...)` to run the callback in
+the current logcontext and it handles the magic behind the scenes of a) restoring the
+calling logcontext before returning to the caller and b) resetting the logcontext to the
+sentinel after the deferred completes and we yield control back to the reactor to avoid
+leaking the logcontext into the reactor.
+
+To solve the second problem, we can extend the lifetime of the "main" logcontext is to
+avoid calling the context manager lifetime methods of `LoggingContext`
+(`__enter__`/`__exit__`). And we can still set the current logcontext by using
+`PreserveLoggingContext` and passing in the "main" logcontext.
 
 
 ```python
@@ -300,8 +310,11 @@ async def main():
     with PreserveLoggingContext(main_context):
         d = defer.Deferred()
         d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
-        d.callback(None)
-        # TODO: Still bad: This will be logged against sentinel logcontext
+        # The whole lambda will be run in the "main" logcontext. But we're using
+        # a trick to return the deferred `d` itself so that `run_in_background`
+        # will wait on that to complete and reset the logcontext to the sentinel
+        # when it does to avoid leaking the "main" logcontext into the reactor.
+        run_in_background(lambda: (d.callback(None), d)[1])
         # Good: This will be logged against the "main" logcontext
         logger.debug("phew")
 
