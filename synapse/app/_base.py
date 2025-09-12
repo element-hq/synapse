@@ -104,7 +104,10 @@ _instance_id_to_sighup_callbacks_map: Dict[
     str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
 ] = {}
 """
-Mapping from homeserver instance_id to tuples of function, args list, kwargs dict
+Map from homeserver instance_id to a list of callbacks.
+
+We use `instance_id` instead of `server_name` because it's possible to have multiple
+workers running in the same process with the same `server_name`.
 """
 P = ParamSpec("P")
 
