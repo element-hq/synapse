@@ -38,6 +38,7 @@ from synapse.logging.context import (
 )
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
+from tests.unittest import logcontext_clean
 
 from .. import unittest
 
@@ -74,6 +75,7 @@ class LoggingContextTestCase(unittest.TestCase):
             await clock.sleep(0)
             self._check_test_key("one")
 
+    @logcontext_clean
     async def test_deferred_callback_await_in_current_logcontext(self) -> None:
         """
         Test that calling the deferred callback in the current logcontext ("foo") and
@@ -132,6 +134,7 @@ class LoggingContextTestCase(unittest.TestCase):
         # Back to the sentinel context
         self._check_test_key("sentinel")
 
+    @logcontext_clean
     async def test_deferred_callback_preserve_logging_context(self) -> None:
         """
         Test that calling the deferred callback inside `PreserveLoggingContext()` works
@@ -191,6 +194,7 @@ class LoggingContextTestCase(unittest.TestCase):
         # Back to the sentinel context
         self._check_test_key("sentinel")
 
+    @logcontext_clean
     async def test_deferred_callback_fire_and_forget_with_current_context(self) -> None:
         """
         Test that it's possible to call the deferred callback with the current context
