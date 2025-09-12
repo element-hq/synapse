@@ -150,6 +150,7 @@ from prometheus_client import Counter
 from twisted.internet import defer
 
 import synapse.metrics
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.presence import UserPresenceState
 from synapse.events import EventBase
 from synapse.federation.sender.per_destination_queue import (
@@ -196,6 +197,24 @@ sent_pdus_destination_dist_count = Counter(
 sent_pdus_destination_dist_total = Counter(
     "synapse_federation_client_sent_pdu_destinations",
     "Total number of PDUs queued for sending across all destinations",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_destinations_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_destinations",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_pdus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_pdus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_edus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_edus",
+    desc="",
     labelnames=[SERVER_NAME_LABEL],
 )
 
@@ -398,11 +417,9 @@ class FederationSender(AbstractFederationSender):
         # map from destination to PerDestinationQueue
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
-        LaterGauge(
-            name="synapse_federation_transaction_queue_pending_destinations",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        transaction_queue_pending_destinations_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): sum(
                     1
                     for d in self._per_destination_queues.values()
@@ -410,22 +427,17 @@ class FederationSender(AbstractFederationSender):
                 )
             },
         )
-
-        LaterGauge(
-            name="synapse_federation_transaction_queue_pending_pdus",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        transaction_queue_pending_pdus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): sum(
                     d.pending_pdu_count() for d in self._per_destination_queues.values()
                 )
             },
         )
-        LaterGauge(
-            name="synapse_federation_transaction_queue_pending_edus",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        transaction_queue_pending_edus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): sum(
                     d.pending_edu_count() for d in self._per_destination_queues.values()
                 )
@@ -643,6 +655,31 @@ class FederationSender(AbstractFederationSender):
                                 event.event_id,
                             )
                             return
+
+                    # If we've rescinded an invite then we want to tell the
+                    # other server.
+                    if (
+                        event.type == EventTypes.Member
+                        and event.membership == Membership.LEAVE
+                        and event.sender != event.state_key
+                    ):
+                        # We check if this leave event is rescinding an invite
+                        # by looking if there is an invite event for the user in
+                        # the auth events. It could otherwise be a kick or
+                        # unban, which we don't want to send (if the user wasn't
+                        # already in the room).
+                        auth_events = await self.store.get_events_as_list(
+                            event.auth_event_ids()
+                        )
+                        for auth_event in auth_events:
+                            if (
+                                auth_event.type == EventTypes.Member
+                                and auth_event.state_key == event.state_key
+                                and auth_event.membership == Membership.INVITE
+                            ):
+                                destinations = set(destinations)
+                                destinations.add(get_domain_from_id(event.state_key))
+                                break
 
                     sharded_destinations = {
                         d

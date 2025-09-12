@@ -211,7 +211,7 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
