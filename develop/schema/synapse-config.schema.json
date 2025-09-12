@@ -2089,7 +2089,7 @@
     },
     "media_upload_limits": {
       "type": "array",
-      "description": "A list of media upload limits defining how much data a given user can upload in a given time period.\n\nAn empty list means no limits are applied.",
+      "description": "A list of media upload limits defining how much data a given user can upload in a given time period.\nThese limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).\n\nAn empty list means no limits are applied.\n\nThese settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).",
       "default": [],
       "items": {
         "time_period": {

@@ -2048,8 +2048,10 @@ Setting this to a high value allows users to report content quickly, possibly in
 </code></pre>
 <hr />
 <h3 id="media_upload_limits"><a class="header" href="#media_upload_limits"><code>media_upload_limits</code></a></h3>
-<p><em>(array)</em> A list of media upload limits defining how much data a given user can upload in a given time period.</p>
+<p><em>(array)</em> A list of media upload limits defining how much data a given user can upload in a given time period.
+These limits are applied in addition to the <code>max_upload_size</code> limit above (which applies to individual uploads).</p>
 <p>An empty list means no limits are applied.</p>
+<p>These settings can be overridden using the <code>get_media_upload_limits_for_user</code> module API <a href="../../modules/media_repository_callbacks.html#get_media_upload_limits_for_user">callback</a>.</p>
 <p>Defaults to <code>[]</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">media_upload_limits:

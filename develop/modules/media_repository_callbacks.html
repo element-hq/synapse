@@ -206,6 +206,53 @@ enforce a different limit for the particular user.</p>
 returns <code>True</code>, Synapse falls through to the next one. The value of the first callback that
 returns <code>False</code> will be used. If this happens, Synapse will not call any of the subsequent
 implementations of this callback.</p>
+<h3 id="get_media_upload_limits_for_user"><a class="header" href="#get_media_upload_limits_for_user"><code>get_media_upload_limits_for_user</code></a></h3>
+<p><em>First introduced in Synapse v1.139.0</em></p>
+<pre><code class="language-python">async def get_media_upload_limits_for_user(user_id: str, size: int) -&gt; Optional[List[synapse.module_api.MediaUploadLimit]]
+</code></pre>
+<p><strong><span style="color:red">
+Caution: This callback is currently experimental. The method signature or behaviour
+may change without notice.
+</span></strong></p>
+<p>Called when processing a request to store content in the media repository. This can be used to dynamically override
+the <a href="../usage/configuration/config_documentation.html#media_upload_limits">media upload limits configuration</a>.</p>
+<p>The arguments passed to this callback are:</p>
+<ul>
+<li><code>user_id</code>: The Matrix user ID of the user (e.g. <code>@alice:example.com</code>) making the request.</li>
+</ul>
+<p>If the callback returns a list then it will be used as the limits instead of those in the configuration (if any).</p>
+<p>If an empty list is returned then no limits are applied (<strong>warning:</strong> users will be able
+to upload as much data as they desire).</p>
+<p>If multiple modules implement this callback, they will be considered in order. If a
+callback returns <code>None</code>, Synapse falls through to the next one. The value of the first
+callback that does not return <code>None</code> will be used. If this happens, Synapse will not call
+any of the subsequent implementations of this callback.</p>
+<p>If there are no registered modules, or if all modules return <code>None</code>, then
+the default
+<a href="../usage/configuration/config_documentation.html#media_upload_limits">media upload limits configuration</a>
+will be used.</p>
+<h3 id="on_media_upload_limit_exceeded"><a class="header" href="#on_media_upload_limit_exceeded"><code>on_media_upload_limit_exceeded</code></a></h3>
+<p><em>First introduced in Synapse v1.139.0</em></p>
+<pre><code class="language-python">async def on_media_upload_limit_exceeded(user_id: str, limit: synapse.module_api.MediaUploadLimit, sent_bytes: int, attempted_bytes: int) -&gt; None
+</code></pre>
+<p><strong><span style="color:red">
+Caution: This callback is currently experimental. The method signature or behaviour
+may change without notice.
+</span></strong></p>
+<p>Called when a user attempts to upload media that would exceed a
+<a href="../usage/configuration/config_documentation.html#media_upload_limits">configured media upload limit</a>.</p>
+<p>This callback will only be called on workers which handle
+<a href="https://spec.matrix.org/v1.15/client-server-api/#post_matrixmediav3upload">POST /_matrix/media/v3/upload</a>
+requests.</p>
+<p>This could be used to inform the user that they have reached a media upload limit through
+some external method.</p>
+<p>The arguments passed to this callback are:</p>
+<ul>
+<li><code>user_id</code>: The Matrix user ID of the user (e.g. <code>@alice:example.com</code>) making the request.</li>
+<li><code>limit</code>: The <code>synapse.module_api.MediaUploadLimit</code> representing the limit that was reached.</li>
+<li><code>sent_bytes</code>: The number of bytes already sent during the period of the limit.</li>
+<li><code>attempted_bytes</code>: The number of bytes that the user attempted to send.</li>
+</ul>
 
                     </main>
 
