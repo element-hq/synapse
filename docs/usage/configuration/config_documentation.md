@@ -2168,7 +2168,7 @@ max_upload_size: 60M
 ### `media_upload_limits`
 
 *(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
-These limits are applied in addition to the `max_upload_size` limit above, which applies to individual uploads.
+These limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).
 
 An empty list means no limits are applied.
 
