@@ -89,11 +89,11 @@ class LoggingContextTestCase(unittest.TestCase):
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         self.assertTrue(
             callback_finished,
@@ -128,15 +128,15 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("looping_call")
             callback_finished = True
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             lc = clock.looping_call(
                 lambda: defer.ensureDeferred(competing_callback()), 0
             )
-            self._check_test_key("one")
+            self._check_test_key("foo")
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         self.assertTrue(
             callback_finished,
@@ -174,13 +174,13 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("looping_call")
             callback_finished = True
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             lc = clock.looping_call_now(
                 lambda: defer.ensureDeferred(competing_callback()), 0
             )
-            self._check_test_key("one")
+            self._check_test_key("foo")
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         self.assertTrue(
             callback_finished,
@@ -218,13 +218,13 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("call_later")
             callback_finished = True
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
-            self._check_test_key("one")
+            self._check_test_key("foo")
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
             await clock.sleep(0)
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         self.assertTrue(
             callback_finished,
@@ -239,7 +239,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         callback_completed = False
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             # fire off function, but don't wait on it.
             d2 = run_in_background(function)
 
@@ -250,7 +250,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
             d2.addCallback(cb)
 
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         # now wait for the function under test to have run, and check that
         # the logcontext is left in a sane state.
@@ -302,18 +302,18 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     def test_run_in_background_with_coroutine(self) -> defer.Deferred:
         async def testfunc() -> None:
-            self._check_test_key("one")
+            self._check_test_key("foo")
             d = defer.ensureDeferred(Clock(reactor).sleep(0))
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             await d
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         return self._test_run_in_background(testfunc)
 
     @logcontext_clean
     def test_run_in_background_with_nonblocking_coroutine(self) -> defer.Deferred:
         async def testfunc() -> None:
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
         return self._test_run_in_background(testfunc)
 
@@ -331,7 +331,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         sentinel_context = current_context()
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             d1 = make_deferred_yieldable(blocking_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -339,7 +339,7 @@ class LoggingContextTestCase(unittest.TestCase):
             yield d1
 
             # now it should be restored
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
     @logcontext_clean
     @defer.inlineCallbacks
@@ -348,7 +348,7 @@ class LoggingContextTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[object]", object, None]:
         sentinel_context = current_context()
 
-        with LoggingContext("one"):
+        with LoggingContext("foo"):
             d1 = make_deferred_yieldable(_chained_deferred_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -356,7 +356,7 @@ class LoggingContextTestCase(unittest.TestCase):
             yield d1
 
             # now it should be restored
-            self._check_test_key("one")
+            self._check_test_key("foo")
 
     @logcontext_clean
     def test_nested_logging_context(self) -> None:
