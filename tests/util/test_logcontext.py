@@ -19,6 +19,7 @@
 #
 #
 
+import logging
 from typing import Callable, Generator, cast
 
 import twisted.python.failure
@@ -32,11 +33,14 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     nested_logging_context,
     run_in_background,
+    _Sentinel,
 )
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
 
 from .. import unittest
+
+logger = logging.getLogger(__name__)
 
 reactor = cast(ISynapseReactor, _reactor)
 
@@ -44,12 +48,73 @@ reactor = cast(ISynapseReactor, _reactor)
 class LoggingContextTestCase(unittest.TestCase):
     def _check_test_key(self, value: str) -> None:
         context = current_context()
-        assert isinstance(context, LoggingContext)
-        self.assertEqual(context.name, value)
+        assert isinstance(context, LoggingContext) or isinstance(context, _Sentinel), (
+            f"Expected LoggingContext({value}) but saw {context}"
+        )
+        self.assertEqual(
+            str(context), value, f"Expected LoggingContext({value}) but saw {context}"
+        )
 
     def test_with_context(self) -> None:
         with LoggingContext("test"):
             self._check_test_key("test")
+
+    async def test_deferred_asdf(self) -> None:
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        async def competing_callback():
+            with LoggingContext("competing"):
+                await clock.sleep(0)
+
+        with LoggingContext("foo"):
+            d = defer.Deferred()
+            d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+            # Call the callback with the "foo" context.
+            d.callback(None)
+
+    async def test_deferred(self) -> None:
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            logger.info("competing_callback1")
+            # The deferred callback should have the same logcontext as the caller
+            self._check_test_key("one")
+
+            logger.info("competing_callback2")
+            with LoggingContext("competing"):
+                await clock.sleep(0)
+                self._check_test_key("competing")
+
+            self._check_test_key("one")
+            logger.info("competing_callback3")
+            callback_finished = True
+
+        with LoggingContext("one"):
+            d = defer.Deferred()
+            d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+            self._check_test_key("one")
+            d.callback(None)
+            self._check_test_key("one")
+            await clock.sleep(0)
+            self._check_test_key("one")
+            await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
 
     async def test_sleep(self) -> None:
         clock = Clock(reactor)

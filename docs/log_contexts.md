@@ -143,8 +143,7 @@ cares about.
 The following sections describe pitfalls and helpful patterns when
 implementing these rules.
 
-Always await your awaitables
-----------------------------
+## Always await your awaitables
 
 Whenever you get an awaitable back from a function, you should `await` on
 it as soon as possible. Do not pass go; do not do any logging; do not
@@ -202,6 +201,67 @@ That doesn't follow the rules, but we can fix it by calling it through
 async def sleep(seconds):
     return await context.make_deferred_yieldable(get_sleep_deferred(seconds))
 ```
+
+## Deferred callbacks
+
+When a deferred callback is called, it will use the current context.
+
+The first issue is that the current context could finish before the callback is
+finishes. In the following example, the callback is called with the "foo" context and
+runs until the `await` where we yield control back to the reactor, setting the sentinel
+logcontext TODO
+
+```python
+async def competing_callback():
+    with LoggingContext("competing"):
+        await clock.sleep(0)
+
+with LoggingContext("foo"):
+    d = defer.Deferred()
+    d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+    # Call the callback with the "foo" context.
+    d.callback(None)
+```
+
+The callback can resume a coroutine, which will restore its
+own logging context, then run:
+
+ - until it blocks, setting the sentinel context
+ - or until it terminates, setting the context it was started with
+
+```python
+async def some_function():
+    with LoggingContext("competing"):
+        await clock.sleep(0)
+
+d = defer.Deferred()
+
+d.addCallback(lambda: defer.ensureDeferred(some_function()))
+
+# 
+d.callback(result)
+```
+
+Similarly, calling the errback may do the same thing.
+
+```python
+d = defer.Deferred()
+
+d.addErrback(some_other_function)
+
+d.errback(failure)
+```
+
+Cancellation is the same as directly calling the errback with a `twisted.internet.defer.CancelledError`:
+
+```python
+d = defer.Deferred()
+
+d.cancel()
+```
+
+
+
 
 ## Fire-and-forget
 
