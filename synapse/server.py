@@ -185,7 +185,7 @@ from synapse.util.task_scheduler import TaskScheduler
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    # Old versions don't have `LiteralString`
+    # Old Python versions don't have `LiteralString`
     from txredisapi import ConnectionHandler
     from typing_extensions import LiteralString
 
