@@ -110,6 +110,10 @@ P = ParamSpec("P")
 
 
 CALL_LATER_DELAY_TRACKING_THRESHOLD_S = 60
+"""
+The length of time (in seconds) the `delay` in a call to `Clock.call_later` must be
+before it is tracked for cancellation on shutdown.
+"""
 
 
 class Clock:
