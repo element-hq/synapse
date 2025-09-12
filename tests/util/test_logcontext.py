@@ -75,17 +75,20 @@ class LoggingContextTestCase(unittest.TestCase):
 
         async def competing_callback() -> None:
             nonlocal callback_finished
+            try:
+                # A callback from the reactor should start with the sentinel context. In
+                # other words, another task shouldn't have leaked their context to us.
+                self._check_test_key("sentinel")
 
-            # A callback from the reactor should start with the sentinel context. In
-            # other words, another task shouldn't have leaked their context to us.
-            self._check_test_key("sentinel")
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
 
-            with LoggingContext("competing"):
-                await clock.sleep(0)
-                self._check_test_key("competing")
-
-            self._check_test_key("sentinel")
-            callback_finished = True
+                self._check_test_key("sentinel")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
@@ -117,16 +120,20 @@ class LoggingContextTestCase(unittest.TestCase):
 
         async def competing_callback() -> None:
             nonlocal callback_finished
-            # A `looping_call` callback should have *some* logcontext since we should know
-            # which server spawned this loop and which server the logs came from.
-            self._check_test_key("looping_call")
+            try:
+                # A `looping_call` callback should have *some* logcontext since we should know
+                # which server spawned this loop and which server the logs came from.
+                self._check_test_key("looping_call")
 
-            with LoggingContext("competing"):
-                await clock.sleep(0)
-                self._check_test_key("competing")
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
 
-            self._check_test_key("looping_call")
-            callback_finished = True
+                self._check_test_key("looping_call")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
 
         with LoggingContext("foo"):
             lc = clock.looping_call(
@@ -163,16 +170,20 @@ class LoggingContextTestCase(unittest.TestCase):
 
         async def competing_callback() -> None:
             nonlocal callback_finished
-            # A `looping_call` callback should have *some* logcontext since we should know
-            # which server spawned this loop and which server the logs came from.
-            self._check_test_key("looping_call")
+            try:
+                # A `looping_call` callback should have *some* logcontext since we should know
+                # which server spawned this loop and which server the logs came from.
+                self._check_test_key("looping_call")
 
-            with LoggingContext("competing"):
-                await clock.sleep(0)
-                self._check_test_key("competing")
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
 
-            self._check_test_key("looping_call")
-            callback_finished = True
+                self._check_test_key("looping_call")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
 
         with LoggingContext("foo"):
             lc = clock.looping_call_now(
@@ -207,16 +218,20 @@ class LoggingContextTestCase(unittest.TestCase):
 
         async def competing_callback() -> None:
             nonlocal callback_finished
-            # A `call_later` callback should have *some* logcontext since we should know
-            # which server spawned this loop and which server the logs came from.
-            self._check_test_key("call_later")
+            try:
+                # A `call_later` callback should have *some* logcontext since we should know
+                # which server spawned this loop and which server the logs came from.
+                self._check_test_key("call_later")
 
-            with LoggingContext("competing"):
-                await clock.sleep(0)
-                self._check_test_key("competing")
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
 
-            self._check_test_key("call_later")
-            callback_finished = True
+                self._check_test_key("call_later")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
 
         with LoggingContext("foo"):
             clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
