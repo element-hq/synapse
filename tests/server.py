@@ -794,6 +794,9 @@ class ThreadPool:
         d: "Deferred[None]" = Deferred()
         d.addCallback(lambda x: function(*args, **kwargs))
         d.addBoth(_)
+        # mypy ignored here because:
+        #   - this is part of the test infrastructure where tracking these calls for
+        #     shutdown isn't strictly necessary.
         self._reactor.callLater(0, d.callback, True)  # type: ignore[call-later-not-tracked]
         return d
 
@@ -912,9 +915,15 @@ class FakeTransport:
             # some implementations of IProducer (for example, FileSender)
             # don't return a deferred.
             d = maybeDeferred(self.producer.resumeProducing)
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure where tracking these calls for
+            #     shutdown isn't strictly necessary.
             d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
 
         if not streaming:
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure where tracking these calls for
+            #     shutdown isn't strictly necessary.
             self._reactor.callLater(0.0, _produce)  # type: ignore[call-later-not-tracked]
 
     def write(self, byt: bytes) -> None:
@@ -927,6 +936,9 @@ class FakeTransport:
         # TLSMemoryBIOProtocol) get very confused if a read comes back while they are
         # still doing a write. Doing a callLater here breaks the cycle.
         if self.autoflush:
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure where tracking these calls for
+            #     shutdown isn't strictly necessary.
             self._reactor.callLater(0.0, self.flush)  # type: ignore[call-later-not-tracked]
 
     def writeSequence(self, seq: Iterable[bytes]) -> None:
@@ -957,6 +969,9 @@ class FakeTransport:
 
         self.buffer = self.buffer[len(to_write) :]
         if self.buffer and self.autoflush:
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure where tracking these calls for
+            #     shutdown isn't strictly necessary.
             self._reactor.callLater(0.0, self.flush)  # type: ignore[call-later-not-tracked]
 
         if not self.buffer and self.disconnecting:

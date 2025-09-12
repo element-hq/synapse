@@ -297,12 +297,17 @@ class Clock:
             with context.PreserveLoggingContext():
                 # We can ignore the lint here since this is the one location callLater
                 # should be called.
+                # mypy ignored here because:
+                #   - this is the main location in code where using `callLater` is
+                #     expected.
                 call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
                 self._call_id_to_delayed_call[call_id] = call
                 return call
         else:
             # We can ignore the lint here since this is the one location callLater should
             # be called.
+            # mypy ignored here because:
+            #   - this is the main location in code where using `callLater` is expected.
             return self._reactor.callLater(delay, callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:

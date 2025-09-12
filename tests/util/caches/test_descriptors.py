@@ -56,6 +56,9 @@ logger = logging.getLogger(__name__)
 
 def run_on_reactor() -> "Deferred[int]":
     d: "Deferred[int]" = Deferred()
+    # mypy ignored here because:
+    #   - this is part of the test infrastructure where tracking these calls for
+    #     shutdown isn't strictly necessary.
     cast(IReactorTime, reactor).callLater(0, d.callback, 0)  # type: ignore[call-later-not-tracked]
     return make_deferred_yieldable(d)
 
