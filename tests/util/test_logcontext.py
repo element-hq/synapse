@@ -30,11 +30,11 @@ from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
     PreserveLoggingContext,
+    _Sentinel,
     current_context,
     make_deferred_yieldable,
     nested_logging_context,
     run_in_background,
-    _Sentinel,
 )
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
@@ -109,7 +109,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 callback_finished = True
 
         with LoggingContext("foo"):
-            d = defer.Deferred()
+            d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
             d.callback(None)
@@ -165,7 +165,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 callback_finished = True
 
         with LoggingContext("foo"):
-            d = defer.Deferred()
+            d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
             # The fix for the naive case is here (i.e. things don't work correctly if we
@@ -232,7 +232,7 @@ class LoggingContextTestCase(unittest.TestCase):
         # And we can still set the current logcontext by using `PreserveLoggingContext`
         # and passing in the "foo" logcontext.
         with PreserveLoggingContext(LoggingContext("foo")):
-            d = defer.Deferred()
+            d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
             # Other part of fix for the naive case is here (i.e. things don't work
@@ -249,7 +249,14 @@ class LoggingContextTestCase(unittest.TestCase):
             # to run in the "foo" logcontext, but return the deferred `d` itself so that
             # `run_in_background` will wait on that to complete before resetting the
             # logcontext to the sentinel.
-            run_in_background(lambda: (d.callback(None), d)[1])
+            #
+            # type-ignore[call-overload]: This appears like a mypy type inference bug. A
+            # function that returns a deferred is exactly what `run_in_background`
+            # expects.
+            #
+            # type-ignore[func-returns-value]: This appears like a mypy type inference
+            # bug. We're always returning the deferred `d`.
+            run_in_background(lambda: (d.callback(None), d)[1])  # type: ignore[call-overload, func-returns-value]
             self._check_test_key("foo")
 
         await clock.sleep(0)
