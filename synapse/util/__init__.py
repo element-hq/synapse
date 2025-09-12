@@ -221,7 +221,8 @@ class Clock:
             # associated with the next thing the reactor does)
             with context.PreserveLoggingContext(context.LoggingContext("looping_call")):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
-                # awaitable returned by `f`) completes
+                # awaitable returned by `f`) completes to avoid leaking the current
+                # logcontext to the reactor
                 return context.run_in_background(f, *args, **kwargs)
 
         call = task.LoopingCall(wrapped_f, *args, **kwargs)
@@ -276,7 +277,8 @@ class Clock:
             # associated with the next thing the reactor does)
             with context.PreserveLoggingContext(context.LoggingContext("call_later")):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
-                # awaitable returned by `f`) completes
+                # awaitable returned by `f`) completes to avoid leaking the current
+                # logcontext to the reactor
                 context.run_in_background(callback, *args, **kwargs)
 
         return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
