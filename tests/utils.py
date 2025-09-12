@@ -284,7 +284,7 @@ class MockClock:
     def call_later(
         self,
         delay: float,
-        _: bool,  # track_for_shutdown Unused in tests
+        _: bool,  # cancel_on_shutdown unused in tests
         callback: Callable[P, object],
         *args: P.args,
         **kwargs: P.kwargs,

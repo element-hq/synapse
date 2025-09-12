@@ -447,12 +447,9 @@ class MessageHandler:
 
         logger.info("Scheduling expiry for event %s in %.3fs", event_id, delay)
 
-        track_for_shutdown = (
-            True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False
-        )
         self._scheduled_expiry = self.clock.call_later(
             delay,
-            track_for_shutdown,
+            True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             run_as_background_process,
             "_expire_event",
             self.server_name,

@@ -147,10 +147,10 @@ class Clock:
         self.cancel_all_looping_calls()
         self.cancel_all_delayed_calls()
 
-    async def sleep(self, seconds: float, track_for_shutdown: bool = False) -> None:
+    async def sleep(self, seconds: float, cancel_on_shutdown: bool = False) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         with context.PreserveLoggingContext():
-            self.call_later(seconds, track_for_shutdown, d.callback, seconds)
+            self.call_later(seconds, cancel_on_shutdown, d.callback, seconds)
             await d
 
     def time(self) -> float:
@@ -250,7 +250,7 @@ class Clock:
     def call_later(
         self,
         delay: float,
-        track_for_shutdown: bool,
+        cancel_on_shutdown: bool,
         callback: Callable,
         *args: Any,
         **kwargs: Any,
@@ -262,7 +262,7 @@ class Clock:
 
         Args:
             delay: How long to wait in seconds.
-            track_for_shutdown: Whether this call should be tracked for cleanup during
+            cancel_on_shutdown: Whether this call should be tracked for cleanup during
                 shutdown. Any call with a long delay, or that is created infrequently,
                 should be tracked. Calls which are short or of 0 delay don't require
                 tracking since the small delay after shutdown before they trigger is
@@ -276,7 +276,7 @@ class Clock:
         if self._is_shutdown:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
 
-        if track_for_shutdown:
+        if cancel_on_shutdown:
             call_id = self._delayed_call_id
             self._delayed_call_id = self._delayed_call_id + 1
 
