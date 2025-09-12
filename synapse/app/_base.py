@@ -110,18 +110,21 @@ P = ParamSpec("P")
 
 
 def register_sighup(
-    instance_id: str, func: Callable[P, None], *args: P.args, **kwargs: P.kwargs
+    homeserver_instance_id: str,
+    func: Callable[P, None],
+    *args: P.args,
+    **kwargs: P.kwargs,
 ) -> None:
     """
     Register a function to be called when a SIGHUP occurs.
 
     Args:
-        instance_id: Unique ID for this Synapse process instance.
+        homeserver_instance_id: Unique ID for this Synapse process instance.
         func: Function to be called when sent a SIGHUP signal.
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
 
-    _instance_id_to_sighup_callbacks_map.setdefault(instance_id, []).append(
+    _instance_id_to_sighup_callbacks_map.setdefault(homeserver_instance_id, []).append(
         (func, args, kwargs)
     )
 
