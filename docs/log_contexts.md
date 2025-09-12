@@ -212,26 +212,31 @@ rules, will restore its own logcontext, then run:
  - until it yields control back to the reactor, setting the sentinel logcontext
  - or until it finishes, restoring the logcontext it was started with (calling context)
 
-The first issue is that the current logcontext could finish before the callback
-finishes. In the following example, the deferred callback is called with the "main"
-logcontext and runs until we yield control back to the reactor in the `await` inside
-`clock.sleep(0)`. Since `clock.sleep(0)` follows our logcontext rules, it sets the
-logcontext to the sentinel before yielding control back to the reactor. Our `main`
-function continues and the `with LoggingContext("main")` block exits, finishing the
-"main" logcontext yielding control back to the reactor again. Finally, later on when
-`clock.sleep(0)` completes, our `with LoggingContext("competing")` block exits, and
-restores the previous "main" logcontext which has already finished, resulting in
-`WARNING: Re-starting finished log context main` and leaking the `main` logcontext into
-the reactor which will then erronously get associated with the next thing the reactor
-does.
+The first issue is that the callback may have reset the logcontext to the sentinel
+before returning. This means our calling function will continue with the sentinel
+logcontext instead of the logcontext it was started with (bad).
 
-The second issue is TODO
+The second issue is that the current logcontext that called the deferred callback could
+finish before the callback finishes (bad).
+
+In the following example, the deferred callback is called with the "main" logcontext and
+runs until we yield control back to the reactor in the `await` inside `clock.sleep(0)`.
+Since `clock.sleep(0)` follows our logcontext rules, it sets the logcontext to the
+sentinel before yielding control back to the reactor. Our `main` function continues with
+the sentinel logcontext (first bad thing) instead of the "main" logcontext. Then the
+`with LoggingContext("main")` block exits, finishing the "main" logcontext and yielding
+control back to the reactor again. Finally, later on when `clock.sleep(0)` completes,
+our `with LoggingContext("competing")` block exits, and restores the previous "main"
+logcontext which has already finished, resulting in `WARNING: Re-starting finished log
+context main` and leaking the `main` logcontext into the reactor which will then
+erronously be associated with the next task the reactor picks up.
 
 ```python
 async def competing_callback():
     # Since this is run with the "main" logcontext, when the "competing"
     # logcontext exits, it will restore the previous "main" logcontext which has
     # already finished and results in "WARNING: Re-starting finished log context main"
+    # and leaking the `main` logcontext into the reactor.
     with LoggingContext("competing"):
         await clock.sleep(0)
 
@@ -267,7 +272,9 @@ async def main():
 We could also fix this by surrounding the call to `d.callback` with a
 `PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
 the callback, and restore the "foo" logcontext afterwards before continuing the `main`
-function:
+function. This solves the problem because when the "competing" logcontext exits, it will
+restore the sentinel logcontext which is not finished, so there is no warning and no
+leakage into the reactor.
 
 ```python
 async def main():
@@ -279,6 +286,38 @@ async def main():
             d.callback(None)
         # Good: This will be logged against the "main" logcontext
         logger.debug("phew")
+```
+
+Another way to extend the lifetime of the "main" logcontext is to avoid calling the
+context manager lifetime methods of `LoggingContext` (`__enter__`/`__exit__`). We can
+still set the current logcontext by using `PreserveLoggingContext` and passing in the
+"main" logcontext.
+
+
+```python
+async def main():
+    main_context = LoggingContext("main")
+    with PreserveLoggingContext(main_context):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        # TODO: Still bad: This will be logged against sentinel logcontext
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
+
+...
+
+# Wherever possible, it's best to finish the logcontext by exiting at some point. This
+# allows us to catch bugs if we later try to erroneously restart a finished logcontext.
+#
+# Since the "main" logcontext stores the `LoggingContext.previous_context` when it is
+# created, we can wrap this call in `PreserveLoggingContext()` to restore the correct
+# previous logcontext. Our goal is to have the calling context remain unchanged after
+# finishing the "main" logcontext.
+with PreserveLoggingContext():
+    # Finish the "main" logcontext
+    with main_context:
+        pass
 ```
 
 ### Deferred errbacks and cancellations

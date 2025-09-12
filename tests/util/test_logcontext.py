@@ -19,6 +19,7 @@
 #
 #
 
+
 import logging
 from typing import Callable, Generator, cast
 
@@ -59,7 +60,7 @@ class LoggingContextTestCase(unittest.TestCase):
         with LoggingContext("test"):
             self._check_test_key("test")
 
-    async def test_deferred_asdf(self) -> None:
+    async def test_deferred_asdf1(self) -> None:
         clock = Clock(reactor)
 
         # Sanity check that we start in the sentinel context
@@ -79,6 +80,30 @@ class LoggingContextTestCase(unittest.TestCase):
             # d.callback(None)
             with PreserveLoggingContext():
                 d.callback(None)
+
+            # This will be logged against sentinel logcontext
+            logger.debug("ugh")
+
+    async def test_deferred_asdf2(self) -> None:
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        async def competing_callback():
+            # Since this is run with the "foo" logcontext, when the "competing"
+            # logcontext exits, it will restore the previous "foo" logcontext which has
+            # already finished and results in "WARNING: Re-starting finished log context foo"
+            with LoggingContext("competing"):
+                await clock.sleep(0)
+
+        with PreserveLoggingContext(LoggingContext("foo")):
+            d = defer.Deferred()
+            d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+            # Call the callback with the "foo" context.
+            d.callback(None)
+            # with PreserveLoggingContext():
+            #     d.callback(None)
 
             # This will be logged against sentinel logcontext
             logger.debug("ugh")
