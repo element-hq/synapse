@@ -137,8 +137,8 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     async def test_deferred_callback_preserve_logging_context(self) -> None:
         """
-        Test that calling the deferred callback inside `PreserveLoggingContext()` works
-        as expected.
+        Test that calling the deferred callback inside `PreserveLoggingContext()` (in
+        the sentinel context) works as expected.
 
         Demonstrates one pattern that we can use fix the naive case where we just call
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
