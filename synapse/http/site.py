@@ -696,7 +696,9 @@ class SynapseProtocol(HTTPChannel):
         """
         Called when the connection is shut down.
 
-        Remove the connection from the factory's connection list, when it's lost.
+        Clear any circular references here, and any external references to this
+        Protocol. The connection has been closed. In our case, we need to remove the
+        connection from the factory's connection list, when it's lost.
         """
         super().connectionLost(reason)
         self.factory.removeConnection(self)
