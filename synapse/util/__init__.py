@@ -318,7 +318,7 @@ class Clock:
 
     def cancel_all_delayed_calls(self, ignore_errs: bool = True) -> None:
         """
-        Stop all scheduled calls.
+        Stop all scheduled calls that were marked with `cancel_on_shutdown` when they were created.
 
         Args:
             ignore_errs: Whether to re-raise errors encountered when cancelling the
