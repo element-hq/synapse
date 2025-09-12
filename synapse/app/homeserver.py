@@ -323,9 +323,11 @@ def setup(
         config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.
         reactor: Optionally provide a reactor to use. Can be useful in different
             scenarios that you want control over the reactor, such as tests.
-        freeze: Whether to freeze all objects in the garbage collector. May result in
-            less work for the garbage collector since the `SynapseHomeServer` generally has
-            a static lifetime.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver in memory, this needs to be
+            false otherwise the homeserver cannot be garbage collected after `shutdown`.
 
     Returns:
         A homeserver instance.
