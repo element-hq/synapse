@@ -204,59 +204,100 @@ async def sleep(seconds):
 
 ## Deferred callbacks
 
-When a deferred callback is called, it will use the current context.
+When a deferred callback is called, it will use the current logcontext.
 
-The first issue is that the current context could finish before the callback is
-finishes. In the following example, the callback is called with the "foo" context and
-runs until the `await` where we yield control back to the reactor, setting the sentinel
-logcontext TODO
+The deferred callback chain can resume a coroutine, which if following our logcontext
+rules, will restore its own logcontext, then run:
+
+ - until it yields control back to the reactor, setting the sentinel logcontext
+ - or until it finishes, restoring the logcontext it was started with (calling context)
+
+The first issue is that the current logcontext could finish before the callback
+finishes. In the following example, the deferred callback is called with the "main"
+logcontext and runs until we yield control back to the reactor in the `await` inside
+`clock.sleep(0)`. Since `clock.sleep(0)` follows our logcontext rules, it sets the
+logcontext to the sentinel before yielding control back to the reactor. Our `main`
+function continues and the `with LoggingContext("main")` block exits, finishing the
+"main" logcontext yielding control back to the reactor again. Finally, later on when
+`clock.sleep(0)` completes, our `with LoggingContext("competing")` block exits, and
+restores the previous "main" logcontext which has already finished, resulting in
+`WARNING: Re-starting finished log context main` and leaking the `main` logcontext into
+the reactor which will then erronously get associated with the next thing the reactor
+does.
+
+The second issue is TODO
 
 ```python
 async def competing_callback():
+    # Since this is run with the "main" logcontext, when the "competing"
+    # logcontext exits, it will restore the previous "main" logcontext which has
+    # already finished and results in "WARNING: Re-starting finished log context main"
     with LoggingContext("competing"):
         await clock.sleep(0)
 
-with LoggingContext("foo"):
-    d = defer.Deferred()
-    d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
-    # Call the callback with the "foo" context.
-    d.callback(None)
+def main():
+    with LoggingContext("main"):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        # Call the callback within the "main" logcontext.
+        d.callback(None)
+        # Bad: This will be logged against sentinel logcontext
+        logger.debug("ugh")
+
+main()
 ```
 
-The callback can resume a coroutine, which will restore its
-own logging context, then run:
-
- - until it blocks, setting the sentinel context
- - or until it terminates, setting the context it was started with
+We could of course fix this by following the general rule of "always await your
+awaitables":
 
 ```python
-async def some_function():
-    with LoggingContext("competing"):
-        await clock.sleep(0)
+async def main():
+    with LoggingContext("main"):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        # Wait for `d` to finish before continuing so the "main" logcontext is
+        # still active. This works because `d` already follows our logcontext
+        # rules. If not, we would also have to use `make_deferred_yieldable(d)`.
+        await d
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
+``` 
 
-d = defer.Deferred()
+We could also fix this by surrounding the call to `d.callback` with a
+`PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
+the callback, and restore the "foo" logcontext afterwards before continuing the `main`
+function:
 
-d.addCallback(lambda: defer.ensureDeferred(some_function()))
-
-# 
-d.callback(result)
+```python
+async def main():
+    with LoggingContext("main"):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        with PreserveLoggingContext():
+            d.callback(None)
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
 ```
 
-Similarly, calling the errback may do the same thing.
+### Deferred errbacks and cancellations
+
+The same care should be taken when calling errbacks on deferreds. An errback and
+callback act the same in this regard (see section above).
 
 ```python
 d = defer.Deferred()
-
 d.addErrback(some_other_function)
-
 d.errback(failure)
 ```
 
-Cancellation is the same as directly calling the errback with a `twisted.internet.defer.CancelledError`:
+Additionally, cancellation is the same as directly calling the errback with a
+`twisted.internet.defer.CancelledError`:
 
 ```python
 d = defer.Deferred()
-
+d.addErrback(some_other_function)
 d.cancel()
 ```
 
