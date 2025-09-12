@@ -65,7 +65,7 @@ returns `True`, Synapse falls through to the next one. The value of the first ca
 returns `False` will be used. If this happens, Synapse will not call any of the subsequent
 implementations of this callback.
 
-### `get_media_upload_limits_for_user`
+### `get_media_upload_limits_for_user` {#get_media_upload_limits_for_user}
 
 _First introduced in Synapse v1.139.0_
 
