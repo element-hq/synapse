@@ -400,9 +400,7 @@ class HomeServer(metaclass=abc.ABCMeta):
                     await port_shutdown
         self._listening_services.clear()
 
-        logger.info("Shutting down metrics listeners")
         for server, thread in self._metrics_listeners:
-            logger.info("Shutting down metrics listener")
             server.shutdown()
             thread.join()
         self._metrics_listeners.clear()
