@@ -331,6 +331,11 @@ async def main():
 with PreserveLoggingContext():
     # Finish the "main" logcontext
     with main_context:
+        # Empty block - We're just trying to call `__exit__` on the "main" context
+        # manager to finish it. We can't call `__exit__` directly as the code expects us
+        # to `__enter__` before calling `__exit__` to `start`/`stop` things
+        # appropriately. And in any case, it's probably best not to call the internal
+        # methods directly.
         pass
 ```
 
