@@ -271,7 +271,7 @@ async def main():
 
 We could also fix this by surrounding the call to `d.callback` with a
 `PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
-the callback, and restore the "foo" logcontext afterwards before continuing the `main`
+the callback, and restore the "main" logcontext afterwards before continuing the `main`
 function. This solves the problem because when the "competing" logcontext exits, it will
 restore the sentinel logcontext which is never finished by its nature, so there is no
 warning and no leakage into the reactor.
@@ -289,8 +289,8 @@ async def main():
         logger.debug("phew")
 ```
 
-But let's say you *do* want to run the deferred callback in the current context without
-running into issues:
+But let's say you *do* want to run (fire-and-forget) the deferred callback in the
+current context without running into issues:
 
 We can solve the first issue by using `run_in_background(...)` to run the callback in
 the current logcontext and it handles the magic behind the scenes of a) restoring the
@@ -338,6 +338,7 @@ with PreserveLoggingContext():
         # methods directly.
         pass
 ```
+
 
 ### Deferred errbacks and cancellations
 
