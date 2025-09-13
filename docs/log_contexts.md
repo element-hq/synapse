@@ -339,6 +339,9 @@ with PreserveLoggingContext():
         pass
 ```
 
+The same thing applies if you have some deferreds stored somewhere which you want to
+callback in the current logcontext.
+
 
 ### Deferred errbacks and cancellations
 
