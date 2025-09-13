@@ -38,6 +38,7 @@ from synapse.logging.context import (
 )
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
+
 from tests.unittest import logcontext_clean
 
 from .. import unittest
