@@ -204,20 +204,21 @@ async def sleep(seconds):
 
 ## Deferred callbacks
 
-When a deferred callback is called, it will use the current logcontext.
-
-The deferred callback chain can resume a coroutine, which if following our logcontext
-rules, will restore its own logcontext, then run:
+When a deferred callback is called, it inherits the current logcontext. The deferred
+callback chain can resume a coroutine, which if following our logcontext rules, will
+restore its own logcontext, then run:
 
  - until it yields control back to the reactor, setting the sentinel logcontext
  - or until it finishes, restoring the logcontext it was started with (calling context)
 
-The first issue is that the callback may have reset the logcontext to the sentinel
-before returning. This means our calling function will continue with the sentinel
-logcontext instead of the logcontext it was started with (bad).
+This behavior creates two specific issues:
 
-The second issue is that the current logcontext that called the deferred callback could
-finish before the callback finishes (bad).
+**Issue 1:** The first issue is that the callback may have reset the logcontext to the
+sentinel before returning. This means our calling function will continue with the
+sentinel logcontext instead of the logcontext it was started with (bad).
+
+**Issue 2:** The second issue is that the current logcontext that called the deferred
+callback could finish before the callback finishes (bad).
 
 In the following example, the deferred callback is called with the "main" logcontext and
 runs until we yield control back to the reactor in the `await` inside `clock.sleep(0)`.
@@ -252,8 +253,8 @@ def main():
 main()
 ```
 
-We could of course fix this by following the general rule of "always await your
-awaitables":
+**Solution 1:** We could of course fix this by following the general rule of "always
+await your awaitables":
 
 ```python
 async def main():
@@ -269,7 +270,7 @@ async def main():
         logger.debug("phew")
 ``` 
 
-We could also fix this by surrounding the call to `d.callback` with a
+**Solution 2:** We could also fix this by surrounding the call to `d.callback` with a
 `PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
 the callback, and restore the "main" logcontext afterwards before continuing the `main`
 function. This solves the problem because when the "competing" logcontext exits, it will
@@ -289,8 +290,8 @@ async def main():
         logger.debug("phew")
 ```
 
-But let's say you *do* want to run (fire-and-forget) the deferred callback in the
-current context without running into issues:
+**Solution 3:** But let's say you *do* want to run (fire-and-forget) the deferred
+callback in the current context without running into issues:
 
 We can solve the first issue by using `run_in_background(...)` to run the callback in
 the current logcontext and it handles the magic behind the scenes of a) restoring the
@@ -298,9 +299,9 @@ calling logcontext before returning to the caller and b) resetting the logcontex
 sentinel after the deferred completes and we yield control back to the reactor to avoid
 leaking the logcontext into the reactor.
 
-To solve the second problem, we can extend the lifetime of the "main" logcontext is to
-avoid calling the context manager lifetime methods of `LoggingContext`
-(`__enter__`/`__exit__`). And we can still set the current logcontext by using
+To solve the second issue, we can extend the lifetime of the "main" logcontext by
+avoiding the `LoggingContext`'s context manager lifetime methods
+(`__enter__`/`__exit__`). We can still set "main" as the current logcontext by using
 `PreserveLoggingContext` and passing in the "main" logcontext.
 
 
