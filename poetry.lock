@@ -2971,14 +2971,14 @@ files = [
 
 [[package]]
 name = "types-psycopg2"
-version = "2.9.21.20250809"
+version = "2.9.21.20250915"
 description = "Typing stubs for psycopg2"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types_psycopg2-2.9.21.20250809-py3-none-any.whl", hash = "sha256:59b7b0ed56dcae9efae62b8373497274fc1a0484bdc5135cdacbe5a8f44e1d7b"},
-    {file = "types_psycopg2-2.9.21.20250809.tar.gz", hash = "sha256:b7c2cbdcf7c0bd16240f59ba694347329b0463e43398de69784ea4dee45f3c6d"},
+    {file = "types_psycopg2-2.9.21.20250915-py3-none-any.whl", hash = "sha256:eefe5ccdc693fc086146e84c9ba437bb278efe1ef330b299a0cb71169dc6c55f"},
+    {file = "types_psycopg2-2.9.21.20250915.tar.gz", hash = "sha256:bfeb8f54c32490e7b5edc46215ab4163693192bc90407b4a023822de9239f5c8"},
 ]
 
 [[package]]
