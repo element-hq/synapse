@@ -250,6 +250,12 @@ class RedisSubscriber(SubscriberProtocol):
             self.server_name,
             self._async_send_command,
             cmd,
+            # We originally, started tracing background processes to avoid `There was no
+            # active span` errors but this change meant we started generating 15x the
+            # number of spans than before.
+            #
+            # This is one of the most heavily used culprits and we don't really need to
+            # trace sending replication commands.
             bg_start_span=False,
         )
 
