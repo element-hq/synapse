@@ -20,11 +20,10 @@
 #
 #
 import datetime
+import importlib.resources as importlib_resources
 import os
 from typing import Any, Dict, List, Tuple
 from unittest.mock import AsyncMock
-
-import pkg_resources
 
 from twisted.internet.testing import MemoryReactor
 
@@ -981,11 +980,12 @@ class AccountValidityRenewalByEmailTestCase(unittest.HomeserverTestCase):
 
         # Email config.
 
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": True,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "expiry_template_html": "notice_expiry.html",
             "expiry_template_text": "notice_expiry.txt",
             "notif_template_html": "notif_mail.html",
