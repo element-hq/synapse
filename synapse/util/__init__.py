@@ -34,12 +34,14 @@ from typing import (
     Sequence,
     Set,
     TypeVar,
+    cast,
 )
 
 import attr
 from immutabledict import immutabledict
 from matrix_common.versionstring import get_distribution_version_string
 from typing_extensions import ParamSpec
+from zope.interface import implementer
 
 from twisted.internet import defer, task
 from twisted.internet.interfaces import IDelayedCall, IReactorTime
@@ -300,6 +302,7 @@ class Clock:
                 # We can ignore the lint here since this class is the one location callLater
                 # should be called.
                 call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
+                call = cast(IDelayedCall, DelayedCallWrapper(call, call_id, self))
                 self._call_id_to_delayed_call[call_id] = call
                 return call
         else:
@@ -330,13 +333,55 @@ class Clock:
             ignore_errs: Whether to re-raise errors encountered when cancelling the
             scheduled call.
         """
-        for call in self._call_id_to_delayed_call.values():
+        # We wrap the dict in a list here since calling cancel on a delayed_call
+        # will result in the call removing itself from the map mid-iteration.
+        for call in list(self._call_id_to_delayed_call.values()):
             try:
                 call.cancel()
             except Exception:
                 if not ignore_errs:
                     raise
         self._call_id_to_delayed_call.clear()
+
+
+@implementer(IDelayedCall)
+class DelayedCallWrapper:
+    """Wraps an `IDelayedCall` so that we can intercept the call to `cancel()` and
+    properly cleanup the delayed call from the tracking map of the `Clock`.
+
+    args:
+        delayed_call: The actual `IDelayedCall`
+        call_id: Unique identifier for this delayed call
+        clock: The clock instance tracking this call
+    """
+
+    def __init__(self, delayed_call: IDelayedCall, call_id: int, clock: Clock):
+        self.delayed_call = delayed_call
+        self.call_id = call_id
+        self.clock = clock
+
+    def cancel(self) -> None:
+        """Remove the call from the tracking map and propagate the call to the
+        underlying delayed_call.
+        """
+        self.delayed_call.cancel()
+        self.clock._call_id_to_delayed_call.pop(self.call_id)
+
+    def getTime(self) -> float:
+        """Propagate the call to the underlying delayed_call."""
+        return self.delayed_call.getTime()
+
+    def delay(self, secondsLater: float) -> None:
+        """Propagate the call to the underlying delayed_call."""
+        self.delayed_call.delay(secondsLater)
+
+    def reset(self, secondsFromNow: float) -> None:
+        """Propagate the call to the underlying delayed_call."""
+        self.delayed_call.reset(secondsFromNow)
+
+    def active(self) -> bool:
+        """Propagate the call to the underlying delayed_call."""
+        return self.delayed_call.active()
 
 
 def log_failure(
