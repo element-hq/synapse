@@ -161,7 +161,7 @@ class ProxyResource(_AsyncResource):
             bodyProducer=QuieterFileBodyProducer(request.content),
         )
         request_deferred = timeout_deferred(
-            request_deferred,
+            deferred=request_deferred,
             # This should be set longer than the timeout in `MatrixFederationHttpClient`
             # so that it has enough time to complete and pass us the data before we give
             # up.

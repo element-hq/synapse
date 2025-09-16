@@ -301,7 +301,7 @@ async def _handle_response(
 
         d = read_body_with_max_size(response, parser, max_response_size)
         d = timeout_deferred(
-            d,
+            deferred=d,
             timeout=timeout_sec,
             cancel_on_shutdown=False,  # We don't track this call since it's short
             clock=clock,
@@ -741,7 +741,7 @@ class MatrixFederationHttpClient:
                                 bodyProducer=producer,
                             )
                             request_deferred = timeout_deferred(
-                                request_deferred,
+                                deferred=request_deferred,
                                 timeout=_sec_timeout,
                                 cancel_on_shutdown=False,  # We don't track this call since it will typically be short
                                 clock=self.clock,
@@ -802,7 +802,7 @@ class MatrixFederationHttpClient:
                         # Update transactions table?
                         d = treq.content(response)
                         d = timeout_deferred(
-                            d,
+                            deferred=d,
                             timeout=_sec_timeout,
                             cancel_on_shutdown=False,  # We don't track this call since it will typically be short
                             clock=self.clock,

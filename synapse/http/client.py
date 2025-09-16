@@ -437,10 +437,10 @@ class BaseHttpClient:
                 # we use our own timeout mechanism rather than treq's as a workaround
                 # for https://twistedmatrix.com/trac/ticket/9534.
                 request_deferred = timeout_deferred(
-                    request_deferred,
-                    60,
-                    False,  # We don't track this call since it's short
-                    self.hs.get_clock(),
+                    deferred=request_deferred,
+                    timeout=60,
+                    cancel_on_shutdown=False,  # We don't track this call since it's short
+                    clock=self.hs.get_clock(),
                 )
 
                 # turn timeouts into RequestTimedOutErrors
@@ -766,10 +766,10 @@ class BaseHttpClient:
 
             # Ensure that the body is not read forever.
             d = timeout_deferred(
-                d,
-                30,
-                False,  # We don't track this call since it's short
-                self.hs.get_clock(),
+                deferred=d,
+                timeout=30,
+                cancel_on_shutdown=False,  # We don't track this call since it's short
+                clock=self.hs.get_clock(),
             )
 
             length = await make_deferred_yieldable(d)
@@ -964,10 +964,10 @@ class ReplicationClient(BaseHttpClient):
                 # for https://twistedmatrix.com/trac/ticket/9534.
                 # (Updated url https://github.com/twisted/twisted/issues/9534)
                 request_deferred = timeout_deferred(
-                    request_deferred,
-                    60,
-                    False,  # We don't track this call since it's short
-                    self.hs.get_clock(),
+                    deferred=request_deferred,
+                    timeout=60,
+                    cancel_on_shutdown=False,  # We don't track this call since it's short
+                    clock=self.hs.get_clock(),
                 )
 
                 # turn timeouts into RequestTimedOutErrors

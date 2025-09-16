@@ -760,6 +760,7 @@ class ReadWriteLock:
 
 
 def timeout_deferred(
+    *,
     deferred: "defer.Deferred[_T]",
     timeout: float,
     cancel_on_shutdown: bool,

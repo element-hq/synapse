@@ -675,16 +675,16 @@ class Notifier:
                         # is a new token.
                         listener = user_stream.new_listener(prev_token)
                         listener = timeout_deferred(
-                            listener,
-                            (end_time - now) / 1000.0,
+                            deferred=listener,
+                            timeout=(end_time - now) / 1000.0,
                             # We don't track these calls since they are constantly being
                             # overridden by new calls to /sync and they don't hold the
                             # `HomeServer` in memory on shutdown. It is safe to let them
                             # timeout of their own accord after shutting down since it
                             # won't delay shutdown and there won't be any adverse
                             # behvaviour.
-                            False,
-                            self.hs.get_clock(),
+                            cancel_on_shutdown=False,
+                            clock=self.hs.get_clock(),
                         )
 
                         log_kv(
