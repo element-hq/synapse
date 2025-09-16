@@ -49,7 +49,12 @@ from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
 )
-from synapse.logging.opentracing import SynapseTags, start_active_span
+from synapse.logging.opentracing import (
+    SynapseTags,
+    active_span,
+    start_active_span,
+    start_active_span_follows_from,
+)
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics._types import Collector
 
@@ -264,15 +269,74 @@ def run_as_background_process(
 
         with BackgroundProcessLoggingContext(
             name=desc, server_name=server_name, instance_id=count
-        ) as context:
+        ) as logging_context:
             try:
                 if bg_start_span:
-                    ctx = start_active_span(
-                        f"bgproc.{desc}", tags={SynapseTags.REQUEST_ID: str(context)}
-                    )
+                    original_active_tracing_span = active_span()
+
+                    # If there is already an active span (e.g. because this background
+                    # process was started as part of handling a request for example),
+                    # because this is a long-running background task that may serve a
+                    # broader purpose than the request that kicked it off, we don't want
+                    # it to be a direct child of the currently active trace connected to
+                    # the request. We only want a loose reference to jump between the
+                    # traces.
+                    #
+                    # For example, when making a `/messages` request, when approaching a
+                    # gap, we may kick off a background process to fetch missing events
+                    # from federation. The `/messages` request trace should't include
+                    # the entire time taken and details around fetching the missing
+                    # events.
+                    if original_active_tracing_span is not None:
+                        # With the OpenTracing client that we're using, it's impossible to
+                        # create a disconnected root span while also providing `references`
+                        # so we first create a bare root span, then create a child span that
+                        # includes the references that we want.
+                        root_tracing_scope = start_active_span(
+                            f"bgproc.{desc}",
+                            tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                            # Create a root span for the background process (disconnected
+                            # from other spans)
+                            ignore_active_span=True,
+                        )
+                        with root_tracing_scope:
+                            tracing_scope = start_active_span_follows_from(
+                                f"bgproc_child.{desc}",
+                                tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                                # Create the `FOLLOWS_FROM` reference to the request's
+                                # span so there is a loose coupling between the two
+                                # traces and it's easy to jump between.
+                                contexts=[original_active_tracing_span.context],
+                            )
+
+                        # Also add a span to the original request trace that
+                        # cross-links to background process trace.
+                        #
+                        # In OpenTracing, `FOLLOWS_FROM` indicates parent-child
+                        # relationship whereas we just want a cross-link to the
+                        # downstream trace. This is a bit hacky, but the closest we
+                        # can get to in OpenTracing land. If we ever migrate to
+                        # OpenTelemetry, we should use a normal `Link` for this.
+                        with start_active_span_follows_from(
+                            f"start_bgproc.{desc}",
+                            child_of=original_active_tracing_span,
+                            ignore_active_span=True,
+                            # Points to the background process span.
+                            contexts=[root_tracing_scope.span.context],
+                        ):
+                            pass
+                    else:
+                        # Otherwise, when there is no active span, we will already be
+                        # creating a disconnected root span already and we don't have to
+                        # worry about cross-linking to anything.
+                        tracing_scope = start_active_span(
+                            f"bgproc.{desc}",
+                            tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                        )
                 else:
-                    ctx = nullcontext()  # type: ignore[assignment]
-                with ctx:
+                    tracing_scope = nullcontext()  # type: ignore[assignment]
+
+                with tracing_scope:
                     return await func(*args, **kwargs)
             except Exception:
                 logger.exception(

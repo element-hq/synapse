@@ -576,7 +576,9 @@ def start_active_span_follows_from(
     operation_name: str,
     contexts: Collection,
     child_of: Optional[Union["opentracing.Span", "opentracing.SpanContext"]] = None,
+    tags: Optional[Dict[str, str]] = None,
     start_time: Optional[float] = None,
+    ignore_active_span: bool = False,
     *,
     inherit_force_tracing: bool = False,
     tracer: Optional["opentracing.Tracer"] = None,
@@ -606,7 +608,9 @@ def start_active_span_follows_from(
         operation_name,
         child_of=child_of,
         references=references,
+        tags=tags,
         start_time=start_time,
+        ignore_active_span=ignore_active_span,
         tracer=tracer,
     )
 
