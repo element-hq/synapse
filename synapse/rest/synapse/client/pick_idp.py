@@ -63,7 +63,13 @@ class PickIdpResource(DirectServeHtmlResource):
         if not idp:
             return await self._serve_id_picker(request, client_redirect_url)
 
-        # Validate the `idp` query parameter
+        # Validate the `idp` query parameter. We should only be working with known IdPs.
+        # No need waste further effort if we don't know about it.
+        #
+        # Although, we primarily prevent open redirect attacks by URL encoding all of
+        # the parameters we use in the redirect URL below, this validation also helps
+        # prevent Synapse from crafting arbitrary URLs and being used in open redirect
+        # attacks (defense in depth).
         providers = self._sso_handler.get_identity_providers()
         auth_provider = providers.get(idp)
         if not auth_provider:
