@@ -762,6 +762,7 @@ class ReadWriteLock:
 def timeout_deferred(
     deferred: "defer.Deferred[_T]",
     timeout: float,
+    cancel_on_shutdown: bool,
     clock: Clock,
 ) -> "defer.Deferred[_T]":
     """The in built twisted `Deferred.addTimeout` fails to time out deferreds
@@ -804,7 +805,8 @@ def timeout_deferred(
         if not new_d.called:
             new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
-    delayed_call = clock.call_later(timeout, False, time_it_out)
+    # We don't track these calls since they are short.
+    delayed_call = clock.call_later(timeout, cancel_on_shutdown, time_it_out)
 
     def convert_cancelled(value: Failure) -> Failure:
         # if the original deferred was cancelled, and our timeout has fired, then

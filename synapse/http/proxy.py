@@ -166,6 +166,7 @@ class ProxyResource(_AsyncResource):
             # so that it has enough time to complete and pass us the data before we give
             # up.
             timeout=90,
+            cancel_on_shutdown=False,  # We don't track this call since it will typically be short
             clock=self._clock,
         )
 

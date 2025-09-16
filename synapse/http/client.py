@@ -439,6 +439,7 @@ class BaseHttpClient:
                 request_deferred = timeout_deferred(
                     request_deferred,
                     60,
+                    False,  # We don't track this call since it's short
                     self.hs.get_clock(),
                 )
 
@@ -764,7 +765,12 @@ class BaseHttpClient:
             d = read_body_with_max_size(response, output_stream, max_size)
 
             # Ensure that the body is not read forever.
-            d = timeout_deferred(d, 30, self.hs.get_clock())
+            d = timeout_deferred(
+                d,
+                30,
+                False,  # We don't track this call since it's short
+                self.hs.get_clock(),
+            )
 
             length = await make_deferred_yieldable(d)
         except BodyExceededMaxSize:
@@ -960,6 +966,7 @@ class ReplicationClient(BaseHttpClient):
                 request_deferred = timeout_deferred(
                     request_deferred,
                     60,
+                    False,  # We don't track this call since it's short
                     self.hs.get_clock(),
                 )
 

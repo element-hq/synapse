@@ -300,7 +300,12 @@ async def _handle_response(
         check_content_type_is(response.headers, parser.CONTENT_TYPE)
 
         d = read_body_with_max_size(response, parser, max_response_size)
-        d = timeout_deferred(d, timeout=timeout_sec, clock=clock)
+        d = timeout_deferred(
+            d,
+            timeout=timeout_sec,
+            cancel_on_shutdown=False,  # We don't track this call since it's short
+            clock=clock,
+        )
 
         length = await make_deferred_yieldable(d)
 
@@ -738,6 +743,7 @@ class MatrixFederationHttpClient:
                             request_deferred = timeout_deferred(
                                 request_deferred,
                                 timeout=_sec_timeout,
+                                cancel_on_shutdown=False,  # We don't track this call since it will typically be short
                                 clock=self.clock,
                             )
 
@@ -798,6 +804,7 @@ class MatrixFederationHttpClient:
                         d = timeout_deferred(
                             d,
                             timeout=_sec_timeout,
+                            cancel_on_shutdown=False,  # We don't track this call since it will typically be short
                             clock=self.clock,
                         )
 

@@ -42,7 +42,7 @@ from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
-from synapse.util import Clock
+from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 from synapse.util.async_helpers import timeout_deferred
 from synapse.util.constants import ONE_MINUTE_SECONDS
 
@@ -251,9 +251,14 @@ class WaitingLock:
                     # periodically wake up in case the lock was released but we
                     # weren't notified.
                     with PreserveLoggingContext():
+                        timeout = self._get_next_retry_interval()
                         await timeout_deferred(
                             deferred=self.deferred,
-                            timeout=self._get_next_retry_interval(),
+                            timeout=timeout,
+                            # Only track this call if it would delay shutdown substantially
+                            cancel_on_shutdown=True
+                            if timeout > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                            else False,
                             clock=self.clock,
                         )
                 except Exception:
@@ -328,9 +333,14 @@ class WaitingMultiLock:
                     # periodically wake up in case the lock was released but we
                     # weren't notified.
                     with PreserveLoggingContext():
+                        timeout = self._get_next_retry_interval()
                         await timeout_deferred(
                             deferred=self.deferred,
-                            timeout=self._get_next_retry_interval(),
+                            timeout=timeout,
+                            # Only track this call if it would delay shutdown substantially
+                            cancel_on_shutdown=True
+                            if timeout > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                            else False,
                             clock=self.clock,
                         )
                 except Exception:

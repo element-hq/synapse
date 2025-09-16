@@ -161,7 +161,7 @@ class TimeoutDeferredTest(TestCase):
             cancelled = True
 
         non_completing_d: Deferred = Deferred(canceller)
-        timing_out_d = timeout_deferred(non_completing_d, 1.0, self.clock)
+        timing_out_d = timeout_deferred(non_completing_d, 1.0, False, self.clock)
 
         self.assertNoResult(timing_out_d)
         self.assertFalse(cancelled, "deferred was cancelled prematurely")
@@ -179,7 +179,7 @@ class TimeoutDeferredTest(TestCase):
             raise Exception("can't cancel this deferred")
 
         non_completing_d: Deferred = Deferred(canceller)
-        timing_out_d = timeout_deferred(non_completing_d, 1.0, self.clock)
+        timing_out_d = timeout_deferred(non_completing_d, 1.0, False, self.clock)
 
         self.assertNoResult(timing_out_d)
 
@@ -215,7 +215,7 @@ class TimeoutDeferredTest(TestCase):
 
             original_deferred = blocking()
             original_deferred.addErrback(errback, "orig")
-            timing_out_d = timeout_deferred(original_deferred, 1.0, self.clock)
+            timing_out_d = timeout_deferred(original_deferred, 1.0, False, self.clock)
             self.assertNoResult(timing_out_d)
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             timing_out_d.addErrback(errback, "timingout")
