@@ -458,6 +458,7 @@ class DelayedEventsHandler:
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
                 delay_sec,
+                # Only track this call if it would delay shutdown by a substantial amount
                 True if delay_sec > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
                 run_as_background_process,
                 "_send_on_timeout",

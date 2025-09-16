@@ -449,6 +449,7 @@ class MessageHandler:
 
         self._scheduled_expiry = self.clock.call_later(
             delay,
+            # Only track this call if it would delay shutdown by a substantial amount
             True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             run_as_background_process,
             "_expire_event",

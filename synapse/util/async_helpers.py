@@ -969,6 +969,7 @@ class AwakenableSleeper:
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
         call = self._clock.call_later(
             delay_ms / 1000,
+            # Only track this call if it would delay shutdown by a substantial amount
             True if delay_ms / 1000 > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             sleep_deferred.callback,
             None,
@@ -1029,6 +1030,7 @@ class DeferredEvent:
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
         call = self._clock.call_later(
             timeout_seconds,
+            # Only track this call if it would delay shutdown by a substantial amount
             True if timeout_seconds > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             sleep_deferred.callback,
             None,

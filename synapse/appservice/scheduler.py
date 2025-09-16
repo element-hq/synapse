@@ -84,7 +84,7 @@ from synapse.logging.context import run_in_background
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main import DataStore
 from synapse.types import DeviceListUpdates, JsonMapping
-from synapse.util import Clock
+from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -513,7 +513,8 @@ class _Recoverer:
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
         self.scheduled_recovery = self.clock.call_later(
             delay,
-            True,
+            # Only track this call if it would delay shutdown by a substantial amount
+            True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             run_as_background_process,
             "as-recoverer",
             self.server_name,

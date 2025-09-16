@@ -146,7 +146,9 @@ class UserDirectoryHandler(StateDeltasHandler):
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
-                10, False, self.kick_off_remote_profile_refresh_process
+                10,
+                False,  # We don't track this call since it's short
+                self.kick_off_remote_profile_refresh_process,
             )
 
     async def search_users(
@@ -563,14 +565,14 @@ class UserDirectoryHandler(StateDeltasHandler):
             # the profile if the server only just sent us an event.
             self.clock.call_later(
                 USER_DIRECTORY_STALE_REFRESH_TIME_MS // 1000 + 1,
-                True,
+                False,  # We don't track this call since it's short
                 self.kick_off_remote_profile_refresh_process_for_remote_server,
                 UserID.from_string(user_id).domain,
             )
             # Schedule a wake-up to handle any backoffs that may occur in the future.
             self.clock.call_later(
                 2 * USER_DIRECTORY_STALE_REFRESH_TIME_MS // 1000 + 1,
-                True,
+                False,  # We don't track this call since it's short
                 self.kick_off_remote_profile_refresh_process,
             )
             return
@@ -666,6 +668,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                 delay = ((next_try_at_ts - self.clock.time_msec()) // 1000) + 2
                 self._refresh_remote_profiles_call_later = self.clock.call_later(
                     delay,
+                    # Only track this call if it would delay shutdown by a substantial amount
                     True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
                     self.kick_off_remote_profile_refresh_process,
                 )
@@ -679,7 +682,7 @@ class UserDirectoryHandler(StateDeltasHandler):
 
         self._refresh_remote_profiles_call_later = self.clock.call_later(
             INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES,
-            False,
+            False,  # We don't track this call since it's short
             self.kick_off_remote_profile_refresh_process,
         )
 

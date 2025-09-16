@@ -36,6 +36,7 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
+from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 
 from . import push_tools
 
@@ -337,7 +338,12 @@ class HttpPusher(Pusher):
                 else:
                     logger.info("Push failed: delaying for %ds", self.backoff_delay)
                     self.timed_call = self.hs.get_clock().call_later(
-                        self.backoff_delay, True, self.on_timer
+                        self.backoff_delay,
+                        # Only track backoffs if they would delay shutdown substantially
+                        True
+                        if self.backoff_delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                        else False,
+                        self.on_timer,
                     )
                     self.backoff_delay = min(
                         self.backoff_delay * 2, self.MAX_BACKOFF_SEC
