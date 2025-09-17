@@ -180,6 +180,8 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
                     # MSC4306: Support for thread subscriptions
                     "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
+                    # MSC4076: Let E2EE clients calculate app badge counts themselves (disable_badge_count)
+                    "org.matrix.msc4076": self.config.experimental.msc4076_enabled,
                 },
             },
         )
