@@ -355,7 +355,12 @@ def start(config_options: List[str]) -> None:
     except Exception as e:
         handle_startup_exception(e)
 
-    register_start(_base.start, hs)
+    async def start() -> None:
+        # Re-establish log context now that we're back from the reactor
+        with LoggingContext("start"):
+            await _base.start(hs)
+
+    register_start(start)
 
     # redirect stdio to the logs, if configured.
     if not hs.config.logging.no_redirect_stdio:
