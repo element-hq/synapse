@@ -379,7 +379,7 @@ def start(config: HomeServerConfig) -> None:
 
 def main() -> None:
     homeserver_config = load_config(sys.argv[1:])
-    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+    with LoggingContext(name="main"):
         start(homeserver_config)
 
 

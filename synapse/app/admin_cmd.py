@@ -329,7 +329,7 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
     # command.
 
     async def run() -> None:
-        with LoggingContext(name="command", server_name=config.server.server_name):
+        with LoggingContext(name="command"):
             await _base.start(ss)
             await args.func(ss, args)
 
@@ -342,5 +342,5 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     homeserver_config, args = load_config(sys.argv[1:])
-    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+    with LoggingContext(name="main"):
         start(homeserver_config, args)
