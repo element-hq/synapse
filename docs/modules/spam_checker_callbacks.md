@@ -201,7 +201,7 @@ The arguments passed to this callback are:
 
 * `user_id`: The Matrix user ID of the user (e.g. `@alice:example.com`).
 * `room_config`: The contents of the body of the [/createRoom request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3createroom) as a dictionary.
-  For a [room upgrade request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3roomsroomidupgrade) it is a synthesised subset of what an equivalent /createRoom request would have looked like. Specifically it contains the `creation_content` (linking to the previous room) and `initial_state` (containing a subset of the state of the previous room).
+  For a [room upgrade request](https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3roomsroomidupgrade) it is a synthesised subset of what an equivalent /createRoom request would have looked like. Specifically, it contains the `creation_content` (linking to the previous room) and `initial_state` (containing a subset of the state of the previous room).
 
 The callback must return one of:
   - `synapse.module_api.NOT_SPAM`, to allow the operation. Other callbacks may still 
