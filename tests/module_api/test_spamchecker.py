@@ -69,8 +69,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         expected_room_config = {"foo": "baa"}
-
         channel = self.create_room(expected_room_config)
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
         self.assertEqual(self.last_room_config, expected_room_config)
@@ -100,8 +100,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
                 }
             ],
         }
-
         channel = self.create_room(expected_room_config)
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
         self.assertEqual(self.last_room_config, expected_room_config)
@@ -111,6 +111,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         # First, create a room to upgrade.
         channel = self.create_room({EventContentFields.TOPIC: "foo"})
+
         self.assertEqual(channel.code, 200)
         room_id = channel.json_body["room_id"]
 
@@ -165,8 +166,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         expected_room_config = {"foo": "baa"}
-
         channel = self.create_room(expected_room_config)
+
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], Codes.UNAUTHORIZED)
         self.assertEqual(self.last_user_id, self.user_id)
@@ -189,6 +190,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         channel = self.create_room({"foo": "baa"})
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
 
@@ -216,6 +218,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         channel = self.create_room({})
+
         self.assertEqual(channel.code, 200)
 
         room_id = channel.json_body["room_id"]
@@ -260,6 +263,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         channel = self.create_room({})
+
         self.assertEqual(channel.code, 200)
 
         room_id = channel.json_body["room_id"]
