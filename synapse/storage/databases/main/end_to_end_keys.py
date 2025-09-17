@@ -1851,12 +1851,27 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 ],
             )
 
+            to_invalidate = [
+                # Each entry is a tuple of arguments to
+                # `_get_e2e_cross_signing_signatures_for_device`, which
+                # itself takes a tuple. Hence the double-tuple.
+                ((user_id, item.target_device_id),)
+                for item in signatures
+            ]
+
+            if to_invalidate:
+                self._invalidate_cache_and_stream_bulk(
+                    txn,
+                    self._get_e2e_cross_signing_signatures_for_device,
+                    to_invalidate,
+                )
+
         await self.db_pool.runInteraction(
             "add_e2e_signing_key",
             _store_e2e_cross_signing_signatures,
             signatures,
         )
-    
+
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     def __init__(
