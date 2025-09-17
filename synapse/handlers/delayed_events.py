@@ -202,6 +202,15 @@ class DelayedEventsHandler:
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
         """
+        # Get the senders of each delta's state event (as sender information is
+        # not currently stored in the `current_state_deltas` table).
+        event_id_and_sender_dict = await self._store.get_senders_for_event_ids(
+            [delta.event_id for delta in deltas if delta.event_id is not None]
+        )
+
+        # Note: No need to batch as `get_current_state_deltas` will only ever
+        # return 100 rows at a time.
+        earliest_next_send_ts = None
         for delta in deltas:
             if delta.event_id is None:
                 logger.debug(
@@ -215,10 +224,7 @@ class DelayedEventsHandler:
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
 
-            event = await self._store.get_event(delta.event_id, allow_none=True)
-            if not event:
-                continue
-            sender = UserID.from_string(event.sender)
+            sender = UserID.from_string(event_id_and_sender_dict[delta.event_id])
 
             next_send_ts = await self._store.cancel_delayed_state_events(
                 room_id=delta.room_id,
