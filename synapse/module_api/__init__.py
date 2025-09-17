@@ -133,6 +133,7 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK,
     ON_THREEPID_BIND_CALLBACK,
     ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK,
+    ON_USER_SEARCH_CALLBACK,
 )
 from synapse.push.httppusher import HttpPusher
 from synapse.rest.client.login import LoginResponse
@@ -508,6 +509,7 @@ class ModuleApi:
         on_remove_user_third_party_identifier: Optional[
             ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
         ] = None,
+        on_user_search: Optional[ON_USER_SEARCH_CALLBACK] = None,
     ) -> None:
         """Registers callbacks for third party event rules capabilities.
 
@@ -526,6 +528,7 @@ class ModuleApi:
             on_threepid_bind=on_threepid_bind,
             on_add_user_third_party_identifier=on_add_user_third_party_identifier,
             on_remove_user_third_party_identifier=on_remove_user_third_party_identifier,
+            on_user_search=on_user_search,
         )
 
     def register_presence_router_callbacks(

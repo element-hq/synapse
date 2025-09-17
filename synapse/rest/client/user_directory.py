@@ -45,6 +45,9 @@ class UserDirectorySearchRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
+        self._third_party_event_rules = (
+            hs.get_module_api_callbacks().third_party_event_rules
+        )
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonMapping]:
         """Searches for users in directory
@@ -82,6 +85,10 @@ class UserDirectorySearchRestServlet(RestServlet):
         results = await self.user_directory_handler.search_users(
             user_id, search_term, limit
         )
+
+        # Let the third party rules modify the result list if needed, or abort
+        # the search entirely with an exception.
+        await self._third_party_event_rules.on_user_search(requester, results)
 
         return 200, results
 
