@@ -802,8 +802,9 @@ def run_in_background(
     deferred returned by the function completes.
 
     To explain how the log contexts work here:
-     - When this function is called, the current context is stored ("original"), we kick
-       off the background task, and we restore that original context before returning
+     - When `run_in_background` is called, the current context is stored ("original"),
+       we kick off the background task in the current context, and we restore that
+       original context before returning
      - When the background task finishes, we don't want to leak our context into the
        reactor which would erroneously get attached to the next operation picked up by
        the event loop. We add a callback to the deferred which will clear the logging
@@ -828,6 +829,7 @@ def run_in_background(
     """
     calling_context = current_context()
     try:
+        # (kick off the task in the current context)
         res = f(*args, **kwargs)
     except Exception:
         # the assumption here is that the caller doesn't want to be disturbed

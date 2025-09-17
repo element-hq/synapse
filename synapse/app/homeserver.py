@@ -377,15 +377,17 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
         handle_startup_exception(e)
 
     async def start() -> None:
-        # Load the OIDC provider metadatas, if OIDC is enabled.
-        if hs.config.oidc.oidc_enabled:
-            oidc = hs.get_oidc_handler()
-            # Loading the provider metadata also ensures the provider config is valid.
-            await oidc.load_metadata()
+        # Re-establish log context now that we're back from the reactor
+        with LoggingContext("start"):
+            # Load the OIDC provider metadatas, if OIDC is enabled.
+            if hs.config.oidc.oidc_enabled:
+                oidc = hs.get_oidc_handler()
+                # Loading the provider metadata also ensures the provider config is valid.
+                await oidc.load_metadata()
 
-        await _base.start(hs)
+            await _base.start(hs)
 
-        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+            hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     register_start(start)
 
