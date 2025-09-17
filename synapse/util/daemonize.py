@@ -29,6 +29,11 @@ import sys
 from types import FrameType, TracebackType
 from typing import NoReturn, Optional, Type
 
+from synapse.logging.context import (
+    LoggingContext,
+    PreserveLoggingContext,
+)
+
 
 def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -> None:
     """daemonize the current process
@@ -64,8 +69,14 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
             pid_fh.write(old_pid)
         sys.exit(1)
 
-    # Fork, creating a new process for the child.
-    process_id = os.fork()
+    # Stop the existing context *before* we fork the process. Otherwise the cputime
+    # metrics get confused about the per-thread resource usage appearing to go backwards
+    # because we're comparing the resource usage from the original process to the forked
+    # process. `PreserveLoggingContext` already takes care of restarting the original
+    # context *after* the block.
+    with PreserveLoggingContext():
+        # Fork, creating a new process for the child.
+        process_id = os.fork()
 
     if process_id != 0:
         # parent process: exit.
@@ -140,9 +151,10 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
 
     # Cleanup pid file at exit.
     def exit() -> None:
-        logger.warning("Stopping daemon.")
-        os.remove(pid_file)
-        sys.exit(0)
+        with LoggingContext("atexit"):
+            logger.warning("Stopping daemon.")
+            os.remove(pid_file)
+            sys.exit(0)
 
     atexit.register(exit)
 
