@@ -530,21 +530,20 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         def _get_e2e_cross_signing_signatures_for_devices_txn(
             txn: LoggingTransaction, device_query: Iterable[Tuple[str, str]]
         ) -> Mapping[Tuple[str, str], Sequence[Tuple[str, str]]]:
-            signature_query_clauses = []
-            signature_query_params = []
+            where_clause_sql, where_clause_params = make_tuple_in_list_sql_clause(
+                self.database_engine,
+                columns=("target_user_id", "target_device_id", "user_id"),
+                iterable=[
+                    (user_id, device_id, user_id) for user_id, device_id in device_query
+                ],
+            )
 
-            for user_id, device_id in device_query:
-                signature_query_clauses.append(
-                    "target_user_id = ? AND target_device_id = ? AND user_id = ?"
-                )
-                signature_query_params.extend([user_id, device_id, user_id])
-
-            signature_sql = """
+            signature_sql = f"""
                 SELECT user_id, key_id, target_device_id, signature
-                FROM e2e_cross_signing_signatures WHERE %s
-                """ % (" OR ".join("(" + q + ")" for q in signature_query_clauses))
+                FROM e2e_cross_signing_signatures WHERE {where_clause_sql}
+            """
 
-            txn.execute(signature_sql, signature_query_params)
+            txn.execute(signature_sql, where_clause_params)
 
             devices_and_signatures: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
 
