@@ -237,8 +237,17 @@ class DelayedEventsHandler:
                 ),
             )
 
-            if self._next_send_ts_changed(next_send_ts):
-                self._schedule_next_at_or_none(next_send_ts)
+            # Schedule the next delayed event call for the earliest
+            # event.
+            if next_send_ts is not None:
+                if (
+                    earliest_next_send_ts is None
+                    or next_send_ts < earliest_next_send_ts
+                ):
+                    earliest_next_send_ts = next_send_ts
+
+        if self._next_send_ts_changed(earliest_next_send_ts):
+            self._schedule_next_at_or_none(earliest_next_send_ts)
 
     async def add(
         self,
