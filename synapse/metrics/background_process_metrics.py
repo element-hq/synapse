@@ -20,7 +20,7 @@
 
 import logging
 import threading
-from contextlib import nullcontext, contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import wraps
 from types import TracebackType
 from typing import (
@@ -28,7 +28,9 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    ContextManager,
     Dict,
+    Generator,
     Iterable,
     Optional,
     Protocol,
@@ -288,6 +290,10 @@ def run_as_background_process(
                     # the entire time taken and details around fetching the missing
                     # events since the request doesn't rely on the result, it was just
                     # part of the heuristic to initiate things.
+                    #
+                    # We don't care about the value from the context manager as it's not
+                    # used.
+                    tracing_scope: ContextManager[Any]
                     if original_active_tracing_span is not None:
                         # With the OpenTracing client that we're using, it's impossible to
                         # create a disconnected root span while also providing `references`
@@ -337,9 +343,9 @@ def run_as_background_process(
                         # For easy usage down below, we create a context manager that
                         # combines both scopes.
                         @contextmanager
-                        def combined_context_manager():
+                        def combined_context_manager() -> Generator[None, None, None]:
                             with root_tracing_scope, child_tracing_scope:
-                                yield child_tracing_scope
+                                yield
 
                         tracing_scope = combined_context_manager()
 
@@ -352,7 +358,7 @@ def run_as_background_process(
                             tags={SynapseTags.REQUEST_ID: str(logging_context)},
                         )
                 else:
-                    tracing_scope = nullcontext()  # type: ignore[assignment]
+                    tracing_scope = nullcontext()
 
                 with tracing_scope:
                     return await func(*args, **kwargs)
