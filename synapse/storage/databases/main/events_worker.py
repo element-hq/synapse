@@ -2135,6 +2135,34 @@ class EventsWorkerStore(SQLBaseStore):
 
         return rows, to_token, True
 
+    async def get_senders_for_event_ids(
+        self, event_ids: Collection[str]
+    ) -> Dict[str, str]:
+        """
+        Given a sequence of event IDs, return the sender associated with each.
+
+        Args:
+            event_ids: A collection of event IDs as strings.
+
+        Returns:
+            A dict of event ID -> sender of the event.
+        """
+
+        def _get_senders_for_event_ids(txn: LoggingTransaction) -> Dict[str, str]:
+            rows = self.db_pool.simple_select_many_txn(
+                txn=txn,
+                table="events",
+                column="event_id",
+                iterable=event_ids,
+                keyvalues={},
+                retcols=["event_id", "sender"],
+            )
+            return dict(rows)
+
+        return await self.db_pool.runInteraction(
+            "get_senders_for_event_ids", _get_senders_for_event_ids
+        )
+
     @cached(max_entries=5000)
     async def get_event_ordering(self, event_id: str, room_id: str) -> Tuple[int, int]:
         res = await self.db_pool.simple_select_one(
