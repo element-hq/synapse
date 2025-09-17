@@ -286,7 +286,8 @@ def run_as_background_process(
                     # gap, we may kick off a background process to fetch missing events
                     # from federation. The `/messages` request trace should't include
                     # the entire time taken and details around fetching the missing
-                    # events.
+                    # events since the request doesn't rely on the result, it was just
+                    # part of the heuristic to initiate things.
                     if original_active_tracing_span is not None:
                         # With the OpenTracing client that we're using, it's impossible to
                         # create a disconnected root span while also providing `references`
@@ -300,9 +301,10 @@ def run_as_background_process(
                             ignore_active_span=True,
                         )
 
-                        # Also add a span to the original request trace that cross-links
-                        # to background process trace. This is just a quick link so we
-                        # immediately finish the span.
+                        # Also add a span in the original request trace that cross-links
+                        # to background process trace. We immediately finish the span as
+                        # this is just a marker to follow where the real work is being
+                        # done.
                         #
                         # In OpenTracing, `FOLLOWS_FROM` indicates parent-child
                         # relationship whereas we just want a cross-link to the
