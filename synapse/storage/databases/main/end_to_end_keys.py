@@ -1825,28 +1825,38 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             user_id: the user who made the signatures
             signatures: signatures to add
         """
-        await self.db_pool.simple_insert_many(
-            "e2e_cross_signing_signatures",
-            keys=(
-                "user_id",
-                "key_id",
-                "target_user_id",
-                "target_device_id",
-                "signature",
-            ),
-            values=[
-                (
-                    user_id,
-                    item.signing_key_id,
-                    item.target_user_id,
-                    item.target_device_id,
-                    item.signature,
-                )
-                for item in signatures
-            ],
-            desc="add_e2e_signing_key",
-        )
+        def _store_e2e_cross_signing_signatures(
+            txn: LoggingTransaction,
+            signatures: "Iterable[SignatureListItem]",
+        ) -> None:
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                "e2e_cross_signing_signatures",
+                keys=(
+                    "user_id",
+                    "key_id",
+                    "target_user_id",
+                    "target_device_id",
+                    "signature",
+                ),
+                values=[
+                    (
+                        user_id,
+                        item.signing_key_id,
+                        item.target_user_id,
+                        item.target_device_id,
+                        item.signature,
+                    )
+                    for item in signatures
+                ],
+            )
 
+        await self.db_pool.runInteraction(
+            "add_e2e_signing_key",
+            _store_e2e_cross_signing_signatures,
+            signatures,
+        )
+    
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     def __init__(
