@@ -354,15 +354,17 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
         for batch in batch_iter(signature_query, 50):
-            cross_sigs_result = await self.db_pool.runInteraction(
-                "get_e2e_cross_signing_signatures_for_devices",
-                self._get_e2e_cross_signing_signatures_for_devices_txn,
-                batch,
+            cross_sigs_result = (
+                await self._get_e2e_cross_signing_signatures_for_devices(batch)
             )
 
             # add each cross-signing signature to the correct device in the result dict.
-            for user_id, key_id, device_id, signature in cross_sigs_result:
+            for (
+                user_id,
+                device_id,
+            ), signature_list in cross_sigs_result.items():
                 target_device_result = result[user_id][device_id]
+
                 # We've only looked up cross-signatures for non-deleted devices with key
                 # data.
                 assert target_device_result is not None
@@ -373,7 +375,15 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 signing_user_signatures = target_device_signatures.setdefault(
                     user_id, {}
                 )
-                signing_user_signatures[key_id] = signature
+
+                if signature_list is None:
+                    # There are no signatures for this user_id/device_id combination.
+                    # We do this here to ensure that the "signatures" key gets created above,
+                    # even if it is empty.
+                    continue
+
+                for key_id, signature in signature_list:
+                    signing_user_signatures[key_id] = signature
 
         log_kv(result)
         return result
