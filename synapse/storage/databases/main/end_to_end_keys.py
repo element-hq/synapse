@@ -377,12 +377,6 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     user_id, {}
                 )
 
-                if signature_list is None:
-                    # There are no signatures for this user_id/device_id combination.
-                    # We do this here to ensure that the "signatures" key gets created above,
-                    # even if it is empty.
-                    continue
-
                 for key_id, signature in signature_list:
                     signing_user_signatures[key_id] = signature
 
@@ -507,7 +501,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
     )
     async def _get_e2e_cross_signing_signatures_for_devices(
         self, device_query: Iterable[Tuple[str, str]]
-    ) -> Mapping[Tuple[str, str], Optional[Sequence[Tuple[str, str]]]]:
+    ) -> Mapping[Tuple[str, str], Sequence[Tuple[str, str]]]:
         """Get cross-signing signatures for a given list of user IDs and devices.
 
         Args:
@@ -516,9 +510,8 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         Returns:
             A mapping of results. The keys are the original (user_id, device_id)
             tuple, while the value is the matching list of tuples of
-            (key_id, signature). The value will be `None` instead if no
-            signatures exist for the device (this is a behaviour of
-            `@cachedList`).
+            (key_id, signature). The value will be an empty list if no
+            signatures exist for the device.
 
             Given this method is annotated with `@cachedList`, the return dict's
             keys match the tuples within `device_query`, so that cache entries can
