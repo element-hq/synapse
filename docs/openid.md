@@ -186,6 +186,7 @@ oidc_providers:
 4. Note the slug of your application, Client ID and Client Secret.
 
 Note: RSA keys must be used for signing for Authentik, ECC keys do not work.
+Note: The provider must have a signing key set and must not use an encryption key.
 
 Synapse config:
 ```yaml
@@ -204,6 +205,11 @@ oidc_providers:
       config:
         localpart_template: "{{ user.preferred_username }}"
         display_name_template: "{{ user.preferred_username|capitalize }}" # TO BE FILLED: If your users have names in Authentik and you want those in Synapse, this should be replaced with user.name|capitalize.
+[...]
+jwt_config:
+    enabled: true
+    secret: "your client secret" # TO BE FILLED (same as `client_secret` above)
+    algorithm: "RS256"
 ```
 
 ### Dex
