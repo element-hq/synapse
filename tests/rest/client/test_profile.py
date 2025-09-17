@@ -778,6 +778,34 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
         self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
+    @unittest.override_config(
+        {
+            "experimental_features": {
+                "msc4133_enabled": True,
+                "msc4133_key_allowlist": ["allowed_field"],
+            }
+        }
+    )
+    def test_set_custom_field_not_allowlisted(self) -> None:
+        """Setting a field not in the allowlist should be rejected."""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/blocked",
+            content={"blocked": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
+
+        # Allowed field should succeed.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/allowed_field",
+            content={"allowed_field": "ok"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
     def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 
