@@ -488,7 +488,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 result.setdefault(user_id, {})[device_id] = None
 
         return result
-    
+
     @cached()
     def _get_e2e_cross_signing_signatures_for_device(
         self,
@@ -499,7 +499,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         See @cachedList for why a separate method is needed.
         """
         raise NotImplementedError()
-    
+
     @cachedList(
         cached_method_name="_get_e2e_cross_signing_signatures_for_device",
         list_name="device_query",
@@ -525,6 +525,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
             As results are cached, the return type is immutable.
         """
+
         def _get_e2e_cross_signing_signatures_for_devices_txn(
             txn: LoggingTransaction, device_query: Iterable[Tuple[str, str]]
         ) -> Mapping[Tuple[str, str], Sequence[Tuple[str, str]]]:
@@ -1825,6 +1826,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             user_id: the user who made the signatures
             signatures: signatures to add
         """
+
         def _store_e2e_cross_signing_signatures(
             txn: LoggingTransaction,
             signatures: "Iterable[SignatureListItem]",
