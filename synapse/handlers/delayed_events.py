@@ -146,10 +146,32 @@ class DelayedEventsHandler:
         )
 
     async def _unsafe_process_new_event(self) -> None:
+        room_max_stream_ordering = self._store.get_room_max_stream_ordering()
+
+        # Check that there are actually any delayed events to process. If not, bail early.
+        delayed_events_count = await self._store.get_count_of_delayed_events()
+        if delayed_events_count == 0:
+            # There are no delayed events to process. Update the
+            # `delayed_events_stream_pos` to the latest `events` stream pos and
+            # exit early.
+            self._event_pos = room_max_stream_ordering
+
+            logger.debug(
+                "No delayed events to process. Updating `delayed_events_stream_pos` to max stream ordering (%s)",
+                room_max_stream_ordering,
+            )
+
+            await self._store.update_delayed_events_stream_pos(room_max_stream_ordering)
+
+            event_processing_positions.labels(
+                name="delayed_events", **{SERVER_NAME_LABEL: self.server_name}
+            ).set(room_max_stream_ordering)
+
+            return
+
         # If self._event_pos is None then means we haven't fetched it from the DB yet
         if self._event_pos is None:
             self._event_pos = await self._store.get_delayed_events_stream_pos()
-            room_max_stream_ordering = self._store.get_room_max_stream_ordering()
             if self._event_pos > room_max_stream_ordering:
                 # apparently, we've processed more events than exist in the database!
                 # this can happen if events are removed with history purge or similar.
