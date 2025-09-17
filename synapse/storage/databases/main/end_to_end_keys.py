@@ -20,6 +20,7 @@
 #
 #
 import abc
+import json
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -1862,10 +1863,29 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             ]
 
             if to_invalidate:
-                self._invalidate_cache_and_stream_bulk(
+                # Invalidate the local cache of this worker.
+                for cache_key in to_invalidate:
+                    txn.call_after(
+                        self._get_e2e_cross_signing_signatures_for_device.invalidate,
+                        cache_key,
+                    )
+
+                # Stream cache invalidate keys over replication.
+                #
+                # We can only send a primitive per function argument across
+                # replication.
+                #
+                # Encode the array of strings as a JSON string, and we'll unpack
+                # it on the other side.
+                to_send = [
+                    (json.dumps([user_id, item.target_device_id]),)
+                    for item in signatures
+                ]
+
+                self._send_invalidation_to_replication_bulk(
                     txn,
-                    self._get_e2e_cross_signing_signatures_for_device,
-                    to_invalidate,
+                    cache_name=self._get_e2e_cross_signing_signatures_for_device.__name__,
+                    key_tuples=to_send,
                 )
 
         await self.db_pool.runInteraction(

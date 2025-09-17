@@ -21,6 +21,7 @@
 
 
 import itertools
+import json
 import logging
 from typing import TYPE_CHECKING, Any, Collection, Iterable, List, Optional, Tuple
 
@@ -281,17 +282,20 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     == GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME
                 ):
                     # "keys" is a list of strings, where each string is a
-                    # stringified representation of the tuple keys, i.e.
-                    # keys: ['(@userid:domain,DEVICEID)','(@userid2:domain,DEVICEID2)']
+                    # JSON-encoded representation of the tuple keys, i.e.
+                    # keys: ['["@userid:domain", "DEVICEID"]','["@userid2:domain", "DEVICEID2"]']
                     #
-                    # This is a side-effect of not being able to send nested information over replication.
-                    for tuple_key in row.keys:
-                        user_id, device_id = (
-                            # Remove the leading and following parantheses.
-                            tuple_key[1:-1]
-                            # Split by comma
-                            .split(",")
-                        )
+                    # This is a side-effect of not being able to send nested
+                    # information over replication.
+                    for json_str in row.keys:
+                        try:
+                            user_id, device_id = json.loads(json_str)
+                        except (json.JSONDecodeError, TypeError):
+                            logger.error(
+                                "Failed to deserialise cache key as valid JSON: %s",
+                                json_str,
+                            )
+                            continue
 
                         # Invalidate each key.
                         #
