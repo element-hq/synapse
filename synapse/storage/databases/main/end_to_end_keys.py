@@ -478,42 +478,85 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 result.setdefault(user_id, {})[device_id] = None
 
         return result
-
-    def _get_e2e_cross_signing_signatures_for_devices_txn(
-        self, txn: LoggingTransaction, device_query: Iterable[Tuple[str, str]]
-    ) -> List[Tuple[str, str, str, str]]:
-        """Get cross-signing signatures for a given list of devices
-
-        Returns signatures made by the owners of the devices.
-
-        Returns: a list of results; each entry in the list is a tuple of
-            (user_id, key_id, target_device_id, signature).
+    
+    @cached()
+    def _get_e2e_cross_signing_signatures_for_device(
+        self,
+        user_id_and_device_id: Tuple[str, str],
+    ) -> Sequence[Tuple[str, str]]:
         """
-        signature_query_clauses = []
-        signature_query_params = []
+        The single-item version of `_get_e2e_cross_signing_signatures_for_devices`.
+        See @cachedList for why a separate method is needed.
+        """
+        raise NotImplementedError()
+    
+    @cachedList(
+        cached_method_name="_get_e2e_cross_signing_signatures_for_device",
+        list_name="device_query",
+    )
+    async def _get_e2e_cross_signing_signatures_for_devices(
+        self, device_query: Iterable[Tuple[str, str]]
+    ) -> Mapping[Tuple[str, str], Optional[Sequence[Tuple[str, str]]]]:
+        """Get cross-signing signatures for a given list of user IDs and devices.
 
-        for user_id, device_id in device_query:
-            signature_query_clauses.append(
-                "target_user_id = ? AND target_device_id = ? AND user_id = ?"
-            )
-            signature_query_params.extend([user_id, device_id, user_id])
+        Args:
+            An iterable containing tuples of (user ID, device ID).
 
-        signature_sql = """
-            SELECT user_id, key_id, target_device_id, signature
-            FROM e2e_cross_signing_signatures WHERE %s
-            """ % (" OR ".join("(" + q + ")" for q in signature_query_clauses))
+        Returns:
+            A mapping of results. The keys are the original (user_id, device_id)
+            tuple, while the value is the matching list of tuples of
+            (key_id, signature). The value will be `None` instead if no
+            signatures exist for the device (this is a behaviour of
+            `@cachedList`).
 
-        txn.execute(signature_sql, signature_query_params)
-        return cast(
-            List[
-                Tuple[
-                    str,
-                    str,
-                    str,
-                    str,
-                ]
-            ],
-            txn.fetchall(),
+            Given this method is annotated with `@cachedList`, the return dict's
+            keys match the tuples within `device_query`, so that cache entries can
+            be computed from the corresponding values.
+
+            As results are cached, the return type is immutable.
+        """
+        def _get_e2e_cross_signing_signatures_for_devices_txn(
+            txn: LoggingTransaction, device_query: Iterable[Tuple[str, str]]
+        ) -> Mapping[Tuple[str, str], Sequence[Tuple[str, str]]]:
+            signature_query_clauses = []
+            signature_query_params = []
+
+            for user_id, device_id in device_query:
+                signature_query_clauses.append(
+                    "target_user_id = ? AND target_device_id = ? AND user_id = ?"
+                )
+                signature_query_params.extend([user_id, device_id, user_id])
+
+            signature_sql = """
+                SELECT user_id, key_id, target_device_id, signature
+                FROM e2e_cross_signing_signatures WHERE %s
+                """ % (" OR ".join("(" + q + ")" for q in signature_query_clauses))
+
+            txn.execute(signature_sql, signature_query_params)
+
+            devices_and_signatures: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
+
+            # `@cachedList` requires we return one key for every item in `device_query`.
+            # Pre-populate `devices_and_signatures` with each key so that none are missing.
+            #
+            # If any are missing, they will be cached as `None`, which is not
+            # what callers expected.
+            for user_id, device_id in device_query:
+                devices_and_signatures.setdefault((user_id, device_id), [])
+
+            # Populate the return dictionary with each found key_id and signature.
+            for user_id, key_id, target_device_id, signature in txn.fetchall():
+                signature_tuple = (key_id, signature)
+                devices_and_signatures[(user_id, target_device_id)].append(
+                    signature_tuple
+                )
+
+            return devices_and_signatures
+
+        return await self.db_pool.runInteraction(
+            "_get_e2e_cross_signing_signatures_for_devices_txn",
+            _get_e2e_cross_signing_signatures_for_devices_txn,
+            device_query,
         )
 
     async def get_e2e_one_time_keys(
