@@ -18,14 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib.resources as importlib_resources
 import os
 import re
 from email.parser import Parser
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Union
 from unittest.mock import Mock
-
-import pkg_resources
 
 from twisted.internet.interfaces import IReactorTCP
 from twisted.internet.testing import MemoryReactor
@@ -59,11 +58,12 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,
@@ -798,11 +798,12 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,

@@ -939,39 +939,32 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         self.assertEqual(chan.code, 200, chan.result)
         self.assertEqual(chan.json_body["user_id"], "@user1:test")
 
-    def test_multi_sso_redirect_to_unknown(self) -> None:
-        """An unknown IdP should cause a 404"""
+    def test_multi_sso_redirect_unknown_idp(self) -> None:
+        """An unknown IdP should cause a 400 bad request error"""
         channel = self.make_request(
             "GET",
             "/_synapse/client/pick_idp?redirectUrl=http://x&idp=xyz",
         )
-        self.assertEqual(channel.code, 302, channel.result)
-        location_headers = channel.headers.getRawHeaders("Location")
-        assert location_headers
-        sso_login_redirect_uri = location_headers[0]
+        self.assertEqual(channel.code, 400, channel.result)
 
-        # it should redirect us to the standard login SSO redirect flow
-        self.assertEqual(
-            sso_login_redirect_uri,
-            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
-                idp_id="xyz", client_redirect_url="http://x"
-            ),
-        )
+    def test_multi_sso_redirect_unknown_idp_as_url(self) -> None:
+        """
+        An unknown IdP that looks like a URL should cause a 400 bad request error (to
+        avoid open redirects).
 
-        # follow the redirect
+        Ideally, we'd have another test for a known IdP with a URL as the `idp_id`, but
+        we can't configure that in our tests because the config validation on
+        `oidc_providers` only allows a subset of characters. If we could configure
+        `oidc_providers` with a URL as the `idp_id`, it should still be URL-encoded
+        properly to avoid open redirections. We do have `test_url_as_idp_id_is_escaped`
+        in the URL building tests to cover this case but is only a unit test vs
+        something at the REST layer here that covers things end-to-end.
+        """
         channel = self.make_request(
             "GET",
-            # We have to make this relative to be compatible with `make_request(...)`
-            get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
-            # We have to set the Host header to match the `public_baseurl` to avoid
-            # the extra redirect in the `SsoRedirectServlet` in order for the
-            # cookies to be visible.
-            custom_headers=[
-                ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
-            ],
+            "/_synapse/client/pick_idp?redirectUrl=something&idp=https://element.io/",
         )
-
-        self.assertEqual(channel.code, 404, channel.result)
+        self.assertEqual(channel.code, 400, channel.result)
 
     def test_client_idp_redirect_to_unknown(self) -> None:
         """If the client tries to pick an unknown IdP, return a 404"""
