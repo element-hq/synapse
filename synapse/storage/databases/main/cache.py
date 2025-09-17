@@ -62,6 +62,12 @@ PURGE_HISTORY_CACHE_NAME = "ph_cache_fake"
 # As above, but for invalidating room caches on room deletion
 DELETE_ROOM_CACHE_NAME = "dr_cache_fake"
 
+# This cache takes a list of tuples as its first argument, which requires
+# special handling.
+GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME = (
+    "_get_e2e_cross_signing_signatures_for_device"
+)
+
 # How long between cache invalidation table cleanups, once we have caught up
 # with the backlog.
 REGULAR_CLEANUP_INTERVAL_MS = Config.parse_duration("1h")
@@ -270,6 +276,30 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     # room membership.
                     #
                     # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
+                elif (
+                    row.cache_func
+                    == GET_E2E_CROSS_SIGNING_SIGNATURES_FOR_DEVICE_CACHE_NAME
+                ):
+                    # "keys" is a list of strings, where each string is a
+                    # stringified representation of the tuple keys, i.e.
+                    # keys: ['(@userid:domain,DEVICEID)','(@userid2:domain,DEVICEID2)']
+                    #
+                    # This is a side-effect of not being able to send nested information over replication.
+                    for tuple_key in row.keys:
+                        user_id, device_id = (
+                            # Remove the leading and following parantheses.
+                            tuple_key[1:-1]
+                            # Split by comma
+                            .split(",")
+                        )
+
+                        # Invalidate each key.
+                        #
+                        # Note: .invalidate takes a tuple of arguments, hence the need
+                        # to nest our tuple in another tuple.
+                        self._get_e2e_cross_signing_signatures_for_device.invalidate(  # type: ignore[attr-defined]
+                            ((user_id, device_id),)
+                        )
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
 
