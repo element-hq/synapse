@@ -20,7 +20,7 @@
 
 import logging
 import threading
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager
 from functools import wraps
 from types import TracebackType
 from typing import (
@@ -299,18 +299,10 @@ def run_as_background_process(
                             # from other spans)
                             ignore_active_span=True,
                         )
-                        with root_tracing_scope:
-                            tracing_scope = start_active_span_follows_from(
-                                f"bgproc_child.{desc}",
-                                tags={SynapseTags.REQUEST_ID: str(logging_context)},
-                                # Create the `FOLLOWS_FROM` reference to the request's
-                                # span so there is a loose coupling between the two
-                                # traces and it's easy to jump between.
-                                contexts=[original_active_tracing_span.context],
-                            )
 
-                        # Also add a span to the original request trace that
-                        # cross-links to background process trace.
+                        # Also add a span to the original request trace that cross-links
+                        # to background process trace. This is just a quick link so we
+                        # immediately finish the span.
                         #
                         # In OpenTracing, `FOLLOWS_FROM` indicates parent-child
                         # relationship whereas we just want a cross-link to the
@@ -325,6 +317,30 @@ def run_as_background_process(
                             contexts=[root_tracing_scope.span.context],
                         ):
                             pass
+
+                        # Then start the tracing scope that we're going to use for
+                        # the duration of the background process within the root
+                        # span we just created.
+                        child_tracing_scope = start_active_span_follows_from(
+                            f"bgproc_child.{desc}",
+                            child_of=root_tracing_scope.span,
+                            ignore_active_span=True,
+                            tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                            # Create the `FOLLOWS_FROM` reference to the request's
+                            # span so there is a loose coupling between the two
+                            # traces and it's easy to jump between.
+                            contexts=[original_active_tracing_span.context],
+                        )
+
+                        # For easy usage down below, we create a context manager that
+                        # combines both scopes.
+                        @contextmanager
+                        def combined_context_manager():
+                            with root_tracing_scope, child_tracing_scope:
+                                yield child_tracing_scope
+
+                        tracing_scope = combined_context_manager()
+
                     else:
                         # Otherwise, when there is no active span, we will already be
                         # creating a disconnected root span already and we don't have to
