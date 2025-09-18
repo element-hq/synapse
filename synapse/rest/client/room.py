@@ -33,7 +33,7 @@ from prometheus_client.core import Histogram
 from twisted.web.server import Request
 
 from synapse import event_auth
-from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.constants import Direction, EventTypes, Membership, StickyEvent
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -81,9 +81,6 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
-MSC4354_STICKY_DURATION_QUERY_PARAM = "msc4354_stick_duration_ms"
-MSC4354_STICKY_EVENT_KEY = "msc4354_sticky"
 
 
 class _RoomSize(Enum):
@@ -370,10 +367,10 @@ class RoomStateEventRestServlet(RestServlet):
                 }
                 if self.msc4354_enabled:
                     sticky_duration_ms = parse_integer(
-                        request, MSC4354_STICKY_DURATION_QUERY_PARAM
+                        request, StickyEvent.QUERY_PARAM_NAME
                     )
                     if sticky_duration_ms is not None:
-                        event_dict[MSC4354_STICKY_EVENT_KEY] = {
+                        event_dict[StickyEvent.FIELD_NAME] = {
                             "duration_ms": sticky_duration_ms,
                         }
 
@@ -456,11 +453,9 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             event_dict["origin_server_ts"] = origin_server_ts
 
         if self.msc4354_enabled:
-            sticky_duration_ms = parse_integer(
-                request, MSC4354_STICKY_DURATION_QUERY_PARAM
-            )
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
             if sticky_duration_ms is not None:
-                event_dict[MSC4354_STICKY_EVENT_KEY] = {
+                event_dict[StickyEvent.FIELD_NAME] = {
                     "duration_ms": sticky_duration_ms,
                 }
 

@@ -24,7 +24,7 @@
 """Contains constants from the specification."""
 
 import enum
-from typing import Final
+from typing import Final, TypedDict
 
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
@@ -360,3 +360,12 @@ class Direction(enum.Enum):
 class ProfileFields:
     DISPLAYNAME: Final = "displayname"
     AVATAR_URL: Final = "avatar_url"
+
+
+class StickyEventField(TypedDict):
+    duration_ms: int
+
+
+class StickyEvent:
+    QUERY_PARAM_NAME: Final = "msc4354_stick_duration_ms"
+    FIELD_NAME: Final = "msc4354_sticky"

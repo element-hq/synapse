@@ -49,6 +49,7 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
     RelationTypes,
+    StickyEvent,
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
@@ -2982,7 +2983,7 @@ class PersistEventsStore:
             if ev.rejected_reason is not None:
                 continue
             # MSC: The presence of sticky.duration_ms with a valid value makes the event “sticky”
-            sticky_obj = ev.get("sticky", None)
+            sticky_obj = ev.get_dict().get(StickyEvent.FIELD_NAME, None)
             if type(sticky_obj) is dict:
                 sticky_duration_ms = sticky_obj.get("duration_ms", None)
                 # MSC: Valid values are the integer range 0-3600000 (1 hour).
@@ -2993,8 +2994,15 @@ class PersistEventsStore:
                 ):
                     sticky_events.append(ev)
 
+        # TODO: filter out already expired sticky events.
+
         if len(sticky_events) == 0:
             return
+        logger.info(
+            "inserting %d sticky events in room %s",
+            len(sticky_events),
+            sticky_events[0].room_id,
+        )
         now_ms = round(time.time() * 1000)
         self.db_pool.simple_insert_many_txn(
             txn,
@@ -3009,8 +3017,10 @@ class PersistEventsStore:
                     # This ensures that malicious origin timestamps cannot specify start times in the future.
                     # Calculate the end time as start_time + min(sticky.duration_ms, 3600000).
                     min(ev.origin_server_ts, now_ms)
-                    + min(ev.get_dict()["sticky"]["duration_ms"], 3600000),
-                    ev.internal_metadata.soft_failed,
+                    + min(
+                        ev.get_dict()[StickyEvent.FIELD_NAME]["duration_ms"], 3600000
+                    ),
+                    ev.internal_metadata.is_soft_failed(),
                 )
                 for ev in sticky_events
             ],
