@@ -272,14 +272,16 @@ class Clock:
 
         Args:
             delay: How long to wait in seconds.
-            cancel_on_shutdown: Whether this call should be tracked for cleanup during
+            callback: Function to call
+            *args: Postional arguments to pass to function.
+            call_cater_cancel_on_shutdown: Whether this call should be tracked for cleanup during
                 shutdown. Any call with a long delay, or that is created infrequently,
                 should be tracked. Calls which are short or of 0 delay don't require
                 tracking since the small delay after shutdown before they trigger is
                 immaterial. It's not worth the overhead to track those calls as it blows up
-                the tracking map on large server instances.
-            callback: Function to call
-            *args: Postional arguments to pass to function.
+                the tracking collection on large server instances.
+                Placed in between `*args` and `**kwargs` in order to be able to set a
+                default value.
             **kwargs: Key arguments to pass to function.
         """
 

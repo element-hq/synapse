@@ -252,13 +252,15 @@ class SynapsePlugin(Plugin):
 
 def check_call_later(ctx: MethodSigContext) -> CallableType:
     """
-    Ensure that the `reactor.callLater` callsites are used intentionally.
+    Ensure that the `reactor.callLater` callsites aren't used.
 
-    Using `synapse.util.Clock.call_later` should be preferred. This is because the
-    `synapse.util.Clock` tracks delayed calls in order to cancel any outstanding calls
-    during server shutdown. Delayed calls which are either short lived (<~60s) or
-    frequently called and can be tracked via other means could be candidates for using
-    `reactor.callLater` directly. In those cases, use a type ignore comment to disable the
+    `synapse.util.Clock.call_later` should always be used instead of `reactor.callLater`.
+    This is because the `synapse.util.Clock` tracks delayed calls in order to cancel any
+    outstanding calls during server shutdown. Delayed calls which are either short lived
+    (<~60s) or frequently called and can be tracked via other means could be candidates for
+    using `synapse.util.Clock.call_later` with `call_later_cancel_on_shutdown` set to
+    `False`. There shouldn't be a need to use `reactor.callLater` outside of tests or the
+    `Clock` class itself. If a need arises, you can use a type ignore comment to disable the
     check, e.g. `# type: ignore[call-later-not-tracked]`.
 
     Args:
@@ -278,9 +280,9 @@ def check_call_later(ctx: MethodSigContext) -> CallableType:
 
 def check_looping_call(ctx: FunctionSigContext) -> CallableType:
     """
-    Ensure that the `task.LoopingCall` callsites are used intentionally.
+    Ensure that the `task.LoopingCall` callsites aren't used.
 
-    Using `synapse.util.Clock.looping_call` should be preferred. This is because the
+    `synapse.util.Clock.looping_call` should always be used instead of `task.LoopingCall`.
     `synapse.util.Clock` tracks looping calls in order to cancel any outstanding calls
     during server shutdown.
 
