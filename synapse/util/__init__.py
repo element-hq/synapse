@@ -34,7 +34,6 @@ from typing import (
     Sequence,
     Set,
     TypeVar,
-    cast,
 )
 
 import attr
@@ -305,7 +304,7 @@ class Clock:
                 # We can ignore the lint here since this class is the one location callLater
                 # should be called.
                 call = self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)  # type: ignore[call-later-not-tracked]
-                call = cast(IDelayedCall, DelayedCallWrapper(call, call_id, self))
+                call = DelayedCallWrapper(call, call_id, self)
                 self._call_id_to_delayed_call[call_id] = call
                 return call
         else:
