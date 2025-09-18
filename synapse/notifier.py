@@ -682,7 +682,7 @@ class Notifier:
                             # `HomeServer` in memory on shutdown. It is safe to let them
                             # timeout of their own accord after shutting down since it
                             # won't delay shutdown and there won't be any adverse
-                            # behvaviour.
+                            # behaviour.
                             cancel_on_shutdown=False,
                             clock=self.hs.get_clock(),
                         )
