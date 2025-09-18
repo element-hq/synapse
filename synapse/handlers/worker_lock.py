@@ -199,7 +199,6 @@ class WorkerLocksHandler:
 
         self._clock.call_later(
             0,
-            False,  # We don't track this call since it's short
             _wake_all_locks,
             locks,
         )

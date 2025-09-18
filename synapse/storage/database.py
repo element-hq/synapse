@@ -638,7 +638,6 @@ class DatabasePool:
         # background updates of tables that aren't safe to update.
         self._clock.call_later(
             0.0,
-            False,  # We don't track this call since it's short
             run_as_background_process,
             "upsert_safety_check",
             self.server_name,
@@ -688,7 +687,6 @@ class DatabasePool:
         if background_update_names:
             self._clock.call_later(
                 15.0,
-                False,  # We don't track this call since it's short
                 run_as_background_process,
                 "upsert_safety_check",
                 self.server_name,

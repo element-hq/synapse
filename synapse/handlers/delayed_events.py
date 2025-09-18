@@ -93,7 +93,6 @@ class DelayedEventsHandler:
                 # that may have fired before the callback was added.
                 self._clock.call_later(
                     0,
-                    False,  # We don't track this call since it's short
                     self.notify_new_event,
                 )
 
@@ -458,12 +457,14 @@ class DelayedEventsHandler:
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
                 delay_sec,
-                # Only track this call if it would delay shutdown by a substantial amount
-                True if delay_sec > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
                 run_as_background_process,
                 "_send_on_timeout",
                 self.server_name,
                 self._send_on_timeout,
+                # Only track this call if it would delay shutdown by a substantial amount
+                call_later_cancel_on_shutdown=True
+                if delay_sec > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                else False,
             )
         else:
             self._next_delayed_event_call.reset(delay_sec)

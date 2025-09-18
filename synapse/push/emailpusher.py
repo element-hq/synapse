@@ -232,9 +232,11 @@ class EmailPusher(Pusher):
             delay = self.seconds_until(soonest_due_at)
             self.timed_call = self.hs.get_clock().call_later(
                 delay,
-                # Only track this call if it would delay shutdown substantially
-                True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
                 self.on_timer,
+                # Only track this call if it would delay shutdown substantially
+                call_later_cancel_on_shutdown=True
+                if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                else False,
             )
 
     async def save_last_stream_ordering_and_success(

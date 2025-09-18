@@ -807,7 +807,9 @@ def timeout_deferred(
             new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
     # We don't track these calls since they are short.
-    delayed_call = clock.call_later(timeout, cancel_on_shutdown, time_it_out)
+    delayed_call = clock.call_later(
+        timeout, time_it_out, call_later_cancel_on_shutdown=cancel_on_shutdown
+    )
 
     def convert_cancelled(value: Failure) -> Failure:
         # if the original deferred was cancelled, and our timeout has fired, then
@@ -972,10 +974,12 @@ class AwakenableSleeper:
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
         call = self._clock.call_later(
             delay_ms / 1000,
-            # Only track this call if it would delay shutdown by a substantial amount
-            True if delay_ms / 1000 > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             sleep_deferred.callback,
             None,
+            # Only track this call if it would delay shutdown by a substantial amount
+            call_later_cancel_on_shutdown=True
+            if delay_ms / 1000 > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+            else False,
         )
 
         # Create a deferred that will get called if `wake` is called with
@@ -1033,10 +1037,12 @@ class DeferredEvent:
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
         call = self._clock.call_later(
             timeout_seconds,
-            # Only track this call if it would delay shutdown by a substantial amount
-            True if timeout_seconds > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             sleep_deferred.callback,
             None,
+            # Only track this call if it would delay shutdown by a substantial amount
+            call_later_cancel_on_shutdown=True
+            if timeout_seconds > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+            else False,
         )
 
         try:

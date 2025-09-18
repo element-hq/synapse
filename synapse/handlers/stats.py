@@ -77,7 +77,6 @@ class StatsHandler:
             # we start populating stats
             self.clock.call_later(
                 0,
-                False,  # We don't track this call since it's short
                 self.notify_new_event,
             )
 

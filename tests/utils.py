@@ -281,12 +281,14 @@ class MockClock:
     def time_msec(self) -> int:
         return int(self.time() * 1000)
 
-    def call_later(
+    # Allow the `call_later_cancel_on_shutdown` arg after `*args` to mimic the API of
+    # the actual `Clock`.
+    def call_later(  # type: ignore[valid-type]
         self,
         delay: float,
-        _: bool,  # cancel_on_shutdown unused in tests
         callback: Callable[P, object],
         *args: P.args,
+        call_later_cancel_on_shutdown: bool = False,
         **kwargs: P.kwargs,
     ) -> Timer:
         ctx = current_context()

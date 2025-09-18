@@ -513,12 +513,14 @@ class _Recoverer:
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
         self.scheduled_recovery = self.clock.call_later(
             delay,
-            # Only track this call if it would delay shutdown by a substantial amount
-            True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False,
             run_as_background_process,
             "as-recoverer",
             self.server_name,
             self.retry,
+            # Only track this call if it would delay shutdown by a substantial amount
+            call_later_cancel_on_shutdown=True
+            if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+            else False,
         )
 
     def _backoff(self) -> None:

@@ -203,7 +203,7 @@ class ResponseCache(Generic[KV]):
                 # We don't want to track these because they can get cancelled really
                 # quickly and thrash the tracking mechanism, ie. during repeated calls
                 # to /sync.
-                self.clock.call_later(self.timeout_sec, False, self._entry_timeout, key)
+                self.clock.call_later(self.timeout_sec, self._entry_timeout, key)
             else:
                 # otherwise, remove the result immediately.
                 self.unset(key)

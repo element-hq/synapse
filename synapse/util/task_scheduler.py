@@ -475,7 +475,6 @@ class TaskScheduler:
             # Try launch a new task since we've finished with this one.
             self._clock.call_later(
                 0.1,
-                False,  # We don't track this call since it's short
                 self._launch_scheduled_tasks,
             )
 

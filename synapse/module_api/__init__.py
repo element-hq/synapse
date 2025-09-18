@@ -1448,7 +1448,6 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            False,  # We don't track calls in the module api since we don't know their purpose
             self.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),

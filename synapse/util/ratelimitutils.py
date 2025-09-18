@@ -421,6 +421,5 @@ class _PerHostRatelimiter:
 
         self.clock.call_later(
             0.0,
-            False,  # We don't track this call since it's short
             start_next_request,
         )

@@ -258,9 +258,9 @@ class Clock:
     def call_later(
         self,
         delay: float,
-        cancel_on_shutdown: bool,
         callback: Callable,
         *args: Any,
+        call_later_cancel_on_shutdown: bool = False,
         **kwargs: Any,
     ) -> IDelayedCall:
         """Call something later
@@ -284,7 +284,7 @@ class Clock:
         if self._is_shutdown:
             raise Exception("Cannot start delayed call. Clock has been shutdown")
 
-        if cancel_on_shutdown:
+        if call_later_cancel_on_shutdown:
             call_id = self._delayed_call_id
             self._delayed_call_id = self._delayed_call_id + 1
 

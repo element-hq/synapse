@@ -877,7 +877,6 @@ class PresenceHandler(BasePresenceHandler):
             # reconnect before we treat them as offline.
             self.clock.call_later(
                 30,
-                False,  # We don't track this call since it's short
                 self.clock.looping_call,
                 self._handle_timeouts,
                 5000,
@@ -888,7 +887,6 @@ class PresenceHandler(BasePresenceHandler):
         if self._presence_enabled:
             self.clock.call_later(
                 60,
-                False,  # We don't track this call since it's short
                 self.clock.looping_call,
                 self._persist_unpersisted_changes,
                 60 * 1000,

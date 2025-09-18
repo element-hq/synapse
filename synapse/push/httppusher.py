@@ -339,11 +339,11 @@ class HttpPusher(Pusher):
                     logger.info("Push failed: delaying for %ds", self.backoff_delay)
                     self.timed_call = self.hs.get_clock().call_later(
                         self.backoff_delay,
+                        self.on_timer,
                         # Only track backoffs if they would delay shutdown substantially
-                        True
+                        call_later_cancel_on_shutdown=True
                         if self.backoff_delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
                         else False,
-                        self.on_timer,
                     )
                     self.backoff_delay = min(
                         self.backoff_delay * 2, self.MAX_BACKOFF_SEC
