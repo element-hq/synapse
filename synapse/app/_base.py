@@ -122,7 +122,7 @@ def register_sighup(
     Register a function to be called when a SIGHUP occurs.
 
     Args:
-        homeserver_instance_id: Unique ID for this Synapse process instance
+        homeserver_instance_id: The unique ID for this Synapse process instance
             (`hs.get_instance_id()`) that this hook is associated with.
         func: Function to be called when sent a SIGHUP signal.
         *args, **kwargs: args and kwargs to be passed to the target function.
