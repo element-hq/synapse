@@ -23,7 +23,10 @@ from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process,
+)
+from synapse.logging.context import make_deferred_yieldable
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
 )
@@ -114,6 +117,11 @@ class DelayedEventsHandler:
                     self._send_events,
                     events,
                 )
+
+                await self._clock.sleep(1)
+                await self._clock.sleep(0.3)
+                # await self._clock.sleep(0.1)
+                logger.info("asdf done _initialized_from_db")
 
             self._initialized_from_db = run_as_background_process(
                 "_schedule_db_events", self.server_name, _schedule_db_events
@@ -328,7 +336,14 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
+        logger.info(
+            "asdf cancelling delayed event before _initialized_from_db %s", delay_id
+        )
         await self._initialized_from_db
+        # await make_deferred_yieldable(self._initialized_from_db)
+        logger.info(
+            "asdf cancelling delayed event after _initialized_from_db %s", delay_id
+        )
 
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id=delay_id,
