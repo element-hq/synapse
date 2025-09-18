@@ -35,12 +35,12 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypedDict,
     cast,
 )
 
 import attr
 from prometheus_client import Counter
-from typing_extensions import TypedDict
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -51,10 +51,16 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, StrippedStateEvent, relation_from_event
-from synapse.events.snapshot import EventContext
+from synapse.events import (
+    EventBase,
+    StrippedStateEvent,
+    is_creator,
+    relation_from_event,
+)
+from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -78,6 +84,7 @@ from synapse.types import (
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.util import json_encoder
+from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.stringutils import non_null_str_or_none
 
@@ -88,11 +95,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-persist_event_counter = Counter("synapse_storage_events_persisted_events", "")
+persist_event_counter = Counter(
+    "synapse_storage_events_persisted_events", "", labelnames=[SERVER_NAME_LABEL]
+)
 event_counter = Counter(
     "synapse_storage_events_persisted_events_sep",
     "",
-    ["type", "origin_type", "origin_entity"],
+    labelnames=["type", "origin_type", "origin_entity", SERVER_NAME_LABEL],
 )
 
 # State event type/key pairs that we need to gather to fill in the
@@ -236,6 +245,7 @@ class PersistEventsStore:
         db_conn: LoggingDatabaseConnection,
     ):
         self.hs = hs
+        self.server_name = hs.hostname
         self.db_pool = db
         self.store = main_data_store
         self.database_engine = db.engine
@@ -246,9 +256,9 @@ class PersistEventsStore:
         self.is_mine_id = hs.is_mine_id
 
         # This should only exist on instances that are configured to write
-        assert (
-            hs.get_instance_name() in hs.config.worker.writers.events
-        ), "Can only instantiate EventsStore on master"
+        assert hs.get_instance_name() in hs.config.worker.writers.events, (
+            "Can only instantiate EventsStore on master"
+        )
 
         # Since we have been configured to write, we ought to have id generators,
         # rather than id trackers.
@@ -264,7 +274,7 @@ class PersistEventsStore:
     async def _persist_events_and_state_updates(
         self,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
         *,
         state_delta_for_room: Optional[DeltaState],
         new_forward_extremities: Optional[Set[str]],
@@ -356,12 +366,16 @@ class PersistEventsStore:
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
             )
-            persist_event_counter.inc(len(events_and_contexts))
+            persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
+                len(events_and_contexts)
+            )
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
-                synapse.metrics.event_persisted_position.set(stream)
+                synapse.metrics.event_persisted_position.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).set(stream)
 
             for event, context in events_and_contexts:
                 if context.app_service:
@@ -374,17 +388,151 @@ class PersistEventsStore:
                     origin_type = "remote"
                     origin_entity = get_domain_from_id(event.sender)
 
-                event_counter.labels(event.type, origin_type, origin_entity).inc()
+                event_counter.labels(
+                    type=event.type,
+                    origin_type=origin_type,
+                    origin_entity=origin_entity,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
+
+                if (
+                    not self.hs.config.experimental.msc4293_enabled
+                    or event.type != EventTypes.Member
+                    or event.state_key is None
+                ):
+                    continue
+
+                # check if this is an unban/join that will undo a ban/kick redaction for
+                # a user in the room
+                if event.membership in [Membership.LEAVE, Membership.JOIN]:
+                    if (
+                        event.membership == Membership.LEAVE
+                        and event.sender == event.state_key
+                    ):
+                        # self-leave, ignore
+                        continue
+
+                    # if there is an existing ban/leave causing redactions for
+                    # this user/room combination update the entry with the stream
+                    # ordering when the redactions should stop - in the case of a backfilled
+                    # event where the stream ordering is negative, use the current max stream
+                    # ordering
+                    stream_ordering = event.internal_metadata.stream_ordering
+                    assert stream_ordering is not None
+                    if stream_ordering < 0:
+                        stream_ordering = self._stream_id_gen.get_current_token()
+                    await self.db_pool.simple_update(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        {"redact_end_ordering": stream_ordering},
+                        desc="room_ban_redactions update redact_end_ordering",
+                    )
+
+                # check for msc4293 redact_events flag and apply if found
+                if event.membership not in [Membership.LEAVE, Membership.BAN]:
+                    continue
+                redact = event.content.get("org.matrix.msc4293.redact_events", False)
+                if not redact or not isinstance(redact, bool):
+                    continue
+                # self-bans currently are not authorized so we don't check for that
+                # case
+                if (
+                    event.membership == Membership.BAN
+                    and event.sender == event.state_key
+                ):
+                    continue
+
+                # check that sender can redact
+                redact_allowed = await self._can_sender_redact(event)
+
+                # Signal that this user's past events in this room
+                # should be redacted by adding an entry to
+                # `room_ban_redactions`.
+                if redact_allowed:
+                    await self.db_pool.simple_upsert(
+                        "room_ban_redactions",
+                        {"room_id": event.room_id, "user_id": event.state_key},
+                        {
+                            "redacting_event_id": event.event_id,
+                            "redact_end_ordering": None,
+                        },
+                        {
+                            "room_id": event.room_id,
+                            "user_id": event.state_key,
+                            "redacting_event_id": event.event_id,
+                            "redact_end_ordering": None,
+                        },
+                    )
+
+                    # normally the cache entry for a redacted event would be invalidated
+                    # by an arriving redaction event, but since we are not creating redaction
+                    # events we invalidate manually
+                    self.store._invalidate_local_get_event_cache_room_id(event.room_id)
+
+                    self.store._invalidate_async_get_event_cache_room_id(event.room_id)
 
             if new_forward_extremities:
                 self.store.get_latest_event_ids_in_room.prefill(
                     (room_id,), frozenset(new_forward_extremities)
                 )
 
+    async def _can_sender_redact(self, event: EventBase) -> bool:
+        state_filter = StateFilter.from_types(
+            [(EventTypes.PowerLevels, ""), (EventTypes.Create, "")]
+        )
+        state = await self.store.get_partial_filtered_current_state_ids(
+            event.room_id, state_filter
+        )
+        pl_id = state[(EventTypes.PowerLevels, "")]
+        pl_event = await self.store.get_event(pl_id, allow_none=True)
+
+        create_id = state[(EventTypes.Create, "")]
+        create_event = await self.store.get_event(create_id, allow_none=True)
+
+        if create_event is None:
+            # not sure how this would happen but if it does then just deny the redaction
+            logger.warning("No create event found for room %s", event.room_id)
+            return False
+
+        if create_event.room_version.msc4289_creator_power_enabled:
+            # per the spec, grant the creator infinite power level and all other users 0
+            if is_creator(create_event, event.sender):
+                return True
+            if pl_event is None:
+                # per the spec, users other than the room creator have power level
+                # 0, which is less than the default to redact events (50).
+                return False
+        else:
+            # per the spec, if a power level event isn't in the room, grant the creator
+            # level 100 (the default redaction level is 50) and all other users 0
+            if pl_event is None:
+                return create_event.sender == event.sender
+
+        assert pl_event is not None
+        sender_level = pl_event.content.get("users", {}).get(event.sender)
+        if sender_level is None:
+            sender_level = pl_event.content.get("users_default", 0)
+
+        redact_level = pl_event.content.get("redact")
+        if redact_level is None:
+            redact_level = pl_event.content.get("events_default", 0)
+
+        room_redaction_level = pl_event.content.get("events", {}).get(
+            "m.room.redaction"
+        )
+        if room_redaction_level is not None:
+            if sender_level < room_redaction_level:
+                return False
+
+        if sender_level >= redact_level:
+            return True
+
+        return False
+
     async def _calculate_sliding_sync_table_changes(
         self,
         room_id: str,
-        events_and_contexts: Sequence[Tuple[EventBase, EventContext]],
+        events_and_contexts: Sequence[EventPersistencePair],
         delta_state: DeltaState,
     ) -> SlidingSyncTableChanges:
         """
@@ -465,9 +613,9 @@ class PersistEventsStore:
                     missing_membership_event_ids
                 )
                 # There shouldn't be any missing events
-                assert (
-                    remaining_events.keys() == missing_membership_event_ids
-                ), missing_membership_event_ids.difference(remaining_events.keys())
+                assert remaining_events.keys() == missing_membership_event_ids, (
+                    missing_membership_event_ids.difference(remaining_events.keys())
+                )
                 membership_event_map.update(remaining_events)
 
             for (
@@ -534,9 +682,9 @@ class PersistEventsStore:
                         missing_state_event_ids
                     )
                     # There shouldn't be any missing events
-                    assert (
-                        remaining_events.keys() == missing_state_event_ids
-                    ), missing_state_event_ids.difference(remaining_events.keys())
+                    assert remaining_events.keys() == missing_state_event_ids, (
+                        missing_state_event_ids.difference(remaining_events.keys())
+                    )
                     for event in remaining_events.values():
                         current_state_map[(event.type, event.state_key)] = event
 
@@ -644,9 +792,9 @@ class PersistEventsStore:
             if missing_event_ids:
                 remaining_events = await self.store.get_events(missing_event_ids)
                 # There shouldn't be any missing events
-                assert (
-                    remaining_events.keys() == missing_event_ids
-                ), missing_event_ids.difference(remaining_events.keys())
+                assert remaining_events.keys() == missing_event_ids, (
+                    missing_event_ids.difference(remaining_events.keys())
+                )
                 for event in remaining_events.values():
                     current_state_map[(event.type, event.state_key)] = event
 
@@ -868,7 +1016,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         *,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
         inhibit_local_membership_updates: bool,
         state_delta_for_room: Optional[DeltaState],
         new_forward_extremities: Optional[Set[str]],
@@ -1518,7 +1666,7 @@ class PersistEventsStore:
     def _persist_transaction_ids_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Persist the mapping from transaction IDs to event IDs (if defined)."""
 
@@ -1605,7 +1753,13 @@ class PersistEventsStore:
             room_id
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
-            stream_id: TODO
+            stream_id: This is expected to be the minimum `stream_ordering` for the
+                batch of events that we are persisting; which means we do not end up in a
+                situation where workers see events before the `current_state_delta` updates.
+                FIXME: However, this function also gets called with next upcoming
+                `stream_ordering` when we re-sync the state of a partial stated room (see
+                `update_current_state(...)`) which may be "correct" but it would be good to
+                nail down what exactly is the expected value here.
             sliding_sync_table_changes: Changes to the
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
@@ -1908,6 +2062,13 @@ class PersistEventsStore:
             stream_id,
         )
 
+        for user_id in members_to_cache_bust:
+            txn.call_after(
+                self.store._membership_stream_cache.entity_has_changed,
+                user_id,
+                stream_id,
+            )
+
         # Invalidate the various caches
         self.store._invalidate_state_caches_and_stream(
             txn, room_id, members_to_cache_bust
@@ -2155,7 +2316,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """
         Update the latest `event_stream_ordering`/`bump_stamp` columns in the
@@ -2295,8 +2456,8 @@ class PersistEventsStore:
 
     @classmethod
     def _filter_events_and_contexts_for_duplicates(
-        cls, events_and_contexts: List[Tuple[EventBase, EventContext]]
-    ) -> List[Tuple[EventBase, EventContext]]:
+        cls, events_and_contexts: List[EventPersistencePair]
+    ) -> List[EventPersistencePair]:
         """Ensure that we don't have the same event twice.
 
         Pick the earliest non-outlier if there is one, else the earliest one.
@@ -2307,9 +2468,7 @@ class PersistEventsStore:
         Returns:
             filtered list
         """
-        new_events_and_contexts: OrderedDict[str, Tuple[EventBase, EventContext]] = (
-            OrderedDict()
-        )
+        new_events_and_contexts: OrderedDict[str, EventPersistencePair] = OrderedDict()
         for event, context in events_and_contexts:
             prev_event_context = new_events_and_contexts.get(event.event_id)
             if prev_event_context:
@@ -2327,7 +2486,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Update min_depth for each room
 
@@ -2369,8 +2528,8 @@ class PersistEventsStore:
     def _update_outliers_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-    ) -> List[Tuple[EventBase, EventContext]]:
+        events_and_contexts: List[EventPersistencePair],
+    ) -> List[EventPersistencePair]:
         """Update any outliers with new event info.
 
         This turns outliers into ex-outliers (unless the new event was rejected), and
@@ -2477,7 +2636,7 @@ class PersistEventsStore:
     def _store_event_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: Collection[Tuple[EventBase, EventContext]],
+        events_and_contexts: Collection[EventPersistencePair],
     ) -> None:
         """Insert new events into the event, event_json, redaction and
         state_events tables.
@@ -2581,8 +2740,8 @@ class PersistEventsStore:
     def _store_rejected_events_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-    ) -> List[Tuple[EventBase, EventContext]]:
+        events_and_contexts: List[EventPersistencePair],
+    ) -> List[EventPersistencePair]:
         """Add rows to the 'rejections' table for received events which were
         rejected
 
@@ -2609,8 +2768,8 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         *,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-        all_events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
+        all_events_and_contexts: List[EventPersistencePair],
         inhibit_local_membership_updates: bool = False,
     ) -> None:
         """Update all the miscellaneous tables for new events
@@ -2704,9 +2863,9 @@ class PersistEventsStore:
     def _add_to_cache(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
-        to_prefill = []
+        to_prefill: List[EventCacheEntry] = []
 
         ev_map = {e.event_id: e for e, _ in events_and_contexts}
         if not ev_map:
@@ -2972,6 +3131,10 @@ class PersistEventsStore:
             # Upsert into the threads table, but only overwrite the value if the
             # new event is of a later topological order OR if the topological
             # ordering is equal, but the stream ordering is later.
+            # (Note by definition that the stream ordering will always be later
+            # unless this is a backfilled event [= negative stream ordering]
+            # because we are only persisting this event now and stream_orderings
+            # are strictly monotonically increasing)
             sql = """
             INSERT INTO threads (room_id, thread_id, latest_event_id, topological_ordering, stream_ordering)
             VALUES (?, ?, ?, ?, ?)
@@ -3089,7 +3252,10 @@ class PersistEventsStore:
     def _store_room_topic_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
         if isinstance(event.content.get("topic"), str):
             self.store_event_search_txn(
-                txn, event, "content.topic", event.content["topic"]
+                txn,
+                event,
+                "content.topic",
+                get_plain_text_topic_from_event_content(event.content) or "",
             )
 
     def _store_room_name_txn(self, txn: LoggingTransaction, event: EventBase) -> None:
@@ -3170,8 +3336,8 @@ class PersistEventsStore:
     def _set_push_actions_for_event_and_users_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-        all_events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
+        all_events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Handles moving push actions from staging table to main
         event_push_actions table for all events in `events_and_contexts`.
@@ -3254,7 +3420,7 @@ class PersistEventsStore:
     def _store_event_state_mappings_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: Collection[Tuple[EventBase, EventContext]],
+        events_and_contexts: Collection[EventPersistencePair],
     ) -> None:
         """
         Raises:
@@ -3435,8 +3601,7 @@ class PersistEventsStore:
         # Delete all these events that we've already fetched and now know that their
         # prev events are the new backwards extremeties.
         query = (
-            "DELETE FROM event_backward_extremities"
-            " WHERE event_id = ? AND room_id = ?"
+            "DELETE FROM event_backward_extremities WHERE event_id = ? AND room_id = ?"
         )
         backward_extremity_tuples_to_remove = [
             (ev.event_id, ev.room_id)

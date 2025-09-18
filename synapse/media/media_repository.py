@@ -52,13 +52,18 @@ from synapse.media._base import (
     FileInfo,
     Responder,
     ThumbnailInfo,
+    check_for_cached_entry_and_respond,
     get_filename_from_headers,
     respond_404,
     respond_with_multipart_responder,
     respond_with_responder,
 )
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage
+from synapse.media.media_storage import (
+    MediaStorage,
+    SHA256TransparentIOReader,
+    SHA256TransparentIOWriter,
+)
 from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
@@ -172,14 +177,27 @@ class MediaRepository:
         else:
             self.url_previewer = None
 
+        # We get the media upload limits and sort them in descending order of
+        # time period, so that we can apply some optimizations.
+        self.default_media_upload_limits = hs.config.media.media_upload_limits
+        self.default_media_upload_limits.sort(
+            key=lambda limit: limit.time_period_ms, reverse=True
+        )
+
+        self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
+
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
-            "update_recently_accessed_media", self._update_recently_accessed
+            "update_recently_accessed_media",
+            self.server_name,
+            self._update_recently_accessed,
         )
 
     def _start_apply_media_retention_rules(self) -> Deferred:
         return run_as_background_process(
-            "apply_media_retention_rules", self._apply_media_retention_rules
+            "apply_media_retention_rules",
+            self.server_name,
+            self._apply_media_retention_rules,
         )
 
     async def _update_recently_accessed(self) -> None:
@@ -280,52 +298,16 @@ class MediaRepository:
             raise NotFoundError("Media ID has expired")
 
     @trace
-    async def update_content(
-        self,
-        media_id: str,
-        media_type: str,
-        upload_name: Optional[str],
-        content: IO,
-        content_length: int,
-        auth_user: UserID,
-    ) -> None:
-        """Update the content of the given media ID.
-
-        Args:
-            media_id: The media ID to replace.
-            media_type: The content type of the file.
-            upload_name: The name of the file, if provided.
-            content: A file like object that is the content to store
-            content_length: The length of the content
-            auth_user: The user_id of the uploader
-        """
-        file_info = FileInfo(server_name=None, file_id=media_id)
-        fname = await self.media_storage.store_file(content, file_info)
-        logger.info("Stored local media in file %r", fname)
-
-        await self.store.update_local_media(
-            media_id=media_id,
-            media_type=media_type,
-            upload_name=upload_name,
-            media_length=content_length,
-            user_id=auth_user,
-        )
-
-        try:
-            await self._generate_thumbnails(None, media_id, media_id, media_type)
-        except Exception as e:
-            logger.info("Failed to generate thumbnails: %s", e)
-
-    @trace
-    async def create_content(
+    async def create_or_update_content(
         self,
         media_type: str,
         upload_name: Optional[str],
         content: IO,
         content_length: int,
         auth_user: UserID,
+        media_id: Optional[str] = None,
     ) -> MXCUri:
-        """Store uploaded content for a local user and return the mxc URL
+        """Create or update the content of the given media ID.
 
         Args:
             media_type: The content type of the file.
@@ -333,27 +315,98 @@ class MediaRepository:
             content: A file like object that is the content to store
             content_length: The length of the content
             auth_user: The user_id of the uploader
+            media_id: The media ID to update if provided, otherwise creates
+                new media ID.
 
         Returns:
             The mxc url of the stored content
         """
 
-        media_id = random_string(24)
+        is_new_media = media_id is None
+        if media_id is None:
+            media_id = random_string(24)
 
         file_info = FileInfo(server_name=None, file_id=media_id)
-
-        fname = await self.media_storage.store_file(content, file_info)
+        sha256reader = SHA256TransparentIOReader(content)
+        # This implements all of IO as it has a passthrough
+        fname = await self.media_storage.store_file(sha256reader.wrap(), file_info)
+        sha256 = sha256reader.hexdigest()
+        should_quarantine = await self.store.get_is_hash_quarantined(sha256)
 
         logger.info("Stored local media in file %r", fname)
 
-        await self.store.store_local_media(
-            media_id=media_id,
-            media_type=media_type,
-            time_now_ms=self.clock.time_msec(),
-            upload_name=upload_name,
-            media_length=content_length,
-            user_id=auth_user,
+        if should_quarantine:
+            logger.warning(
+                "Media has been automatically quarantined as it matched existing quarantined media"
+            )
+
+        # Check that the user has not exceeded any of the media upload limits.
+
+        # Use limits from module API if provided
+        media_upload_limits = (
+            await self.media_repository_callbacks.get_media_upload_limits_for_user(
+                auth_user.to_string()
+            )
         )
+
+        # Otherwise use the default limits from config
+        if media_upload_limits is None:
+            # Note: the media upload limits are sorted so larger time periods are
+            # first.
+            media_upload_limits = self.default_media_upload_limits
+
+        # This is the total size of media uploaded by the user in the last
+        # `time_period_ms` milliseconds, or None if we haven't checked yet.
+        uploaded_media_size: Optional[int] = None
+
+        for limit in media_upload_limits:
+            # We only need to check the amount of media uploaded by the user in
+            # this latest (smaller) time period if the amount of media uploaded
+            # in a previous (larger) time period is below the limit.
+            #
+            # This optimization means that in the common case where the user
+            # hasn't uploaded much media, we only need to query the database
+            # once.
+            if (
+                uploaded_media_size is None
+                or uploaded_media_size + content_length > limit.max_bytes
+            ):
+                uploaded_media_size = await self.store.get_media_uploaded_size_for_user(
+                    user_id=auth_user.to_string(), time_period_ms=limit.time_period_ms
+                )
+
+            if uploaded_media_size + content_length > limit.max_bytes:
+                await self.media_repository_callbacks.on_media_upload_limit_exceeded(
+                    user_id=auth_user.to_string(),
+                    limit=limit,
+                    sent_bytes=uploaded_media_size,
+                    attempted_bytes=content_length,
+                )
+                raise SynapseError(
+                    400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
+                )
+
+        if is_new_media:
+            await self.store.store_local_media(
+                media_id=media_id,
+                media_type=media_type,
+                time_now_ms=self.clock.time_msec(),
+                upload_name=upload_name,
+                media_length=content_length,
+                user_id=auth_user,
+                sha256=sha256,
+                quarantined_by="system" if should_quarantine else None,
+            )
+        else:
+            await self.store.update_local_media(
+                media_id=media_id,
+                media_type=media_type,
+                upload_name=upload_name,
+                media_length=content_length,
+                user_id=auth_user,
+                sha256=sha256,
+                quarantined_by="system" if should_quarantine else None,
+            )
 
         try:
             await self._generate_thumbnails(None, media_id, media_id, media_type)
@@ -459,6 +512,11 @@ class MediaRepository:
 
         self.mark_recently_accessed(None, media_id)
 
+        # Once we've checked auth we can return early if the media is cached on
+        # the client
+        if check_for_cached_entry_and_respond(request):
+            return
+
         media_type = media_info.media_type
         if not media_type:
             media_type = "application/octet-stream"
@@ -537,6 +595,17 @@ class MediaRepository:
                 use_federation_endpoint,
                 allow_authenticated,
             )
+
+        # Check if the media is cached on the client, if so return 304. We need
+        # to do this after we have fetched remote media, as we need it to do the
+        # auth.
+        if check_for_cached_entry_and_respond(request):
+            # We always need to use the responder.
+            if responder:
+                with responder:
+                    pass
+
+            return
 
         # We deliberately stream the file outside the lock
         if responder and media_info:
@@ -739,11 +808,13 @@ class MediaRepository:
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
+            sha256writer = SHA256TransparentIOWriter(f)
             try:
                 length, headers = await self.client.download_media(
                     server_name,
                     media_id,
-                    output_stream=f,
+                    # This implements all of BinaryIO as it has a passthrough
+                    output_stream=sha256writer.wrap(),
                     max_size=self.max_upload_size,
                     max_timeout_ms=max_timeout_ms,
                     download_ratelimiter=download_ratelimiter,
@@ -808,6 +879,7 @@ class MediaRepository:
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
+                sha256=sha256writer.hexdigest(),
             )
 
         logger.info("Stored remote media in file %r", fname)
@@ -828,6 +900,7 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
+            sha256=sha256writer.hexdigest(),
         )
 
     async def _federation_download_remote_file(
@@ -862,11 +935,13 @@ class MediaRepository:
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
+            sha256writer = SHA256TransparentIOWriter(f)
             try:
                 res = await self.client.federation_download_media(
                     server_name,
                     media_id,
-                    output_stream=f,
+                    # This implements all of BinaryIO as it has a passthrough
+                    output_stream=sha256writer.wrap(),
                     max_size=self.max_upload_size,
                     max_timeout_ms=max_timeout_ms,
                     download_ratelimiter=download_ratelimiter,
@@ -937,6 +1012,7 @@ class MediaRepository:
                 upload_name=upload_name,
                 media_length=length,
                 filesystem_id=file_id,
+                sha256=sha256writer.hexdigest(),
             )
 
         logger.debug("Stored remote media in file %r", fname)
@@ -957,6 +1033,7 @@ class MediaRepository:
             last_access_ts=time_now_ms,
             quarantined_by=None,
             authenticated=authenticated,
+            sha256=sha256writer.hexdigest(),
         )
 
     def _get_thumbnail_requirements(
@@ -1343,8 +1420,8 @@ class MediaRepository:
             )
 
             logger.info(
-                "Purging remote media last accessed before"
-                f" {remote_media_threshold_timestamp_ms}"
+                "Purging remote media last accessed before %s",
+                remote_media_threshold_timestamp_ms,
             )
 
             await self.delete_old_remote_media(
@@ -1359,8 +1436,8 @@ class MediaRepository:
             )
 
             logger.info(
-                "Purging local media last accessed before"
-                f" {local_media_threshold_timestamp_ms}"
+                "Purging local media last accessed before %s",
+                local_media_threshold_timestamp_ms,
             )
 
             await self.delete_old_local_media(

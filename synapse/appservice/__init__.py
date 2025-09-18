@@ -78,7 +78,7 @@ class ApplicationService:
         self,
         token: str,
         id: str,
-        sender: str,
+        sender: UserID,
         url: Optional[str] = None,
         namespaces: Optional[JsonDict] = None,
         hs_token: Optional[str] = None,
@@ -87,6 +87,7 @@ class ApplicationService:
         ip_range_whitelist: Optional[IPSet] = None,
         supports_ephemeral: bool = False,
         msc3202_transaction_extensions: bool = False,
+        msc4190_device_management: bool = False,
     ):
         self.token = token
         self.url = (
@@ -95,11 +96,14 @@ class ApplicationService:
         self.hs_token = hs_token
         # The full Matrix ID for this application service's sender.
         self.sender = sender
+        # The application service user should be part of the server's domain.
+        self.server_name = sender.domain  # nb must be called this for @cached
         self.namespaces = self._check_namespaces(namespaces)
         self.id = id
         self.ip_range_whitelist = ip_range_whitelist
         self.supports_ephemeral = supports_ephemeral
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
+        self.msc4190_device_management = msc4190_device_management
 
         if "|" in self.id:
             raise Exception("application service ID cannot contain '|' character")
@@ -221,7 +225,7 @@ class ApplicationService:
         """
         return (
             # User is the appservice's configured sender_localpart user
-            user_id == self.sender
+            user_id == self.sender.to_string()
             # User is in the appservice's user namespace
             or self.is_user_in_namespace(user_id)
         )
@@ -345,7 +349,7 @@ class ApplicationService:
     def is_exclusive_user(self, user_id: str) -> bool:
         return (
             self._is_exclusive(ApplicationService.NS_USERS, user_id)
-            or user_id == self.sender
+            or user_id == self.sender.to_string()
         )
 
     def is_interested_in_protocol(self, protocol: str) -> bool:

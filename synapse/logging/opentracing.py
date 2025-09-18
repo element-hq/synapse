@@ -251,18 +251,17 @@ class _DummyTagNames:
 try:
     import opentracing
     import opentracing.tags
+    from opentracing.scope_managers.contextvars import ContextVarsScopeManager
 
     tags = opentracing.tags
 except ImportError:
     opentracing = None  # type: ignore[assignment]
     tags = _DummyTagNames  # type: ignore[assignment]
+    ContextVarsScopeManager = None  # type: ignore
 try:
     from jaeger_client import Config as JaegerConfig
-
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     JaegerConfig = None  # type: ignore
-    LogContextScopeManager = None  # type: ignore
 
 
 try:
@@ -484,7 +483,7 @@ def init_tracer(hs: "HomeServer") -> None:
     config = JaegerConfig(
         config=jaeger_config,
         service_name=f"{hs.config.server.server_name} {instance_name_by_type}",
-        scope_manager=LogContextScopeManager(),
+        scope_manager=ContextVarsScopeManager(),
         metrics_factory=PrometheusMetricsFactory(),
     )
 
@@ -794,6 +793,13 @@ def inject_response_headers(response_headers: Headers) -> None:
 
     if trace_id is not None:
         response_headers.addRawHeader("Synapse-Trace-Id", f"{trace_id:x}")
+
+
+@ensure_active_span("inject the span into a header dict")
+def inject_request_headers(headers: Dict[str, str]) -> None:
+    span = opentracing.tracer.active_span
+    assert span is not None
+    opentracing.tracer.inject(span.context, opentracing.Format.HTTP_HEADERS, headers)
 
 
 @ensure_active_span(

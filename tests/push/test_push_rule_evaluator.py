@@ -21,7 +21,7 @@
 
 from typing import Any, Dict, List, Optional, Union, cast
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, HistoryVisibility, Membership
@@ -150,6 +150,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         *,
         related_events: Optional[JsonDict] = None,
         msc4210: bool = False,
+        msc4306: bool = False,
     ) -> PushRuleEvaluator:
         event = FrozenEvent(
             {
@@ -176,6 +177,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             room_version_feature_flags=event.room_version.msc3931_push_features,
             msc3931_enabled=True,
             msc4210_enabled=msc4210,
+            msc4306_enabled=msc4306,
         )
 
     def test_display_name(self) -> None:
@@ -806,6 +808,112 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             )
         )
 
+    def test_thread_subscription_subscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in a subscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=True,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=True,
+            )
+        )
+
+    def test_thread_subscription_unsubscribed(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an event in an unsubscribed thread.
+        """
+        evaluator = self._get_evaluator(
+            {
+                "msgtype": "m.text",
+                "body": "Squawk",
+                "m.relates_to": {
+                    "event_id": "$threadroot",
+                    "rel_type": "m.thread",
+                },
+            },
+            msc4306=True,
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=False,
+            )
+        )
+        self.assertTrue(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=False,
+            )
+        )
+
+    def test_thread_subscription_unthreaded(self) -> None:
+        """
+        Test MSC4306 thread subscription push rules against an unthreaded event.
+        """
+        evaluator = self._get_evaluator(
+            {"msgtype": "m.text", "body": "Squawk"}, msc4306=True
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": True,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=None,
+            )
+        )
+        self.assertFalse(
+            evaluator.matches(
+                {
+                    "kind": "io.element.msc4306.thread_subscription",
+                    "subscribed": False,
+                },
+                None,
+                None,
+                msc4306_thread_subscription_state=None,
+            )
+        )
+
 
 class TestBulkPushRuleEvaluator(unittest.HomeserverTestCase):
     """Tests for the bulk push rule evaluator"""
@@ -823,9 +931,9 @@ class TestBulkPushRuleEvaluator(unittest.HomeserverTestCase):
         # Define an application service so that we can register appservice users
         self._service_token = "some_token"
         self._service = ApplicationService(
-            self._service_token,
-            "as1",
-            "@as.sender:test",
+            token=self._service_token,
+            id="as1",
+            sender=UserID.from_string("@as.sender:test"),
             namespaces={
                 "users": [
                     {"regex": "@_as_.*:test", "exclusive": True},

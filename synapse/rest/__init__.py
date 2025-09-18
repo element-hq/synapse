@@ -29,7 +29,7 @@ from synapse.rest.client import (
     account_validity,
     appservice_ping,
     auth,
-    auth_issuer,
+    auth_metadata,
     capabilities,
     delayed_events,
     devices,
@@ -63,6 +63,7 @@ from synapse.rest.client import (
     sync,
     tags,
     thirdparty,
+    thread_subscriptions,
     tokenrefresh,
     user_directory,
     versions,
@@ -121,7 +122,8 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     mutual_rooms.register_servlets,
     login_token_request.register_servlets,
     rendezvous.register_servlets,
-    auth_issuer.register_servlets,
+    auth_metadata.register_servlets,
+    thread_subscriptions.register_servlets,
 )
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
@@ -165,7 +167,7 @@ class ClientRestResource(JsonResource):
             # Fail on unknown servlet groups.
             if servlet_group not in SERVLET_GROUPS:
                 if servlet_group == "media":
-                    logger.warn(
+                    logger.warning(
                         "media.can_load_media_repo needs to be configured for the media servlet to be available"
                     )
                 raise RuntimeError(
@@ -187,7 +189,6 @@ class ClientRestResource(JsonResource):
                     mutual_rooms.register_servlets,
                     login_token_request.register_servlets,
                     rendezvous.register_servlets,
-                    auth_issuer.register_servlets,
                 ]:
                     continue
 

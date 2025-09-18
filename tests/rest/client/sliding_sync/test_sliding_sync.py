@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 from parameterized import parameterized, parameterized_class
 from typing_extensions import assert_never
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -790,6 +790,64 @@ class SlidingSyncTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_reject_remote_invite(self) -> None:
+        """Test that rejecting a remote invite comes down incremental sync"""
+
+        user_id = self.register_user("user1", "pass")
+        user_tok = self.login(user_id, "pass")
+
+        # Create a remote room invite (out-of-band membership)
+        room_id = "!room:remote.server"
+        self._create_remote_invite_room_for_user(user_id, None, room_id)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [(EventTypes.Member, StateValues.ME)],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user_tok)
+        # We should see the room (like normal)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+
+        # Reject the remote room invite
+        self.helper.leave(room_id, user_id, tok=user_tok)
+
+        # Sync again after rejecting the invite
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user_tok)
+
+        # The fix to add the leave event to incremental sync when rejecting a remote
+        # invite relies on the new tables to work.
+        if self.use_new_tables:
+            # We should see the newly_left room
+            self.assertIncludes(
+                set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+                {room_id},
+                exact=True,
+            )
+            # We should see the leave state for the room so clients don't end up with stuck
+            # invites
+            self.assertIncludes(
+                {
+                    (
+                        state["type"],
+                        state["state_key"],
+                        state["content"].get("membership"),
+                    )
+                    for state in response_body["rooms"][room_id]["required_state"]
+                },
+                {(EventTypes.Member, user_id, Membership.LEAVE)},
+                exact=True,
+            )
+
     def test_ignored_user_invites_initial_sync(self) -> None:
         """
         Make sure we ignore invites if they are from one of the `m.ignored_user_list` on
@@ -1169,12 +1227,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
-        )
-
         # Ensure that the state reset worked and only user2 is in the room now
         users_in_room = self.get_success(self.store.get_users_in_room(room_id1))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
@@ -1320,12 +1372,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
         _, join_rule_event_pos, _ = self.get_success(
             self.persistence.persist_event(join_rule_event, join_rule_context)
-        )
-
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
         )
 
         # Ensure that the state reset worked and only user2 is in the room now
@@ -1506,12 +1552,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
-        )
-
         # Ensure that the state reset worked and only user2 is in the room now
         users_in_room = self.get_success(self.store.get_users_in_room(space_room_id))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
@@ -1576,3 +1616,55 @@ class SlidingSyncTestCase(SlidingSyncBase):
                 {space_room_id, space_room_id2},
                 exact=True,
             )
+
+    def test_exclude_rooms_from_sync(self) -> None:
+        """Tests that sliding sync honours the `exclude_rooms_from_sync` config
+        option.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id_to_exclude = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        room_id_to_include = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # We cheekily modify the stored config here, as we can't add it to the
+        # raw config since we don't know the room ID before we start up.
+        self.hs.get_sliding_sync_handler().rooms_to_exclude_globally.append(
+            room_id_to_exclude
+        )
+        self.hs.get_sliding_sync_handler().room_lists.rooms_to_exclude_globally.append(
+            room_id_to_exclude
+        )
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make sure response only contains room_id_to_include
+        self.assertIncludes(
+            set(response_body["rooms"].keys()),
+            {room_id_to_include},
+            exact=True,
+        )
+
+        # Test that the excluded room is not in the list ops
+        # Make sure the list is sorted in the way we expect
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id_to_include},
+            exact=True,
+        )

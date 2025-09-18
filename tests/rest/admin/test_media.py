@@ -24,7 +24,7 @@ from typing import Dict
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -35,7 +35,7 @@ from synapse.server import HomeServer
 from synapse.util import Clock
 
 from tests import unittest
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
 from tests.unittest import override_config
 
 VALID_TIMESTAMP = 1609459200000  # 2021-01-01 in milliseconds
@@ -598,23 +598,27 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
 
 class QuarantineMediaByIDTestCase(_AdminMediaTests):
+    def upload_media_and_return_media_id(self, data: bytes) -> str:
+        # Upload some media into the room
+        response = self.helper.upload_media(
+            data,
+            tok=self.admin_user_tok,
+            expect_code=200,
+        )
+        # Extract media ID from the response
+        server_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
+        return server_and_media_id.split("/")[1]
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.server_name = hs.hostname
 
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
-
-        # Upload some media into the room
-        response = self.helper.upload_media(
-            SMALL_PNG,
-            tok=self.admin_user_tok,
-            expect_code=200,
-        )
-        # Extract media ID from the response
-        server_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
-        self.media_id = server_and_media_id.split("/")[1]
-
+        self.media_id = self.upload_media_and_return_media_id(SMALL_PNG)
+        self.media_id_2 = self.upload_media_and_return_media_id(SMALL_PNG)
+        self.media_id_3 = self.upload_media_and_return_media_id(SMALL_PNG)
+        self.media_id_other = self.upload_media_and_return_media_id(SMALL_CMYK_JPEG)
         self.url = "/_synapse/admin/v1/media/%s/%s/%s"
 
     @parameterized.expand(["quarantine", "unquarantine"])
@@ -685,6 +689,52 @@ class QuarantineMediaByIDTestCase(_AdminMediaTests):
         media_info = self.get_success(self.store.get_local_media(self.media_id))
         assert media_info is not None
         self.assertFalse(media_info.quarantined_by)
+
+    def test_quarantine_media_match_hash(self) -> None:
+        """
+        Tests that quarantining removes all media with the same hash
+        """
+
+        media_info = self.get_success(self.store.get_local_media(self.media_id))
+        assert media_info is not None
+        self.assertFalse(media_info.quarantined_by)
+
+        # quarantining
+        channel = self.make_request(
+            "POST",
+            self.url % ("quarantine", self.server_name, self.media_id),
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertFalse(channel.json_body)
+
+        # Test that ALL similar media was quarantined.
+        for media in [self.media_id, self.media_id_2, self.media_id_3]:
+            media_info = self.get_success(self.store.get_local_media(media))
+            assert media_info is not None
+            self.assertTrue(media_info.quarantined_by)
+
+        # Test that other media was not.
+        media_info = self.get_success(self.store.get_local_media(self.media_id_other))
+        assert media_info is not None
+        self.assertFalse(media_info.quarantined_by)
+
+        # remove from quarantine
+        channel = self.make_request(
+            "POST",
+            self.url % ("unquarantine", self.server_name, self.media_id),
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertFalse(channel.json_body)
+
+        # Test that ALL similar media is now reset.
+        for media in [self.media_id, self.media_id_2, self.media_id_3]:
+            media_info = self.get_success(self.store.get_local_media(media))
+            assert media_info is not None
+            self.assertFalse(media_info.quarantined_by)
 
     def test_quarantine_protected_media(self) -> None:
         """

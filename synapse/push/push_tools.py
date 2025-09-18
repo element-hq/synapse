@@ -74,9 +74,13 @@ async def get_context_for_event(
 
         room_state = []
         if ev.content.get("membership") == Membership.INVITE:
-            room_state = ev.unsigned.get("invite_room_state", [])
+            invite_room_state = ev.unsigned.get("invite_room_state", [])
+            if isinstance(invite_room_state, list):
+                room_state = invite_room_state
         elif ev.content.get("membership") == Membership.KNOCK:
-            room_state = ev.unsigned.get("knock_room_state", [])
+            knock_room_state = ev.unsigned.get("knock_room_state", [])
+            if isinstance(knock_room_state, list):
+                room_state = knock_room_state
 
         # Ideally we'd reuse the logic in `calculate_room_name`, but that gets
         # complicated to handle partial events vs pulling events from the DB.

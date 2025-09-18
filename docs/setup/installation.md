@@ -157,7 +157,7 @@ sudo pip install py-bcrypt
 
 #### Alpine Linux
 
-6543 maintains [Synapse packages for Alpine Linux](https://pkgs.alpinelinux.org/packages?name=synapse&branch=edge) in the community repository. Install with:
+Jahway603 maintains [Synapse packages for Alpine Linux](https://pkgs.alpinelinux.org/packages?name=synapse&branch=edge) in the community repository. Install with:
 
 ```sh
 sudo apk add synapse
@@ -286,7 +286,7 @@ Installing prerequisites on Ubuntu or Debian:
 ```sh
 sudo apt install build-essential python3-dev libffi-dev \
                      python3-pip python3-setuptools sqlite3 \
-                     libssl-dev virtualenv libjpeg-dev libxslt1-dev libicu-dev
+                     libssl-dev virtualenv libjpeg-dev libxslt1-dev
 ```
 
 ##### ArchLinux
@@ -295,7 +295,7 @@ Installing prerequisites on ArchLinux:
 
 ```sh
 sudo pacman -S base-devel python python-pip \
-               python-setuptools python-virtualenv sqlite3 icu
+               python-setuptools python-virtualenv sqlite3
 ```
 
 ##### CentOS/Fedora
@@ -305,33 +305,21 @@ Installing prerequisites on CentOS or Fedora Linux:
 ```sh
 sudo dnf install libtiff-devel libjpeg-devel libzip-devel freetype-devel \
                  libwebp-devel libxml2-devel libxslt-devel libpq-devel \
-                 python3-virtualenv libffi-devel openssl-devel python3-devel \
-                 libicu-devel
+                 python3-virtualenv libffi-devel openssl-devel python3-devel
 sudo dnf group install "Development Tools"
 ```
 
-##### Red Hat Enterprise Linux / Rocky Linux
+##### Red Hat Enterprise Linux / Rocky Linux / Oracle Linux
 
-*Note: The term "RHEL" below refers to both Red Hat Enterprise Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
+*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
 
 It's recommended to use the latest Python versions.
 
-RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ship with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
+RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ships with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
 
 Python 3.11 and 3.12 are available for both RHEL 8 and 9.
 
 These commands should be run as root user.
-
-RHEL 8
-```bash
-# Enable PowerTools repository
-dnf config-manager --set-enabled powertools
-```
-RHEL 9
-```bash
-# Enable CodeReady Linux Builder repository
-crb enable
-```
 
 Install new version of Python. You only need one of these:
 ```bash
@@ -344,7 +332,7 @@ dnf install python3.12 python3.12-devel
 ```
 Finally, install common prerequisites
 ```bash
-dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf
+dnf install libpq5 libpq5-devel lz4 pkgconf
 dnf group install "Development Tools"
 ```
 ###### Using venv module instead of virtualenv command
@@ -376,20 +364,6 @@ xcode-select --install
 
 Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) for them.
 
-You may need to install icu, and make the icu binaries and libraries accessible.
-Please follow [the official instructions of PyICU](https://pypi.org/project/PyICU/) to do so.
-
-If you're struggling to get icu discovered, and see:
-```
-  RuntimeError:
-  Please install pkg-config on your system or set the ICU_VERSION environment
-  variable to the version of ICU you have installed.
-```
-despite it being installed and having your `PATH` updated, you can omit this dependency by
-not specifying `--extras all` to `poetry`. If using postgres, you can install Synapse via
-`poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry`.
-ICU is not a hard dependency on getting a working installation.
-
 On ARM-based Macs you may also need to install libjpeg and libpq:
 ```sh
  brew install jpeg libpq
@@ -411,8 +385,7 @@ Installing prerequisites on openSUSE:
 ```sh
 sudo zypper in -t pattern devel_basis
 sudo zypper in python-pip python-setuptools sqlite3 python-virtualenv \
-               python-devel libffi-devel libopenssl-devel libjpeg62-devel \
-               libicu-devel
+               python-devel libffi-devel libopenssl-devel libjpeg62-devel
 ```
 
 ##### OpenBSD

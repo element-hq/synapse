@@ -40,6 +40,7 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     Union,
     overload,
@@ -49,7 +50,7 @@ import attr
 from immutabledict import immutabledict
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
-from typing_extensions import Self, TypedDict
+from typing_extensions import Self
 from unpaddedbase64 import decode_base64
 from zope.interface import Interface
 
@@ -72,8 +73,10 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from synapse.appservice.api import ApplicationService
+    from synapse.events import EventBase
     from synapse.storage.databases.main import DataStore, PurgeEventsStore
     from synapse.storage.databases.main.appservice import ApplicationServiceWorkerStore
+    from synapse.storage.util.id_generators import MultiWriterIdGenerator
 
 
 logger = logging.getLogger(__name__)
@@ -352,15 +355,82 @@ class RoomAlias(DomainSpecificString):
 
 
 @attr.s(slots=True, frozen=True, repr=False)
-class RoomID(DomainSpecificString):
-    """Structure representing a room id."""
+class RoomIdWithDomain(DomainSpecificString):
+    """Structure representing a room ID with a domain suffix."""
 
     SIGIL = "!"
 
 
+# the set of urlsafe base64 characters, no padding.
+ROOM_ID_PATTERN_DOMAINLESS = re.compile(r"^[A-Za-z0-9\-_]{43}$")
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True, repr=False)
+class RoomID:
+    """Structure representing a room id without a domain.
+    There are two forms of room IDs:
+      - "!localpart:domain" used in most room versions prior to MSC4291.
+      - "!event_id_base_64" used in room versions post MSC4291.
+    This class will accept any room ID which meets either of these two criteria.
+    """
+
+    SIGIL = "!"
+    id: str
+    room_id_with_domain: Optional[RoomIdWithDomain]
+
+    @classmethod
+    def is_valid(cls: Type["RoomID"], s: str) -> bool:
+        if ":" in s:
+            return RoomIdWithDomain.is_valid(s)
+        try:
+            cls.from_string(s)
+            return True
+        except Exception:
+            return False
+
+    def get_domain(self) -> Optional[str]:
+        if not self.room_id_with_domain:
+            return None
+        return self.room_id_with_domain.domain
+
+    def to_string(self) -> str:
+        if self.room_id_with_domain:
+            return self.room_id_with_domain.to_string()
+        return self.id
+
+    __repr__ = to_string
+
+    @classmethod
+    def from_string(cls: Type["RoomID"], s: str) -> "RoomID":
+        # sigil check
+        if len(s) < 1 or s[0] != cls.SIGIL:
+            raise SynapseError(
+                400,
+                "Expected %s string to start with '%s'" % (cls.__name__, cls.SIGIL),
+                Codes.INVALID_PARAM,
+            )
+
+        room_id_with_domain: Optional[RoomIdWithDomain] = None
+        if ":" in s:
+            room_id_with_domain = RoomIdWithDomain.from_string(s)
+        else:
+            # MSC4291 room IDs must be valid urlsafe unpadded base64
+            val = s[1:]
+            if not ROOM_ID_PATTERN_DOMAINLESS.match(val):
+                raise SynapseError(
+                    400,
+                    "Expected %s string to be valid urlsafe unpadded base64 '%s'"
+                    % (cls.__name__, val),
+                    Codes.INVALID_PARAM,
+                )
+
+        return cls(id=s, room_id_with_domain=room_id_with_domain)
+
+
 @attr.s(slots=True, frozen=True, repr=False)
 class EventID(DomainSpecificString):
-    """Structure representing an event id."""
+    """Structure representing an event ID which is namespaced to a homeserver.
+    Room versions 3 and above are not supported by this grammar."""
 
     SIGIL = "$"
 
@@ -569,6 +639,25 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
             ),
         )
 
+    @classmethod
+    def from_generator(cls, generator: "MultiWriterIdGenerator") -> Self:
+        """Get the current token out of a MultiWriterIdGenerator"""
+
+        # The `min_pos` is the minimum position that we know all instances
+        # have finished persisting to, so we only care about instances whose
+        # positions are ahead of that. (Instance positions can be behind the
+        # min position as there are times we can work out that the minimum
+        # position is ahead of the naive minimum across all current
+        # positions. See MultiWriterIdGenerator for details)
+        min_pos = generator.get_current_token()
+        positions = {
+            instance: position
+            for instance, position in generator.get_positions().items()
+            if position > min_pos
+        }
+
+        return cls(stream=min_pos, instance_map=immutabledict(positions))
+
 
 @attr.s(frozen=True, slots=True, order=False)
 class RoomStreamToken(AbstractMultiWriterStreamToken):
@@ -664,6 +753,11 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
     @classmethod
     async def parse(cls, store: "PurgeEventsStore", string: str) -> "RoomStreamToken":
+        # Check that it looks like a Synapse token first. We do this so that
+        # we don't log at the exception-level for obviously incorrect tokens.
+        if not string or string[0] not in ("s", "t", "m"):
+            raise SynapseError(400, f"Invalid room stream token {string:!r}")
+
         try:
             if string[0] == "s":
                 return cls(topological=None, stream=int(string[1:]))
@@ -883,8 +977,7 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
     def __str__(self) -> str:
         instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
         return (
-            f"MultiWriterStreamToken(stream: {self.stream}, "
-            f"instances: {{{instances}}})"
+            f"MultiWriterStreamToken(stream: {self.stream}, instances: {{{instances}}})"
         )
 
 
@@ -903,6 +996,7 @@ class StreamKeyType(Enum):
     TO_DEVICE = "to_device_key"
     DEVICE_LIST = "device_list_key"
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
+    THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -910,7 +1004,7 @@ class StreamToken:
     """A collection of keys joined together by underscores in the following
     order and which represent the position in their respective streams.
 
-    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379`
+    ex. `s2633508_17_338_6732159_1082514_541479_274711_265584_1_379_4242`
         1. `room_key`: `s2633508` which is a `RoomStreamToken`
            - `RoomStreamToken`'s can also look like `t426-2633508` or `m56~2.58~3.59`
            - See the docstring for `RoomStreamToken` for more details.
@@ -923,6 +1017,7 @@ class StreamToken:
         8. `device_list_key`: `265584`
         9. `groups_key`: `1` (note that this key is now unused)
         10. `un_partial_stated_rooms_key`: `379`
+        11. `thread_subscriptions_key`: 4242
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -975,10 +1070,13 @@ class StreamToken:
     account_data_key: int
     push_rules_key: int
     to_device_key: int
-    device_list_key: int
+    device_list_key: MultiWriterStreamToken = attr.ib(
+        validator=attr.validators.instance_of(MultiWriterStreamToken)
+    )
     # Note that the groups key is no longer used and may have bogus values.
     groups_key: int
     un_partial_stated_rooms_key: int
+    thread_subscriptions_key: int
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1006,6 +1104,7 @@ class StreamToken:
                 device_list_key,
                 groups_key,
                 un_partial_stated_rooms_key,
+                thread_subscriptions_key,
             ) = keys
 
             return cls(
@@ -1016,9 +1115,12 @@ class StreamToken:
                 account_data_key=int(account_data_key),
                 push_rules_key=int(push_rules_key),
                 to_device_key=int(to_device_key),
-                device_list_key=int(device_list_key),
+                device_list_key=await MultiWriterStreamToken.parse(
+                    store, device_list_key
+                ),
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
+                thread_subscriptions_key=int(thread_subscriptions_key),
             )
         except CancelledError:
             raise
@@ -1035,12 +1137,13 @@ class StreamToken:
                 str(self.account_data_key),
                 str(self.push_rules_key),
                 str(self.to_device_key),
-                str(self.device_list_key),
+                await self.device_list_key.to_string(store),
                 # Note that the groups key is no longer used, but it is still
                 # serialized so that there will not be confusion in the future
                 # if additional tokens are added.
                 str(self.groups_key),
                 str(self.un_partial_stated_rooms_key),
+                str(self.thread_subscriptions_key),
             ]
         )
 
@@ -1064,6 +1167,12 @@ class StreamToken:
                 StreamKeyType.RECEIPT, self.receipt_key.copy_and_advance(new_value)
             )
             return new_token
+        elif key == StreamKeyType.DEVICE_LIST:
+            new_token = self.copy_and_replace(
+                StreamKeyType.DEVICE_LIST,
+                self.device_list_key.copy_and_advance(new_value),
+            )
+            return new_token
 
         new_token = self.copy_and_replace(key, new_value)
         new_id = new_token.get_field(key)
@@ -1082,7 +1191,11 @@ class StreamToken:
 
     @overload
     def get_field(
-        self, key: Literal[StreamKeyType.RECEIPT]
+        self,
+        key: Literal[
+            StreamKeyType.RECEIPT,
+            StreamKeyType.DEVICE_LIST,
+        ],
     ) -> MultiWriterStreamToken: ...
 
     @overload
@@ -1090,12 +1203,12 @@ class StreamToken:
         self,
         key: Literal[
             StreamKeyType.ACCOUNT_DATA,
-            StreamKeyType.DEVICE_LIST,
             StreamKeyType.PRESENCE,
             StreamKeyType.PUSH_RULES,
             StreamKeyType.TO_DEVICE,
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            StreamKeyType.THREAD_SUBSCRIPTIONS,
         ],
     ) -> int: ...
 
@@ -1151,12 +1264,23 @@ class StreamToken:
             f"typing: {self.typing_key}, receipt: {self.receipt_key}, "
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
-            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key})"
+            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
+            f"thread_subscriptions: {self.thread_subscriptions_key})"
         )
 
 
 StreamToken.START = StreamToken(
-    RoomStreamToken(stream=0), 0, 0, MultiWriterStreamToken(stream=0), 0, 0, 0, 0, 0, 0
+    room_key=RoomStreamToken(stream=0),
+    presence_key=0,
+    typing_key=0,
+    receipt_key=MultiWriterStreamToken(stream=0),
+    account_data_key=0,
+    push_rules_key=0,
+    to_device_key=0,
+    device_list_key=MultiWriterStreamToken(stream=0),
+    groups_key=0,
+    un_partial_stated_rooms_key=0,
+    thread_subscriptions_key=0,
 )
 
 
@@ -1201,6 +1325,27 @@ class SlidingSyncStreamToken:
         """Serializes the token to a string"""
         stream_token_str = await self.stream_token.to_string(store)
         return f"{self.connection_position}/{stream_token_str}"
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class ThreadSubscriptionsToken:
+    """
+    Token for a position in the thread subscriptions stream.
+
+    Format: `ts<stream_id>`
+    """
+
+    stream_id: int
+
+    @staticmethod
+    def from_string(s: str) -> "ThreadSubscriptionsToken":
+        if not s.startswith("ts"):
+            raise ValueError("thread subscription token must start with `ts`")
+
+        return ThreadSubscriptionsToken(stream_id=int(s[2:]))
+
+    def to_string(self) -> str:
+        return f"ts{self.stream_id}"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1416,3 +1561,31 @@ class ScheduledTask:
     result: Optional[JsonMapping]
     # Optional error that should be assigned a value when the status is FAILED
     error: Optional[str]
+
+
+@attr.s(auto_attribs=True, frozen=True, slots=True)
+class EventOrderings:
+    stream: int
+    """
+    The stream_ordering of the event.
+    Negative numbers mean the event was backfilled.
+    """
+
+    topological: int
+    """
+    The topological_ordering of the event.
+    Currently this is equivalent to the `depth` attributes of
+    the PDU.
+    """
+
+    @staticmethod
+    def from_event(event: "EventBase") -> "EventOrderings":
+        """
+        Get the orderings from an event.
+
+        Preconditions:
+        - the event must have been persisted (otherwise it won't have a stream ordering)
+        """
+        stream = event.internal_metadata.stream_ordering
+        assert stream is not None
+        return EventOrderings(stream, event.depth)

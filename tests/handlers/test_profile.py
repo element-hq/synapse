@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.types
 from synapse.api.errors import AuthError, SynapseError
@@ -369,6 +369,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                 time_now_ms=self.clock.time_msec(),
                 upload_name=None,
                 filesystem_id="xyz",
+                sha256="abcdefg12345",
             )
         )
 

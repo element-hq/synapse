@@ -98,9 +98,9 @@ class StateDeltasStore(SQLBaseStore):
         prev_stream_id = int(prev_stream_id)
 
         # check we're not going backwards
-        assert (
-            prev_stream_id <= max_stream_id
-        ), f"New stream id {max_stream_id} is smaller than prev stream id {prev_stream_id}"
+        assert prev_stream_id <= max_stream_id, (
+            f"New stream id {max_stream_id} is smaller than prev stream id {prev_stream_id}"
+        )
 
         if not self._curr_state_delta_stream_cache.has_any_entity_changed(
             prev_stream_id
@@ -243,6 +243,13 @@ class StateDeltasStore(SQLBaseStore):
 
         (> `from_token` and <= `to_token`)
         """
+        # We can bail early if the `from_token` is after the `to_token`
+        if (
+            to_token is not None
+            and from_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            return []
 
         if (
             from_token is not None

@@ -51,7 +51,7 @@ from twisted.internet import defer
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.logging.opentracing import (
@@ -61,6 +61,7 @@ from synapse.logging.opentracing import (
     start_active_span_follows_from,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
@@ -82,25 +83,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # The number of times we are recalculating the current state
-state_delta_counter = Counter("synapse_storage_events_state_delta", "")
+state_delta_counter = Counter(
+    "synapse_storage_events_state_delta", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 # The number of times we are recalculating state when there is only a
 # single forward extremity
 state_delta_single_event_counter = Counter(
-    "synapse_storage_events_state_delta_single_event", ""
+    "synapse_storage_events_state_delta_single_event",
+    "",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # The number of times we are reculating state when we could have resonably
 # calculated the delta when we calculated the state for an event we were
 # persisting.
 state_delta_reuse_delta_counter = Counter(
-    "synapse_storage_events_state_delta_reuse_delta", ""
+    "synapse_storage_events_state_delta_reuse_delta", "", labelnames=[SERVER_NAME_LABEL]
 )
 
 # The number of forward extremities for each new event.
 forward_extremities_counter = Histogram(
     "synapse_storage_events_forward_extremities_persisted",
     "Number of forward extremities for each new event",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
@@ -109,22 +115,26 @@ forward_extremities_counter = Histogram(
 stale_forward_extremities_counter = Histogram(
     "synapse_storage_events_stale_forward_extremities_persisted",
     "Number of unchanged forward extremities for each new event",
+    labelnames=[SERVER_NAME_LABEL],
     buckets=(0, 1, 2, 3, 5, 7, 10, 15, 20, 50, 100, 200, 500, "+Inf"),
 )
 
 state_resolutions_during_persistence = Counter(
     "synapse_storage_events_state_resolutions_during_persistence",
     "Number of times we had to do state res to calculate new current state",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 potential_times_prune_extremities = Counter(
     "synapse_storage_events_potential_times_prune_extremities",
     "Number of times we might be able to prune extremities",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 times_pruned_extremities = Counter(
     "synapse_storage_events_times_pruned_extremities",
     "Number of times we were actually be able to prune extremities",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -134,7 +144,7 @@ class _PersistEventsTask:
 
     name: ClassVar[str] = "persist_event_batch"  # used for opentracing
 
-    events_and_contexts: List[Tuple[EventBase, EventContext]]
+    events_and_contexts: List[EventPersistencePair]
     backfilled: bool
 
     def try_merge(self, task: "_EventPersistQueueTask") -> bool:
@@ -185,6 +195,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
 
     def __init__(
         self,
+        server_name: str,
         per_item_callback: Callable[
             [str, _EventPersistQueueTask],
             Awaitable[_PersistResult],
@@ -195,6 +206,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         The per_item_callback will be called for each item added via add_to_queue,
         and its result will be returned via the Deferreds returned from add_to_queue.
         """
+        self.server_name = server_name
         self._event_persist_queues: Dict[str, Deque[_EventPersistQueueItem]] = {}
         self._currently_persisting_rooms: Set[str] = set()
         self._per_item_callback = per_item_callback
@@ -299,7 +311,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
                 self._currently_persisting_rooms.discard(room_id)
 
         # set handle_queue_loop off in the background
-        run_as_background_process("persist_events", handle_queue_loop)
+        run_as_background_process("persist_events", self.server_name, handle_queue_loop)
 
     def _get_drainining_queue(
         self, room_id: str
@@ -332,15 +344,17 @@ class EventsPersistenceStorageController:
         # store for now.
         self.main_store = stores.main
         self.state_store = stores.state
+        self._state_deletion_store = stores.state_deletion
 
         assert stores.persist_events
         self.persist_events_store = stores.persist_events
 
+        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
         self.is_mine_id = hs.is_mine_id
         self._event_persist_queue = _EventPeristenceQueue(
-            self._process_event_persist_queue_task
+            self.server_name, self._process_event_persist_queue_task
         )
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._state_controller = state_controller
@@ -377,7 +391,7 @@ class EventsPersistenceStorageController:
     @trace
     async def persist_events(
         self,
-        events_and_contexts: Iterable[Tuple[EventBase, EventContext]],
+        events_and_contexts: Iterable[EventPersistencePair],
         backfilled: bool = False,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
         """
@@ -400,7 +414,7 @@ class EventsPersistenceStorageController:
                 a room that has been un-partial stated.
         """
         event_ids: List[str] = []
-        partitioned: Dict[str, List[Tuple[EventBase, EventContext]]] = {}
+        partitioned: Dict[str, List[EventPersistencePair]] = {}
         for event, ctx in events_and_contexts:
             partitioned.setdefault(event.room_id, []).append((event, ctx))
             event_ids.append(event.event_id)
@@ -416,7 +430,7 @@ class EventsPersistenceStorageController:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "backfilled", str(backfilled))
 
         async def enqueue(
-            item: Tuple[str, List[Tuple[EventBase, EventContext]]],
+            item: Tuple[str, List[EventPersistencePair]],
         ) -> Dict[str, str]:
             room_id, evs_ctxs = item
             return await self._event_persist_queue.add_to_queue(
@@ -549,7 +563,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_maps_by_state_group,
             event_map=None,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_deletion_store
+            ),
         )
 
         return await res.get_state(self._state_controller, StateFilter.all())
@@ -613,7 +629,11 @@ class EventsPersistenceStorageController:
             state_delta_for_room = None
 
             if not backfilled:
-                with Measure(self._clock, "_calculate_state_and_extrem"):
+                with Measure(
+                    self._clock,
+                    name="_calculate_state_and_extrem",
+                    server_name=self.server_name,
+                ):
                     # Work out the new "current state" for the room.
                     # We do this by working out what the new extremities are and then
                     # calculating the state from that.
@@ -624,7 +644,11 @@ class EventsPersistenceStorageController:
                         room_id, chunk
                     )
 
-            with Measure(self._clock, "calculate_chain_cover_index_for_events"):
+            with Measure(
+                self._clock,
+                name="calculate_chain_cover_index_for_events",
+                server_name=self.server_name,
+            ):
                 # We now calculate chain ID/sequence numbers for any state events we're
                 # persisting. We ignore out of band memberships as we're not in the room
                 # and won't have their auth chain (we'll fix it up later if we join the
@@ -635,20 +659,25 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
-            await self.persist_events_store._persist_events_and_state_updates(
-                room_id,
-                chunk,
-                state_delta_for_room=state_delta_for_room,
-                new_forward_extremities=new_forward_extremities,
-                use_negative_stream_ordering=backfilled,
-                inhibit_local_membership_updates=backfilled,
-                new_event_links=new_event_links,
-            )
+            # Stop the state groups from being deleted while we're persisting
+            # them.
+            async with self._state_deletion_store.persisting_state_group_references(
+                events_and_contexts
+            ):
+                await self.persist_events_store._persist_events_and_state_updates(
+                    room_id,
+                    chunk,
+                    state_delta_for_room=state_delta_for_room,
+                    new_forward_extremities=new_forward_extremities,
+                    use_negative_stream_ordering=backfilled,
+                    inhibit_local_membership_updates=backfilled,
+                    new_event_links=new_event_links,
+                )
 
         return replaced_events
 
     async def _calculate_new_forward_extremities_and_state_delta(
-        self, room_id: str, ev_ctx_rm: List[Tuple[EventBase, EventContext]]
+        self, room_id: str, ev_ctx_rm: List[EventPersistencePair]
     ) -> Tuple[Optional[Set[str]], Optional[DeltaState]]:
         """Calculates the new forward extremities and state delta for a room
         given events to persist.
@@ -690,9 +719,11 @@ class EventsPersistenceStorageController:
             if all_single_prev_not_state:
                 return (new_forward_extremities, None)
 
-        state_delta_counter.inc()
+        state_delta_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
         if len(new_latest_event_ids) == 1:
-            state_delta_single_event_counter.inc()
+            state_delta_single_event_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
 
             # This is a fairly handwavey check to see if we could
             # have guessed what the delta would have been when
@@ -707,11 +738,17 @@ class EventsPersistenceStorageController:
             for ev, _ in ev_ctx_rm:
                 prev_event_ids = set(ev.prev_event_ids())
                 if latest_event_ids == prev_event_ids:
-                    state_delta_reuse_delta_counter.inc()
+                    state_delta_reuse_delta_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc()
                     break
 
         logger.debug("Calculating state delta for room %s", room_id)
-        with Measure(self._clock, "persist_events.get_new_state_after_events"):
+        with Measure(
+            self._clock,
+            name="persist_events.get_new_state_after_events",
+            server_name=self.server_name,
+        ):
             res = await self._get_new_state_after_events(
                 room_id,
                 ev_ctx_rm,
@@ -738,7 +775,11 @@ class EventsPersistenceStorageController:
             # removed keys entirely.
             delta = DeltaState([], delta_ids)
         elif current_state is not None:
-            with Measure(self._clock, "persist_events.calculate_state_delta"):
+            with Measure(
+                self._clock,
+                name="persist_events.calculate_state_delta",
+                server_name=self.server_name,
+            ):
                 delta = await self._calculate_state_delta(room_id, current_state)
 
         if delta:
@@ -761,7 +802,7 @@ class EventsPersistenceStorageController:
     async def _calculate_new_extremities(
         self,
         room_id: str,
-        event_contexts: List[Tuple[EventBase, EventContext]],
+        event_contexts: List[EventPersistencePair],
         latest_event_ids: AbstractSet[str],
     ) -> Set[str]:
         """Calculates the new forward extremities for a room given events to
@@ -808,16 +849,20 @@ class EventsPersistenceStorageController:
         # We only update metrics for events that change forward extremities
         # (e.g. we ignore backfill/outliers/etc)
         if result != latest_event_ids:
-            forward_extremities_counter.observe(len(result))
+            forward_extremities_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(len(result))
             stale = latest_event_ids & result
-            stale_forward_extremities_counter.observe(len(stale))
+            stale_forward_extremities_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(len(stale))
 
         return result
 
     async def _get_new_state_after_events(
         self,
         room_id: str,
-        events_context: List[Tuple[EventBase, EventContext]],
+        events_context: List[EventPersistencePair],
         old_latest_event_ids: AbstractSet[str],
         new_latest_event_ids: Set[str],
     ) -> Tuple[Optional[StateMap[str]], Optional[StateMap[str]], Set[str]]:
@@ -862,8 +907,7 @@ class EventsPersistenceStorageController:
                 # This should only happen for outlier events.
                 if not ev.internal_metadata.is_outlier():
                     raise Exception(
-                        "Context for new event %s has no state "
-                        "group" % (ev.event_id,)
+                        "Context for new event %s has no state group" % (ev.event_id,)
                     )
                 continue
             if ctx.state_group_deltas:
@@ -965,10 +1009,14 @@ class EventsPersistenceStorageController:
             room_version,
             state_groups,
             events_map,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_deletion_store
+            ),
         )
 
-        state_resolutions_during_persistence.inc()
+        state_resolutions_during_persistence.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # If the returned state matches the state group of one of the new
         # forward extremities then we check if we are able to prune some state
@@ -991,12 +1039,14 @@ class EventsPersistenceStorageController:
         new_latest_event_ids: Set[str],
         resolved_state_group: int,
         event_id_to_state_group: Dict[str, int],
-        events_context: List[Tuple[EventBase, EventContext]],
+        events_context: List[EventPersistencePair],
     ) -> Set[str]:
         """See if we can prune any of the extremities after calculating the
         resolved state.
         """
-        potential_times_prune_extremities.inc()
+        potential_times_prune_extremities.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         # We keep all the extremities that have the same state group, and
         # see if we can drop the others.
@@ -1094,7 +1144,7 @@ class EventsPersistenceStorageController:
 
             return new_latest_event_ids
 
-        times_pruned_extremities.inc()
+        times_pruned_extremities.labels(**{SERVER_NAME_LABEL: self.server_name}).inc()
 
         logger.info(
             "Pruning forward extremities in room %s: from %s -> %s",
@@ -1126,7 +1176,7 @@ class EventsPersistenceStorageController:
     async def _is_server_still_joined(
         self,
         room_id: str,
-        ev_ctx_rm: List[Tuple[EventBase, EventContext]],
+        ev_ctx_rm: List[EventPersistencePair],
         delta: DeltaState,
     ) -> bool:
         """Check if the server will still be joined after the given events have

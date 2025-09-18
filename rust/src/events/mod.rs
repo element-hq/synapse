@@ -30,7 +30,7 @@ mod internal_metadata;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child_module = PyModule::new_bound(py, "events")?;
+    let child_module = PyModule::new(py, "events")?;
     child_module.add_class::<internal_metadata::EventInternalMetadata>()?;
     child_module.add_function(wrap_pyfunction!(filter::event_visible_to_server_py, m)?)?;
 
@@ -38,7 +38,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import events` work.
-    py.import_bound("sys")?
+    py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.events", child_module)?;
 

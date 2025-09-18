@@ -22,14 +22,26 @@ import logging
 from unittest.mock import AsyncMock, Mock
 
 from netaddr import IPSet
+from signedjson.key import (
+    encode_verify_key_base64,
+    generate_signing_key,
+    get_verify_key,
+)
+
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
-from synapse.events.builder import EventBuilderFactory
+from synapse.api.room_versions import RoomVersion
+from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.events import EventBase, make_event_from_dict
 from synapse.handlers.typing import TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.rest.admin import register_servlets_for_client_rest_resource
 from synapse.rest.client import login, room
-from synapse.types import UserID, create_requester
+from synapse.server import HomeServer
+from synapse.storage.keys import FetchKeyResult
+from synapse.types import JsonDict, UserID, create_requester
+from synapse.util import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import get_clock
@@ -56,12 +68,17 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
 
         reactor, _ = get_clock()
         self.matrix_federation_agent = MatrixFederationAgent(
-            reactor,
+            server_name="OUR_STUB_HOMESERVER_NAME",
+            reactor=reactor,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            proxy_config=None,
         )
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.storage_controllers = hs.get_storage_controllers()
 
     def test_send_event_single_sender(self) -> None:
         """Test that using a single federation sender worker correctly sends a
@@ -243,35 +260,92 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
         self.assertTrue(sent_on_1)
         self.assertTrue(sent_on_2)
 
+    def create_fake_event_from_remote_server(
+        self, remote_server_name: str, event_dict: JsonDict, room_version: RoomVersion
+    ) -> EventBase:
+        """
+        This is similar to what `FederatingHomeserverTestCase` is doing but we don't
+        need all of the extra baggage and we want to be able to create an event from
+        many remote servers.
+        """
+
+        # poke the other server's signing key into the key store, so that we don't
+        # make requests for it
+        other_server_signature_key = generate_signing_key("test")
+        verify_key = get_verify_key(other_server_signature_key)
+        verify_key_id = "%s:%s" % (verify_key.alg, verify_key.version)
+
+        self.get_success(
+            self.hs.get_datastores().main.store_server_keys_response(
+                remote_server_name,
+                from_server=remote_server_name,
+                ts_added_ms=self.clock.time_msec(),
+                verify_keys={
+                    verify_key_id: FetchKeyResult(
+                        verify_key=verify_key,
+                        valid_until_ts=self.clock.time_msec() + 10000,
+                    ),
+                },
+                response_json={
+                    "verify_keys": {
+                        verify_key_id: {"key": encode_verify_key_base64(verify_key)}
+                    }
+                },
+            )
+        )
+
+        add_hashes_and_signatures(
+            room_version=room_version,
+            event_dict=event_dict,
+            signature_name=remote_server_name,
+            signing_key=other_server_signature_key,
+        )
+        event = make_event_from_dict(
+            event_dict,
+            room_version=room_version,
+        )
+
+        return event
+
     def create_room_with_remote_server(
         self, user: str, token: str, remote_server: str = "other_server"
     ) -> str:
-        room = self.helper.create_room_as(user, tok=token)
+        room_id = self.helper.create_room_as(user, tok=token)
         store = self.hs.get_datastores().main
         federation = self.hs.get_federation_event_handler()
 
-        prev_event_ids = self.get_success(store.get_latest_event_ids_in_room(room))
-        room_version = self.get_success(store.get_room_version(room))
+        room_version = self.get_success(store.get_room_version(room_id))
 
-        factory = EventBuilderFactory(self.hs)
-        factory.hostname = remote_server
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        # Figure out what the forward extremities in the room are (the most recent
+        # events that aren't tied into the DAG)
+        prev_event_ids = self.get_success(store.get_latest_event_ids_in_room(room_id))
 
         user_id = UserID("user", remote_server).to_string()
 
-        event_dict = {
-            "type": EventTypes.Member,
-            "state_key": user_id,
-            "content": {"membership": Membership.JOIN},
-            "sender": user_id,
-            "room_id": room,
-        }
-
-        builder = factory.for_room_version(room_version, event_dict)
-        join_event = self.get_success(
-            builder.build(prev_event_ids=list(prev_event_ids), auth_event_ids=None)
+        join_event = self.create_fake_event_from_remote_server(
+            remote_server_name=remote_server,
+            event_dict={
+                "room_id": room_id,
+                "sender": user_id,
+                "type": EventTypes.Member,
+                "state_key": user_id,
+                "depth": 1000,
+                "origin_server_ts": 1,
+                "content": {"membership": Membership.JOIN},
+                "auth_events": [
+                    state_map[(EventTypes.Create, "")].event_id,
+                    state_map[(EventTypes.JoinRules, "")].event_id,
+                ],
+                "prev_events": list(prev_event_ids),
+            },
+            room_version=room_version,
         )
 
         self.get_success(federation.on_send_membership_event(remote_server, join_event))
         self.replicate()
 
-        return room
+        return room_id

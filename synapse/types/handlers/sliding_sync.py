@@ -50,6 +50,7 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StrCollection,
     StreamToken,
+    ThreadSubscriptionsToken,
     UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
@@ -357,11 +358,50 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_typing_map)
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadSubscriptionsExtension:
+            """The Thread Subscriptions extension (MSC4308)
+
+            Attributes:
+                subscribed: map (room_id -> thread_root_id -> info) of new or changed subscriptions
+                unsubscribed: map (room_id -> thread_root_id -> info) of new unsubscriptions
+                prev_batch: if present, there is a gap and the client can use this token to backpaginate
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadSubscription:
+                # always present when `subscribed`
+                automatic: Optional[bool]
+
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUnsubscription:
+                # the same as our stream_id; useful for clients to resolve
+                # race conditions locally
+                bump_stamp: int
+
+            # room_id -> event_id (of thread root) -> the subscription change
+            subscribed: Optional[Mapping[str, Mapping[str, ThreadSubscription]]]
+            # room_id -> event_id (of thread root) -> the unsubscription
+            unsubscribed: Optional[Mapping[str, Mapping[str, ThreadUnsubscription]]]
+            prev_batch: Optional[ThreadSubscriptionsToken]
+
+            def __bool__(self) -> bool:
+                return (
+                    bool(self.subscribed)
+                    or bool(self.unsubscribed)
+                    or bool(self.prev_batch)
+                )
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
+        thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -370,6 +410,7 @@ class SlidingSyncResult:
                 or self.account_data
                 or self.receipts
                 or self.typing
+                or self.thread_subscriptions
             )
 
     next_pos: SlidingSyncStreamToken
@@ -407,8 +448,8 @@ class StateValues:
     # Include all state events of the given type
     WILDCARD: Final = "*"
     # Lazy-load room membership events (include room membership events for any event
-    # `sender` in the timeline). We only give special meaning to this value when it's a
-    # `state_key`.
+    # `sender` or membership change target in the timeline). We only give special
+    # meaning to this value when it's a `state_key`.
     LAZY: Final = "$LAZY"
     # Subsitute with the requester's user ID. Typically used by clients to get
     # the user's membership.
@@ -641,9 +682,10 @@ class RoomSyncConfig:
             if user_id == StateValues.ME:
                 continue
             # We're lazy-loading membership so we can just return the state we have.
-            # Lazy-loading means we include membership for any event `sender` in the
-            # timeline but since we had to auth those timeline events, we will have the
-            # membership state for them (including from remote senders).
+            # Lazy-loading means we include membership for any event `sender` or
+            # membership change target in the timeline but since we had to auth those
+            # timeline events, we will have the membership state for them (including
+            # from remote senders).
             elif user_id == StateValues.LAZY:
                 continue
             elif user_id == StateValues.WILDCARD:

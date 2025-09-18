@@ -28,6 +28,7 @@ from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -36,8 +37,6 @@ from typing import (
     TypeVar,
     overload,
 )
-
-from typing_extensions import Literal
 
 from twisted.web.server import Request
 
@@ -129,6 +128,16 @@ def parse_integer(
     """
     args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
     return parse_integer_from_args(args, name, default, required, negative)
+
+
+@overload
+def parse_integer_from_args(
+    args: Mapping[bytes, Sequence[bytes]],
+    name: str,
+    default: int,
+    required: Literal[False] = False,
+    negative: bool = False,
+) -> int: ...
 
 
 @overload
@@ -583,9 +592,9 @@ def parse_enum(
             is not one of those allowed values.
     """
     # Assert the enum values are strings.
-    assert all(
-        isinstance(e.value, str) for e in E
-    ), "parse_enum only works with string values"
+    assert all(isinstance(e.value, str) for e in E), (
+        "parse_enum only works with string values"
+    )
     str_value = parse_string(
         request,
         name,

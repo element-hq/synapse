@@ -26,13 +26,12 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     Type,
     Union,
 )
-
-from typing_extensions import Protocol
 
 """
 Some very basic protocol definitions for the DB-API2 classes specified in PEP-249

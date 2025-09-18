@@ -22,7 +22,7 @@ from typing import Any, List, Optional
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -324,7 +324,7 @@ class EventsStreamTestCase(BaseStreamTestCase):
         pls = self.helper.get_state(
             self.room_id, EventTypes.PowerLevels, tok=self.user_tok
         )
-        pls["users"].update({u: 50 for u in user_ids})
+        pls["users"].update(dict.fromkeys(user_ids, 50))
         self.helper.send_state(
             self.room_id,
             EventTypes.PowerLevels,

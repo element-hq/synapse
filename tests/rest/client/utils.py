@@ -29,23 +29,25 @@ from http import HTTPStatus
 from typing import (
     Any,
     AnyStr,
+    Callable,
     Dict,
     Iterable,
+    Literal,
     Mapping,
     MutableMapping,
     Optional,
+    Sequence,
     Tuple,
     overload,
 )
 from urllib.parse import urlencode
 
 import attr
-from typing_extensions import Literal
 
-from twisted.test.proto_helpers import MemoryReactorClock
+from twisted.internet.testing import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import Membership, ReceiptTypes
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -185,7 +187,7 @@ class RestHelper:
     def join(
         self,
         room: str,
-        user: Optional[str] = None,
+        user: str,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
         appservice_user_id: Optional[str] = None,
@@ -394,6 +396,32 @@ class RestHelper:
             custom_headers=custom_headers,
         )
 
+    def send_messages(
+        self,
+        room_id: str,
+        num_events: int,
+        content_fn: Callable[[int], JsonDict] = lambda idx: {
+            "msgtype": "m.text",
+            "body": f"Test event {idx}",
+        },
+        tok: Optional[str] = None,
+    ) -> Sequence[str]:
+        """
+        Helper to send a handful of sequential events and return their event IDs as a sequence.
+        """
+        event_ids = []
+
+        for event_index in range(num_events):
+            response = self.send_event(
+                room_id,
+                EventTypes.Message,
+                content_fn(event_index),
+                tok=tok,
+            )
+            event_ids.append(response["event_id"])
+
+        return event_ids
+
     def send_event(
         self,
         room_id: str,
@@ -548,7 +576,7 @@ class RestHelper:
         room_id: str,
         event_type: str,
         body: Dict[str, Any],
-        tok: Optional[str],
+        tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
     ) -> JsonDict:
@@ -716,9 +744,9 @@ class RestHelper:
             "/login",
             content={"type": "m.login.token", "token": login_token},
         )
-        assert (
-            channel.code == expected_status
-        ), f"unexpected status in response: {channel.code}"
+        assert channel.code == expected_status, (
+            f"unexpected status in response: {channel.code}"
+        )
         return channel.json_body
 
     def auth_via_oidc(
@@ -889,7 +917,7 @@ class RestHelper:
             "GET",
             uri,
         )
-        assert channel.code == 302
+        assert channel.code == 302, f"Expected 302 for {uri}, got {channel.code}"
 
         # hit the redirect url again with the right Host header, which should now issue
         # a cookie and redirect to the SSO provider.
@@ -901,17 +929,18 @@ class RestHelper:
 
         location = get_location(channel)
         parts = urllib.parse.urlsplit(location)
+        next_uri = urllib.parse.urlunsplit(("", "") + parts[2:])
         channel = make_request(
             self.reactor,
             self.site,
             "GET",
-            urllib.parse.urlunsplit(("", "") + parts[2:]),
+            next_uri,
             custom_headers=[
                 ("Host", parts[1]),
             ],
         )
 
-        assert channel.code == 302
+        assert channel.code == 302, f"Expected 302 for {next_uri}, got {channel.code}"
         channel.extract_cookies(cookies)
         return get_location(channel)
 

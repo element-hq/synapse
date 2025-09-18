@@ -33,6 +33,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# FIXME(2025-07-22): Remove this on the next release, this may only be used
+# during rollout to Synapse 1.134 and can be removed after that release.
 class ReplicationRegisterServlet(ReplicationEndpoint):
     """Register a new user"""
 

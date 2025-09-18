@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, patch
 
 from immutabledict import immutabledict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     Direction,
@@ -1207,12 +1207,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         )
         _, join_rule_event_pos, _ = self.get_success(
             self.persistence.persist_event(join_rule_event, join_rule_context)
-        )
-
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
         )
 
         after_reset_token = self.event_sources.get_current_token()

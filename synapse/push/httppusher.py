@@ -31,6 +31,7 @@ from twisted.internet.interfaces import IDelayedCall
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
@@ -46,21 +47,25 @@ logger = logging.getLogger(__name__)
 http_push_processed_counter = Counter(
     "synapse_http_httppusher_http_pushes_processed",
     "Number of push notifications successfully sent",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 http_push_failed_counter = Counter(
     "synapse_http_httppusher_http_pushes_failed",
     "Number of push notifications which failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 http_badges_processed_counter = Counter(
     "synapse_http_httppusher_badge_updates_processed",
     "Number of badge updates successfully sent",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 http_badges_failed_counter = Counter(
     "synapse_http_httppusher_badge_updates_failed",
     "Number of badge updates which failed",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 
@@ -106,6 +111,7 @@ class HttpPusher(Pusher):
 
     def __init__(self, hs: "HomeServer", pusher_config: PusherConfig):
         super().__init__(hs, pusher_config)
+        self.server_name = hs.hostname
         self._storage_controllers = self.hs.get_storage_controllers()
         self.app_display_name = pusher_config.app_display_name
         self.device_display_name = pusher_config.device_display_name
@@ -126,6 +132,11 @@ class HttpPusher(Pusher):
         self.data = pusher_config.data
         if self.data is None:
             raise PusherConfigException("'data' key can not be null for HTTP pusher")
+
+        # Check if badge counts should be disabled for this push gateway
+        self.disable_badge_count = self.hs.config.experimental.msc4076_enabled and bool(
+            self.data.get("org.matrix.msc4076.disable_badge_count", False)
+        )
 
         self.name = "%s/%s/%s" % (
             pusher_config.user_name,
@@ -171,7 +182,9 @@ class HttpPusher(Pusher):
 
         # We could check the receipts are actually m.read receipts here,
         # but currently that's the only type of receipt anyway...
-        run_as_background_process("http_pusher.on_new_receipts", self._update_badge)
+        run_as_background_process(
+            "http_pusher.on_new_receipts", self.server_name, self._update_badge
+        )
 
     async def _update_badge(self) -> None:
         # XXX as per https://github.com/matrix-org/matrix-doc/issues/2627, this seems
@@ -200,7 +213,13 @@ class HttpPusher(Pusher):
         if self._is_processing:
             return
 
-        run_as_background_process("httppush.process", self._process)
+        # Check if we are trying, but failing, to contact the pusher. If so, we
+        # don't try and start processing immediately and instead wait for the
+        # retry loop to try again later (which is controlled by the timer).
+        if self.failing_since and self.timed_call and self.timed_call.active():
+            return
+
+        run_as_background_process("httppush.process", self.server_name, self._process)
 
     async def _process(self) -> None:
         # we should never get here if we are already processing
@@ -254,7 +273,9 @@ class HttpPusher(Pusher):
                 processed = await self._process_one(push_action)
 
             if processed:
-                http_push_processed_counter.inc()
+                http_push_processed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
                 self.backoff_delay = HttpPusher.INITIAL_BACKOFF_SEC
                 self.last_stream_ordering = push_action.stream_ordering
                 pusher_still_exists = (
@@ -278,7 +299,9 @@ class HttpPusher(Pusher):
                         self.app_id, self.pushkey, self.user_id, self.failing_since
                     )
             else:
-                http_push_failed_counter.inc()
+                http_push_failed_counter.labels(
+                    **{SERVER_NAME_LABEL: self.server_name}
+                ).inc()
                 if not self.failing_since:
                     self.failing_since = self.clock.time_msec()
                     await self.store.update_pusher_failing_since(
@@ -461,9 +484,10 @@ class HttpPusher(Pusher):
             content: JsonDict = {
                 "event_id": event.event_id,
                 "room_id": event.room_id,
-                "counts": {"unread": badge},
                 "prio": priority,
             }
+            if not self.disable_badge_count:
+                content["counts"] = {"unread": badge}
             # event_id_only doesn't include the tweaks, so override them.
             tweaks = {}
         else:
@@ -478,11 +502,11 @@ class HttpPusher(Pusher):
                 "type": event.type,
                 "sender": event.user_id,
                 "prio": priority,
-                "counts": {
-                    "unread": badge,
-                    # 'missed_calls': 2
-                },
             }
+            if not self.disable_badge_count:
+                content["counts"] = {
+                    "unread": badge,
+                }
             if event.type == "m.room.member" and event.is_state():
                 content["membership"] = event.content["membership"]
                 content["user_is_target"] = event.state_key == self.user_id
@@ -528,9 +552,13 @@ class HttpPusher(Pusher):
         }
         try:
             await self.http_client.post_json_get_json(self.url, d)
-            http_badges_processed_counter.inc()
+            http_badges_processed_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()
         except Exception as e:
             logger.warning(
                 "Failed to send badge count to %s: %s %s", self.name, type(e), e
             )
-            http_badges_failed_counter.inc()
+            http_badges_failed_counter.labels(
+                **{SERVER_NAME_LABEL: self.server_name}
+            ).inc()

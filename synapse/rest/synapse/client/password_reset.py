@@ -47,7 +47,7 @@ class PasswordResetSubmitTokenResource(DirectServeHtmlResource):
         Args:
             hs: server
         """
-        super().__init__()
+        super().__init__(clock=hs.get_clock())
 
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main

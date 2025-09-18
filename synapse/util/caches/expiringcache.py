@@ -21,10 +21,9 @@
 
 import logging
 from collections import OrderedDict
-from typing import Any, Generic, Iterable, Optional, TypeVar, Union, overload
+from typing import Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
 
 import attr
-from typing_extensions import Literal
 
 from twisted.internet import defer
 
@@ -47,7 +46,9 @@ VT = TypeVar("VT")
 class ExpiringCache(Generic[KT, VT]):
     def __init__(
         self,
+        *,
         cache_name: str,
+        server_name: str,
         clock: Clock,
         max_len: int = 0,
         expiry_ms: int = 0,
@@ -57,6 +58,8 @@ class ExpiringCache(Generic[KT, VT]):
         """
         Args:
             cache_name: Name of this cache, used for logging.
+            server_name: The homeserver name that this cache is associated
+                with (used to label the metric) (`hs.hostname`).
             clock
             max_len: Max size of dict. If the dict grows larger than this
                 then the oldest items get automatically evicted. Default is 0,
@@ -84,14 +87,21 @@ class ExpiringCache(Generic[KT, VT]):
 
         self.iterable = iterable
 
-        self.metrics = register_cache("expiring", cache_name, self)
+        self.metrics = register_cache(
+            cache_type="expiring",
+            cache_name=cache_name,
+            cache=self,
+            server_name=server_name,
+        )
 
         if not self._expiry_ms:
             # Don't bother starting the loop if things never expire
             return
 
         def f() -> "defer.Deferred[None]":
-            return run_as_background_process("prune_cache", self._prune_cache)
+            return run_as_background_process(
+                "prune_cache", server_name, self._prune_cache
+            )
 
         self._clock.looping_call(f, self._expiry_ms / 2)
 

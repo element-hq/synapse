@@ -5,10 +5,10 @@ It is recommended to put a reverse proxy such as
 [Apache](https://httpd.apache.org/docs/current/mod/mod_proxy_http.html),
 [Caddy](https://caddyserver.com/docs/quick-starts/reverse-proxy),
 [HAProxy](https://www.haproxy.org/) or
-[relayd](https://man.openbsd.org/relayd.8) in front of Synapse. One advantage
-of doing so is that it means that you can expose the default https port
-(443) to Matrix clients without needing to run Synapse with root
-privileges.
+[relayd](https://man.openbsd.org/relayd.8) in front of Synapse.
+This has the advantage of being able to expose the default HTTPS port (443) to Matrix
+clients without requiring Synapse to bind to a privileged port (port numbers less than
+1024), avoiding the need for `CAP_NET_BIND_SERVICE` or running as root.
 
 You should configure your reverse proxy to forward requests to `/_matrix` or
 `/_synapse/client` to Synapse, and have it set the `X-Forwarded-For` and
@@ -74,7 +74,7 @@ server {
         proxy_pass http://localhost:8008;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Host $host;
+        proxy_set_header Host $host:$server_port;
 
         # Nginx by default only allows file uploads up to 1M in size
         # Increase client_max_body_size to match max_upload_size defined in homeserver.yaml

@@ -29,6 +29,7 @@ from typing import (
     Iterable,
     List,
     Literal,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -50,7 +51,7 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import log_kv, start_active_span
-from synapse.metrics import LaterGauge
+from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.streams.config import PaginationConfig
 from synapse.types import (
     ISynapseReactor,
@@ -66,7 +67,6 @@ from synapse.types import (
 from synapse.util.async_helpers import (
     timeout_deferred,
 )
-from synapse.util.metrics import Measure
 from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_events_for_client
 
@@ -75,10 +75,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-notified_events_counter = Counter("synapse_notifier_notified_events", "")
+# FIXME: Unused metric, remove if not needed.
+notified_events_counter = Counter(
+    "synapse_notifier_notified_events", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 users_woken_by_stream_counter = Counter(
-    "synapse_notifier_users_woken_by_stream", "", ["stream"]
+    "synapse_notifier_users_woken_by_stream",
+    "",
+    labelnames=["stream", SERVER_NAME_LABEL],
+)
+
+
+notifier_listeners_gauge = LaterGauge(
+    name="synapse_notifier_listeners",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+notifier_rooms_gauge = LaterGauge(
+    name="synapse_notifier_rooms",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+notifier_users_gauge = LaterGauge(
+    name="synapse_notifier_users",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 T = TypeVar("T")
@@ -159,6 +182,9 @@ class _NotifierUserStream:
             lst = notifier.room_to_user_streams.get(room, set())
             lst.discard(self)
 
+            if not lst:
+                notifier.room_to_user_streams.pop(room, None)
+
         notifier.user_to_user_stream.pop(self.user_id)
 
     def count_listeners(self) -> int:
@@ -222,6 +248,7 @@ class Notifier:
         self.room_to_user_streams: Dict[str, Set[_NotifierUserStream]] = {}
 
         self.hs = hs
+        self.server_name = hs.hostname
         self._storage_controllers = hs.get_storage_controllers()
         self.event_sources = hs.get_event_sources()
         self.store = hs.get_datastores().main
@@ -255,7 +282,10 @@ class Notifier:
         # This is not a very cheap test to perform, but it's only executed
         # when rendering the metrics page, which is likely once per minute at
         # most when scraping it.
-        def count_listeners() -> int:
+        #
+        # Ideally, we'd use `Mapping[Tuple[str], int]` here but mypy doesn't like it.
+        # This is close enough and better than a type ignore.
+        def count_listeners() -> Mapping[Tuple[str, ...], int]:
             all_user_streams: Set[_NotifierUserStream] = set()
 
             for streams in list(self.room_to_user_streams.values()):
@@ -263,18 +293,26 @@ class Notifier:
             for stream in list(self.user_to_user_stream.values()):
                 all_user_streams.add(stream)
 
-            return sum(stream.count_listeners() for stream in all_user_streams)
+            return {
+                (self.server_name,): sum(
+                    stream.count_listeners() for stream in all_user_streams
+                )
+            }
 
-        LaterGauge("synapse_notifier_listeners", "", [], count_listeners)
-
-        LaterGauge(
-            "synapse_notifier_rooms",
-            "",
-            [],
-            lambda: count(bool, list(self.room_to_user_streams.values())),
+        notifier_listeners_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(), hook=count_listeners
         )
-        LaterGauge(
-            "synapse_notifier_users", "", [], lambda: len(self.user_to_user_stream)
+        notifier_rooms_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): count(
+                    bool, list(self.room_to_user_streams.values())
+                )
+            },
+        )
+        notifier_users_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
@@ -348,9 +386,10 @@ class Notifier:
             for listener in listeners:
                 listener.callback(current_token)
 
-        users_woken_by_stream_counter.labels(StreamKeyType.UN_PARTIAL_STATED_ROOMS).inc(
-            len(user_streams)
-        )
+        users_woken_by_stream_counter.labels(
+            stream=StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).inc(len(user_streams))
 
         # Poke the replication so that other workers also see the write to
         # the un-partial-stated rooms stream.
@@ -493,6 +532,7 @@ class Notifier:
             StreamKeyType.TO_DEVICE,
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            StreamKeyType.THREAD_SUBSCRIPTIONS,
         ],
         new_token: int,
         users: Optional[Collection[Union[str, UserID]]] = None,
@@ -520,20 +560,22 @@ class Notifier:
         users = users or []
         rooms = rooms or []
 
-        with Measure(self.clock, "on_new_event"):
-            user_streams: Set[_NotifierUserStream] = set()
+        user_streams: Set[_NotifierUserStream] = set()
 
-            log_kv(
-                {
-                    "waking_up_explicit_users": len(users),
-                    "waking_up_explicit_rooms": len(rooms),
-                    "users": shortstr(users),
-                    "rooms": shortstr(rooms),
-                    "stream": stream_key,
-                    "stream_id": new_token,
-                }
-            )
+        log_kv(
+            {
+                "waking_up_explicit_users": len(users),
+                "waking_up_explicit_rooms": len(rooms),
+                "users": shortstr(users),
+                "rooms": shortstr(rooms),
+                "stream": stream_key,
+                "stream_id": new_token,
+            }
+        )
 
+        # Only calculate which user streams to wake up if there are, in fact,
+        # any user streams registered.
+        if self.user_to_user_stream or self.room_to_user_streams:
             for user in users:
                 user_stream = self.user_to_user_stream.get(str(user))
                 if user_stream is not None:
@@ -565,25 +607,28 @@ class Notifier:
             # We resolve all these deferreds in one go so that we only need to
             # call `PreserveLoggingContext` once, as it has a bunch of overhead
             # (to calculate performance stats)
-            with PreserveLoggingContext():
-                for listener in listeners:
-                    listener.callback(current_token)
+            if listeners:
+                with PreserveLoggingContext():
+                    for listener in listeners:
+                        listener.callback(current_token)
 
-            users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
+            if user_streams:
+                users_woken_by_stream_counter.labels(
+                    stream=stream_key,
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc(len(user_streams))
 
-            self.notify_replication()
+        self.notify_replication()
 
-            # Notify appservices.
-            try:
-                self.appservice_handler.notify_interested_services_ephemeral(
-                    stream_key,
-                    new_token,
-                    users,
-                )
-            except Exception:
-                logger.exception(
-                    "Error notifying application services of ephemeral events"
-                )
+        # Notify appservices.
+        try:
+            self.appservice_handler.notify_interested_services_ephemeral(
+                stream_key,
+                new_token,
+                users,
+            )
+        except Exception:
+            logger.exception("Error notifying application services of ephemeral events")
 
     def on_new_replication_data(self) -> None:
         """Used to inform replication listeners that something has happened

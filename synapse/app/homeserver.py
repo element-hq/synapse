@@ -54,6 +54,7 @@ from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.additional_resource import AdditionalResource
 from synapse.http.server import (
+    JsonResource,
     OptionsResource,
     RootOptionsRedirectResource,
     StaticResource,
@@ -61,8 +62,7 @@ from synapse.http.server import (
 from synapse.logging.context import LoggingContext
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
-from synapse.rest import ClientRestResource
-from synapse.rest.admin import AdminRestResource
+from synapse.rest import ClientRestResource, admin
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
@@ -180,11 +180,14 @@ class SynapseHomeServer(HomeServer):
             if compress:
                 client_resource = gz_wrap(client_resource)
 
+            admin_resource = JsonResource(self, canonical_json=False)
+            admin.register_servlets(self, admin_resource)
+
             resources.update(
                 {
                     CLIENT_API_PREFIX: client_resource,
                     "/.well-known": well_known_resource(self),
-                    "/_synapse/admin": AdminRestResource(self),
+                    "/_synapse/admin": admin_resource,
                     **build_synapse_client_resource_tree(self),
                 }
             )
@@ -286,8 +289,7 @@ class SynapseHomeServer(HomeServer):
             elif listener.type == "metrics":
                 if not self.config.metrics.enable_metrics:
                     logger.warning(
-                        "Metrics listener configured, but "
-                        "enable_metrics is not True!"
+                        "Metrics listener configured, but enable_metrics is not True!"
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
@@ -375,15 +377,17 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
         handle_startup_exception(e)
 
     async def start() -> None:
-        # Load the OIDC provider metadatas, if OIDC is enabled.
-        if hs.config.oidc.oidc_enabled:
-            oidc = hs.get_oidc_handler()
-            # Loading the provider metadata also ensures the provider config is valid.
-            await oidc.load_metadata()
+        # Re-establish log context now that we're back from the reactor
+        with LoggingContext("start"):
+            # Load the OIDC provider metadatas, if OIDC is enabled.
+            if hs.config.oidc.oidc_enabled:
+                oidc = hs.get_oidc_handler()
+                # Loading the provider metadata also ensures the provider config is valid.
+                await oidc.load_metadata()
 
-        await _base.start(hs)
+            await _base.start(hs)
 
-        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+            hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     register_start(start)
 

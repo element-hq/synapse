@@ -48,7 +48,12 @@ from synapse.logging.opentracing import trace
 from synapse.storage.controllers import StorageControllers
 from synapse.storage.databases.main import DataStore
 from synapse.synapse_rust.events import event_visible_to_server
-from synapse.types import RetentionPolicy, StateMap, StrCollection, get_domain_from_id
+from synapse.types import (
+    RetentionPolicy,
+    StateMap,
+    StrCollection,
+    get_domain_from_id,
+)
 from synapse.types.state import StateFilter
 from synapse.util import Clock
 
@@ -106,9 +111,32 @@ async def filter_events_for_client(
         of `user_id` at each event.
     """
     # Filter out events that have been soft failed so that we don't relay them
-    # to clients.
-    events_before_filtering = events
+    # to clients, unless they're a server admin and want that to happen.
+    #
+    # We copy the events list to guarantee any modifications we make will only
+    # happen within the function.
+    events_before_filtering = events.copy()
+    # Default case is to *exclude* soft-failed events
     events = [e for e in events if not e.internal_metadata.is_soft_failed()]
+    client_config = await storage.main.get_admin_client_config_for_user(user_id)
+    if filter_send_to_client and await storage.main.is_server_admin(user_id):
+        if client_config.return_soft_failed_events:
+            # The user has requested that all events be included, so do that.
+            # We copy the list for mutation safety.
+            events = events_before_filtering.copy()
+        elif client_config.return_policy_server_spammy_events:
+            # Include events that were soft failed by a policy server (marked spammy),
+            # but exclude all other soft failed events. We also want to include all
+            # not-soft-failed events, per usual operation.
+            events = [
+                e
+                for e in events_before_filtering
+                if not e.internal_metadata.is_soft_failed()
+                or e.internal_metadata.policy_server_spammy
+            ]
+        # else - no change in behaviour; use default case
+    # else - no change in behaviour; use default case
+
     if len(events_before_filtering) != len(events):
         if filtered_event_logger.isEnabledFor(logging.DEBUG):
             filtered_event_logger.debug(

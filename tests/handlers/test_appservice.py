@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, Mock
 from parameterized import parameterized
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.storage
@@ -43,6 +43,7 @@ from synapse.types import (
     MultiWriterStreamToken,
     RoomStreamToken,
     StreamKeyType,
+    UserID,
 )
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
@@ -1009,7 +1010,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
         appservice = ApplicationService(
             token=random_string(10),
             id=random_string(10),
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
             rate_limited=False,
             namespaces=namespaces,
             supports_ephemeral=True,
@@ -1087,7 +1088,7 @@ class ApplicationServicesHandlerDeviceListsTestCase(unittest.HomeserverTestCase)
         appservice = ApplicationService(
             token=random_string(10),
             id=random_string(10),
-            sender="@as:example.com",
+            sender=UserID.from_string("@as:example.com"),
             rate_limited=False,
             namespaces={
                 ApplicationService.NS_USERS: [
@@ -1151,9 +1152,9 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         # Define an application service for the tests
         self._service_token = "VERYSECRET"
         self._service = ApplicationService(
-            self._service_token,
-            "as1",
-            "@as.sender:test",
+            token=self._service_token,
+            id="as1",
+            sender=UserID.from_string("@as.sender:test"),
             namespaces={
                 "users": [
                     {"regex": "@_as_.*:test", "exclusive": True},
@@ -1165,12 +1166,23 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         self.hs.get_datastores().main.services_cache = [self._service]
 
         # Register some appservice users
-        self._sender_user, self._sender_device = self.register_appservice_user(
+        user_id, device_id = self.register_appservice_user(
             "as.sender", self._service_token
         )
-        self._namespaced_user, self._namespaced_device = self.register_appservice_user(
+        # With MSC4190 enabled, there will not be a device created
+        # during AS registration. However MSC4190 is not enabled
+        # in this test. It may become the default behaviour in the
+        # future, in which case this test will need to be updated.
+        assert device_id is not None
+        self._sender_user = user_id
+        self._sender_device = device_id
+
+        user_id, device_id = self.register_appservice_user(
             "_as_user1", self._service_token
         )
+        assert device_id is not None
+        self._namespaced_user = user_id
+        self._namespaced_device = device_id
 
         # Register a real user as well.
         self._real_user = self.register_user("real.user", "meow")

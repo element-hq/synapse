@@ -20,7 +20,7 @@
 #
 from typing import Dict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.media._base import FileInfo
@@ -61,6 +61,7 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
                 time_now_ms=clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
+                sha256=file_id,
             )
         )
 

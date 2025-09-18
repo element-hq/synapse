@@ -17,13 +17,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from http import HTTPStatus
 from typing import Collection, ContextManager, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
 from synapse.api.errors import Codes, ResourceLimitError
@@ -36,7 +37,6 @@ from synapse.handlers.sync import (
     SyncConfig,
     SyncRequestKey,
     SyncResult,
-    SyncVersion,
     TimelineBatch,
 )
 from synapse.rest import admin
@@ -112,7 +112,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -123,7 +122,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             ),
             ResourceLimitError,
@@ -141,7 +139,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             ),
             ResourceLimitError,
@@ -166,7 +163,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -202,7 +198,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -217,7 +212,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
@@ -251,7 +245,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -266,7 +259,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_config=generate_sync_config(
                     user, device_id="dev", use_state_after=self.use_state_after
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
@@ -309,7 +301,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(owner),
                 generate_sync_config(owner, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -335,7 +326,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -347,14 +337,21 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # the prev_events used when creating the join event, such that the ban does not
         # precede the join.
         with self._patch_get_latest_events([last_room_creation_event_id]):
-            self.helper.join(room_id, eve, tok=eve_token)
+            self.helper.join(
+                room_id,
+                eve,
+                tok=eve_token,
+                # Previously, this join would succeed but now we expect it to fail at
+                # this point. The rest of the test is for the case when this used to
+                # succeed.
+                expect_code=HTTPStatus.FORBIDDEN,
+            )
 
         # Eve makes a second, incremental sync.
         eve_incremental_sync_after_join: SyncResult = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=eve_sync_after_ban.next_batch,
             )
@@ -367,7 +364,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=None,
             )
@@ -402,7 +398,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -432,7 +427,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -478,7 +472,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -518,7 +511,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -567,7 +559,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -594,7 +585,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -634,7 +624,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=incremental_sync.next_batch,
             )
@@ -708,7 +697,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -734,7 +722,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     ),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -760,7 +747,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
@@ -824,7 +810,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 bob_requester,
                 generate_sync_config(bob, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -858,7 +843,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                     filter_collection=FilterCollection(self.hs, filter_dict),
                     use_state_after=self.use_state_after,
                 ),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=None if initial_sync else initial_sync_result.next_batch,
             )
@@ -958,7 +942,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1007,7 +990,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user2),
                 generate_sync_config(user2, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1033,7 +1015,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
             )
         )
@@ -1070,7 +1051,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=since_token,
                 timeout=0,
@@ -1125,7 +1105,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 create_requester(user),
                 generate_sync_config(user, use_state_after=self.use_state_after),
-                sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=since_token,
                 timeout=0,

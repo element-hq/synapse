@@ -23,6 +23,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 
 import attr
+from immutabledict import immutabledict
 
 from synapse.api.constants import Direction, EventTypes, JoinRules, Membership
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -149,6 +150,7 @@ class RoomRestV2Servlet(RestServlet):
 def _convert_delete_task_to_response(task: ScheduledTask) -> JsonDict:
     return {
         "delete_id": task.id,
+        "room_id": task.resource_id,
         "status": task.status,
         "shutdown_room": task.result,
     }
@@ -463,7 +465,18 @@ class RoomStateRestServlet(RestServlet):
         if not room:
             raise NotFoundError("Room not found")
 
-        event_ids = await self._storage_controllers.state.get_current_state_ids(room_id)
+        state_filter = None
+        type = parse_string(request, "type")
+
+        if type:
+            state_filter = StateFilter(
+                types=immutabledict({type: None}),
+                include_others=False,
+            )
+
+        event_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id, state_filter
+        )
         events = await self.store.get_events(event_ids.values())
         now = self.clock.time_msec()
         room_state = await self._event_serializer.serialize_events(events.values(), now)
@@ -614,6 +627,15 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
             ]
             admin_users.sort(key=lambda user: user_power[user])
 
+            if create_event.room_version.msc4289_creator_power_enabled:
+                creators = create_event.content.get("additional_creators", []) + [
+                    create_event.sender
+                ]
+                for creator in creators:
+                    if self.is_mine_id(creator):
+                        # include the creator as they won't be in the PL users map.
+                        admin_users.append(creator)
+
             if not admin_users:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST, "No local admin user in room"
@@ -653,7 +675,11 @@ class MakeRoomAdminRestServlet(ResolveRoomIdMixin, RestServlet):
         # updated power level event.
         new_pl_content = dict(pl_content)
         new_pl_content["users"] = dict(pl_content.get("users", {}))
-        new_pl_content["users"][user_to_add] = new_pl_content["users"][admin_user_id]
+        # give the new user the same PL as the admin, default to 100 in case there is no PL event.
+        # This means in v12+ rooms we get PL100 if the creator promotes us.
+        new_pl_content["users"][user_to_add] = new_pl_content["users"].get(
+            admin_user_id, 100
+        )
 
         fake_requester = create_requester(
             admin_user_id,

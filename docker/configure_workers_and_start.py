@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/local/bin/python
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
@@ -178,6 +178,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/login$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/3pid$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/account/whoami$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/account/deactivate$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/devices(/|$)",
+            "^/_matrix/client/(r0|v3)/delete_devices$",
             "^/_matrix/client/versions$",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/voip/turnServer$",
             "^/_matrix/client/(r0|v3|unstable)/register$",
@@ -194,6 +197,9 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$",
             "^/_matrix/client/(r0|v3|unstable)/capabilities$",
             "^/_matrix/client/(r0|v3|unstable)/notifications$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/device_signing/upload$",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/keys/signatures/upload$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
@@ -202,6 +208,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["federation"],
         "endpoint_patterns": [
+            "^/_matrix/federation/v1/version$",
             "^/_matrix/federation/(v1|v2)/event/",
             "^/_matrix/federation/(v1|v2)/state/",
             "^/_matrix/federation/(v1|v2)/state_ids/",
@@ -264,13 +271,6 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
-    "frontend_proxy": {
-        "app": "synapse.app.generic_worker",
-        "listener_resources": ["client", "replication"],
-        "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/keys/upload"],
-        "shared_extra_conf": {},
-        "worker_extra_conf": "",
-    },
     "account_data": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -305,6 +305,13 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "device_lists": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "typing": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
@@ -318,6 +325,15 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client", "replication"],
         "endpoint_patterns": ["^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/"],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
+    "thread_subscriptions": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client", "replication"],
+        "endpoint_patterns": [
+            "^/_matrix/client/unstable/io.element.msc4306/.*",
+        ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
@@ -351,6 +367,11 @@ def error(txt: str) -> NoReturn:
 
 
 def flush_buffers() -> None:
+    """
+    Python's `print()` buffers output by default, typically waiting until ~8KB
+    accumulates. This method can be used to flush the buffers so we can see the output
+    of any print statements so far.
+    """
     sys.stdout.flush()
     sys.stderr.flush()
 
@@ -376,9 +397,11 @@ def convert(src: str, dst: str, **template_vars: object) -> None:
     #
     # We use append mode in case the files have already been written to by something else
     # (for instance, as part of the instructions in a dockerfile).
+    exists = os.path.isfile(dst)
     with open(dst, "a") as outfile:
         # In case the existing file doesn't end with a newline
-        outfile.write("\n")
+        if exists:
+            outfile.write("\n")
 
         outfile.write(rendered)
 
@@ -404,16 +427,18 @@ def add_worker_roles_to_shared_config(
     # streams
     instance_map = shared_config.setdefault("instance_map", {})
 
-    # This is a list of the stream_writers that there can be only one of. Events can be
-    # sharded, and therefore doesn't belong here.
-    singular_stream_writers = [
+    # This is a list of the stream_writers.
+    stream_writers = {
         "account_data",
+        "events",
+        "device_lists",
         "presence",
         "receipts",
         "to_device",
         "typing",
         "push_rules",
-    ]
+        "thread_subscriptions",
+    }
 
     # Worker-type specific sharding config. Now a single worker can fulfill multiple
     # roles, check each.
@@ -423,28 +448,11 @@ def add_worker_roles_to_shared_config(
     if "federation_sender" in worker_types_set:
         shared_config.setdefault("federation_sender_instances", []).append(worker_name)
 
-    if "event_persister" in worker_types_set:
-        # Event persisters write to the events stream, so we need to update
-        # the list of event stream writers
-        shared_config.setdefault("stream_writers", {}).setdefault("events", []).append(
-            worker_name
-        )
-
-        # Map of stream writer instance names to host/ports combos
-        if os.environ.get("SYNAPSE_USE_UNIX_SOCKET", False):
-            instance_map[worker_name] = {
-                "path": f"/run/worker.{worker_port}",
-            }
-        else:
-            instance_map[worker_name] = {
-                "host": "localhost",
-                "port": worker_port,
-            }
     # Update the list of stream writers. It's convenient that the name of the worker
     # type is the same as the stream to write. Iterate over the whole list in case there
     # is more than one.
     for worker in worker_types_set:
-        if worker in singular_stream_writers:
+        if worker in stream_writers:
             shared_config.setdefault("stream_writers", {}).setdefault(
                 worker, []
             ).append(worker_name)
@@ -604,7 +612,7 @@ def generate_base_homeserver_config() -> None:
     # start.py already does this for us, so just call that.
     # note that this script is copied in in the official, monolith dockerfile
     os.environ["SYNAPSE_HTTP_PORT"] = str(MAIN_PROCESS_HTTP_LISTENER_PORT)
-    subprocess.run(["/usr/local/bin/python", "/start.py", "migrate_config"], check=True)
+    subprocess.run([sys.executable, "/start.py", "migrate_config"], check=True)
 
 
 def parse_worker_types(
@@ -868,6 +876,13 @@ def generate_worker_files(
         else:
             healthcheck_urls.append("http://localhost:%d/health" % (worker_port,))
 
+        # Special case for event_persister: those are just workers that write to
+        # the `events` stream. For other workers, the worker name is the same
+        # name of the stream they write to, but for some reason it is not the
+        # case for event_persister.
+        if "event_persister" in worker_types_set:
+            worker_types_set.add("events")
+
         # Update the shared config with sharding-related options if necessary
         add_worker_roles_to_shared_config(
             shared_config, worker_types_set, worker_name, worker_port
@@ -998,6 +1013,7 @@ def generate_worker_files(
         "/healthcheck.sh",
         healthcheck_urls=healthcheck_urls,
     )
+    os.chmod("/healthcheck.sh", 0o755)
 
     # Ensure the logging directory exists
     log_dir = data_dir + "/logs"
@@ -1098,6 +1114,13 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         environ["LD_PRELOAD"] = jemallocpath
     else:
         log("Could not find %s, will not use" % (jemallocpath,))
+
+    # Empty strings are falsy in Python so this default is fine. We just can't have these
+    # be undefined because supervisord will complain about our
+    # `%(ENV_SYNAPSE_HTTP_PROXY)s` usage.
+    environ.setdefault("SYNAPSE_HTTP_PROXY", "")
+    environ.setdefault("SYNAPSE_HTTPS_PROXY", "")
+    environ.setdefault("SYNAPSE_NO_PROXY", "")
 
     # Start supervisord, which will start Synapse, all of the configured worker
     # processes, redis, nginx etc. according to the config we created above.

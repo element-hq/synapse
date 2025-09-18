@@ -22,11 +22,10 @@
 import logging
 import os
 from typing import Any, Dict, List, Tuple
-from urllib.request import getproxies_environment  # type: ignore
 
 import attr
 
-from synapse.config.server import generate_ip_set
+from synapse.config.server import generate_ip_set, parse_proxy_config
 from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
 from synapse.util.module_loader import load_module
@@ -61,7 +60,7 @@ THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP = {
     "image/png": "png",
 }
 
-HTTP_PROXY_SET_WARNING = """\
+URL_PREVIEW_BLACKLIST_IGNORED_BECAUSE_HTTP_PROXY_SET_WARNING = """\
 The Synapse config url_preview_ip_range_blacklist will be ignored as an HTTP(s) proxy is configured."""
 
 
@@ -117,6 +116,23 @@ def parse_thumbnail_requirements(
     return {
         media_type: tuple(thumbnails) for media_type, thumbnails in requirements.items()
     }
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class MediaUploadLimit:
+    """
+    Represents a limit on the amount of data a user can upload in a given time
+    period.
+
+    These can be configured through the `media_upload_limits` [config option](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#media_upload_limits)
+    or via the `get_media_upload_limits_for_user` module API [callback](https://element-hq.github.io/synapse/latest/modules/media_repository_callbacks.html#get_media_upload_limits_for_user).
+    """
+
+    max_bytes: int
+    """The maximum number of bytes that can be uploaded in the given time period."""
+
+    time_period_ms: int
+    """The time period in milliseconds."""
 
 
 class ContentRepositoryConfig(Config):
@@ -225,17 +241,25 @@ class ContentRepositoryConfig(Config):
         if self.url_preview_enabled:
             check_requirements("url-preview")
 
-            proxy_env = getproxies_environment()
-            if "url_preview_ip_range_blacklist" not in config:
-                if "http" not in proxy_env or "https" not in proxy_env:
+            proxy_config = parse_proxy_config(config)
+            is_proxy_configured = (
+                proxy_config.http_proxy is not None
+                or proxy_config.https_proxy is not None
+            )
+            if "url_preview_ip_range_blacklist" in config:
+                if is_proxy_configured:
+                    logger.warning(
+                        "".join(
+                            URL_PREVIEW_BLACKLIST_IGNORED_BECAUSE_HTTP_PROXY_SET_WARNING
+                        )
+                    )
+            else:
+                if not is_proxy_configured:
                     raise ConfigError(
                         "For security, you must specify an explicit target IP address "
                         "blacklist in url_preview_ip_range_blacklist for url previewing "
                         "to work"
                     )
-            else:
-                if "http" in proxy_env or "https" in proxy_env:
-                    logger.warning("".join(HTTP_PROXY_SET_WARNING))
 
             # we always block '0.0.0.0' and '::', which are supposed to be
             # unroutable addresses.
@@ -273,6 +297,13 @@ class ContentRepositoryConfig(Config):
             )
 
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
+
+        self.media_upload_limits: List[MediaUploadLimit] = []
+        for limit_config in config.get("media_upload_limits", []):
+            time_period_ms = self.parse_duration(limit_config["time_period"])
+            max_bytes = self.parse_size(limit_config["max_size"])
+
+            self.media_upload_limits.append(MediaUploadLimit(max_bytes, time_period_ms))
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None

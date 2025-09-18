@@ -378,7 +378,8 @@ class CasHandler:
 
             # Arbitrarily use the first attribute found.
             display_name = cas_response.attributes.get(
-                self._cas_displayname_attribute, [None]
+                self._cas_displayname_attribute,  # type: ignore[arg-type]
+                [None],
             )[0]
 
             return UserAttributes(localpart=localpart, display_name=display_name)

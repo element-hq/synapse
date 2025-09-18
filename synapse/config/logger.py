@@ -51,6 +51,8 @@ if TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig
     from synapse.server import HomeServer
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_LOG_CONFIG = Template(
     """\
 # Log configuration for Synapse.
@@ -291,7 +293,7 @@ def _load_logging_config(log_config_path: str) -> None:
         log_config = yaml.safe_load(f.read())
 
     if not log_config:
-        logging.warning("Loaded a blank logging config?")
+        logger.warning("Loaded a blank logging config?")
 
     # If the old structured logging configuration is being used, raise an error.
     if "structured" in log_config and log_config.get("structured"):
@@ -312,7 +314,7 @@ def _reload_logging_config(log_config_path: Optional[str]) -> None:
         return
 
     _load_logging_config(log_config_path)
-    logging.info("Reloaded log config from %s due to SIGHUP", log_config_path)
+    logger.info("Reloaded log config from %s due to SIGHUP", log_config_path)
 
 
 def setup_logging(
@@ -349,16 +351,17 @@ def setup_logging(
     appbase.register_sighup(_reload_logging_config, log_config_path)
 
     # Log immediately so we can grep backwards.
-    logging.warning("***** STARTING SERVER *****")
-    logging.warning(
+    logger.warning("***** STARTING SERVER *****")
+    logger.warning(
         "Server %s version %s",
         sys.argv[0],
         SYNAPSE_VERSION,
     )
-    logging.warning("Copyright (c) 2023 New Vector, Inc")
-    logging.warning(
+    logger.warning("Copyright (c) 2023 New Vector, Inc")
+    logger.warning(
         "Licensed under the AGPL 3.0 license. Website: https://github.com/element-hq/synapse"
     )
-    logging.info("Server hostname: %s", config.server.server_name)
-    logging.info("Instance name: %s", hs.get_instance_name())
-    logging.info("Twisted reactor: %s", type(reactor).__name__)
+    logger.info("Server hostname: %s", config.server.server_name)
+    logger.info("Public Base URL: %s", config.server.public_baseurl)
+    logger.info("Instance name: %s", hs.get_instance_name())
+    logger.info("Twisted reactor: %s", type(reactor).__name__)

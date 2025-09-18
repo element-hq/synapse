@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from twisted.internet.address import IPv4Address
 from twisted.internet.protocol import Protocol, connectionDone
+from twisted.internet.testing import MemoryReactor
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.app.generic_worker import GenericWorkerServer
@@ -32,7 +32,6 @@ from synapse.config.workers import InstanceTcpLocationConfig, InstanceUnixLocati
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.replication.http import ReplicationRestResource
 from synapse.replication.tcp.client import ReplicationDataHandler
-from synapse.replication.tcp.handler import ReplicationCommandHandler
 from synapse.replication.tcp.protocol import (
     ClientReplicationStreamProtocol,
     ServerReplicationStreamProtocol,
@@ -97,7 +96,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         self.test_handler = self._build_replication_data_handler()
         self.worker_hs._replication_data_handler = self.test_handler  # type: ignore[attr-defined]
 
-        repl_handler = ReplicationCommandHandler(self.worker_hs)
+        repl_handler = self.worker_hs.get_replication_command_handler()
         self.client = ClientReplicationStreamProtocol(
             self.worker_hs,
             "client",
@@ -220,7 +219,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         fetching updates for given stream.
         """
 
-        path: bytes = request.path  # type: ignore
+        path: bytes = request.path
         self.assertRegex(
             path,
             rb"^/_synapse/replication/get_repl_stream_updates/%s/[^/]+$"

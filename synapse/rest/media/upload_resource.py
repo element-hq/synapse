@@ -50,9 +50,12 @@ class BaseUploadServlet(RestServlet):
         self.server_name = hs.hostname
         self.auth = hs.get_auth()
         self.max_upload_size = hs.config.media.max_upload_size
+        self._media_repository_callbacks = (
+            hs.get_module_api_callbacks().media_repository
+        )
 
-    def _get_file_metadata(
-        self, request: SynapseRequest
+    async def _get_file_metadata(
+        self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, Optional[str], str]:
         raw_content_length = request.getHeader("Content-Length")
         if raw_content_length is None:
@@ -67,7 +70,14 @@ class BaseUploadServlet(RestServlet):
                 code=413,
                 errcode=Codes.TOO_LARGE,
             )
-
+        if not await self._media_repository_callbacks.is_user_allowed_to_upload_media_of_size(
+            user_id, content_length
+        ):
+            raise SynapseError(
+                msg="Upload request body is too large",
+                code=413,
+                errcode=Codes.TOO_LARGE,
+            )
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
         upload_name_bytes = parse_bytes_from_args(args, "filename")
         if upload_name_bytes:
@@ -104,11 +114,13 @@ class UploadServlet(BaseUploadServlet):
 
     async def on_POST(self, request: SynapseRequest) -> None:
         requester = await self.auth.get_user_by_req(request)
-        content_length, upload_name, media_type = self._get_file_metadata(request)
+        content_length, upload_name, media_type = await self._get_file_metadata(
+            request, requester.user.to_string()
+        )
 
         try:
             content: IO = request.content  # type: ignore
-            content_uri = await self.media_repo.create_content(
+            content_uri = await self.media_repo.create_or_update_content(
                 media_type, upload_name, content, content_length, requester.user
             )
         except SpamMediaException:
@@ -152,17 +164,19 @@ class AsyncUploadServlet(BaseUploadServlet):
 
         async with lock:
             await self.media_repo.verify_can_upload(media_id, requester.user)
-            content_length, upload_name, media_type = self._get_file_metadata(request)
+            content_length, upload_name, media_type = await self._get_file_metadata(
+                request, requester.user.to_string()
+            )
 
             try:
                 content: IO = request.content  # type: ignore
-                await self.media_repo.update_content(
-                    media_id,
+                await self.media_repo.create_or_update_content(
                     media_type,
                     upload_name,
                     content,
                     content_length,
                     requester.user,
+                    media_id=media_id,
                 )
             except SpamMediaException:
                 # For uploading of media we want to respond with a 400, instead of

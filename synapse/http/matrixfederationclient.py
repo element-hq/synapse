@@ -34,6 +34,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Literal,
     Optional,
     TextIO,
     Tuple,
@@ -48,7 +49,6 @@ import treq
 from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
 from signedjson.sign import sign_json
-from typing_extensions import Literal
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError
@@ -87,6 +87,7 @@ from synapse.http.types import QueryParams
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util import json_decoder
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
@@ -99,10 +100,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 outgoing_requests_counter = Counter(
-    "synapse_http_matrixfederationclient_requests", "", ["method"]
+    "synapse_http_matrixfederationclient_requests",
+    "",
+    labelnames=["method", SERVER_NAME_LABEL],
 )
 incoming_responses_counter = Counter(
-    "synapse_http_matrixfederationclient_responses", "", ["method", "code"]
+    "synapse_http_matrixfederationclient_responses",
+    "",
+    labelnames=["method", "code", SERVER_NAME_LABEL],
 )
 
 
@@ -417,17 +422,19 @@ class MatrixFederationHttpClient:
         if hs.get_instance_name() in outbound_federation_restricted_to:
             # Talk to federation directly
             federation_agent: IAgent = MatrixFederationAgent(
-                self.reactor,
-                tls_client_options_factory,
-                user_agent.encode("ascii"),
-                hs.config.server.federation_ip_range_allowlist,
-                hs.config.server.federation_ip_range_blocklist,
+                server_name=self.server_name,
+                reactor=self.reactor,
+                tls_client_options_factory=tls_client_options_factory,
+                user_agent=user_agent.encode("ascii"),
+                ip_allowlist=hs.config.server.federation_ip_range_allowlist,
+                ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+                proxy_config=hs.config.server.proxy_config,
             )
         else:
             proxy_authorization_secret = hs.config.worker.worker_replication_secret
-            assert (
-                proxy_authorization_secret is not None
-            ), "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+            assert proxy_authorization_secret is not None, (
+                "`worker_replication_secret` must be set when using `outbound_federation_restricted_to` (used to authenticate requests across workers)"
+            )
             federation_proxy_credentials = BearerProxyCredentials(
                 proxy_authorization_secret.encode("ascii")
             )
@@ -436,9 +443,9 @@ class MatrixFederationHttpClient:
             # locations
             federation_proxy_locations = outbound_federation_restricted_to.locations
             federation_agent = ProxyAgent(
-                self.reactor,
-                self.reactor,
-                tls_client_options_factory,
+                reactor=self.reactor,
+                proxy_reactor=self.reactor,
+                contextFactory=tls_client_options_factory,
                 federation_proxy_locations=federation_proxy_locations,
                 federation_proxy_credentials=federation_proxy_credentials,
             )
@@ -602,7 +609,7 @@ class MatrixFederationHttpClient:
         try:
             parse_and_validate_server_name(request.destination)
         except ValueError:
-            logger.exception(f"Invalid destination: {request.destination}.")
+            logger.exception("Invalid destination: %s.", request.destination)
             raise FederationDeniedError(request.destination)
 
         if timeout is not None:
@@ -618,9 +625,10 @@ class MatrixFederationHttpClient:
             raise FederationDeniedError(request.destination)
 
         limiter = await synapse.util.retryutils.get_retry_limiter(
-            request.destination,
-            self.clock,
-            self._store,
+            destination=request.destination,
+            our_server_name=self.server_name,
+            clock=self.clock,
+            store=self._store,
             backoff_on_404=backoff_on_404,
             ignore_backoff=ignore_backoff,
             notifier=self.hs.get_notifier(),
@@ -694,10 +702,16 @@ class MatrixFederationHttpClient:
                         _sec_timeout,
                     )
 
-                    outgoing_requests_counter.labels(request.method).inc()
+                    outgoing_requests_counter.labels(
+                        method=request.method, **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc()
 
                     try:
-                        with Measure(self.clock, "outbound_request"):
+                        with Measure(
+                            self.clock,
+                            name="outbound_request",
+                            server_name=self.server_name,
+                        ):
                             # we don't want all the fancy cookie and redirect handling
                             # that treq.request gives: just use the raw Agent.
 
@@ -729,7 +743,9 @@ class MatrixFederationHttpClient:
                         raise RequestSendFailed(e, can_retry=True) from e
 
                     incoming_responses_counter.labels(
-                        request.method, response.code
+                        method=request.method,
+                        code=response.code,
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).inc()
 
                     set_tag(tags.HTTP_STATUS_CODE, response.code)

@@ -70,13 +70,14 @@ from synapse.http import get_request_user_agent
 from synapse.http.server import finish_request, respond_with_html
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.registration import (
     LoginTokenExpired,
     LoginTokenLookupResult,
     LoginTokenReused,
 )
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import JsonDict, Requester, StrCollection, UserID
 from synapse.util import stringutils as stringutils
 from synapse.util.async_helpers import delay_cancellation, maybe_awaitable
 from synapse.util.msisdn import phone_number_to_msisdn
@@ -95,7 +96,7 @@ INVALID_USERNAME_OR_PASSWORD = "Invalid username or password"
 invalid_login_token_counter = Counter(
     "synapse_user_login_invalid_login_tokens",
     "Counts the number of rejected m.login.token on /login",
-    ["reason"],
+    labelnames=["reason", SERVER_NAME_LABEL],
 )
 
 
@@ -174,6 +175,7 @@ def login_id_phone_to_thirdparty(identifier: JsonDict) -> Dict[str, str]:
 
     # Accept both "phone" and "number" as valid keys in m.id.phone
     phone_number = identifier.get("phone", identifier["number"])
+    assert isinstance(phone_number, str)
 
     # Convert user-provided phone number to a consistent representation
     msisdn = phone_number_to_msisdn(identifier["country"], phone_number)
@@ -198,6 +200,7 @@ class AuthHandler:
     SESSION_EXPIRE_MS = 48 * 60 * 60 * 1000
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
         self.auth_blocking = hs.get_auth_blocking()
@@ -219,6 +222,7 @@ class AuthHandler:
         self._password_localdb_enabled = hs.config.auth.password_localdb_enabled
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
         self._account_validity_handler = hs.get_account_validity_handler()
+        self._pusher_pool = hs.get_pusherpool()
 
         # Ratelimiter for failed auth during UIA. Uses same ratelimit config
         # as per `rc_login.failed_attempts`.
@@ -246,6 +250,7 @@ class AuthHandler:
                 run_as_background_process,
                 5 * 60 * 1000,
                 "expire_old_sessions",
+                self.server_name,
                 self._expire_old_sessions,
             )
 
@@ -270,8 +275,6 @@ class AuthHandler:
             hs.config.sso.sso_account_deactivated_template
         )
 
-        self._server_name = hs.config.server.server_name
-
         # cast to tuple for use with str.startswith
         self._whitelisted_sso_clients = tuple(hs.config.sso.sso_client_whitelist)
 
@@ -279,7 +282,9 @@ class AuthHandler:
         # response.
         self._extra_attributes: Dict[str, SsoLoginExtraAttributes] = {}
 
-        self.msc3861_oauth_delegation_enabled = hs.config.experimental.msc3861.enabled
+        self._auth_delegation_enabled = (
+            hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+        )
 
     async def validate_user_via_ui_auth(
         self,
@@ -330,7 +335,7 @@ class AuthHandler:
             LimitExceededError if the ratelimiter's failed request count for this
                 user is too high to proceed
         """
-        if self.msc3861_oauth_delegation_enabled:
+        if self._auth_delegation_enabled:
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR, "UIA shouldn't be used with MSC3861"
             )
@@ -1477,11 +1482,20 @@ class AuthHandler:
         try:
             return await self.store.consume_login_token(login_token)
         except LoginTokenExpired:
-            invalid_login_token_counter.labels("expired").inc()
+            invalid_login_token_counter.labels(
+                reason="expired",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
         except LoginTokenReused:
-            invalid_login_token_counter.labels("reused").inc()
+            invalid_login_token_counter.labels(
+                reason="reused",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
         except NotFoundError:
-            invalid_login_token_counter.labels("not found").inc()
+            invalid_login_token_counter.labels(
+                reason="not found",
+                **{SERVER_NAME_LABEL: self.server_name},
+            ).inc()
 
         raise AuthError(403, "Invalid login token", errcode=Codes.FORBIDDEN)
 
@@ -1547,6 +1561,31 @@ class AuthHandler:
             user_id, (token_id for _, token_id, _ in tokens_and_devices)
         )
 
+    async def delete_access_tokens_for_devices(
+        self,
+        user_id: str,
+        device_ids: StrCollection,
+    ) -> None:
+        """Invalidate access tokens for the devices
+
+        Args:
+            user_id:  ID of user the tokens belong to
+            device_ids:  ID of device the tokens are associated with.
+                If None, tokens associated with any device (or no device) will
+                be deleted
+        """
+        tokens_and_devices = await self.store.user_delete_access_tokens_for_devices(
+            user_id,
+            device_ids,
+        )
+
+        # see if any modules want to know about this
+        if self.password_auth_provider.on_logged_out_callbacks:
+            for token, _, device_id in tokens_and_devices:
+                await self.password_auth_provider.on_logged_out(
+                    user_id=user_id, device_id=device_id, access_token=token
+                )
+
     async def add_threepid(
         self, user_id: str, medium: str, address: str, validated_at: int
     ) -> None:
@@ -1579,7 +1618,10 @@ class AuthHandler:
         # for the presence of an email address during password reset was
         # case sensitive).
         if medium == "email":
-            address = canonicalise_email(address)
+            try:
+                address = canonicalise_email(address)
+            except ValueError as e:
+                raise SynapseError(400, str(e))
 
         await self.store.user_add_threepid(
             user_id, medium, address, validated_at, self.hs.get_clock().time_msec()
@@ -1610,7 +1652,10 @@ class AuthHandler:
         """
         # 'Canonicalise' email addresses as per above
         if medium == "email":
-            address = canonicalise_email(address)
+            try:
+                address = canonicalise_email(address)
+            except ValueError as e:
+                raise SynapseError(400, str(e))
 
         await self.store.user_delete_threepid(user_id, medium, address)
 
@@ -1620,7 +1665,7 @@ class AuthHandler:
         )
 
         if medium == "email":
-            await self.store.delete_pusher_by_app_id_pushkey_user_id(
+            await self._pusher_pool.remove_pusher(
                 app_id="m.email", pushkey=address, user_id=user_id
             )
 
@@ -1825,7 +1870,7 @@ class AuthHandler:
         html = self._sso_redirect_confirm_template.render(
             display_url=display_url,
             redirect_url=redirect_url,
-            server_name=self._server_name,
+            server_name=self.server_name,
             new_user=new_user,
             user_id=registered_user_id,
             user_profile=user_profile_data,
@@ -1889,7 +1934,7 @@ def load_single_legacy_password_auth_provider(
     try:
         provider = module(config=config, account_handler=api)
     except Exception as e:
-        logger.error("Error while initializing %r: %s", module, e)
+        logger.exception("Error while initializing %r: %s", module, e)
         raise
 
     # All methods that the module provides should be async, but this wasn't enforced
@@ -2422,7 +2467,7 @@ class PasswordAuthProvider:
             except CancelledError:
                 raise
             except Exception as e:
-                logger.error("Module raised an exception in is_3pid_allowed: %s", e)
+                logger.exception("Module raised an exception in is_3pid_allowed: %s", e)
                 raise SynapseError(code=500, msg="Internal Server Error")
 
         return True

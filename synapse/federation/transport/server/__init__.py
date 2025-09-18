@@ -20,9 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Tuple, Type
-
-from typing_extensions import Literal
+from typing import TYPE_CHECKING, Dict, Iterable, List, Literal, Optional, Tuple, Type
 
 from synapse.api.errors import FederationDeniedError, SynapseError
 from synapse.federation.transport.server._base import (
@@ -137,7 +135,7 @@ class PublicRoomList(BaseFederationServlet):
         if not self.allow_access:
             raise FederationDeniedError(origin)
 
-        limit = parse_integer_from_args(query, "limit", 0)
+        limit: Optional[int] = parse_integer_from_args(query, "limit", 0)
         since_token = parse_string_from_args(query, "since", None)
         include_all_networks = parse_boolean_from_args(
             query, "include_all_networks", default=False

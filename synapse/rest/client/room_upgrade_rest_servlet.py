@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import Codes, ShadowBanError, SynapseError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.event_auth import check_valid_additional_creators
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -85,13 +86,18 @@ class RoomUpgradeRestServlet(RestServlet):
                 "Your homeserver does not support this room version",
                 Codes.UNSUPPORTED_ROOM_VERSION,
             )
+        additional_creators = None
+        if new_version.msc4289_creator_power_enabled:
+            additional_creators = content.get("additional_creators")
+            if additional_creators is not None:
+                check_valid_additional_creators(additional_creators)
 
         try:
             async with self._worker_lock_handler.acquire_read_write_lock(
                 NEW_EVENT_DURING_PURGE_LOCK_NAME, room_id, write=False
             ):
                 new_room_id = await self._room_creation_handler.upgrade_room(
-                    requester, room_id, new_version
+                    requester, room_id, new_version, additional_creators
                 )
         except ShadowBanError:
             # Generate a random room ID.

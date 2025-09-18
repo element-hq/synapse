@@ -36,6 +36,7 @@ from .federation import FederationConfig
 from .jwt import JWTConfig
 from .key import KeyConfig
 from .logger import LoggingConfig
+from .mas import MasConfig
 from .metrics import MetricsConfig
 from .modules import ModulesConfig
 from .oembed import OembedConfig
@@ -59,6 +60,7 @@ from .third_party_event_rules import ThirdPartyRulesConfig
 from .tls import TlsConfig
 from .tracer import TracerConfig
 from .user_directory import UserDirectoryConfig
+from .user_types import UserTypesConfig
 from .voip import VoipConfig
 from .workers import WorkerConfig
 
@@ -107,4 +109,7 @@ class HomeServerConfig(RootConfig):
         ExperimentalConfig,
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
+        UserTypesConfig,
+        # This must be last, as it checks for conflicts with other config options.
+        MasConfig,
     ]

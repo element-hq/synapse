@@ -34,6 +34,7 @@ class InviteAutoAccepter:
     def __init__(self, config: AutoAcceptInvitesConfig, api: ModuleApi):
         # Keep a reference to the Module API.
         self._api = api
+        self.server_name = api.server_name
         self._config = config
 
         if not self._config.enabled:
@@ -66,49 +67,66 @@ class InviteAutoAccepter:
             event: The incoming event.
         """
         # Check if the event is an invite for a local user.
-        is_invite_for_local_user = (
-            event.type == EventTypes.Member
-            and event.is_state()
-            and event.membership == Membership.INVITE
-            and self._api.is_mine(event.state_key)
-        )
+        if (
+            event.type != EventTypes.Member
+            or event.is_state() is False
+            or event.membership != Membership.INVITE
+            or self._api.is_mine(event.state_key) is False
+        ):
+            return
 
         # Only accept invites for direct messages if the configuration mandates it.
         is_direct_message = event.content.get("is_direct", False)
-        is_allowed_by_direct_message_rules = (
-            not self._config.accept_invites_only_for_direct_messages
-            or is_direct_message is True
-        )
+        if (
+            self._config.accept_invites_only_for_direct_messages
+            and is_direct_message is False
+        ):
+            return
 
         # Only accept invites from remote users if the configuration mandates it.
         is_from_local_user = self._api.is_mine(event.sender)
-        is_allowed_by_local_user_rules = (
-            not self._config.accept_invites_only_from_local_users
-            or is_from_local_user is True
+        if (
+            self._config.accept_invites_only_from_local_users
+            and is_from_local_user is False
+        ):
+            return
+
+        # Check the user is activated.
+        recipient = await self._api.get_userinfo_by_id(event.state_key)
+
+        # Ignore if the user doesn't exist.
+        if recipient is None:
+            return
+
+        # Never accept invites for deactivated users.
+        if recipient.is_deactivated:
+            return
+
+        # Never accept invites for suspended users.
+        if recipient.suspended:
+            return
+
+        # Never accept invites for locked users.
+        if recipient.locked:
+            return
+
+        # Make the user join the room. We run this as a background process to circumvent a race condition
+        # that occurs when responding to invites over federation (see https://github.com/matrix-org/synapse-auto-accept-invite/issues/12)
+        run_as_background_process(
+            "retry_make_join",
+            self._retry_make_join,
+            event.state_key,
+            event.state_key,
+            event.room_id,
+            "join",
+            bg_start_span=False,
         )
 
-        if (
-            is_invite_for_local_user
-            and is_allowed_by_direct_message_rules
-            and is_allowed_by_local_user_rules
-        ):
-            # Make the user join the room. We run this as a background process to circumvent a race condition
-            # that occurs when responding to invites over federation (see https://github.com/matrix-org/synapse-auto-accept-invite/issues/12)
-            run_as_background_process(
-                "retry_make_join",
-                self._retry_make_join,
-                event.state_key,
-                event.state_key,
-                event.room_id,
-                "join",
-                bg_start_span=False,
+        if is_direct_message:
+            # Mark this room as a direct message!
+            await self._mark_room_as_direct_message(
+                event.state_key, event.sender, event.room_id
             )
-
-            if is_direct_message:
-                # Mark this room as a direct message!
-                await self._mark_room_as_direct_message(
-                    event.state_key, event.sender, event.room_id
-                )
 
     async def _mark_room_as_direct_message(
         self, user_id: str, dm_user_id: str, room_id: str
@@ -178,15 +196,18 @@ class InviteAutoAccepter:
             except SynapseError as e:
                 if e.code == HTTPStatus.FORBIDDEN:
                     logger.debug(
-                        f"Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: {e}"
+                        "Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: %s",
+                        e,
                     )
                 else:
-                    logger.warn(
-                        f"Update_room_membership raised the following unexpected (SynapseError) exception: {e}"
+                    logger.warning(
+                        "Update_room_membership raised the following unexpected (SynapseError) exception: %s",
+                        e,
                     )
             except Exception as e:
-                logger.warn(
-                    f"Update_room_membership raised the following unexpected exception: {e}"
+                logger.warning(
+                    "Update_room_membership raised the following unexpected exception: %s",
+                    e,
                 )
 
             sleep = 2**retries

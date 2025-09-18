@@ -25,8 +25,8 @@ from typing import TYPE_CHECKING, List, Tuple
 from twisted.web.server import Request
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import EventBase, make_event_from_dict
-from synapse.events.snapshot import EventContext
+from synapse.events import make_event_from_dict
+from synapse.events.snapshot import EventContext, EventPersistencePair
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
 from synapse.types import JsonDict, Requester, UserID
@@ -77,6 +77,7 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.server_name = hs.hostname
         self.event_creation_handler = hs.get_event_creation_handler()
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -84,7 +85,7 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         store: "DataStore",
         requester: Requester,
         ratelimit: bool,
@@ -122,7 +123,9 @@ class ReplicationSendEventsRestServlet(ReplicationEndpoint):
     async def _handle_request(  # type: ignore[override]
         self, request: Request, payload: JsonDict
     ) -> Tuple[int, JsonDict]:
-        with Measure(self.clock, "repl_send_events_parse"):
+        with Measure(
+            self.clock, name="repl_send_events_parse", server_name=self.server_name
+        ):
             events_and_context = []
             events = payload["events"]
             rooms = set()

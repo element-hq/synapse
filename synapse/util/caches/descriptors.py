@@ -33,6 +33,7 @@ from typing import (
     List,
     Mapping,
     Optional,
+    Protocol,
     Sequence,
     Tuple,
     Type,
@@ -153,6 +154,14 @@ class _CacheDescriptorBase:
         )
 
 
+class HasServerName(Protocol):
+    server_name: str
+    """
+    The homeserver name that this cache is associated with (used to label the metric)
+    (`hs.hostname`).
+    """
+
+
 class DeferredCacheDescriptor(_CacheDescriptorBase):
     """A method decorator that applies a memoizing cache around the function.
 
@@ -200,6 +209,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
 
     def __init__(
         self,
+        *,
         orig: Callable[..., Any],
         max_entries: int = 1000,
         num_args: Optional[int] = None,
@@ -229,10 +239,20 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[Any], owner: Optional[Type]
+        self, obj: Optional[HasServerName], owner: Optional[Type]
     ) -> Callable[..., "defer.Deferred[Any]"]:
+        # We need access to instance-level `obj.server_name` attribute
+        assert obj is not None, (
+            "Cannot call cached method from class (❌ `MyClass.cached_method()`) "
+            "and must be called from an instance (✅ `MyClass().cached_method()`). "
+        )
+        assert obj.server_name is not None, (
+            "The `server_name` attribute must be set on the object where `@cached` decorator is used."
+        )
+
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
+            server_name=obj.server_name,
             max_entries=self.max_entries,
             tree=self.tree,
             iterable=self.iterable,
@@ -490,7 +510,7 @@ class _CachedFunctionDescriptor:
 
     def __call__(self, orig: F) -> CachedFunction[F]:
         d = DeferredCacheDescriptor(
-            orig,
+            orig=orig,
             max_entries=self.max_entries,
             num_args=self.num_args,
             uncached_args=self.uncached_args,
@@ -559,9 +579,12 @@ def cachedList(
     Used to do batch lookups for an already created cache. One of the arguments
     is specified as a list that is iterated through to lookup keys in the
     original cache. A new tuple consisting of the (deduplicated) keys that weren't in
-    the cache gets passed to the original function, which is expected to results
+    the cache gets passed to the original function, which is expected to result
     in a map of key to value for each passed value. The new results are stored in the
-    original cache. Note that any missing values are cached as None.
+    original cache.
+
+    Note that any values in the input that end up being missing from both the
+    cache and the returned dictionary will be cached as `None`.
 
     Args:
         cached_method_name: The name of the single-item lookup method.

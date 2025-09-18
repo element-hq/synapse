@@ -19,9 +19,7 @@
 #
 #
 
-from typing import Hashable, Tuple
-
-from typing_extensions import Protocol
+from typing import Hashable, Protocol, Tuple
 
 from twisted.internet import defer, reactor
 from twisted.internet.base import ReactorBase

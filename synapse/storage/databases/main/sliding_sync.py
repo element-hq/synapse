@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023, 2025 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -59,6 +59,21 @@ class SlidingSyncStore(SQLBaseStore):
             index_name="sliding_sync_connection_room_configs_required_state_id_idx",
             table="sliding_sync_connection_room_configs",
             columns=("required_state_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_membership_event_id_idx",
+            index_name="sliding_sync_membership_snapshots_membership_event_id_idx",
+            table="sliding_sync_membership_snapshots",
+            columns=("membership_event_id",),
+        )
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            index_name="sliding_sync_membership_snapshots_user_id_stream_ordering",
+            table="sliding_sync_membership_snapshots",
+            columns=("user_id", "event_stream_ordering"),
+            replaces_index="sliding_sync_membership_snapshots_user_id",
         )
 
     async def get_latest_bump_stamp_for_room(
@@ -477,7 +492,7 @@ class PerConnectionStateDB:
     """An equivalent to `PerConnectionState` that holds data in a format stored
     in the DB.
 
-    The principle difference is that the tokens for the different streams are
+    The principal difference is that the tokens for the different streams are
     serialized to strings.
 
     When persisting this *only* contains updates to the state.

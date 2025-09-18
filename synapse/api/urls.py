@@ -22,8 +22,10 @@
 """Contains the URL paths to prefix various aspects of the server with."""
 
 import hmac
+import urllib.parse
 from hashlib import sha256
-from urllib.parse import urlencode
+from typing import Optional
+from urllib.parse import urlencode, urljoin
 
 from synapse.config import ConfigError
 from synapse.config.homeserver import HomeServerConfig
@@ -66,3 +68,52 @@ class ConsentURIBuilder:
             urlencode({"u": user_id, "h": mac}),
         )
         return consent_uri
+
+
+class LoginSSORedirectURIBuilder:
+    def __init__(self, hs_config: HomeServerConfig):
+        self._public_baseurl = hs_config.server.public_baseurl
+
+    def build_login_sso_redirect_uri(
+        self, *, idp_id: Optional[str], client_redirect_url: str
+    ) -> str:
+        """Build a `/login/sso/redirect` URI for the given identity provider.
+
+        Builds `/_matrix/client/v3/login/sso/redirect/{idpId}?redirectUrl=xxx` when `idp_id` is specified.
+        Otherwise, builds `/_matrix/client/v3/login/sso/redirect?redirectUrl=xxx` when `idp_id` is `None`.
+
+        Args:
+            idp_id: Optional ID of the identity provider
+            client_redirect_url: URL to redirect the user to after login
+
+        Returns
+            The URI to follow when choosing a specific identity provider.
+        """
+        base_url = urljoin(
+            self._public_baseurl,
+            f"{CLIENT_API_PREFIX}/v3/login/sso/redirect",
+        )
+
+        serialized_query_parameters = urlencode({"redirectUrl": client_redirect_url})
+
+        if idp_id:
+            # Since this is a user-controlled string, make it safe to include in a URL path.
+            url_encoded_idp_id = urllib.parse.quote(
+                idp_id,
+                # Since this defaults to `safe="/"`, we have to override it. We're
+                # working with an individual URL path parameter so there shouldn't be
+                # any slashes in it which could change the request path.
+                safe="",
+                encoding="utf8",
+            )
+
+            resultant_url = urljoin(
+                # We have to add a trailing slash to the base URL to ensure that the
+                # last path segment is not stripped away when joining with another path.
+                f"{base_url}/",
+                f"{url_encoded_idp_id}?{serialized_query_parameters}",
+            )
+        else:
+            resultant_url = f"{base_url}?{serialized_query_parameters}"
+
+        return resultant_url

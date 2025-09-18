@@ -21,6 +21,7 @@
 import contextlib
 import logging
 import time
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Generator, Optional, Tuple, Union
 
 import attr
@@ -43,6 +44,7 @@ from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, Requester
 
 if TYPE_CHECKING:
@@ -82,12 +84,14 @@ class SynapseRequest(Request):
         self,
         channel: HTTPChannel,
         site: "SynapseSite",
+        our_server_name: str,
         *args: Any,
         max_request_body_size: int = 1024,
         request_id_header: Optional[str] = None,
         **kw: Any,
     ):
         super().__init__(channel, *args, **kw)
+        self.our_server_name = our_server_name
         self._max_request_body_size = max_request_body_size
         self.request_id_header = request_id_header
         self.synapse_site = site
@@ -138,6 +142,41 @@ class SynapseRequest(Request):
             self.clientproto.decode("ascii", errors="replace"),
             self.synapse_site.site_tag,
         )
+
+    # Twisted machinery: this method is called by the Channel once the full request has
+    # been received, to dispatch the request to a resource.
+    #
+    # We're patching Twisted to bail/abort early when we see someone trying to upload
+    # `multipart/form-data` so we can avoid Twisted parsing the entire request body into
+    # in-memory (specific problem of this specific `Content-Type`). This protects us
+    # from an attacker uploading something bigger than the available RAM and crashing
+    # the server with a `MemoryError`, or carefully block just enough resources to cause
+    # all other requests to fail.
+    #
+    # FIXME: This can be removed once we Twisted releases a fix and we update to a
+    # version that is patched
+    def requestReceived(self, command: bytes, path: bytes, version: bytes) -> None:
+        if command == b"POST":
+            ctype = self.requestHeaders.getRawHeaders(b"content-type")
+            if ctype and b"multipart/form-data" in ctype[0]:
+                self.method, self.uri = command, path
+                self.clientproto = version
+                self.code = HTTPStatus.UNSUPPORTED_MEDIA_TYPE.value
+                self.code_message = bytes(
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE.phrase, "ascii"
+                )
+                self.responseHeaders.setRawHeaders(b"content-length", [b"0"])
+
+                logger.warning(
+                    "Aborting connection from %s because `content-type: multipart/form-data` is unsupported: %s %s",
+                    self.client,
+                    command,
+                    path,
+                )
+                self.write(b"")
+                self.loseConnection()
+                return
+        return super().requestReceived(command, path, version)
 
     def handleContentChunk(self, data: bytes) -> None:
         # we should have a `content` by now.
@@ -298,7 +337,11 @@ class SynapseRequest(Request):
             # dispatching to the handler, so that the handler
             # can update the servlet name in the request
             # metrics
-            requests_counter.labels(self.get_method(), self.request_metrics.name).inc()
+            requests_counter.labels(
+                method=self.get_method(),
+                servlet=self.request_metrics.name,
+                **{SERVER_NAME_LABEL: self.our_server_name},
+            ).inc()
 
     @contextlib.contextmanager
     def processing(self) -> Generator[None, None, None]:
@@ -419,7 +462,7 @@ class SynapseRequest(Request):
                 self.request_metrics.name.
         """
         self.start_time = time.time()
-        self.request_metrics = RequestMetrics()
+        self.request_metrics = RequestMetrics(our_server_name=self.our_server_name)
         self.request_metrics.start(
             self.start_time, name=servlet_name, method=self.get_method()
         )
@@ -658,6 +701,7 @@ class SynapseSite(ProxySite):
 
         self.site_tag = site_tag
         self.reactor: ISynapseReactor = reactor
+        self.server_name = hs.hostname
 
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded
@@ -669,6 +713,7 @@ class SynapseSite(ProxySite):
             return request_class(
                 channel,
                 self,
+                our_server_name=self.server_name,
                 max_request_body_size=max_request_body_size,
                 queued=queued,
                 request_id_header=request_id_header,

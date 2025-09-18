@@ -38,7 +38,9 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import (
     MemberSummary,
@@ -48,6 +50,7 @@ from synapse.types import (
     MutableStateMap,
     PersistedEventPosition,
     Requester,
+    RoomStreamToken,
     SlidingSyncStreamToken,
     StateMap,
     StrCollection,
@@ -77,7 +80,7 @@ logger = logging.getLogger(__name__)
 sync_processing_time = Histogram(
     "synapse_sliding_sync_processing_time",
     "Time taken to generate a sliding sync response, ignoring wait times.",
-    ["initial"],
+    labelnames=["initial", SERVER_NAME_LABEL],
 )
 
 # Limit the number of state_keys we should remember sending down the connection for each
@@ -92,6 +95,7 @@ MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
 
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
@@ -112,7 +116,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         from_token: Optional[SlidingSyncStreamToken] = None,
         timeout_ms: int = 0,
-    ) -> SlidingSyncResult:
+    ) -> Tuple[SlidingSyncResult, bool]:
         """
         Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
@@ -124,9 +128,16 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
             timeout_ms: The time in milliseconds to wait for new data to arrive. If 0,
-                we will immediately but there might not be any new data so we just return an
-                empty response.
+                we will respond immediately but there might not be any new data so we just
+                return an empty response.
+
+        Returns:
+            A tuple containing the `SlidingSyncResult` and whether we waited for new
+            activity before responding. Knowing whether we waited is useful in traces
+            to filter out long-running requests where we were just waiting.
         """
+        did_wait = False
+
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
         # auth_blocking will occur)
@@ -145,7 +156,7 @@ class SlidingSyncHandler:
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return SlidingSyncResult.empty(from_token)
+                return SlidingSyncResult.empty(from_token), did_wait
 
             # If we've spent significant time waiting to catch up, take it off
             # the timeout.
@@ -181,8 +192,9 @@ class SlidingSyncHandler:
                 current_sync_callback,
                 from_token=from_token.stream_token,
             )
+            did_wait = True
 
-        return result
+        return result, did_wait
 
     @trace
     async def current_sync_for_user(
@@ -199,7 +211,7 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
@@ -269,6 +281,7 @@ class SlidingSyncHandler:
                 from_token=from_token,
                 to_token=to_token,
                 newly_joined=room_id in interested_rooms.newly_joined_rooms,
+                newly_left=room_id in interested_rooms.newly_left_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
@@ -365,9 +378,9 @@ class SlidingSyncHandler:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
 
         end_time_s = self.clock.time()
-        sync_processing_time.labels(from_token is not None).observe(
-            end_time_s - start_time_s
-        )
+        sync_processing_time.labels(
+            initial=from_token is not None, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time_s - start_time_s)
 
         return sliding_sync_result
 
@@ -471,6 +484,64 @@ class SlidingSyncHandler:
         return state_map
 
     @trace
+    async def get_current_state_deltas_for_room(
+        self,
+        room_id: str,
+        room_membership_for_user_at_to_token: RoomsForUserType,
+        from_token: RoomStreamToken,
+        to_token: RoomStreamToken,
+    ) -> List[StateDelta]:
+        """
+        Get the state deltas between two tokens taking into account the user's
+        membership. If the user is LEAVE/BAN, we will only get the state deltas up to
+        their LEAVE/BAN event (inclusive).
+
+        (> `from_token` and <= `to_token`)
+        """
+        membership = room_membership_for_user_at_to_token.membership
+        # We don't know how to handle `membership` values other than these. The
+        # code below would need to be updated.
+        assert membership in (
+            Membership.JOIN,
+            Membership.INVITE,
+            Membership.KNOCK,
+            Membership.LEAVE,
+            Membership.BAN,
+        )
+
+        # People shouldn't see past their leave/ban event
+        if membership in (
+            Membership.LEAVE,
+            Membership.BAN,
+        ):
+            to_bound = (
+                room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
+            )
+        # If we are participating in the room, we can get the latest current state in
+        # the room
+        elif membership == Membership.JOIN:
+            to_bound = to_token
+        # We can only rely on the stripped state included in the invite/knock event
+        # itself so there will never be any state deltas to send down.
+        elif membership in (Membership.INVITE, Membership.KNOCK):
+            return []
+        else:
+            # We don't know how to handle this type of membership yet
+            #
+            # FIXME: We should use `assert_never` here but for some reason
+            # the exhaustive matching doesn't recognize the `Never` here.
+            # assert_never(membership)
+            raise AssertionError(
+                f"Unexpected membership {membership} that we don't know how to handle yet"
+            )
+
+        return await self.store.get_current_state_deltas_for_room(
+            room_id=room_id,
+            from_token=from_token,
+            to_token=to_bound,
+        )
+
+    @trace
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
@@ -482,6 +553,7 @@ class SlidingSyncHandler:
         from_token: Optional[SlidingSyncStreamToken],
         to_token: StreamToken,
         newly_joined: bool,
+        newly_left: bool,
         is_dm: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
@@ -499,6 +571,7 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
             newly_joined: If the user has newly joined the room
+            newly_left: If the user has newly left the room
             is_dm: Whether the room is a DM room
         """
         user = sync_config.user
@@ -755,13 +828,19 @@ class SlidingSyncHandler:
 
             stripped_state = []
             if invite_or_knock_event.membership == Membership.INVITE:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("invite_room_state", [])
+                invite_state = invite_or_knock_event.unsigned.get(
+                    "invite_room_state", []
                 )
+                if not isinstance(invite_state, list):
+                    invite_state = []
+
+                stripped_state.extend(invite_state)
             elif invite_or_knock_event.membership == Membership.KNOCK:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("knock_room_state", [])
-                )
+                knock_state = invite_or_knock_event.unsigned.get("knock_room_state", [])
+                if not isinstance(knock_state, list):
+                    knock_state = []
+
+                stripped_state.extend(knock_state)
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
@@ -790,8 +869,29 @@ class SlidingSyncHandler:
             # TODO: Limit the number of state events we're about to send down
             # the room, if its too many we should change this to an
             # `initial=True`?
-            deltas = await self.store.get_current_state_deltas_for_room(
+
+            # For the case of rejecting remote invites, the leave event won't be
+            # returned by `get_current_state_deltas_for_room`. This is due to the current
+            # state only being filled out for rooms the server is in, and so doesn't pick
+            # up out-of-band leaves (including locally rejected invites) as these events
+            # are outliers and not added to the `current_state_delta_stream`.
+            #
+            # We rely on being explicitly told that the room has been `newly_left` to
+            # ensure we extract the out-of-band leave.
+            if newly_left and room_membership_for_user_at_to_token.event_id is not None:
+                membership_changed = True
+                leave_event = await self.store.get_event(
+                    room_membership_for_user_at_to_token.event_id
+                )
+                state_key = leave_event.get_state_key()
+                if state_key is not None:
+                    room_state_delta_id_map[(leave_event.type, state_key)] = (
+                        room_membership_for_user_at_to_token.event_id
+                    )
+
+            deltas = await self.get_current_state_deltas_for_room(
                 room_id=room_id,
+                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
                 from_token=from_bound,
                 to_token=to_token.room_key,
             )
@@ -955,14 +1055,20 @@ class SlidingSyncHandler:
                             and state_key == StateValues.LAZY
                         ):
                             lazy_load_room_members = True
+
                             # Everyone in the timeline is relevant
-                            #
-                            # FIXME: We probably also care about invite, ban, kick, targets, etc
-                            # but the spec only mentions "senders".
                             timeline_membership: Set[str] = set()
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
+                                    # Anyone who sent a message is relevant
                                     timeline_membership.add(timeline_event.sender)
+
+                                    # We also care about invite, ban, kick, targets,
+                                    # etc.
+                                    if timeline_event.type == EventTypes.Member:
+                                        timeline_membership.add(
+                                            timeline_event.state_key
+                                        )
 
                             # Update the required state filter so we pick up the new
                             # membership

@@ -31,22 +31,14 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypedDict,
     cast,
 )
 
 import attr
 
-try:
-    # Figure out if ICU support is available for searching users.
-    import icu
-
-    USE_ICU = True
-except ModuleNotFoundError:
-    USE_ICU = False
-
-from typing_extensions import TypedDict
-
 from synapse.api.errors import StoreError
+from synapse.synapse_rust import segmenter as icu
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:
@@ -253,8 +245,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             return 1
 
         logger.debug(
-            "Processing the next %d rooms of %d remaining"
-            % (len(rooms_to_work_on), progress["remaining"])
+            "Processing the next %d rooms of %d remaining",
+            len(rooms_to_work_on),
+            progress["remaining"],
         )
 
         processed_event_count = 0
@@ -583,9 +576,9 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             retry_counter: number of failures in refreshing the profile so far. Used for
                 exponential backoff calculations.
         """
-        assert not self.hs.is_mine_id(
-            user_id
-        ), "Can't mark a local user as a stale remote user."
+        assert not self.hs.is_mine_id(user_id), (
+            "Can't mark a local user as a stale remote user."
+        )
 
         server_name = UserID.from_string(user_id).domain
 
@@ -1038,11 +1031,11 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 }
         """
 
+        join_args: Tuple[str, ...] = (user_id,)
+
         if self.hs.config.userdirectory.user_directory_search_all_users:
-            join_args = (user_id,)
             where_clause = "user_id != ?"
         else:
-            join_args = (user_id,)
             where_clause = """
                 (
                     EXISTS (select 1 from users_in_public_rooms WHERE user_id = t.user_id)
@@ -1055,6 +1048,14 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
 
         if not show_locked_users:
             where_clause += " AND (u.locked IS NULL OR u.locked = FALSE)"
+
+        # Adjust the JOIN type based on the exclude_remote_users flag (the users
+        # table only contains local users so an inner join is a good way to
+        # to exclude remote users)
+        if self.hs.config.userdirectory.user_directory_exclude_remote_users:
+            join_type = "JOIN"
+        else:
+            join_type = "LEFT JOIN"
 
         # We allow manipulating the ranking algorithm by injecting statements
         # based on config options.
@@ -1087,7 +1088,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM matching_users as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                 ORDER BY
@@ -1116,6 +1117,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_case_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = (
                 (full_query,)
@@ -1143,7 +1145,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
                 SELECT d.user_id AS user_id, display_name, avatar_url
                 FROM user_directory_search as t
                 INNER JOIN user_directory AS d USING (user_id)
-                LEFT JOIN users AS u ON t.user_id = u.name
+                %(join_type)s users AS u ON t.user_id = u.name
                 WHERE
                     %(where_clause)s
                     AND value MATCH ?
@@ -1156,6 +1158,7 @@ class UserDirectoryStore(UserDirectoryBackgroundUpdateStore):
             """ % {
                 "where_clause": where_clause,
                 "order_statements": " ".join(additional_ordering_statements),
+                "join_type": join_type,
             }
             args = join_args + (search_query,) + ordering_arguments + (limit + 1,)
         else:
@@ -1215,7 +1218,7 @@ def _filter_text_for_index(text: str) -> str:
 
 def _parse_query_sqlite(search_term: str) -> str:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
 
@@ -1231,14 +1234,20 @@ def _parse_query_sqlite(search_term: str) -> str:
 
 def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
     """Takes a plain unicode string from the user and converts it into a form
-    that can be passed to database.
+    that can be passed to the database.
     We use this so that we can add prefix matching, which isn't something
     that is supported by default.
     """
     search_term = _filter_text_for_index(search_term)
 
     escaped_words = []
-    for word in _parse_words(search_term):
+    for index, word in enumerate(_parse_words(search_term)):
+        if index >= 10:
+            # We limit how many terms we include, as otherwise it can use
+            # excessive database time if people accidentally search for large
+            # strings.
+            break
+
         # Postgres tsvector and tsquery quoting rules:
         # words potentially containing punctuation should be quoted
         # and then existing quotes and backslashes should be doubled
@@ -1255,12 +1264,7 @@ def _parse_query_postgres(search_term: str) -> Tuple[str, str, str]:
 
 
 def _parse_words(search_term: str) -> List[str]:
-    """Split the provided search string into a list of its words.
-
-    If support for ICU (International Components for Unicode) is available, use it.
-    Otherwise, fall back to using a regex to detect word boundaries. This latter
-    solution works well enough for most latin-based languages, but doesn't work as well
-    with other languages.
+    """Split the provided search string into a list of its words using ICU.
 
     Args:
         search_term: The search string.
@@ -1268,18 +1272,7 @@ def _parse_words(search_term: str) -> List[str]:
     Returns:
         A list of the words in the search string.
     """
-    if USE_ICU:
-        return _parse_words_with_icu(search_term)
-
-    return _parse_words_with_regex(search_term)
-
-
-def _parse_words_with_regex(search_term: str) -> List[str]:
-    """
-    Break down search term into words, when we don't have ICU available.
-    See: `_parse_words`
-    """
-    return re.findall(r"([\w-]+)", search_term, re.UNICODE)
+    return _parse_words_with_icu(search_term)
 
 
 def _parse_words_with_icu(search_term: str) -> List[str]:
@@ -1293,22 +1286,13 @@ def _parse_words_with_icu(search_term: str) -> List[str]:
         A list of the words in the search string.
     """
     results = []
-    breaker = icu.BreakIterator.createWordInstance(icu.Locale.getDefault())
-    breaker.setText(search_term)
-    i = 0
-    while True:
-        j = breaker.nextBoundary()
-        if j < 0:
-            break
-
+    for part in icu.parse_words(search_term):
         # We want to make sure that we split on `@` and `:` specifically, as
         # they occur in user IDs.
-        for result in re.split(r"[@:]+", search_term[i:j]):
+        for result in re.split(r"[@:]+", part):
             results.append(result.strip())
 
-        i = j
-
-    # libicu will break up words that have punctuation in them, but to handle
+    # icu will break up words that have punctuation in them, but to handle
     # cases where user IDs have '-', '.' and '_' in them we want to *not* break
     # those into words and instead allow the DB to tokenise them how it wants.
     #

@@ -72,10 +72,10 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
-from synapse.logging.context import PreserveLoggingContext
+from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -183,25 +183,23 @@ def start_reactor(
         if gc_thresholds:
             gc.set_threshold(*gc_thresholds)
         install_gc_manager()
-        run_command()
 
-    # make sure that we run the reactor with the sentinel log context,
-    # otherwise other PreserveLoggingContext instances will get confused
-    # and complain when they see the logcontext arbitrarily swapping
-    # between the sentinel and `run` logcontexts.
-    #
-    # We also need to drop the logcontext before forking if we're daemonizing,
-    # otherwise the cputime metrics get confused about the per-thread resource usage
-    # appearing to go backwards.
-    with PreserveLoggingContext():
-        if daemonize:
-            assert pid_file is not None
+        # Reset the logging context when we start the reactor (whenever we yield control
+        # to the reactor, the `sentinel` logging context needs to be set so we don't
+        # leak the current logging context and erroneously apply it to the next task the
+        # reactor event loop picks up)
+        with PreserveLoggingContext():
+            run_command()
 
-            if print_pidfile:
-                print(pid_file)
+    if daemonize:
+        assert pid_file is not None
 
-            daemonize_process(pid_file, logger)
-        run()
+        if print_pidfile:
+            print(pid_file)
+
+        daemonize_process(pid_file, logger)
+
+    run()
 
 
 def quit_with_error(error_string: str) -> NoReturn:
@@ -286,6 +284,16 @@ def register_start(
 def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
     """
     Start Prometheus metrics server.
+
+    This method runs the metrics server on a different port, in a different thread to
+    Synapse. This can make it more resilient to heavy load in Synapse causing metric
+    requests to be slow or timeout.
+
+    Even though `start_http_server_prometheus(...)` uses `threading.Thread` behind the
+    scenes (where all threads share the GIL and only one thread can execute Python
+    bytecode at a time), this still works because the metrics thread can preempt the
+    Twisted reactor thread between bytecode boundaries and the metrics thread gets
+    scheduled with roughly equal priority to the Twisted reactor thread.
     """
     from prometheus_client import start_http_server as start_http_server_prometheus
 
@@ -293,30 +301,7 @@ def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
 
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
-        _set_prometheus_client_use_created_metrics(False)
         start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
-
-
-def _set_prometheus_client_use_created_metrics(new_value: bool) -> None:
-    """
-    Sets whether prometheus_client should expose `_created`-suffixed metrics for
-    all gauges, histograms and summaries.
-    There is no programmatic way to disable this without poking at internals;
-    the proper way is to use an environment variable which prometheus_client
-    loads at import time.
-
-    The motivation for disabling these `_created` metrics is that they're
-    a waste of space as they're not useful but they take up space in Prometheus.
-    """
-
-    import prometheus_client.metrics
-
-    if hasattr(prometheus_client.metrics, "_use_created"):
-        prometheus_client.metrics._use_created = new_value
-    else:
-        logger.error(
-            "Can't disable `_created` metrics in prometheus_client (brittle hack broken?)"
-        )
 
 
 def listen_manhole(
@@ -445,8 +430,8 @@ def listen_http(
         # getHost() returns a UNIXAddress which contains an instance variable of 'name'
         # encoded as a byte string. Decode as utf-8 so pretty.
         logger.info(
-            "Synapse now listening on Unix Socket at: "
-            f"{ports[0].getHost().name.decode('utf-8')}"
+            "Synapse now listening on Unix Socket at: %s",
+            ports[0].getHost().name.decode("utf-8"),
         )
 
     return ports
@@ -525,6 +510,7 @@ async def start(hs: "HomeServer") -> None:
     Args:
         hs: homeserver instance
     """
+    server_name = hs.hostname
     reactor = hs.get_reactor()
 
     # We want to use a separate thread pool for the resolver so that large
@@ -537,22 +523,34 @@ async def start(hs: "HomeServer") -> None:
     )
 
     # Register the threadpools with our metrics.
-    register_threadpool("default", reactor.getThreadPool())
-    register_threadpool("gai_resolver", resolver_threadpool)
+    register_threadpool(
+        name="default", server_name=server_name, threadpool=reactor.getThreadPool()
+    )
+    register_threadpool(
+        name="gai_resolver", server_name=server_name, threadpool=resolver_threadpool
+    )
 
     # Set up the SIGHUP machinery.
     if hasattr(signal, "SIGHUP"):
 
-        @wrap_as_background_process("sighup")
-        async def handle_sighup(*args: Any, **kwargs: Any) -> None:
-            # Tell systemd our state, if we're using it. This will silently fail if
-            # we're not using systemd.
-            sdnotify(b"RELOADING=1")
+        def handle_sighup(*args: Any, **kwargs: Any) -> "defer.Deferred[None]":
+            async def _handle_sighup(*args: Any, **kwargs: Any) -> None:
+                # Tell systemd our state, if we're using it. This will silently fail if
+                # we're not using systemd.
+                sdnotify(b"RELOADING=1")
 
-            for i, args, kwargs in _sighup_callbacks:
-                i(*args, **kwargs)
+                for i, args, kwargs in _sighup_callbacks:
+                    i(*args, **kwargs)
 
-            sdnotify(b"READY=1")
+                sdnotify(b"READY=1")
+
+            return run_as_background_process(
+                "sighup",
+                server_name,
+                _handle_sighup,
+                *args,
+                **kwargs,
+            )
 
         # We defer running the sighup handlers until next reactor tick. This
         # is so that we're in a sane state, e.g. flushing the logs may fail
@@ -601,18 +599,38 @@ async def start(hs: "HomeServer") -> None:
     hs.get_datastores().main.db_pool.start_profiling()
     hs.get_pusherpool().start()
 
+    def log_shutdown() -> None:
+        with LoggingContext("log_shutdown"):
+            logger.info("Shutting down...")
+
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger(
-        "before", "shutdown", logger.info, "Shutting down..."
-    )
+    hs.get_reactor().addSystemEventTrigger("before", "shutdown", log_shutdown)
 
     setup_sentry(hs)
     setup_sdnotify(hs)
 
-    # If background tasks are running on the main process or this is the worker in
-    # charge of them, start collecting the phone home stats and shared usage metrics.
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # While we could "start" these before the reactor runs, nothing will happen until
+    # the reactor is running, so we may as well do it here in `start`.
+    #
+    # Additionally, this means we also start them after we daemonize and fork the
+    # process which means we can avoid any potential problems with cputime metrics
+    # getting confused about the per-thread resource usage appearing to go backwards
+    # because we're comparing the resource usage (`rusage`) from the original process to
+    # the forked process.
     if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
+        # TODO: This should be moved to same pattern we use for other background tasks:
+        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
+        # `start_background_tasks` to start it.
         await hs.get_common_usage_metrics_manager().setup()
+
+        # TODO: This feels like another pattern that should refactored as one of the
+        # `REQUIRED_ON_BACKGROUND_TASK_STARTUP`
         start_phone_stats_home(hs)
 
     # We now freeze all allocated objects in the hopes that (almost)

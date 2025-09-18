@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib.resources as importlib_resources
 import os
 import re
 from email.parser import Parser
@@ -25,10 +26,8 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Union
 from unittest.mock import Mock
 
-import pkg_resources
-
 from twisted.internet.interfaces import IReactorTCP
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import LoginType, Membership
@@ -59,11 +58,12 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,
@@ -764,10 +764,10 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         as_token = "i_am_an_app_service"
 
         appservice = ApplicationService(
-            as_token,
+            token=as_token,
             id="1234",
             namespaces={"users": [{"regex": user_id, "exclusive": True}]},
-            sender=user_id,
+            sender=UserID.from_string(user_id),
         )
         self.hs.get_datastores().main.services_cache.append(appservice)
 
@@ -798,11 +798,12 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         config = self.default_config()
 
         # Email config.
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": False,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "smtp_host": "127.0.0.1",
             "smtp_port": 20,
             "require_transport_security": False,

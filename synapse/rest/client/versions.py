@@ -112,6 +112,7 @@ class VersionsRestServlet(RestServlet):
                     "v1.9",
                     "v1.10",
                     "v1.11",
+                    "v1.12",
                 ],
                 # as per MSC1497:
                 "unstable_features": {
@@ -170,10 +171,15 @@ class VersionsRestServlet(RestServlet):
                     ),
                     # MSC4140: Delayed events
                     "org.matrix.msc4140": bool(self.config.server.max_event_delay_ms),
-                    # MSC4151: Report room API (Client-Server API)
-                    "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
+                    # Arbitrary key-value profile fields.
+                    "uk.tcpip.msc4133": self.config.experimental.msc4133_enabled,
+                    "uk.tcpip.msc4133.stable": True,
+                    # MSC4155: Invite filtering
+                    "org.matrix.msc4155": self.config.experimental.msc4155_enabled,
+                    # MSC4306: Support for thread subscriptions
+                    "org.matrix.msc4306": self.config.experimental.msc4306_enabled,
                 },
             },
         )

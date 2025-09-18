@@ -20,6 +20,7 @@
 #
 #
 import abc
+import json
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -27,6 +28,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
@@ -39,7 +41,6 @@ from typing import (
 
 import attr
 from canonicaljson import encode_canonical_json
-from typing_extensions import Literal
 
 from synapse.api.constants import DeviceKeyAlgorithms
 from synapse.appservice import (
@@ -59,7 +60,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, JsonMapping
+from synapse.types import JsonDict, JsonMapping, MultiWriterStreamToken
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.cancellation import cancellable
@@ -120,6 +121,21 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             self.hs.config.federation.allow_device_name_lookup_over_federation
         )
 
+        self._cross_signing_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="e2e_cross_signing_keys",
+            server_name=self.server_name,
+            instance_name=self._instance_name,
+            tables=[
+                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
+            ],
+            sequence_name="e2e_cross_signing_keys_sequence",
+            # No one reads the stream positions, so we're allowed to have an empty list of writers
+            writers=[],
+        )
+
     def process_replication_rows(
         self,
         stream_name: str,
@@ -145,7 +161,12 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         Returns:
             (stream_id, devices)
         """
-        now_stream_id = self.get_device_stream_token()
+        # Here, we don't use the individual instances positions, as we *need* to
+        # give out the stream_id as an integer in the federation API.
+        # This means that we'll potentially return the same data twice with a
+        # different stream_id, and invalidate cache more often than necessary,
+        # which is fine overall.
+        now_stream_id = self.get_device_stream_token().stream
 
         # We need to be careful with the caching here, as we need to always
         # return *all* persisted devices, however there may be a lag between a
@@ -164,8 +185,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             # have to check for potential invalidations after the
             # `now_stream_id`.
             sql = """
-                SELECT user_id FROM device_lists_stream
+                SELECT 1
+                FROM device_lists_stream
                 WHERE stream_id >= ? AND user_id = ?
+                LIMIT 1
             """
             rows = await self.db_pool.execute(
                 "get_e2e_device_keys_for_federation_query_check",
@@ -332,15 +355,17 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
         for batch in batch_iter(signature_query, 50):
-            cross_sigs_result = await self.db_pool.runInteraction(
-                "get_e2e_cross_signing_signatures_for_devices",
-                self._get_e2e_cross_signing_signatures_for_devices_txn,
-                batch,
+            cross_sigs_result = (
+                await self._get_e2e_cross_signing_signatures_for_devices(batch)
             )
 
             # add each cross-signing signature to the correct device in the result dict.
-            for user_id, key_id, device_id, signature in cross_sigs_result:
+            for (
+                user_id,
+                device_id,
+            ), signature_list in cross_sigs_result.items():
                 target_device_result = result[user_id][device_id]
+
                 # We've only looked up cross-signatures for non-deleted devices with key
                 # data.
                 assert target_device_result is not None
@@ -351,7 +376,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 signing_user_signatures = target_device_signatures.setdefault(
                     user_id, {}
                 )
-                signing_user_signatures[key_id] = signature
+
+                for key_id, signature in signature_list:
+                    signing_user_signatures[key_id] = signature
 
         log_kv(result)
         return result
@@ -457,41 +484,83 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
         return result
 
-    def _get_e2e_cross_signing_signatures_for_devices_txn(
-        self, txn: LoggingTransaction, device_query: Iterable[Tuple[str, str]]
-    ) -> List[Tuple[str, str, str, str]]:
-        """Get cross-signing signatures for a given list of devices
-
-        Returns signatures made by the owners of the devices.
-
-        Returns: a list of results; each entry in the list is a tuple of
-            (user_id, key_id, target_device_id, signature).
+    @cached()
+    def _get_e2e_cross_signing_signatures_for_device(
+        self,
+        user_id_and_device_id: Tuple[str, str],
+    ) -> Sequence[Tuple[str, str]]:
         """
-        signature_query_clauses = []
-        signature_query_params = []
+        The single-item version of `_get_e2e_cross_signing_signatures_for_devices`.
+        See @cachedList for why a separate method is needed.
+        """
+        raise NotImplementedError()
 
-        for user_id, device_id in device_query:
-            signature_query_clauses.append(
-                "target_user_id = ? AND target_device_id = ? AND user_id = ?"
+    @cachedList(
+        cached_method_name="_get_e2e_cross_signing_signatures_for_device",
+        list_name="device_query",
+    )
+    async def _get_e2e_cross_signing_signatures_for_devices(
+        self, device_query: Iterable[Tuple[str, str]]
+    ) -> Mapping[Tuple[str, str], Sequence[Tuple[str, str]]]:
+        """Get cross-signing signatures for a given list of user IDs and devices.
+
+        Args:
+            An iterable containing tuples of (user ID, device ID).
+
+        Returns:
+            A mapping of results. The keys are the original (user_id, device_id)
+            tuple, while the value is the matching list of tuples of
+            (key_id, signature). The value will be an empty list if no
+            signatures exist for the device.
+
+            Given this method is annotated with `@cachedList`, the return dict's
+            keys match the tuples within `device_query`, so that cache entries can
+            be computed from the corresponding values.
+
+            As results are cached, the return type is immutable.
+        """
+
+        def _get_e2e_cross_signing_signatures_for_devices_txn(
+            txn: LoggingTransaction, device_query: Iterable[Tuple[str, str]]
+        ) -> Mapping[Tuple[str, str], Sequence[Tuple[str, str]]]:
+            where_clause_sql, where_clause_params = make_tuple_in_list_sql_clause(
+                self.database_engine,
+                columns=("target_user_id", "target_device_id", "user_id"),
+                iterable=[
+                    (user_id, device_id, user_id) for user_id, device_id in device_query
+                ],
             )
-            signature_query_params.extend([user_id, device_id, user_id])
 
-        signature_sql = """
-            SELECT user_id, key_id, target_device_id, signature
-            FROM e2e_cross_signing_signatures WHERE %s
-            """ % (" OR ".join("(" + q + ")" for q in signature_query_clauses))
+            signature_sql = f"""
+                SELECT user_id, key_id, target_device_id, signature
+                FROM e2e_cross_signing_signatures WHERE {where_clause_sql}
+            """
 
-        txn.execute(signature_sql, signature_query_params)
-        return cast(
-            List[
-                Tuple[
-                    str,
-                    str,
-                    str,
-                    str,
-                ]
-            ],
-            txn.fetchall(),
+            txn.execute(signature_sql, where_clause_params)
+
+            devices_and_signatures: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
+
+            # `@cachedList` requires we return one key for every item in `device_query`.
+            # Pre-populate `devices_and_signatures` with each key so that none are missing.
+            #
+            # If any are missing, they will be cached as `None`, which is not
+            # what callers expected.
+            for user_id, device_id in device_query:
+                devices_and_signatures.setdefault((user_id, device_id), [])
+
+            # Populate the return dictionary with each found key_id and signature.
+            for user_id, key_id, target_device_id, signature in txn.fetchall():
+                signature_tuple = (key_id, signature)
+                devices_and_signatures[(user_id, target_device_id)].append(
+                    signature_tuple
+                )
+
+            return devices_and_signatures
+
+        return await self.db_pool.runInteraction(
+            "_get_e2e_cross_signing_signatures_for_devices_txn",
+            _get_e2e_cross_signing_signatures_for_devices_txn,
+            device_query,
         )
 
     async def get_e2e_one_time_keys(
@@ -593,7 +662,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             txn, self.count_e2e_one_time_keys, (user_id, device_id)
         )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def count_e2e_one_time_keys(
         self, user_id: str, device_id: str
     ) -> Mapping[str, int]:
@@ -808,7 +877,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                     },
                 )
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def get_e2e_unused_fallback_key_types(
         self, user_id: str, device_id: str
     ) -> Sequence[str]:
@@ -1117,7 +1186,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     @abc.abstractmethod
-    def get_device_stream_token(self) -> int:
+    def get_device_stream_token(self) -> MultiWriterStreamToken:
         """Get the current stream id from the _device_list_id_gen"""
         ...
 
@@ -1501,27 +1570,83 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             "delete_old_otks_for_next_user_batch", impl
         )
 
+    async def allow_master_cross_signing_key_replacement_without_uia(
+        self, user_id: str, duration_ms: int
+    ) -> Optional[int]:
+        """Mark this user's latest master key as being replaceable without UIA.
 
-class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
+        Said replacement will only be permitted for a short time after calling this
+        function. That time period is controlled by the duration argument.
 
-        self._cross_signing_id_gen = MultiWriterIdGenerator(
-            db_conn=db_conn,
-            db=database,
-            notifier=hs.get_replication_notifier(),
-            stream_name="e2e_cross_signing_keys",
-            instance_name=self._instance_name,
-            tables=[
-                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
-            ],
-            sequence_name="e2e_cross_signing_keys_sequence",
-            writers=["master"],
+        Returns:
+            None, if there is no such key.
+            Otherwise, the timestamp before which replacement is allowed without UIA.
+        """
+        timestamp = self._clock.time_msec() + duration_ms
+
+        def impl(txn: LoggingTransaction) -> Optional[int]:
+            txn.execute(
+                """
+                UPDATE e2e_cross_signing_keys
+                SET updatable_without_uia_before_ms = ?
+                WHERE stream_id = (
+                    SELECT stream_id
+                    FROM e2e_cross_signing_keys
+                    WHERE user_id = ? AND keytype = 'master'
+                    ORDER BY stream_id DESC
+                    LIMIT 1
+                )
+            """,
+                (timestamp, user_id),
+            )
+            if txn.rowcount == 0:
+                return None
+
+            return timestamp
+
+        return await self.db_pool.runInteraction(
+            "allow_master_cross_signing_key_replacement_without_uia",
+            impl,
+        )
+
+    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
+        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
+            log_kv(
+                {
+                    "message": "Deleting keys for device",
+                    "device_id": device_id,
+                    "user_id": user_id,
+                }
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_device_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_one_time_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.count_e2e_one_time_keys, (user_id, device_id)
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="dehydrated_devices",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="e2e_fallback_keys_json",
+                keyvalues={"user_id": user_id, "device_id": device_id},
+            )
+            self._invalidate_cache_and_stream(
+                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
+            )
+
+        await self.db_pool.runInteraction(
+            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
         )
 
     async def set_e2e_device_keys(
@@ -1592,46 +1717,6 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
         )
         log_kv({"message": "Device keys stored."})
         return True
-
-    async def delete_e2e_keys_by_device(self, user_id: str, device_id: str) -> None:
-        def delete_e2e_keys_by_device_txn(txn: LoggingTransaction) -> None:
-            log_kv(
-                {
-                    "message": "Deleting keys for device",
-                    "device_id": device_id,
-                    "user_id": user_id,
-                }
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_device_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_one_time_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.count_e2e_one_time_keys, (user_id, device_id)
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="dehydrated_devices",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="e2e_fallback_keys_json",
-                keyvalues={"user_id": user_id, "device_id": device_id},
-            )
-            self._invalidate_cache_and_stream(
-                txn, self.get_e2e_unused_fallback_key_types, (user_id, device_id)
-            )
-
-        await self.db_pool.runInteraction(
-            "delete_e2e_keys_by_device", delete_e2e_keys_by_device_txn
-        )
 
     def _set_e2e_cross_signing_key_txn(
         self,
@@ -1734,63 +1819,79 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
             user_id: the user who made the signatures
             signatures: signatures to add
         """
-        await self.db_pool.simple_insert_many(
-            "e2e_cross_signing_signatures",
-            keys=(
-                "user_id",
-                "key_id",
-                "target_user_id",
-                "target_device_id",
-                "signature",
-            ),
-            values=[
-                (
-                    user_id,
-                    item.signing_key_id,
-                    item.target_user_id,
-                    item.target_device_id,
-                    item.signature,
-                )
-                for item in signatures
-            ],
-            desc="add_e2e_signing_key",
-        )
 
-    async def allow_master_cross_signing_key_replacement_without_uia(
-        self, user_id: str, duration_ms: int
-    ) -> Optional[int]:
-        """Mark this user's latest master key as being replaceable without UIA.
-
-        Said replacement will only be permitted for a short time after calling this
-        function. That time period is controlled by the duration argument.
-
-        Returns:
-            None, if there is no such key.
-            Otherwise, the timestamp before which replacement is allowed without UIA.
-        """
-        timestamp = self._clock.time_msec() + duration_ms
-
-        def impl(txn: LoggingTransaction) -> Optional[int]:
-            txn.execute(
-                """
-                UPDATE e2e_cross_signing_keys
-                SET updatable_without_uia_before_ms = ?
-                WHERE stream_id = (
-                    SELECT stream_id
-                    FROM e2e_cross_signing_keys
-                    WHERE user_id = ? AND keytype = 'master'
-                    ORDER BY stream_id DESC
-                    LIMIT 1
-                )
-            """,
-                (timestamp, user_id),
+        def _store_e2e_cross_signing_signatures(
+            txn: LoggingTransaction,
+            signatures: "Iterable[SignatureListItem]",
+        ) -> None:
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                "e2e_cross_signing_signatures",
+                keys=(
+                    "user_id",
+                    "key_id",
+                    "target_user_id",
+                    "target_device_id",
+                    "signature",
+                ),
+                values=[
+                    (
+                        user_id,
+                        item.signing_key_id,
+                        item.target_user_id,
+                        item.target_device_id,
+                        item.signature,
+                    )
+                    for item in signatures
+                ],
             )
-            if txn.rowcount == 0:
-                return None
 
-            return timestamp
+            to_invalidate = [
+                # Each entry is a tuple of arguments to
+                # `_get_e2e_cross_signing_signatures_for_device`, which
+                # itself takes a tuple. Hence the double-tuple.
+                ((user_id, item.target_device_id),)
+                for item in signatures
+            ]
 
-        return await self.db_pool.runInteraction(
-            "allow_master_cross_signing_key_replacement_without_uia",
-            impl,
+            if to_invalidate:
+                # Invalidate the local cache of this worker.
+                for cache_key in to_invalidate:
+                    txn.call_after(
+                        self._get_e2e_cross_signing_signatures_for_device.invalidate,
+                        cache_key,
+                    )
+
+                # Stream cache invalidate keys over replication.
+                #
+                # We can only send a primitive per function argument across
+                # replication.
+                #
+                # Encode the array of strings as a JSON string, and we'll unpack
+                # it on the other side.
+                to_send = [
+                    (json.dumps([user_id, item.target_device_id]),)
+                    for item in signatures
+                ]
+
+                self._send_invalidation_to_replication_bulk(
+                    txn,
+                    cache_name=self._get_e2e_cross_signing_signatures_for_device.__name__,
+                    key_tuples=to_send,
+                )
+
+        await self.db_pool.runInteraction(
+            "add_e2e_signing_key",
+            _store_e2e_cross_signing_signatures,
+            signatures,
         )
+
+
+class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)

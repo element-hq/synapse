@@ -22,7 +22,7 @@
 from typing import Any, Awaitable, Callable, Dict
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.api.errors
 import synapse.rest.admin
@@ -587,6 +587,7 @@ class TestRoomListSearchDisabled(unittest.HomeserverTestCase):
         self.room_list_handler = hs.get_room_list_handler()
         self.directory_handler = hs.get_directory_handler()
 
+    @unittest.override_config({"room_list_publication_rules": [{"action": "allow"}]})
     def test_disabling_room_list(self) -> None:
         self.room_list_handler.enable_room_list_search = True
         self.directory_handler.enable_room_list_search = True

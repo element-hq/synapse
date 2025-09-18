@@ -40,6 +40,7 @@ from typing import (
     Mapping,
     NoReturn,
     Optional,
+    Protocol,
     Tuple,
     Type,
     TypeVar,
@@ -50,12 +51,12 @@ from unittest.mock import Mock, patch
 import canonicaljson
 import signedjson.key
 import unpaddedbase64
-from typing_extensions import Concatenate, ParamSpec, Protocol
+from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet.defer import Deferred, ensureDeferred
+from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
 from twisted.python.threadpool import ThreadPool
-from twisted.test.proto_helpers import MemoryReactor, MemoryReactorClock
 from twisted.trial import unittest
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -781,7 +782,7 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         appservice_token: str,
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, Optional[str]]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
 
@@ -805,7 +806,7 @@ class HomeserverTestCase(TestCase):
             access_token=appservice_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
-        return channel.json_body["user_id"], channel.json_body["device_id"]
+        return channel.json_body["user_id"], channel.json_body.get("device_id")
 
     def login(
         self,

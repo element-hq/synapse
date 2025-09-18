@@ -110,6 +110,7 @@ class EmailConfig(Config):
             raise ConfigError(
                 "email.require_transport_security requires email.enable_tls to be true"
             )
+        self.email_tlsname = email_config.get("tlsname", None)
 
         if "app_name" in email_config:
             self.email_app_name = email_config["app_name"]

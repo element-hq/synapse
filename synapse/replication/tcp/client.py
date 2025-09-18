@@ -44,6 +44,7 @@ from synapse.replication.tcp.streams import (
     UnPartialStatedEventStream,
     UnPartialStatedRoomStream,
 )
+from synapse.replication.tcp.streams._base import ThreadSubscriptionsStream
 from synapse.replication.tcp.streams.events import (
     EventsStream,
     EventsStreamEventRow,
@@ -75,6 +76,7 @@ class ReplicationDataHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
         self._reactor = hs.get_reactor()
@@ -115,7 +117,11 @@ class ReplicationDataHandler:
         all_room_ids: Set[str] = set()
         if stream_name == DeviceListsStream.NAME:
             if any(not row.is_signature and not row.hosts_calculated for row in rows):
-                prev_token = self.store.get_device_stream_token()
+                # This only uses the minimum stream position on the device lists
+                # stream, which means that we may process a device list change
+                # twice in case of concurrent writes. This is fine, as this only
+                # triggers cache invalidation, which is harmless if done twice.
+                prev_token = self.store.get_device_stream_token().stream
                 all_room_ids = await self.store.get_all_device_list_changes(
                     prev_token, token
                 )
@@ -250,6 +256,12 @@ class ReplicationDataHandler:
                 self._state_storage_controller.notify_event_un_partial_stated(
                     row.event_id
                 )
+        elif stream_name == ThreadSubscriptionsStream.NAME:
+            self.notifier.on_new_event(
+                StreamKeyType.THREAD_SUBSCRIPTIONS,
+                token,
+                users=[row.user_id for row in rows],
+            )
 
         await self._presence_handler.process_replication_rows(
             stream_name, instance_name, token, rows
@@ -342,7 +354,11 @@ class ReplicationDataHandler:
         waiting_list.add((position, deferred))
 
         # We measure here to get in flight counts and average waiting time.
-        with Measure(self._clock, "repl.wait_for_stream_position"):
+        with Measure(
+            self._clock,
+            name="repl.wait_for_stream_position",
+            server_name=self.server_name,
+        ):
             logger.info(
                 "Waiting for repl stream %r to reach %s (%s); currently at: %s",
                 stream_name,
@@ -404,6 +420,7 @@ class FederationSenderHandler:
     def __init__(self, hs: "HomeServer"):
         assert hs.should_send_federation()
 
+        self.server_name = hs.hostname
         self.store = hs.get_datastores().main
         self._is_mine_id = hs.is_mine_id
         self._hs = hs
@@ -494,7 +511,9 @@ class FederationSenderHandler:
             # no need to queue up another task.
             return
 
-        run_as_background_process("_save_and_send_ack", self._save_and_send_ack)
+        run_as_background_process(
+            "_save_and_send_ack", self.server_name, self._save_and_send_ack
+        )
 
     async def _save_and_send_ack(self) -> None:
         """Save the current federation position in the database and send an ACK
