@@ -8618,7 +8618,8 @@ has more information on setting up SiWA.</p>
 <li>Create an application for synapse in Authentik and link it to the provider.</li>
 <li>Note the slug of your application, Client ID and Client Secret.</li>
 </ol>
-<p>Note: RSA keys must be used for signing for Authentik, ECC keys do not work.</p>
+<p>Note: RSA keys must be used for signing for Authentik, ECC keys do not work.
+Note: The provider must have a signing key set and must not use an encryption key.</p>
 <p>Synapse config:</p>
 <pre><code class="language-yaml">oidc_providers:
   - idp_id: authentik
@@ -8635,6 +8636,12 @@ has more information on setting up SiWA.</p>
       config:
         localpart_template: &quot;{{ user.preferred_username }}&quot;
         display_name_template: &quot;{{ user.preferred_username|capitalize }}&quot; # TO BE FILLED: If your users have names in Authentik and you want those in Synapse, this should be replaced with user.name|capitalize.
+[...]
+jwt_config:
+    enabled: true
+    secret: &quot;your client secret&quot; # TO BE FILLED (same as `client_secret` above)
+    algorithm: &quot;RS256&quot;
+    # (...other fields)
 </code></pre>
 <h3 id="dex"><a class="header" href="#dex">Dex</a></h3>
 <p><a href="https://github.com/dexidp/dex">Dex</a> is a simple, open-source OpenID Connect Provider.
