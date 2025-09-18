@@ -146,6 +146,11 @@ class DelayedEventsHandler:
         )
 
     async def _unsafe_process_new_event(self) -> None:
+        # We purposefully fetch the current max room stream ordering before
+        # doing anything else, as it could increment duing processing of state
+        # deltas. We want to avoid updating `delayed_events_stream_pos` past
+        # the stream ordering of the state deltas we've processed. Otherwise
+        # we'll leave gaps in our processing.
         room_max_stream_ordering = self._store.get_room_max_stream_ordering()
 
         # Check that there are actually any delayed events to process. If not, bail early.
