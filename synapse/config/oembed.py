@@ -18,13 +18,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import importlib.resources as importlib_resources
 import json
 import re
 from typing import Any, Dict, Iterable, List, Optional, Pattern
 from urllib import parse as urlparse
 
 import attr
-import pkg_resources
 
 from synapse.types import JsonDict, StrSequence
 
@@ -64,7 +64,12 @@ class OembedConfig(Config):
         """
         # Whether to use the packaged providers.json file.
         if not oembed_config.get("disable_default_providers") or False:
-            with pkg_resources.resource_stream("synapse", "res/providers.json") as s:
+            path = (
+                importlib_resources.files("synapse")
+                .joinpath("res")
+                .joinpath("providers.json")
+            )
+            with path.open("r", encoding="utf-8") as s:
                 providers = json.load(s)
 
             yield from self._parse_and_validate_provider(

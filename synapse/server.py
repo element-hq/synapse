@@ -434,16 +434,16 @@ class HomeServer(metaclass=abc.ABCMeta):
             try:
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
                 defer.ensureDeferred(shutdown_handler.func(**shutdown_handler.kwargs))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Error calling shutdown async handler: %s", e)
         self._async_shutdown_handlers.clear()
 
         for shutdown_handler in self._sync_shutdown_handlers:
             try:
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
                 shutdown_handler.func(**shutdown_handler.kwargs)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Error calling shutdown sync handler: %s", e)
         self._sync_shutdown_handlers.clear()
 
     def register_async_shutdown_handler(

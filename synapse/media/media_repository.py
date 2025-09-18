@@ -181,10 +181,12 @@ class MediaRepository:
 
         # We get the media upload limits and sort them in descending order of
         # time period, so that we can apply some optimizations.
-        self.media_upload_limits = hs.config.media.media_upload_limits
-        self.media_upload_limits.sort(
+        self.default_media_upload_limits = hs.config.media.media_upload_limits
+        self.default_media_upload_limits.sort(
             key=lambda limit: limit.time_period_ms, reverse=True
         )
+
+        self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
 
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
@@ -342,16 +344,27 @@ class MediaRepository:
 
         # Check that the user has not exceeded any of the media upload limits.
 
+        # Use limits from module API if provided
+        media_upload_limits = (
+            await self.media_repository_callbacks.get_media_upload_limits_for_user(
+                auth_user.to_string()
+            )
+        )
+
+        # Otherwise use the default limits from config
+        if media_upload_limits is None:
+            # Note: the media upload limits are sorted so larger time periods are
+            # first.
+            media_upload_limits = self.default_media_upload_limits
+
         # This is the total size of media uploaded by the user in the last
         # `time_period_ms` milliseconds, or None if we haven't checked yet.
         uploaded_media_size: Optional[int] = None
 
-        # Note: the media upload limits are sorted so larger time periods are
-        # first.
-        for limit in self.media_upload_limits:
+        for limit in media_upload_limits:
             # We only need to check the amount of media uploaded by the user in
             # this latest (smaller) time period if the amount of media uploaded
-            # in a previous (larger) time period is above the limit.
+            # in a previous (larger) time period is below the limit.
             #
             # This optimization means that in the common case where the user
             # hasn't uploaded much media, we only need to query the database
@@ -365,6 +378,12 @@ class MediaRepository:
                 )
 
             if uploaded_media_size + content_length > limit.max_bytes:
+                await self.media_repository_callbacks.on_media_upload_limit_exceeded(
+                    user_id=auth_user.to_string(),
+                    limit=limit,
+                    sent_bytes=uploaded_media_size,
+                    attempted_bytes=content_length,
+                )
                 raise SynapseError(
                     400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
                 )
