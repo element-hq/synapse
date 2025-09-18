@@ -210,6 +210,7 @@ jwt_config:
     enabled: true
     secret: "your client secret" # TO BE FILLED (same as `client_secret` above)
     algorithm: "RS256"
+    # (...other fields)
 ```
 
 ### Dex
