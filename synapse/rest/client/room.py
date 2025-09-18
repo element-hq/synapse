@@ -82,6 +82,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+MSC4354_STICKY_DURATION_QUERY_PARAM = "msc4354_stick_duration_ms"
+MSC4354_STICKY_EVENT_KEY = "msc4354_sticky"
+
 
 class _RoomSize(Enum):
     """
@@ -206,6 +209,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
+        self.msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -364,6 +368,14 @@ class RoomStateEventRestServlet(RestServlet):
                     "room_id": room_id,
                     "sender": requester.user.to_string(),
                 }
+                if self.msc4354_enabled:
+                    sticky_duration_ms = parse_integer(
+                        request, MSC4354_STICKY_DURATION_QUERY_PARAM
+                    )
+                    if sticky_duration_ms is not None:
+                        event_dict[MSC4354_STICKY_EVENT_KEY] = {
+                            "duration_ms": sticky_duration_ms,
+                        }
 
                 if state_key is not None:
                     event_dict["state_key"] = state_key
@@ -396,6 +408,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
         self._max_event_delay_ms = hs.config.server.max_event_delay_ms
+        self.msc4354_enabled = hs.config.experimental.msc4354_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
@@ -441,6 +454,15 @@ class RoomSendEventRestServlet(TransactionRestServlet):
 
         if origin_server_ts is not None:
             event_dict["origin_server_ts"] = origin_server_ts
+
+        if self.msc4354_enabled:
+            sticky_duration_ms = parse_integer(
+                request, MSC4354_STICKY_DURATION_QUERY_PARAM
+            )
+            if sticky_duration_ms is not None:
+                event_dict[MSC4354_STICKY_EVENT_KEY] = {
+                    "duration_ms": sticky_duration_ms,
+                }
 
         try:
             (
