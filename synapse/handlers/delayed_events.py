@@ -237,7 +237,6 @@ class DelayedEventsHandler:
 
         # Note: No need to batch as `get_current_state_deltas` will only ever
         # return 100 rows at a time.
-        earliest_next_send_ts = None
         for delta in deltas:
             if delta.event_id is None:
                 logger.debug(
@@ -280,17 +279,8 @@ class DelayedEventsHandler:
                 ),
             )
 
-            # Schedule the next delayed event call for the earliest
-            # event.
-            if next_send_ts is not None:
-                if (
-                    earliest_next_send_ts is None
-                    or next_send_ts < earliest_next_send_ts
-                ):
-                    earliest_next_send_ts = next_send_ts
-
-        if self._next_send_ts_changed(earliest_next_send_ts):
-            self._schedule_next_at_or_none(earliest_next_send_ts)
+            if self._next_send_ts_changed(next_send_ts):
+                self._schedule_next_at_or_none(next_send_ts)
 
     async def add(
         self,
