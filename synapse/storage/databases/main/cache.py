@@ -134,7 +134,6 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self.hs.get_clock().call_later(
                 CATCH_UP_CLEANUP_INTERVAL_MS / 1000,
                 self._clean_up_cache_invalidation_wrapper,
-                call_later_cancel_on_shutdown=True,  # We track this call to speedup shutdown
             )
 
     async def get_all_updated_caches(
@@ -799,7 +798,6 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self.hs.get_clock().call_later(
             next_interval / 1000,
             self._clean_up_cache_invalidation_wrapper,
-            call_later_cancel_on_shutdown=True,  # We track this call to speedup shutdown
         )
 
     async def _clean_up_batch_of_old_cache_invalidations(

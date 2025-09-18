@@ -201,6 +201,7 @@ class WorkerLocksHandler:
             0,
             _wake_all_locks,
             locks,
+            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
     @wrap_as_background_process("_cleanup_locks")

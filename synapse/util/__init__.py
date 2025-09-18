@@ -260,7 +260,7 @@ class Clock:
         delay: float,
         callback: Callable,
         *args: Any,
-        call_later_cancel_on_shutdown: bool = False,
+        call_later_cancel_on_shutdown: bool = True,
         **kwargs: Any,
     ) -> IDelayedCall:
         """Call something later

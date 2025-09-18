@@ -174,6 +174,7 @@ def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCa
         return clock.call_later(
             _EPSILON,
             x,
+            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
     return _scheduler

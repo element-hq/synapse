@@ -288,6 +288,7 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
         clock.call_later(
             0,
             performance_stats_init,
+            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
         # We wait 5 minutes to send the first set of stats as the server can
@@ -297,5 +298,4 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
             phone_stats_home,
             hs,
             stats,
-            call_later_cancel_on_shutdown=True,  # We track this call since it would prevent shutdown for 5 minutes
         )

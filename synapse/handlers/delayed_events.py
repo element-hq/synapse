@@ -94,6 +94,7 @@ class DelayedEventsHandler:
                 self._clock.call_later(
                     0,
                     self.notify_new_event,
+                    call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
                 )
 
                 # Delayed events that are already marked as processed on startup might not have been

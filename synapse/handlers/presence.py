@@ -880,6 +880,7 @@ class PresenceHandler(BasePresenceHandler):
                 self.clock.looping_call,
                 self._handle_timeouts,
                 5000,
+                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
         # Presence information is persisted, whether or not it is being tracked
@@ -890,6 +891,7 @@ class PresenceHandler(BasePresenceHandler):
                 self.clock.looping_call,
                 self._persist_unpersisted_changes,
                 60 * 1000,
+                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
         presence_wheel_timer_size_gauge.register_hook(
