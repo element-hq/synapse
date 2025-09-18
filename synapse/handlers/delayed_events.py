@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import ShadowBanError
+from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
@@ -251,7 +251,23 @@ class DelayedEventsHandler:
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
 
-            sender = UserID.from_string(event_id_and_sender_dict[delta.event_id])
+            sender_str = event_id_and_sender_dict.get(delta.event_id, None)
+            if sender_str is None:
+                logger.debug(
+                    "Not handling delta for event where sender is unknown: %s",
+                    delta.event_id,
+                )
+                continue
+
+            try:
+                sender = UserID.from_string(sender_str)
+            except SynapseError as e:
+                logger.error(
+                    "Skipping state delta with Matrix User ID '%s' that failed to parse: %s",
+                    sender_str,
+                    e,
+                )
+                continue
 
             next_send_ts = await self._store.cancel_delayed_state_events(
                 room_id=delta.room_id,
