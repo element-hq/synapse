@@ -74,9 +74,7 @@ from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
-    PreserveLoggingContext,
     current_context,
-    run_in_background,
     set_current_context,
 )
 from synapse.rest import RegisterServletsFunc
@@ -672,7 +670,7 @@ class HomeserverTestCase(TestCase):
 
         async def run_bg_updates() -> None:
             with LoggingContext("run_bg_updates"):
-                await stor.db_pool.updates.run_background_updates(False)
+                self.get_success(stor.db_pool.updates.run_background_updates(False))
 
         hs = setup_test_homeserver(self.addCleanup, **kwargs)
         stor = hs.get_datastores().main
@@ -690,43 +688,9 @@ class HomeserverTestCase(TestCase):
         self.reactor.pump([by] * 100)
 
     def get_success(self, d: Awaitable[TV], by: float = 0.0) -> TV:
-        async def wrapped_task() -> TV:
-            return await d
-
-        # To avoid "metrics will be lost" errors from running this function in the
-        # sentinel logcontext, let's setup a logcontext to use. We use
-        # `PreserveLoggingContext` so that the logcontext doesn't finish to avoid
-        # "Re-starting finished log context" errors as we pump in `get_success(...)`. We
-        # use `run_in_background` so that we run the task in the given logcontext and
-        # handle the magic behind the scenes.
-        #
-        # Create the logcontext in the sentinel logcontext so when we enter/exit later,
-        # it matches the context it was created with (avoid "Expected previous context"
-        # errors). We do this as someone could have wrapped this call in their own
-        # `LoggingContext(...)`
-        with PreserveLoggingContext():
-            logcontext = LoggingContext("homeserver_test_case")
-
-        with PreserveLoggingContext(logcontext):
-            # We use `run_in_background` to reset the logcontext after `f` (or the
-            # awaitable returned by `f`) completes to avoid leaking the current
-            # logcontext to the reactor
-            deferred = run_in_background(wrapped_task)
-
-        # deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
+        deferred: Deferred[TV] = ensureDeferred(d)  # type: ignore[arg-type]
         self.pump(by=by)
-
-        result = self.successResultOf(deferred)
-
-        # We have our result now, so we don't expect to log anything else after this.
-        #
-        # Play nice and finish the logcontext so we can catch if we later try to
-        # erroneously restart a finished logcontext.
-        with PreserveLoggingContext():
-            with logcontext:
-                pass
-
-        return result
+        return self.successResultOf(deferred)
 
     def get_failure(
         self, d: Awaitable[Any], exc: Type[_ExcType], by: float = 0.0
@@ -734,7 +698,6 @@ class HomeserverTestCase(TestCase):
         """
         Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
         """
-        # TODO: use same pattern as `get_success` to add a logcontext
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
         self.pump(by)
         return self.failureResultOf(deferred, exc)
