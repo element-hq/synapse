@@ -157,6 +157,12 @@ def get_registered_paths_for_default(
     # TODO We only do this to avoid an error, but don't need the database etc
     hs.setup()
     registered_paths = get_registered_paths_for_hs(hs)
+    # NOTE: a more robust implementation would properly shutdown/cleanup each server
+    # to avoid resource buildup.
+    # However, the call to `shutdown` is `async` so it would require additional complexity here.
+    # We are intentionally skipping this cleanup because this is a short-lived, one-off
+    # utility script where the simpler approach is sufficient and we shouldn't run into
+    # any resource buildup issues.
 
     return registered_paths
 
