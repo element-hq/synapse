@@ -1,1 +1,1 @@
-Fix performance regression related to the delayed events feature.
+Fix a performance regression related to the experimental Delayed Events ([MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)) feature.
