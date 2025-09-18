@@ -38,11 +38,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.federation.federation_client import SendJoinResult
-from synapse.logging.context import (
-    LoggingContext,
-    PreserveLoggingContext,
-    run_in_background,
-)
+from synapse.logging.context import LoggingContext, run_in_background
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -153,22 +149,11 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             room_version,
         )
 
-        # To avoid "metrics will be lost" errors from running this function in the
-        # sentinel logcontext, let's setup a logcontext to use. We use
-        # `PreserveLoggingContext` so that the logcontext doesn't finish to avoid
-        # "Re-starting finished log context" errors as we pump in `get_success(...)`. We
-        # use `run_in_background` so that we run the task in the given logcontext and
-        # handle the magic behind the scenes.
-        send_rejected_logcontext = LoggingContext("send_rejected")
-        with PreserveLoggingContext(send_rejected_logcontext):
+        with LoggingContext("send_rejected"):
             d = run_in_background(
                 self.hs.get_federation_event_handler().on_receive_pdu, OTHER_SERVER, ev
             )
         self.get_success(d)
-        # Play nice and finish the logcontext
-        with PreserveLoggingContext():
-            with send_rejected_logcontext:
-                pass
 
         # that should have been rejected
         e = self.get_success(self.store.get_event(ev.event_id, allow_rejected=True))
@@ -218,22 +203,11 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             room_version,
         )
 
-        # To avoid "metrics will be lost" errors from running this function in the
-        # sentinel logcontext, let's setup a logcontext to use. We use
-        # `PreserveLoggingContext` so that the logcontext doesn't finish to avoid
-        # "Re-starting finished log context" errors as we pump in `get_success(...)`. We
-        # use `run_in_background` so that we run the task in the given logcontext and
-        # handle the magic behind the scenes.
-        send_rejected_logcontext = LoggingContext("send_rejected")
-        with PreserveLoggingContext(send_rejected_logcontext):
+        with LoggingContext("send_rejected"):
             d = run_in_background(
                 self.hs.get_federation_event_handler().on_receive_pdu, OTHER_SERVER, ev
             )
         self.get_success(d)
-        # Play nice and finish the logcontext
-        with PreserveLoggingContext():
-            with send_rejected_logcontext:
-                pass
 
         # that should have been rejected
         e = self.get_success(self.store.get_event(ev.event_id, allow_rejected=True))
@@ -349,14 +323,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
 
         current_depth = 1
         limit = 100
-        # To avoid "metrics will be lost" errors from running this function in the
-        # sentinel logcontext, let's setup a logcontext to use. We use
-        # `PreserveLoggingContext` so that the logcontext doesn't finish to avoid
-        # "Re-starting finished log context" errors as we pump in `get_success(...)`. We
-        # use `run_in_background` so that we run the task in the given logcontext and
-        # handle the magic behind the scenes.
-        receive_pdu_logcontext = LoggingContext("receive_pdu")
-        with PreserveLoggingContext(receive_pdu_logcontext):
+        with LoggingContext("receive_pdu"):
             # Make sure backfill still works
             d = run_in_background(
                 self.hs.get_federation_handler().maybe_backfill,
@@ -365,10 +332,6 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 limit,
             )
         self.get_success(d)
-        # Play nice and finish the logcontext
-        with PreserveLoggingContext():
-            with receive_pdu_logcontext:
-                pass
 
     def test_backfill_ignores_known_events(self) -> None:
         """
@@ -522,37 +485,19 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
     def _build_and_send_join_event(
         self, other_server: str, other_user: str, room_id: str
     ) -> EventBase:
-        # To avoid "metrics will be lost" errors from running this function in the
-        # sentinel logcontext, let's setup a logcontext to use. We use
-        # `PreserveLoggingContext` so that the logcontext doesn't finish to avoid
-        # "Re-starting finished log context" errors as we pump in `get_success(...)`. We
-        # use `run_in_background` so that we run the task in the given logcontext and
-        # handle the magic behind the scenes.
-        make_join_logcontext = LoggingContext("make_join")
-        with PreserveLoggingContext(make_join_logcontext):
-            d = run_in_background(
-                self.handler.on_make_join_request, other_server, room_id, other_user
-            )
-        join_event = self.get_success(d)
-        # Play nice and finish the logcontext
-        with PreserveLoggingContext():
-            with make_join_logcontext:
-                pass
+        join_event = self.get_success(
+            self.handler.on_make_join_request(other_server, room_id, other_user)
+        )
         # the auth code requires that a signature exists, but doesn't check that
         # signature... go figure.
         join_event.signatures[other_server] = {"x": "y"}
-
-        send_join_logcontext = LoggingContext("send_join")
-        with PreserveLoggingContext(send_join_logcontext):
+        with LoggingContext("send_join"):
             d = run_in_background(
                 self.hs.get_federation_event_handler().on_send_membership_event,
                 other_server,
                 join_event,
             )
         self.get_success(d)
-        with PreserveLoggingContext():
-            with send_join_logcontext:
-                pass
 
         # sanity-check: the room should show that the new user is a member
         r = self.get_success(self.store.get_partial_current_state_ids(room_id))
