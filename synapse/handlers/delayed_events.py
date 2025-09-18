@@ -118,11 +118,6 @@ class DelayedEventsHandler:
                     events,
                 )
 
-                await self._clock.sleep(1)
-                await self._clock.sleep(0.3)
-                # await self._clock.sleep(0.1)
-                logger.info("asdf done _initialized_from_db")
-
             self._initialized_from_db = run_as_background_process(
                 "_schedule_db_events", self.server_name, _schedule_db_events
             )
@@ -336,14 +331,7 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        logger.info(
-            "asdf cancelling delayed event before _initialized_from_db %s", delay_id
-        )
-        await self._initialized_from_db
-        # await make_deferred_yieldable(self._initialized_from_db)
-        logger.info(
-            "asdf cancelling delayed event after _initialized_from_db %s", delay_id
-        )
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id=delay_id,
@@ -369,7 +357,7 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id=delay_id,
@@ -395,7 +383,7 @@ class DelayedEventsHandler:
         # Use standard request limiter for sending delayed events on-demand,
         # as an on-demand send is similar to sending a regular event.
         await self._request_ratelimiter.ratelimit(requester)
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(
             delay_id=delay_id,
