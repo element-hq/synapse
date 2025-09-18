@@ -127,6 +127,9 @@ class Clock:
     ensure the calls made by this `HomeServer` instance are tracked and can be cleaned
     up during `HomeServer.shutdown()`.
 
+    We enforce usage of this clock instead of using the reactor directly via lints in
+    `scripts-dev/mypy_synapse_plugin.py`.
+
     Args:
         reactor: The Twisted reactor to use.
     """
