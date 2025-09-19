@@ -172,7 +172,7 @@ class Clock:
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
             assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
+                "Expected `call_when_running` callback from the reactor to start with the sentinel logcontext "
                 f"but saw {context.current_context()}. In other words, another task shouldn't have "
                 "leaked their logcontext to us."
             )
@@ -181,7 +181,7 @@ class Clock:
             # `sentinel` log context at this point. We want the function to log with
             # some logcontext as we want to know which server the logs came from.
             #
-            # We use `PreserveLoggingContext` to prevent our new `call_later`
+            # We use `PreserveLoggingContext` to prevent our new `call_when_running`
             # logcontext from finishing as soon as we exit this function, in case `f`
             # returns an awaitable/deferred which would continue running and may try to
             # restore the `loop_call` context when it's done (because it's trying to
