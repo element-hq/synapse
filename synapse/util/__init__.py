@@ -337,7 +337,7 @@ class Clock:
             ignore_errs: Whether to re-raise errors encountered when cancelling the
             scheduled call.
         """
-        # We wrap the dict in a list here since calling cancel on a delayed_call
+        # We make a copy here since calling `cancel()` on a delayed_call
         # will result in the call removing itself from the map mid-iteration.
         for call in list(self._call_id_to_delayed_call.values()):
             try:
