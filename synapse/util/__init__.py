@@ -234,7 +234,7 @@ class Clock:
             raise Exception("Cannot start looping call. Clock has been shutdown")
         # We can ignore the lint here since this is the one location LoopingCall's
         # should be created.
-        call = task.LoopingCall(f, *args, **kwargs)  # type: ignore[looping-call-not-tracked]
+        call = task.LoopingCall(f, *args, **kwargs)  # type: ignore[prefer-synapse-clock-looping-call]
         call.clock = self._reactor
         d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)

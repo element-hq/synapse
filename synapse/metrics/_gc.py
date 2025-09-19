@@ -140,7 +140,7 @@ def install_gc_manager() -> None:
 
     # We can ignore the lint here since this looping call does not hold a `HomeServer`
     # reference so can be cleaned up by other means on shutdown.
-    gc_task = task.LoopingCall(_maybe_gc)  # type: ignore[looping-call-not-tracked]
+    gc_task = task.LoopingCall(_maybe_gc)  # type: ignore[prefer-synapse-clock-looping-call]
     gc_task.start(0.1)
 
 
