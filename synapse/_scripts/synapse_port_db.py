@@ -1567,7 +1567,7 @@ def main() -> None:
     config = HomeServerConfig()
     config.parse_config_dict(hs_config, "", "")
 
-    hs = MockHomeserver(hs_config)
+    hs = MockHomeserver(config)
 
     def start(stdscr: Optional["curses.window"] = None) -> None:
         progress: Progress
