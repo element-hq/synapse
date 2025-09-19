@@ -20,7 +20,6 @@
 
 import gc
 import weakref
-from unittest import TestResult
 
 from synapse.app.homeserver import SynapseHomeServer
 
