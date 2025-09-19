@@ -619,6 +619,11 @@ class SyncRestServlet(RestServlet):
             ephemeral_events = room.ephemeral
             result["ephemeral"] = {"events": ephemeral_events}
             result["unread_notifications"] = room.unread_notifications
+            if room.sticky:
+                serialized_sticky = await self._event_serializer.serialize_events(
+                    room.sticky, time_now, config=serialize_options
+                )
+                result["sticky"] = {"events": serialized_sticky}
             if room.unread_thread_notifications:
                 result["unread_thread_notifications"] = room.unread_thread_notifications
                 if self._msc3773_enabled:

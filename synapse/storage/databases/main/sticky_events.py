@@ -15,6 +15,7 @@ import time
 from typing import (
     TYPE_CHECKING,
     Any,
+    Collection,
     Dict,
     Iterable,
     List,
@@ -100,7 +101,7 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_sticky_events_in_rooms(
         self,
-        room_ids: List[str],
+        room_ids: Collection[str],
         from_id: int,
     ) -> Tuple[int, Dict[str, Set[str]]]:
         """
@@ -130,7 +131,7 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
     def _get_sticky_events_in_rooms_txn(
         self,
         txn: LoggingTransaction,
-        room_ids: List[str],
+        room_ids: Collection[str],
         from_id: int,
     ) -> List[Tuple[int, str, str]]:
         if len(room_ids) == 0:
@@ -140,7 +141,7 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         )
         txn.execute(
             f"""
-            SELECT stream_id, room_id, event_id FROM sticky_events WHERE stream_id > ? AND {clause}
+            SELECT stream_id, room_id, event_id FROM sticky_events WHERE soft_failed=FALSE AND stream_id > ? AND {clause}
             """,
             (from_id, room_id_values),
         )

@@ -153,6 +153,7 @@ class JoinedSyncResult:
     state: StateMap[EventBase]
     ephemeral: List[JsonDict]
     account_data: List[JsonDict]
+    sticky: List[EventBase]
     unread_notifications: JsonDict
     unread_thread_notifications: JsonDict
     summary: Optional[JsonDict]
@@ -607,6 +608,69 @@ class SyncHandler:
                 ephemeral_by_room.setdefault(room_id, []).append(event_copy)
 
         return now_token, ephemeral_by_room
+
+    async def sticky_events_by_room(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        now_token: StreamToken,
+        since_token: Optional[StreamToken] = None,
+    ) -> Tuple[StreamToken, Dict[str, Set[str]]]:
+        """Get the sticky events for each room the user is in
+        Args:
+            sync_result_builder
+            now_token: Where the server is currently up to.
+            since_token: Where the server was when the client
+                last synced.
+        Returns:
+            A tuple of the now StreamToken, updated to reflect the which sticky
+            events are included, and a dict mapping from room_id to a list of
+            sticky event IDs for that room.
+        """
+        with Measure(
+            self.clock, name="sticky_events_by_room", server_name=self.server_name
+        ):
+            from_id = since_token.sticky_events_key if since_token else 0
+
+            room_ids = sync_result_builder.joined_room_ids
+
+            to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
+                room_ids, from_id
+            )
+            now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
+
+        return now_token, sticky_by_room
+
+    async def _generate_sticky_events(
+        self,
+        sync_result_builder: "SyncResultBuilder",
+        sticky_by_room: Dict[str, Set[str]],
+    ) -> None:
+        """Generate sticky events to put into the sync response.
+
+        The builder should already be populated with timeline events for joined rooms, so we can
+        duplicate suppress sticky events that are already going to be returned in the timeline section
+        of the sync response.
+
+        Args:
+            sync_result_builder
+            sticky_by_room: Map of room ID to sticky event IDs.
+        """
+        for joined_room in sync_result_builder.joined:
+            sticky_event_ids = sticky_by_room.get(joined_room.room_id, set())
+            if len(sticky_event_ids) == 0:
+                continue
+            # remove sticky events that are in the timeline
+            timeline = {ev.event_id for ev in joined_room.timeline.events}
+            sticky_event_ids = sticky_event_ids.difference(timeline)
+            if len(sticky_event_ids) == 0:
+                continue
+            event_map = await self.store.get_events(sticky_event_ids)
+            joined_room.sticky = await filter_events_for_client(
+                self._storage_controllers,
+                sync_result_builder.sync_config.user.to_string(),
+                list(event_map.values()),
+                always_include_ids=frozenset(sticky_event_ids),
+            )
 
     async def _load_filtered_recents(
         self,
@@ -2240,6 +2304,14 @@ class SyncHandler:
         sync_result_builder.invited.extend(invited)
         sync_result_builder.knocked.extend(knocked)
 
+        if self.hs_config.experimental.msc4354_enabled:
+            now_token, sticky_by_room = await self.sticky_events_by_room(
+                sync_result_builder, now_token, since_token
+            )
+            if sticky_by_room:
+                await self._generate_sticky_events(sync_result_builder, sticky_by_room)
+            sync_result_builder.now_token = now_token
+
         return set(newly_joined_rooms), set(newly_left_rooms)
 
     async def _have_rooms_changed(
@@ -2795,6 +2867,7 @@ class SyncHandler:
                     unread_thread_notifications={},
                     summary=summary,
                     unread_count=0,
+                    sticky=[],
                 )
 
                 if room_sync or always_include:
