@@ -229,6 +229,8 @@ class DelayedEventsHandler:
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
         """
+        # TODO: How to handle state deltas that are the result of a state reset?
+
         # Get the senders of each delta's state event (as sender information is
         # not currently stored in the `current_state_deltas` table).
         event_id_and_sender_dict = await self._store.get_senders_for_event_ids(
