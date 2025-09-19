@@ -47,7 +47,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             reactor=self.reactor,
             homeserver_to_use=SynapseHomeServer,
             clock=self.clock,
-            shutdown_homeserver_on_cleanup=False,
         )
         self.wait_for_background_updates()
 

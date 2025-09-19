@@ -28,6 +28,7 @@ import sqlite3
 import time
 import uuid
 import warnings
+import weakref
 from collections import deque
 from io import SEEK_END, BytesIO
 from typing import (
@@ -1053,7 +1054,6 @@ def setup_test_homeserver(
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
     homeserver_to_use: Type[HomeServer] = TestHomeServer,
-    shutdown_homeserver_on_cleanup: bool = True,
     **kwargs: Any,
 ) -> HomeServer:
     """
@@ -1065,9 +1065,6 @@ def setup_test_homeserver(
     Args:
         cleanup_func : The function used to register a cleanup routine for
                        after the test.
-        shutdown_homeserver_on_cleanup: Whether to include `hs.shutdown()` in the
-            cleanup funcs. This should always be `True` unless the test is manually
-            testing `hs.shutdown()`.
 
     Calling this method directly is deprecated: you should instead derive from
     HomeserverTestCase.
@@ -1177,11 +1174,19 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
-    if shutdown_homeserver_on_cleanup:
-        # Register the cleanup hook for the homeserver.
-        # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
-        # strange behaviours.
-        cleanup_func(lambda: (defer.ensureDeferred(hs.shutdown()), None)[1])
+    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
+    # cleanup functions result in holding the `hs` in memory.
+    cleanup_hs_ref = weakref.ref(hs)
+
+    def shutdown_hs_on_cleanup() -> None:
+        cleanup_hs = cleanup_hs_ref()
+        if cleanup_hs is not None:
+            defer.ensureDeferred(cleanup_hs.shutdown())
+
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
+    cleanup_func(shutdown_hs_on_cleanup)
 
     # Install @cache_in_self attributes
     for key, val in kwargs.items():
