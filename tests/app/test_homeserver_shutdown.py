@@ -32,6 +32,14 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
     def setUp(self) -> None:
         pass
 
+    # NOTE: ideally we'd have another test to ensure we properly shutdown with
+    # real in-flight HTTP requests since those result in additional resources being
+    # setup that hold strong references to the homeserver.
+    # Mainly, the HTTP channel created by a real TCP connection from client to server
+    # is held open between requests and care needs to be taken in Twisted to ensure it is properly
+    # closed in a timely manner during shutdown. Simulating this behaviour in a unit test
+    # won't be as good as a proper integration test in complement.
+
     def test_clean_homeserver_shutdown(self) -> None:
         """Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected"""
         self.reactor, self.clock = get_clock()
@@ -49,7 +57,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # This works since we register `hs.shutdown()` as a cleanup function in
         # `setup_test_homeserver`.
         self._runCleanups(TestResult())
-        self.get_success(self.reactor.shutdown())
+        self.reactor.shutdown()
 
         # Cleanup the internal reference in our test case
         del self.hs

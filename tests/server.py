@@ -525,7 +525,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
-    async def shutdown(self) -> None:
+    def shutdown(self) -> None:
         """Cleanup any outstanding resources referenced by this reactor. Useful when
         trying to remove any references to the `HomeServer` that may have been
         registered with this fake reactor"""
