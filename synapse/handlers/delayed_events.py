@@ -194,7 +194,7 @@ class DelayedEventsHandler:
                 self._clock, name="delayed_events_delta", server_name=self.server_name
             ):
                 room_max_stream_ordering = self._store.get_room_max_stream_ordering()
-                if self._event_pos == room_max_stream_ordering:
+                if self._event_pos >= room_max_stream_ordering:
                     return
 
                 logger.debug(
