@@ -1,4 +1,4 @@
-## Streams
+# Streams
 
 Synapse has a concept of "streams", which are roughly described in [`id_generators.py`](
     https://github.com/element-hq/synapse/blob/develop/synapse/storage/util/id_generators.py
@@ -19,7 +19,7 @@ To that end, let's describe streams formally, paraphrasing from the docstring of
     https://github.com/element-hq/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96
 ).
 
-### Definition
+## Definition
 
 A stream is an append-only log `T1, T2, ..., Tn, ...` of facts[^1] which grows over time.
 Only "writers" can add facts to a stream, and there may be multiple writers.
@@ -47,7 +47,7 @@ But unhappy cases (e.g. transaction rollback due to an error) also count as comp
 Once completed, the rows written with that stream ID are fixed, and no new rows
 will be inserted with that ID.
 
-### Current stream ID
+## Current stream ID
 
 For any given stream reader (including writers themselves), we may define a per-writer current stream ID:
 
@@ -93,7 +93,7 @@ Consider a single-writer stream which is initially at ID 1.
 | Complete 6 | 6                 |                                                 |
 
 
-### Multi-writer streams
+## Multi-writer streams
 
 There are two ways to view a multi-writer stream.
 
@@ -115,7 +115,7 @@ The facts this stream holds are instructions to "you should now invalidate these
 We only ever treat this as a multiple single-writer streams as there is no important ordering between cache invalidations.
 (Invalidations are self-contained facts; and the invalidations commute/are idempotent).
 
-### Writing to streams
+## Writing to streams
 
 Writers need to track:
  - track their current position (i.e. its own per-writer stream ID).
@@ -133,7 +133,7 @@ To complete a fact, first remove it from your map of facts currently awaiting co
 Then, if no earlier fact is awaiting completion, the writer can advance its current position in that stream.
 Upon doing so it should emit an `RDATA` message[^3], once for every fact between the old and the new stream ID.
 
-### Subscribing to streams
+## Subscribing to streams
 
 Readers need to track the current position of every writer.
 
@@ -146,7 +146,7 @@ The `RDATA` itself is not a self-contained representation of the fact;
 readers will have to query the stream tables for the full details.
 Readers must also advance their record of the writer's current position for that stream.
 
-# Summary
+## Summary
 
 In a nutshell: we have an append-only log with a "buffer/scratchpad" at the end where we have to wait for the sequence to be linear and contiguous.
 
