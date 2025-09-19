@@ -265,8 +265,6 @@ def check_call_later(ctx: MethodSigContext) -> CallableType:
 
     Args:
         ctx: The `FunctionSigContext` from mypy.
-        fullname: The fully qualified name of the function being called,
-            e.g. `"twisted.internet.interfaces.IReactorTime.callLater"`
     """
     signature: CallableType = ctx.default_signature
     ctx.api.fail(
@@ -288,8 +286,6 @@ def check_looping_call(ctx: FunctionSigContext) -> CallableType:
 
     Args:
         ctx: The `FunctionSigContext` from mypy.
-        fullname: The fully qualified name of the function being called,
-            e.g. `"twisted.internet.task.LoopingCall"`
     """
     signature: CallableType = ctx.default_signature
     ctx.api.fail(
