@@ -71,13 +71,13 @@ PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
 INTERNAL_CLOCK_CALL_LATER_NOT_USED = ErrorCode(
     "call-later-not-tracked",
     "`synapse.util.Clock.call_later` should be used instead of `reactor.callLater`",
-    category="delayed-call-tracking",
+    category="synapse-reactor-clock",
 )
 
 INTERNAL_CLOCK_LOOPING_CALL_NOT_USED = ErrorCode(
     "looping-call-not-tracked",
     "`synapse.util.Clock.looping_call` should be used instead of `task.LoopingCall`",
-    category="delayed-call-tracking",
+    category="synapse-reactor-clock",
 )
 
 
