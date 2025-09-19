@@ -1,1 +1,1 @@
-Introduce `Clock.call_when_running(...)` so that any Synapse code running when the reactor starts includes logcontext as we want to know which server the logs came from.
+Introduce `Clock.call_when_running(...)` to wrap startup code in a logcontext, ensuring we can identify which server generated the logs.
