@@ -48,15 +48,14 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
             reactor=self.reactor,
             homeserver_to_use=SynapseHomeServer,
             clock=self.clock,
+            shutdown_homeserver_on_cleanup=False,
         )
         self.wait_for_background_updates()
 
         hs_ref = weakref.ref(self.hs)
 
         # Cleanup the homeserver.
-        # This works since we register `hs.shutdown()` as a cleanup function in
-        # `setup_test_homeserver`.
-        self._runCleanups(TestResult())
+        self.get_success(self.hs.shutdown())
         self.reactor.shutdown()
 
         # Cleanup the internal reference in our test case
