@@ -52,9 +52,10 @@ from zope.interface import implementer
 
 from twisted.internet import defer, interfaces, reactor
 from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import IReactorTime
 from twisted.python import failure
 from twisted.web import resource
+
+from synapse.types import ISynapseThreadlessReactor
 
 try:
     from twisted.web.pages import notFound
@@ -411,7 +412,7 @@ class DirectServeJsonResource(_AsyncResource):
         clock: Optional[Clock] = None,
     ):
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
 
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
@@ -590,7 +591,7 @@ class DirectServeHtmlResource(_AsyncResource):
         clock: Optional[Clock] = None,
     ):
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
 
         super().__init__(clock, extract_context)
 

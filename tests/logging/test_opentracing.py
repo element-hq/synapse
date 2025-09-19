@@ -159,7 +159,13 @@ class TracingScopeTestCase(TestCase):
     def test_overlapping_spans(self) -> None:
         """Overlapping spans which are not neatly nested should work"""
         reactor = MemoryReactorClock()
-        clock = Clock(reactor)
+        # type-ignore: mypy-zope doesn't seem to recognise that `MemoryReactorClock`
+        # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
+        # Reactor/Clock interfaces), via inheritance from
+        # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
+        clock = Clock(
+            reactor  # type: ignore[arg-type]
+        )
 
         scopes = []
 
@@ -223,7 +229,13 @@ class TracingScopeTestCase(TestCase):
         parent.
         """
         reactor = MemoryReactorClock()
-        clock = Clock(reactor)
+        # type-ignore: mypy-zope doesn't seem to recognise that `MemoryReactorClock`
+        # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
+        # Reactor/Clock interfaces), via inheritance from
+        # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
+        clock = Clock(
+            reactor  # type: ignore[arg-type]
+        )
 
         scope_map: Dict[str, opentracing.Scope] = {}
 

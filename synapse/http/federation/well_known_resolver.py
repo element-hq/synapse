@@ -27,7 +27,6 @@ from typing import Callable, Dict, Optional, Tuple
 import attr
 
 from twisted.internet import defer
-from twisted.internet.interfaces import IReactorTime
 from twisted.web.client import RedirectAgent
 from twisted.web.http import stringToDatetime
 from twisted.web.http_headers import Headers
@@ -35,6 +34,7 @@ from twisted.web.iweb import IAgent, IResponse
 
 from synapse.http.client import BodyExceededMaxSize, read_body_with_max_size
 from synapse.logging.context import make_deferred_yieldable
+from synapse.types import ISynapseThreadlessReactor
 from synapse.util.caches.ttlcache import TTLCache
 from synapse.util.clock import Clock
 from synapse.util.json import json_decoder
@@ -89,7 +89,7 @@ class WellKnownResolver:
     def __init__(
         self,
         server_name: str,
-        reactor: IReactorTime,
+        reactor: ISynapseThreadlessReactor,
         agent: IAgent,
         user_agent: bytes,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
