@@ -1586,8 +1586,7 @@ def main() -> None:
 
         @defer.inlineCallbacks
         def run() -> Generator["defer.Deferred[Any]", Any, None]:
-            with LoggingContext("synapse_port_db_run"):
-                yield defer.ensureDeferred(porter.run())
+            yield defer.ensureDeferred(porter.run())
 
         hs.get_clock().call_when_running(run)
 

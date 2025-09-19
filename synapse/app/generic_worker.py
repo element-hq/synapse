@@ -356,9 +356,7 @@ def start(config_options: List[str]) -> None:
         handle_startup_exception(e)
 
     async def start() -> None:
-        # Re-establish log context now that we're back from the reactor
-        with LoggingContext("start"):
-            await _base.start(hs)
+        await _base.start(hs)
 
     register_start(hs, start)
 
