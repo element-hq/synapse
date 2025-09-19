@@ -199,4 +199,6 @@ class Clock:
                 # logcontext to the reactor
                 context.run_in_background(callback, *args, **kwargs)
 
-        self._reactor.callWhenRunning(wrapped_callback, *args, **kwargs)
+        # We can ignore the lint here since this class is the one location
+        # callWhenRunning should be called.
+        self._reactor.callWhenRunning(wrapped_callback, *args, **kwargs)  # type: ignore[prefer-synapse-clock-call-when-running]

@@ -389,7 +389,7 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
 
             hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
-    register_start(start)
+    register_start(hs, start)
 
     return hs
 

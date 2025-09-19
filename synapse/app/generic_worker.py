@@ -360,7 +360,7 @@ def start(config_options: List[str]) -> None:
         with LoggingContext("start"):
             await _base.start(hs)
 
-    register_start(start)
+    register_start(hs, start)
 
     # redirect stdio to the logs, if configured.
     if not hs.config.logging.no_redirect_stdio:
