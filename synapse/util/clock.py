@@ -171,11 +171,15 @@ class Clock:
         """
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `call_when_running` callback from the reactor to start with the sentinel logcontext "
-                f"but saw {context.current_context()}. In other words, another task shouldn't have "
-                "leaked their logcontext to us."
-            )
+            # Since this callback can be invoked immediately if the reactor is already
+            # running, we can't always assume that we're running in the sentinel
+            # logcontext (i.e. we can't assert that we're in the sentinel context like
+            # we can in other methods).
+            #
+            # We will only be running in the sentinel logcontext if the reactor was not
+            # running when `call_when_running` was invoked and later starts up.
+            #
+            # assert context.current_context() is context.SENTINEL_CONTEXT
 
             # Because this is a callback from the reactor, we will be using the
             # `sentinel` log context at this point. We want the function to log with
