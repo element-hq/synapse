@@ -23,7 +23,6 @@ import logging
 import sys
 from typing import Dict, List
 
-from synapse.storage.databases.main.sticky_events import StickyEventsWorkerStore
 from twisted.web.resource import Resource
 
 import synapse
@@ -102,6 +101,7 @@ from synapse.storage.databases.main.signatures import SignatureWorkerStore
 from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.databases.main.stats import StatsStore
+from synapse.storage.databases.main.sticky_events import StickyEventsWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.task_scheduler import TaskSchedulerWorkerStore

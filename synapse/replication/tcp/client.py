@@ -44,7 +44,10 @@ from synapse.replication.tcp.streams import (
     UnPartialStatedEventStream,
     UnPartialStatedRoomStream,
 )
-from synapse.replication.tcp.streams._base import ThreadSubscriptionsStream
+from synapse.replication.tcp.streams._base import (
+    StickyEventsStream,
+    ThreadSubscriptionsStream,
+)
 from synapse.replication.tcp.streams.events import (
     EventsStream,
     EventsStreamEventRow,
@@ -261,6 +264,13 @@ class ReplicationDataHandler:
                 StreamKeyType.THREAD_SUBSCRIPTIONS,
                 token,
                 users=[row.user_id for row in rows],
+            )
+        elif stream_name == StickyEventsStream.NAME:
+            print(f"STICKY_EVENTS on_rdata {token} => {rows}")
+            self.notifier.on_new_event(
+                StreamKeyType.STICKY_EVENTS,
+                token,
+                rooms=[row.room_id for row in rows],
             )
 
         await self._presence_handler.process_replication_rows(

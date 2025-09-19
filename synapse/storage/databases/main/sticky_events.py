@@ -15,10 +15,13 @@ import time
 from typing import (
     TYPE_CHECKING,
     Any,
+    Dict,
     Iterable,
     List,
     Optional,
+    Set,
     Tuple,
+    cast,
 )
 
 from synapse.api.constants import EventTypes, StickyEvent
@@ -29,6 +32,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events import DeltaState
@@ -94,6 +98,54 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
     def get_sticky_events_stream_id_generator(self) -> MultiWriterIdGenerator:
         return self._sticky_events_id_gen
 
+    async def get_sticky_events_in_rooms(
+        self,
+        room_ids: List[str],
+        from_id: int,
+    ) -> Tuple[int, Dict[str, Set[str]]]:
+        """
+        Fetch all the sticky events in the given rooms, from the given sticky stream ID.
+
+        Args:
+            room_ids: The room IDs to return sticky events in.
+            from_id: The sticky stream ID that sticky events should be returned from.
+        Returns:
+            A tuple of (to_id, map[room_id, event_ids])
+        """
+        sticky_events_rows = await self.db_pool.runInteraction(
+            "get_sticky_events_in_rooms",
+            self._get_sticky_events_in_rooms_txn,
+            room_ids,
+            from_id,
+        )
+        to_id = from_id
+        room_to_events: Dict[str, Set[str]] = {}
+        for stream_id, room_id, event_id in sticky_events_rows:
+            to_id = max(to_id, stream_id)
+            events = room_to_events.get(room_id, set())
+            events.add(event_id)
+            room_to_events[room_id] = events
+        return (to_id, room_to_events)
+
+    def _get_sticky_events_in_rooms_txn(
+        self,
+        txn: LoggingTransaction,
+        room_ids: List[str],
+        from_id: int,
+    ) -> List[Tuple[int, str, str]]:
+        if len(room_ids) == 0:
+            return []
+        clause, room_id_values = make_in_list_sql_clause(
+            txn.database_engine, "room_id", room_ids
+        )
+        txn.execute(
+            f"""
+            SELECT stream_id, room_id, event_id FROM sticky_events WHERE stream_id > ? AND {clause}
+            """,
+            (from_id, room_id_values),
+        )
+        return cast(List[Tuple[int, str, str]], txn.fetchall())
+
     async def get_updated_sticky_events(
         self, from_id: int, to_id: int, limit: int
     ) -> List[Tuple[int, str, str]]:
@@ -107,7 +159,24 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         Returns:
             list of (stream_id, room_id, event_id) tuples
         """
-        return []  # TODO
+        return await self.db_pool.runInteraction(
+            "get_updated_sticky_events",
+            self._get_updated_sticky_events_txn,
+            from_id,
+            to_id,
+            limit,
+        )
+
+    def _get_updated_sticky_events_txn(
+        self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
+    ) -> List[Tuple[int, str, str]]:
+        txn.execute(
+            """
+            SELECT stream_id, room_id, event_id FROM sticky_events WHERE stream_id > ? AND stream_id <= ? LIMIT ?
+            """,
+            (from_id, to_id, limit),
+        )
+        return cast(List[Tuple[int, str, str]], txn.fetchall())
 
     def handle_sticky_events_txn(
         self,
@@ -136,6 +205,8 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         """
         if len(events_and_contexts) == 0:
             return
+
+        assert self._can_write_to_sticky_events
 
         # TODO: finish the impl
         # fetch soft failed sticky events to recheck now, before we insert new sticky events, else
