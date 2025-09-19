@@ -74,8 +74,8 @@ INTERNAL_CLOCK_CALL_LATER_NOT_USED = ErrorCode(
     category="synapse-reactor-clock",
 )
 
-INTERNAL_CLOCK_LOOPING_CALL_NOT_USED = ErrorCode(
-    "looping-call-not-tracked",
+PREFER_SYNAPSE_CLOCK_LOOPING_CALL = ErrorCode(
+    "prefer-synapse-clock-looping-call",
     "`synapse.util.Clock.looping_call` should be used instead of `task.LoopingCall`",
     category="synapse-reactor-clock",
 )
@@ -295,7 +295,7 @@ def check_looping_call(ctx: FunctionSigContext) -> CallableType:
         "instead. This is so that long lived calls can be tracked for cancellation during "
         "server shutdown",
         ctx.context,
-        code=INTERNAL_CLOCK_LOOPING_CALL_NOT_USED,
+        code=PREFER_SYNAPSE_CLOCK_LOOPING_CALL,
     )
 
     return signature
