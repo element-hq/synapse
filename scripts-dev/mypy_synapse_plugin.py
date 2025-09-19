@@ -268,7 +268,9 @@ def check_call_later(ctx: MethodSigContext) -> CallableType:
     """
     signature: CallableType = ctx.default_signature
     ctx.api.fail(
-        "Expected all `reactor.callLater` calls to use `synapse.util.Clock.call_later` instead. This is so that long lived calls can be tracked for cancellation during server shutdown",
+        "Expected all `reactor.callLater` calls to use `synapse.util.Clock.call_later` "
+        "instead. This is so that long lived calls can be tracked for cancellation during "
+        "server shutdown",
         ctx.context,
         code=INTERNAL_CLOCK_CALL_LATER_NOT_USED,
     )
@@ -289,7 +291,9 @@ def check_looping_call(ctx: FunctionSigContext) -> CallableType:
     """
     signature: CallableType = ctx.default_signature
     ctx.api.fail(
-        "Expected all `task.LoopingCall` instances to use `synapse.util.Clock.looping_call` instead. This is so that long lived calls can be tracked for cancellation during server shutdown",
+        "Expected all `task.LoopingCall` instances to use `synapse.util.Clock.looping_call` "
+        "instead. This is so that long lived calls can be tracked for cancellation during "
+        "server shutdown",
         ctx.context,
         code=INTERNAL_CLOCK_LOOPING_CALL_NOT_USED,
     )
