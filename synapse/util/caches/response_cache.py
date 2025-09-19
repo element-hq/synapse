@@ -198,15 +198,15 @@ class ResponseCache(Generic[KV]):
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
             if self.timeout_sec and context.should_cache:
-                # We don't need to track these calls since they don't hold and strong
-                # references which would keep the `HomeServer` in memory after shutdown.
-                # We don't want to track these because they can get cancelled really
-                # quickly and thrash the tracking mechanism, ie. during repeated calls
-                # to /sync.
                 self.clock.call_later(
                     self.timeout_sec,
                     self._entry_timeout,
                     key,
+                    # We don't need to track these calls since they don't hold any strong
+                    # references which would keep the `HomeServer` in memory after shutdown.
+                    # We don't want to track these because they can get cancelled really
+                    # quickly and thrash the tracking mechanism, ie. during repeated calls
+                    # to /sync.
                     call_later_cancel_on_shutdown=False,
                 )
             else:
