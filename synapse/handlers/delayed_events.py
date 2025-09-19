@@ -252,8 +252,8 @@ class DelayedEventsHandler:
 
             sender_str = event_id_and_sender_dict.get(delta.event_id, None)
             if sender_str is None:
-                logger.debug(
-                    "Not handling delta for event where sender is unknown: %s",
+                logger.error(
+                    "Skipping state delta with event ID '%s' as 'sender' was unknown. This is unexpected - please report it as a bug!",
                     delta.event_id,
                 )
                 continue
