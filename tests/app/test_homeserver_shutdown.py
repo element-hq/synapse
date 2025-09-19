@@ -51,6 +51,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         self._runCleanups(TestResult())
         self.get_success(self.reactor.shutdown())
 
+        # Cleanup the internal reference in our test case
         del self.hs
 
         # Advance the reactor to allow for any outstanding calls to be run.
