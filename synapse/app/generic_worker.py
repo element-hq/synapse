@@ -23,6 +23,7 @@ import logging
 import sys
 from typing import Dict, List
 
+from synapse.storage.databases.main.sticky_events import StickyEventsWorkerStore
 from twisted.web.resource import Resource
 
 import synapse
@@ -136,6 +137,7 @@ class GenericWorkerStore(
     RoomWorkerStore,
     DirectoryWorkerStore,
     ThreadSubscriptionsWorkerStore,
+    StickyEventsWorkerStore,
     PushRulesWorkerStore,
     ApplicationServiceTransactionWorkerStore,
     ApplicationServiceWorkerStore,
