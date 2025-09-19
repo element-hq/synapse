@@ -54,7 +54,6 @@ from twisted.internet import defer, reactor as reactor_
 from synapse.config.database import DatabaseConnectionConfig
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import (
-    LoggingContext,
     make_deferred_yieldable,
     run_in_background,
 )
