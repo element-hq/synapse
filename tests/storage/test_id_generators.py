@@ -35,7 +35,7 @@ from synapse.storage.util.sequence import (
     PostgresSequenceGenerator,
     SequenceGenerator,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 from tests.utils import USE_POSTGRES_FOR_TESTS

@@ -43,7 +43,7 @@ from synapse.events.snapshot import EventContext
 from synapse.state import StateHandler, StateResolutionHandler, _make_state_cache_entry
 from synapse.types import MutableStateMap, StateMap
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.macaroons import MacaroonGenerator
 
 from tests import unittest

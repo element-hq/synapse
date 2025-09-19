@@ -77,10 +77,11 @@ from synapse.api.errors import (
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
-from synapse.util import Clock, json_encoder
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.clock import Clock
 from synapse.util.iterutils import chunk_seq
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     import opentracing

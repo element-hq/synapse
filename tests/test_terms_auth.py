@@ -26,7 +26,7 @@ from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from synapse.rest.client.register import register_servlets
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

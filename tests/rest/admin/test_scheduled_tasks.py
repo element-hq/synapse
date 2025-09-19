@@ -22,7 +22,7 @@ from synapse.api.errors import Codes
 from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

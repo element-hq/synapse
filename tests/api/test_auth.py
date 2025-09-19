@@ -39,7 +39,7 @@ from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
 from synapse.storage.databases.main.registration import TokenLookupResult
 from synapse.types import Requester, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

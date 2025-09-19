@@ -43,7 +43,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventCacheEntry
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.events import generate_fake_event_id
 
 from tests import unittest

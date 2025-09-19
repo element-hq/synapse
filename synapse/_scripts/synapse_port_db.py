@@ -98,7 +98,8 @@ from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStor
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
-from synapse.util import SYNAPSE_VERSION, Clock
+from synapse.util import SYNAPSE_VERSION
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 # Cast safety: Twisted does some naughty magic which replaces the

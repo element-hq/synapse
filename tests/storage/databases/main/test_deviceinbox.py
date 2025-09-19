@@ -30,7 +30,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.deviceinbox import (
     DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

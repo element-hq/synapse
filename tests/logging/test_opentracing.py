@@ -35,7 +35,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace_with_opname,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 try:
     import opentracing

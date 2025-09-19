@@ -37,7 +37,7 @@ from synapse.storage.background_updates import (
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

@@ -39,7 +39,7 @@ from synapse.storage.databases.main.appservice import (
     ApplicationServiceTransactionStore,
 )
 from synapse.types import DeviceListUpdates
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

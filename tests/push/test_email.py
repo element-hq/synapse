@@ -35,7 +35,7 @@ from synapse.push.emailpusher import EmailPusher
 from synapse.rest.client import login, room
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import FakeSite, make_request
 from tests.unittest import HomeserverTestCase
