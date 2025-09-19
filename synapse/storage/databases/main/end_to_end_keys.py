@@ -354,7 +354,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             if d is not None and d.keys is not None
         )
 
-        for batch in batch_iter(signature_query, 50):
+        for batch in batch_iter(signature_query, 1000):
             cross_sigs_result = (
                 await self._get_e2e_cross_signing_signatures_for_devices(batch)
             )
