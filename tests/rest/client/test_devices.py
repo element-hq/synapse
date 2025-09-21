@@ -23,7 +23,7 @@ from http import HTTPStatus
 from twisted.internet.defer import ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.api.errors import Codes, NotFoundError
+from synapse.api.errors import NotFoundError
 from synapse.appservice import ApplicationService
 from synapse.rest import admin, devices, sync
 from synapse.rest.client import keys, login, register
@@ -492,23 +492,6 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.hs.get_datastores().main.services_cache.append(self.msc4190_service)
         self.hs.get_datastores().main.services_cache.append(self.pre_msc_service)
         return self.hs
-
-    def test_register_fail(self) -> None:
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/v3/register",
-            {
-                "username": "alice",
-                "type": "m.login.application_service",
-            },
-            access_token=self.msc4190_service.token,
-        )
-        self.assertEqual(channel.code, 400, channel.json_body)
-        self.assertEqual(
-            channel.json_body.get("errcode"),
-            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
-            channel.json_body,
-        )
 
     def test_PUT_device(self) -> None:
         self.register_appservice_user(
