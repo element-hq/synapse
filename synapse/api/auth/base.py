@@ -359,7 +359,7 @@ class BaseAuth:
                 raise AuthError(
                     400,
                     f"Application service trying to use a device that doesn't exist ('{effective_device_id}' for {effective_user_id})",
-                    Codes.EXCLUSIVE,
+                    Codes.UNKNOWN_DEVICE,
                 )
 
         return create_requester(
