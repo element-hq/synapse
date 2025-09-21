@@ -304,7 +304,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
         failure = self.get_failure(self.auth.get_user_by_req(request), AuthError)
         self.assertEqual(failure.value.code, 400)
-        self.assertEqual(failure.value.errcode, Codes.EXCLUSIVE)
+        self.assertEqual(failure.value.errcode, Codes.UNKNOWN_DEVICE)
 
     def test_get_user_by_req__puppeted_token__not_tracking_puppeted_mau(self) -> None:
         self.store.get_user_by_access_token = AsyncMock(
