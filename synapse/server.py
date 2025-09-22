@@ -1007,7 +1007,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        self.get_reactor().addSystemEventTrigger(
+        self.get_clock().add_system_event_trigger(
             "during", "shutdown", media_threadpool.stop
         )
 

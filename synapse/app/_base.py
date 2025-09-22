@@ -518,7 +518,9 @@ async def start(hs: "HomeServer") -> None:
     # numbers of DNS requests don't starve out other users of the threadpool.
     resolver_threadpool = ThreadPool(name="gai_resolver")
     resolver_threadpool.start()
-    reactor.addSystemEventTrigger("during", "shutdown", resolver_threadpool.stop)
+    hs.get_clock().add_system_event_trigger(
+        "during", "shutdown", resolver_threadpool.stop
+    )
     reactor.installNameResolver(
         GAIResolver(reactor, getThreadPool=lambda: resolver_threadpool)
     )
@@ -605,7 +607,7 @@ async def start(hs: "HomeServer") -> None:
             logger.info("Shutting down...")
 
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger("before", "shutdown", log_shutdown)
+    hs.get_clock().add_system_event_trigger("before", "shutdown", log_shutdown)
 
     setup_sentry(hs)
     setup_sdnotify(hs)
@@ -720,7 +722,7 @@ def setup_sdnotify(hs: "HomeServer") -> None:
     # we're not using systemd.
     sdnotify(b"READY=1\nMAINPID=%i" % (os.getpid(),))
 
-    hs.get_reactor().addSystemEventTrigger(
+    hs.get_clock().add_system_event_trigger(
         "before", "shutdown", sdnotify, b"STOPPING=1"
     )
 
