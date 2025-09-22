@@ -44,6 +44,7 @@ class Clock:
     """
 
     _reactor: ISynapseThreadlessReactor = attr.ib()
+    _server_name: str = attr.ib()
 
     async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
@@ -144,7 +145,11 @@ class Clock:
             # this function and yield control back to the reactor to avoid leaking the
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
-            with context.PreserveLoggingContext(context.LoggingContext("looping_call")):
+            with context.PreserveLoggingContext(
+                context.LoggingContext(
+                    name="looping_call", server_name=self._server_name
+                )
+            ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
@@ -199,7 +204,9 @@ class Clock:
             # this function and yield control back to the reactor to avoid leaking the
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
-            with context.PreserveLoggingContext(context.LoggingContext("call_later")):
+            with context.PreserveLoggingContext(
+                context.LoggingContext(name="call_later", server_name=self._server_name)
+            ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
@@ -258,7 +265,9 @@ class Clock:
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
             with context.PreserveLoggingContext(
-                context.LoggingContext("call_when_running")
+                context.LoggingContext(
+                    name="call_when_running", server_name=self._server_name
+                )
             ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
@@ -313,7 +322,11 @@ class Clock:
             # this function and yield control back to the reactor to avoid leaking the
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
-            with context.PreserveLoggingContext(context.LoggingContext("system_event")):
+            with context.PreserveLoggingContext(
+                context.LoggingContext(
+                    name="system_event", server_name=self._server_name
+                )
+            ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
