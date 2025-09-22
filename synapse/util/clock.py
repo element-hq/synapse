@@ -23,6 +23,7 @@ import attr
 from typing_extensions import ParamSpec
 
 from twisted.internet import defer, task
+from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IDelayedCall
 from twisted.internet.task import LoopingCall
 
@@ -46,6 +47,8 @@ class Clock:
 
     async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
+        # Start task in the `sentinel` logcontext, to avoid leaking the current context
+        # into the reactor once it finishes.
         with context.PreserveLoggingContext():
             self._reactor.callLater(seconds, d.callback, seconds)
             await d
@@ -74,8 +77,9 @@ class Clock:
         this functionality thanks to this function being a thin wrapper around
         `twisted.internet.task.LoopingCall`.
 
-        Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in run_as_background_process.
+        Note that the function will be called with generic `looping_call` logcontext, so
+        if it is anything other than a trivial task, you probably want to wrap it in
+        `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
             f: The function to call repeatedly.
@@ -97,8 +101,9 @@ class Clock:
         As with `looping_call`: subsequent calls are not scheduled until after the
         the Awaitable returned by a previous call has finished.
 
-        Also as with `looping_call`: the function is called with no logcontext and
-        you probably want to wrap it in `run_as_background_process`.
+        Note that the function will be called with generic `looping_call` logcontext, so
+        if it is anything other than a trivial task, you probably want to wrap it in
+        `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
             f: The function to call repeatedly.
@@ -117,9 +122,43 @@ class Clock:
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
-        call = task.LoopingCall(f, *args, **kwargs)
+
+        def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
+            assert context.current_context() is context.SENTINEL_CONTEXT, (
+                "Expected `looping_call` callback from the reactor to start with the sentinel logcontext "
+                f"but saw {context.current_context()}. In other words, another task shouldn't have "
+                "leaked their logcontext to us."
+            )
+
+            # Because this is a callback from the reactor, we will be using the
+            # `sentinel` log context at this point. We want the function to log with
+            # some logcontext as we want to know which server the logs came from.
+            #
+            # We use `PreserveLoggingContext` to prevent our new `looping_call`
+            # logcontext from finishing as soon as we exit this function, in case `f`
+            # returns an awaitable/deferred which would continue running and may try to
+            # restore the `loop_call` context when it's done (because it's trying to
+            # adhere to the Synapse logcontext rules.)
+            #
+            # This also ensures that we return to the `sentinel` context when we exit
+            # this function and yield control back to the reactor to avoid leaking the
+            # current logcontext to the reactor (which would then get picked up and
+            # associated with the next thing the reactor does)
+            with context.PreserveLoggingContext(context.LoggingContext("looping_call")):
+                # We use `run_in_background` to reset the logcontext after `f` (or the
+                # awaitable returned by `f`) completes to avoid leaking the current
+                # logcontext to the reactor
+                return context.run_in_background(f, *args, **kwargs)
+
+        call = task.LoopingCall(wrapped_f, *args, **kwargs)
         call.clock = self._reactor
-        d = call.start(msec / 1000.0, now=now)
+        # If `now=true`, the function will be called here immediately so we need to be
+        # in the sentinel context now.
+        #
+        # We want to start the task in the `sentinel` logcontext, to avoid leaking the
+        # current context into the reactor after the function finishes.
+        with context.PreserveLoggingContext():
+            d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         return call
 
@@ -128,8 +167,9 @@ class Clock:
     ) -> IDelayedCall:
         """Call something later
 
-        Note that the function will be called with no logcontext, so if it is anything
-        other than trivial, you probably want to wrap it in run_as_background_process.
+        Note that the function will be called with generic `call_later` logcontext, so
+        if it is anything other than a trivial task, you probably want to wrap it in
+        `run_as_background_process` to give it more specific label and track metrics.
 
         Args:
             delay: How long to wait in seconds.
@@ -139,11 +179,33 @@ class Clock:
         """
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            with context.PreserveLoggingContext():
-                callback(*args, **kwargs)
+            assert context.current_context() is context.SENTINEL_CONTEXT, (
+                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
+                f"but saw {context.current_context()}. In other words, another task shouldn't have "
+                "leaked their logcontext to us."
+            )
 
-        with context.PreserveLoggingContext():
-            return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+            # Because this is a callback from the reactor, we will be using the
+            # `sentinel` log context at this point. We want the function to log with
+            # some logcontext as we want to know which server the logs came from.
+            #
+            # We use `PreserveLoggingContext` to prevent our new `call_later`
+            # logcontext from finishing as soon as we exit this function, in case `f`
+            # returns an awaitable/deferred which would continue running and may try to
+            # restore the `loop_call` context when it's done (because it's trying to
+            # adhere to the Synapse logcontext rules.)
+            #
+            # This also ensures that we return to the `sentinel` context when we exit
+            # this function and yield control back to the reactor to avoid leaking the
+            # current logcontext to the reactor (which would then get picked up and
+            # associated with the next thing the reactor does)
+            with context.PreserveLoggingContext(context.LoggingContext("call_later")):
+                # We use `run_in_background` to reset the logcontext after `f` (or the
+                # awaitable returned by `f`) completes to avoid leaking the current
+                # logcontext to the reactor
+                context.run_in_background(callback, *args, **kwargs)
+
+        return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:

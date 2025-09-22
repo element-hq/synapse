@@ -31,6 +31,7 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes, SynapseError
+from synapse.logging.context import make_deferred_yieldable
 from synapse.push.emailpusher import EmailPusher
 from synapse.rest.client import login, room
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
@@ -89,7 +90,7 @@ class EmailPusherTests(HomeserverTestCase):
             # This mocks out synapse.reactor.send_email._sendmail.
             d: Deferred = Deferred()
             self.email_attempts.append((d, args, kwargs))
-            return d
+            return make_deferred_yieldable(d)
 
         hs.get_send_email_handler()._sendmail = sendmail  # type: ignore[assignment]
 
