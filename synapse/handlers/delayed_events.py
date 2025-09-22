@@ -229,8 +229,6 @@ class DelayedEventsHandler:
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
         """
-        # TODO: How to handle state deltas that are the result of a state reset?
-
         # Get the senders of each delta's state event (as sender information is
         # not currently stored in the `current_state_deltas` table).
         event_id_and_sender_dict = await self._store.get_senders_for_event_ids(
@@ -240,29 +238,40 @@ class DelayedEventsHandler:
         # Note: No need to batch as `get_current_state_deltas` will only ever
         # return 100 rows at a time.
         for delta in deltas:
+            logger.debug(
+                "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
+            )
+
+            # `delta.event_id` and `delta.sender` can be `None` in a few valid
+            # cases (see the docstring of
+            # `get_current_state_delta_membership_changes_for_user` for details).
             if delta.event_id is None:
+                # TODO: Differentiate whether this is a state reset or the
+                # homeserver has simply left the room. We can do so by checking
+                # whether there are any local memberships still left in the
+                # room. If so, then this *is* a state reset, and we should log
+                # appropriately.
                 logger.debug(
-                    "Not handling delta for deleted state: %r %r",
+                    "Skipping state delta (%r, %r) without corresponding event ID."
+                    "This can happen if the homeserver has left the room, or if there has been a state reset",
                     delta.event_type,
                     delta.state_key,
                 )
                 continue
 
-            logger.debug(
-                "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
-            )
-
             sentinel = object()
             sender_str = event_id_and_sender_dict.get(delta.event_id, sentinel)
             if sender_str is None:
+                # An event exists, but the `sender` field was "null" and Synapse
+                # incorrectly accepted the event. This is not expected.
                 logger.error(
-                    "Skipping state delta with event ID '%s' as 'sender' was unknown. This is unexpected - please report it as a bug!",
+                    "Skipping state delta with event ID '%s' as 'sender' was None. This is unexpected - please report it as a bug!",
                     delta.event_id,
                 )
                 continue
             if sender_str is sentinel:
                 # This can happen if a room is purged. State deltas related to
-                # the room are left behind, but the event/room no longer exist.
+                # the room are left behind, but the event/room both no longer exist.
                 logger.warning(
                     "Skipping state delta with event ID '%s' as it is an unknown event - the room may have been purged",
                     delta.event_id,
