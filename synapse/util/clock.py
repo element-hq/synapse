@@ -156,8 +156,7 @@ class Clock:
         # in the sentinel context now.
         #
         # We want to start the task in the `sentinel` logcontext, to avoid leaking the
-        # current context into the reactor after the function finishes. TODO: Or perhaps
-        # someone cancels the looping call (does this matter?).
+        # current context into the reactor after the function finishes.
         with context.PreserveLoggingContext():
             d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
