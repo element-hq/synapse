@@ -66,7 +66,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.sleep`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -111,7 +111,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.looping_call`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -161,7 +161,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.looping_call_now`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -209,7 +209,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.call_later`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -292,7 +292,7 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     def test_run_in_background_with_blocking_fn(self) -> defer.Deferred:
         async def blocking_function() -> None:
-            await Clock(reactor).sleep(0)
+            await Clock(reactor, server_name="test_server").sleep(0)
 
         return self._test_run_in_background(blocking_function)
 
@@ -318,7 +318,7 @@ class LoggingContextTestCase(unittest.TestCase):
     def test_run_in_background_with_coroutine(self) -> defer.Deferred:
         async def testfunc() -> None:
             self._check_test_key("foo")
-            d = defer.ensureDeferred(Clock(reactor).sleep(0))
+            d = defer.ensureDeferred(Clock(reactor, server_name="test_server").sleep(0))
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             await d
             self._check_test_key("foo")

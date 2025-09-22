@@ -107,7 +107,7 @@ class WellKnownResolver:
 
         self.server_name = server_name
         self._reactor = reactor
-        self._clock = Clock(reactor)
+        self._clock = Clock(reactor, server_name=server_name)
 
         if well_known_cache is None:
             well_known_cache = TTLCache(

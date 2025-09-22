@@ -124,7 +124,7 @@ class MatrixFederationAgent:
         # addresses, to prevent DNS rebinding.
         reactor = BlocklistingReactorWrapper(reactor, ip_allowlist, ip_blocklist)
 
-        self._clock = Clock(reactor)
+        self._clock = Clock(reactor, server_name=server_name)
         self._pool = HTTPConnectionPool(reactor)
         self._pool.retryAutomatically = False
         self._pool.maxPersistentPerHost = 5

@@ -164,7 +164,8 @@ class TracingScopeTestCase(TestCase):
         # Reactor/Clock interfaces), via inheritance from
         # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
         clock = Clock(
-            reactor  # type: ignore[arg-type]
+            reactor,  # type: ignore[arg-type]
+            server_name="test_server",
         )
 
         scopes = []
@@ -234,7 +235,8 @@ class TracingScopeTestCase(TestCase):
         # Reactor/Clock interfaces), via inheritance from
         # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
         clock = Clock(
-            reactor  # type: ignore[arg-type]
+            reactor,  # type: ignore[arg-type]
+            server_name="test_server",
         )
 
         scope_map: Dict[str, opentracing.Scope] = {}

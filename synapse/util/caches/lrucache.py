@@ -497,7 +497,9 @@ class LruCache(Generic[KT, VT]):
         # Default `clock` to something sensible. Note that we rename it to
         # `real_clock` so that mypy doesn't think its still `Optional`.
         if clock is None:
-            real_clock = Clock(cast(ISynapseThreadlessReactor, reactor))
+            real_clock = Clock(
+                cast(ISynapseThreadlessReactor, reactor), server_name=server_name
+            )
         else:
             real_clock = clock
 

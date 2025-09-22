@@ -442,7 +442,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_clock(self) -> Clock:
-        return Clock(self._reactor)
+        return Clock(self._reactor, server_name=self.hostname)
 
     def get_datastores(self) -> Databases:
         if not self.datastores:
