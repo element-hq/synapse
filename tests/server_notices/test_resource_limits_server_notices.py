@@ -32,7 +32,7 @@ from synapse.server_notices.resource_limits_server_notices import (
 )
 from synapse.server_notices.server_notices_sender import ServerNoticesSender
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

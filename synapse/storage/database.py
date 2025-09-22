@@ -61,7 +61,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.metrics import SERVER_NAME_LABEL, LaterGauge, register_threadpool
+from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
@@ -611,12 +611,6 @@ class DatabasePool:
         )
 
         self.updates = BackgroundUpdater(hs, self)
-        LaterGauge(
-            name="synapse_background_update_status",
-            desc="Background update status",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): self.updates.get_status()},
-        )
 
         self._previous_txn_total_time = 0.0
         self._current_txn_total_time = 0.0
@@ -2661,12 +2655,19 @@ def make_in_list_sql_clause(
 
 
 # These overloads ensure that `columns` and `iterable` values have the same length.
-# Suppress "Single overload definition, multiple required" complaint.
-@overload  # type: ignore[misc]
+@overload
 def make_tuple_in_list_sql_clause(
     database_engine: BaseDatabaseEngine,
     columns: Tuple[str, str],
     iterable: Collection[Tuple[Any, Any]],
+) -> Tuple[str, list]: ...
+
+
+@overload
+def make_tuple_in_list_sql_clause(
+    database_engine: BaseDatabaseEngine,
+    columns: Tuple[str, str, str],
+    iterable: Collection[Tuple[Any, Any, Any]],
 ) -> Tuple[str, list]: ...
 
 

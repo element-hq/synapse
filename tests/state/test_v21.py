@@ -38,7 +38,7 @@ from synapse.state.v2 import (
     resolve_events_with_store,
 )
 from synapse.types import StateMap
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.state.test_v2 import TestStateResolutionStore

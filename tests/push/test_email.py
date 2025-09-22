@@ -18,12 +18,12 @@
 #
 #
 import email.message
+import importlib.resources as importlib_resources
 import os
 from http import HTTPStatus
 from typing import Any, Dict, List, Sequence, Tuple
 
 import attr
-import pkg_resources
 from parameterized import parameterized
 
 from twisted.internet.defer import Deferred
@@ -31,11 +31,12 @@ from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes, SynapseError
+from synapse.logging.context import make_deferred_yieldable
 from synapse.push.emailpusher import EmailPusher
 from synapse.rest.client import login, room
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import FakeSite, make_request
 from tests.unittest import HomeserverTestCase
@@ -59,11 +60,12 @@ class EmailPusherTests(HomeserverTestCase):
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
+        templates = (
+            importlib_resources.files("synapse").joinpath("res").joinpath("templates")
+        )
         config["email"] = {
             "enable_notifs": True,
-            "template_dir": os.path.abspath(
-                pkg_resources.resource_filename("synapse", "res/templates")
-            ),
+            "template_dir": os.path.abspath(str(templates)),
             "expiry_template_html": "notice_expiry.html",
             "expiry_template_text": "notice_expiry.txt",
             "notif_template_html": "notif_mail.html",
@@ -88,7 +90,7 @@ class EmailPusherTests(HomeserverTestCase):
             # This mocks out synapse.reactor.send_email._sendmail.
             d: Deferred = Deferred()
             self.email_attempts.append((d, args, kwargs))
-            return d
+            return make_deferred_yieldable(d)
 
         hs.get_send_email_handler()._sendmail = sendmail  # type: ignore[assignment]
 

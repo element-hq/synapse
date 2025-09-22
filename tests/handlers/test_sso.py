@@ -27,7 +27,7 @@ from twisted.web.http_headers import Headers
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.client import RawHeaders
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG, FakeResponse

@@ -65,7 +65,8 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util import Clock
+from synapse.types import ISynapseThreadlessReactor
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +348,7 @@ T2 = TypeVar("T2")
 T3 = TypeVar("T3")
 T4 = TypeVar("T4")
 T5 = TypeVar("T5")
+T6 = TypeVar("T6")
 
 
 @overload
@@ -461,6 +463,23 @@ async def gather_optional_coroutines(
 ) -> Tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5]]: ...
 
 
+@overload
+async def gather_optional_coroutines(
+    *coroutines: Unpack[
+        Tuple[
+            Optional[Coroutine[Any, Any, T1]],
+            Optional[Coroutine[Any, Any, T2]],
+            Optional[Coroutine[Any, Any, T3]],
+            Optional[Coroutine[Any, Any, T4]],
+            Optional[Coroutine[Any, Any, T5]],
+            Optional[Coroutine[Any, Any, T6]],
+        ]
+    ],
+) -> Tuple[
+    Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5], Optional[T6]
+]: ...
+
+
 async def gather_optional_coroutines(
     *coroutines: Unpack[Tuple[Optional[Coroutine[Any, Any, T1]], ...]],
 ) -> Tuple[Optional[T1], ...]:
@@ -548,7 +567,7 @@ class Linearizer:
         if not clock:
             from twisted.internet import reactor
 
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
         self._clock = clock
         self.max_count = max_count
 

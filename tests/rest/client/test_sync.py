@@ -22,7 +22,7 @@ import json
 import logging
 from typing import List
 
-from parameterized import parameterized, parameterized_class
+from parameterized import parameterized
 
 from twisted.internet.testing import MemoryReactor
 
@@ -36,7 +36,7 @@ from synapse.api.constants import (
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.federation.transport.test_knocking import (
@@ -702,28 +702,10 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
-@parameterized_class(
-    ("sync_endpoint", "experimental_features"),
-    [
-        ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
-    ],
-)
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device list (`device_lists`) changes.
-
-    Attributes:
-        sync_endpoint: The endpoint under test to use for syncing.
-        experimental_features: The experimental features homeserver config to use.
     """
-
-    sync_endpoint: str
-    experimental_features: JsonDict
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -732,11 +714,6 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        config["experimental_features"] = self.experimental_features
-        return config
 
     def test_receiving_local_device_list_changes(self) -> None:
         """Tests that a local users that share a room receive each other's device list
@@ -767,7 +744,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # Now have Bob initiate an initial sync (in order to get a since token)
         channel = self.make_request(
             "GET",
-            self.sync_endpoint,
+            "/sync",
             access_token=bob_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -777,7 +754,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # which we hope will happen as a result of Alice updating their device list.
         bob_sync_channel = self.make_request(
             "GET",
-            f"{self.sync_endpoint}?since={next_batch_token}&timeout=30000",
+            f"/sync?since={next_batch_token}&timeout=30000",
             access_token=bob_access_token,
             # Start the request, then continue on.
             await_result=False,
@@ -824,7 +801,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # Have Bob initiate an initial sync (in order to get a since token)
         channel = self.make_request(
             "GET",
-            self.sync_endpoint,
+            "/sync",
             access_token=bob_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -834,7 +811,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # which we hope will happen as a result of Alice updating their device list.
         bob_sync_channel = self.make_request(
             "GET",
-            f"{self.sync_endpoint}?since={next_batch_token}&timeout=1000",
+            f"/sync?since={next_batch_token}&timeout=1000",
             access_token=bob_access_token,
             # Start the request, then continue on.
             await_result=False,
@@ -873,9 +850,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
         next_batch = channel.json_body["next_batch"]
 
@@ -883,7 +858,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # It won't return until something has happened
         incremental_sync_channel = self.make_request(
             "GET",
-            f"{self.sync_endpoint}?since={next_batch}&timeout=30000",
+            f"/sync?since={next_batch}&timeout=30000",
             access_token=alice_access_token,
             await_result=False,
         )
@@ -913,17 +888,6 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         )
 
 
-@parameterized_class(
-    ("sync_endpoint", "experimental_features"),
-    [
-        ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
-    ],
-)
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device one time keys (`device_one_time_keys_count`) changes.
@@ -933,20 +897,12 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         experimental_features: The experimental features homeserver config to use.
     """
 
-    sync_endpoint: str
-    experimental_features: JsonDict
-
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        config["experimental_features"] = self.experimental_features
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
@@ -964,9 +920,7 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for those one time key counts
@@ -1011,9 +965,7 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for those one time key counts
@@ -1024,17 +976,6 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
         )
 
 
-@parameterized_class(
-    ("sync_endpoint", "experimental_features"),
-    [
-        ("/sync", {}),
-        (
-            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
-            # Enable sliding sync
-            {"msc3575_enabled": True},
-        ),
-    ],
-)
 class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
     """
     Tests regarding device one time keys (`device_unused_fallback_key_types`) changes.
@@ -1044,20 +985,12 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         experimental_features: The experimental features homeserver config to use.
     """
 
-    sync_endpoint: str
-    experimental_features: JsonDict
-
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        config["experimental_features"] = self.experimental_features
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = self.hs.get_datastores().main
@@ -1078,9 +1011,7 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for those one time key counts
@@ -1122,9 +1053,7 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(fallback_res, ["alg1"], fallback_res)
 
         # Request an initial sync
-        channel = self.make_request(
-            "GET", self.sync_endpoint, access_token=alice_access_token
-        )
+        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Check for the unused fallback key types

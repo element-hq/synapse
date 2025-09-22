@@ -27,7 +27,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.databases.main.lock import _LOCK_TIMEOUT_MS, _RENEWAL_INTERVAL_MS
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

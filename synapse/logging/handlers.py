@@ -60,8 +60,18 @@ class PeriodicallyFlushingMemoryHandler(MemoryHandler):
         else:
             reactor_to_use = reactor
 
-        # call our hook when the reactor start up
-        reactor_to_use.callWhenRunning(on_reactor_running)
+        # Call our hook when the reactor start up
+        #
+        # type-ignore: Ideally, we'd use `Clock.call_when_running(...)`, but
+        # `PeriodicallyFlushingMemoryHandler` is instantiated via Python logging
+        # configuration, so it's not straightforward to pass in the homeserver's clock
+        # (and we don't want to burden other peoples logging config with the details).
+        #
+        # The important reason why we want to use `Clock.call_when_running` is so that
+        # the callback runs with a logcontext as we want to know which server the logs
+        # came from. But since we don't log anything in the callback, it's safe to
+        # ignore the lint here.
+        reactor_to_use.callWhenRunning(on_reactor_running)  # type: ignore[prefer-synapse-clock-call-when-running]
 
     def shouldFlush(self, record: LogRecord) -> bool:
         """

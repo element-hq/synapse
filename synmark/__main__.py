@@ -62,7 +62,10 @@ def make_test(
                 return res
 
             d.addBoth(on_done)
-            reactor.callWhenRunning(lambda: d.callback(True))
+            # type-ignore: This is outside of Synapse (just a utility benchmark script)
+            # so we don't need to worry about  which server the logs are coming from
+            # (`Clock.call_when_running` manages the logcontext for us).
+            reactor.callWhenRunning(lambda: d.callback(True))  # type: ignore[prefer-synapse-clock-call-when-running]
             reactor.run()
 
         # mypy thinks this is an object for some reason.

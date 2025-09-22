@@ -556,6 +556,9 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        # MSC4169: Backwards-compatible redaction sending using `/send`
+        self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
+
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
 
@@ -590,5 +593,5 @@ class ExperimentalConfig(Config):
         self.msc4293_enabled: bool = experimental.get("msc4293_enabled", False)
 
         # MSC4306: Thread Subscriptions
-        # (and MSC4308: sliding sync extension for thread subscriptions)
+        # (and MSC4308: Thread Subscriptions extension to Sliding Sync)
         self.msc4306_enabled: bool = experimental.get("msc4306_enabled", False)

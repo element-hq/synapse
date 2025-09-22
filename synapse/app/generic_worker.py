@@ -368,7 +368,10 @@ def start(config: HomeServerConfig) -> None:
     except Exception as e:
         handle_startup_exception(e)
 
-    register_start(_base.start, hs)
+    async def start() -> None:
+        await _base.start(hs)
+
+    register_start(hs, start)
 
     # redirect stdio to the logs, if configured.
     if not hs.config.logging.no_redirect_stdio:

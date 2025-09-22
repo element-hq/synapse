@@ -405,7 +405,7 @@ def setup(config: HomeServerConfig) -> SynapseHomeServer:
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
-    register_start(start)
+    register_start(hs, start)
 
     return hs
 

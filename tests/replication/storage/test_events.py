@@ -38,7 +38,7 @@ from synapse.storage.databases.main.event_push_actions import (
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import PersistedEventPosition
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from ._base import BaseWorkerStoreTestCase
 

@@ -35,8 +35,8 @@ from synapse.types.handlers.sliding_sync import (
     RoomStatusMap,
     RoomSyncConfig,
 )
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -492,7 +492,7 @@ class PerConnectionStateDB:
     """An equivalent to `PerConnectionState` that holds data in a format stored
     in the DB.
 
-    The principle difference is that the tokens for the different streams are
+    The principal difference is that the tokens for the different streams are
     serialized to strings.
 
     When persisting this *only* contains updates to the state.

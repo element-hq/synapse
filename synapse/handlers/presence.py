@@ -173,6 +173,18 @@ state_transition_counter = Counter(
     labelnames=["locality", "from", "to", SERVER_NAME_LABEL],
 )
 
+presence_user_to_current_state_size_gauge = LaterGauge(
+    name="synapse_handlers_presence_user_to_current_state_size",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+presence_wheel_timer_size_gauge = LaterGauge(
+    name="synapse_handlers_presence_wheel_timer_size",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
 # If a user was last active in the last LAST_ACTIVE_GRANULARITY, consider them
 # "currently_active"
 LAST_ACTIVE_GRANULARITY = 60 * 1000
@@ -529,7 +541,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
         )
 
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             run_as_background_process,
@@ -779,11 +791,9 @@ class PresenceHandler(BasePresenceHandler):
             EduTypes.PRESENCE, self.incoming_presence
         )
 
-        LaterGauge(
-            name="synapse_handlers_presence_user_to_current_state_size",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.user_to_current_state)},
+        presence_user_to_current_state_size_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.user_to_current_state)},
         )
 
         # The per-device presence state, maps user to devices to per-device presence state.
@@ -832,7 +842,7 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             run_as_background_process,
@@ -882,11 +892,9 @@ class PresenceHandler(BasePresenceHandler):
                 60 * 1000,
             )
 
-        LaterGauge(
-            name="synapse_handlers_presence_wheel_timer_size",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.wheel_timer)},
+        presence_wheel_timer_size_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.wheel_timer)},
         )
 
         # Used to handle sending of presence to newly joined users/servers

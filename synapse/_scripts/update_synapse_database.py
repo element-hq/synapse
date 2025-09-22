@@ -74,7 +74,7 @@ def run_background_updates(hs: HomeServer) -> None:
             )
         )
 
-    reactor.callWhenRunning(run)
+    hs.get_clock().call_when_running(run)
 
     reactor.run()
 
@@ -119,6 +119,13 @@ def main() -> None:
     # Setup instantiates the store within the homeserver object and updates the
     # DB.
     hs.setup()
+
+    # This will cause all of the relevant storage classes to be instantiated and call
+    # `register_background_update_handler(...)`,
+    # `register_background_index_update(...)`,
+    # `register_background_validate_constraint(...)`, etc so they are available to use
+    # if we are asked to run those background updates.
+    hs.get_storage_controllers()
 
     if args.run_background_updates:
         run_background_updates(hs)

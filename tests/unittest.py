@@ -81,7 +81,7 @@ from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, Requester, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -783,6 +783,7 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         appservice_token: str,
+        inhibit_login: bool = False,
     ) -> Tuple[str, Optional[str]]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
@@ -803,6 +804,7 @@ class HomeserverTestCase(TestCase):
             {
                 "username": username,
                 "type": "m.login.application_service",
+                "inhibit_login": inhibit_login,
             },
             access_token=appservice_token,
         )

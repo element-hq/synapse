@@ -81,6 +81,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
@@ -1337,6 +1338,7 @@ class EventsWorkerStore(SQLBaseStore):
         fetched_event_ids: Set[str] = set()
         fetched_events: Dict[str, _EventRow] = {}
 
+        @trace
         async def _fetch_event_ids_and_get_outstanding_redactions(
             event_ids_to_fetch: Collection[str],
         ) -> Collection[str]:
@@ -1344,6 +1346,10 @@ class EventsWorkerStore(SQLBaseStore):
             Fetch all of the given event_ids and return any associated redaction event_ids
             that we still need to fetch in the next iteration.
             """
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "event_ids_to_fetch.length",
+                str(len(event_ids_to_fetch)),
+            )
             row_map = await self._enqueue_events(event_ids_to_fetch)
 
             # we need to recursively fetch any redactions of those events
@@ -1617,21 +1623,28 @@ class EventsWorkerStore(SQLBaseStore):
             # likely that some of these events may be for the same room/user combo, in
             # which case we don't need to do redundant queries
             to_check_set = set(to_check)
-            for room_and_user in to_check_set:
-                room_redactions_sql = "SELECT redacting_event_id, redact_end_ordering FROM room_ban_redactions WHERE room_id = ? and user_id = ?"
-                txn.execute(room_redactions_sql, room_and_user)
-
-                res = txn.fetchone()
-                # we have a redaction for a room, user_id combo - apply it to matching events
-                if not res:
-                    continue
+            room_redaction_sql = "SELECT room_id, user_id, redacting_event_id, redact_end_ordering FROM room_ban_redactions WHERE "
+            (
+                in_list_clause,
+                room_redaction_args,
+            ) = make_tuple_in_list_sql_clause(
+                self.database_engine, ("room_id", "user_id"), to_check_set
+            )
+            txn.execute(room_redaction_sql + in_list_clause, room_redaction_args)
+            for (
+                returned_room_id,
+                returned_user_id,
+                redacting_event_id,
+                redact_end_ordering,
+            ) in txn:
                 for e_row in events:
                     e_json = json.loads(e_row.json)
                     room_id = e_json.get("room_id")
                     user_id = e_json.get("sender")
+                    room_and_user = (returned_room_id, returned_user_id)
+                    # check if we have a redaction match for this room, user combination
                     if room_and_user != (room_id, user_id):
                         continue
-                    redacting_event_id, redact_end_ordering = res
                     if redact_end_ordering:
                         # Avoid redacting any events arriving *after* the membership event which
                         # ends an active redaction - note that this will always redact
