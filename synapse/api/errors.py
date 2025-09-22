@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from twisted.web import http
 
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if typing.TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig
@@ -139,6 +139,9 @@ class Codes(str, Enum):
 
     # Part of MSC4155
     INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
+
+    # Part of MSC4190
+    APPSERVICE_LOGIN_UNSUPPORTED = "IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED"
 
     # Part of MSC4306: Thread Subscriptions
     MSC4306_CONFLICTING_UNSUBSCRIPTION = (

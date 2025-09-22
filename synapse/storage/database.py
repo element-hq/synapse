@@ -2653,12 +2653,19 @@ def make_in_list_sql_clause(
 
 
 # These overloads ensure that `columns` and `iterable` values have the same length.
-# Suppress "Single overload definition, multiple required" complaint.
-@overload  # type: ignore[misc]
+@overload
 def make_tuple_in_list_sql_clause(
     database_engine: BaseDatabaseEngine,
     columns: Tuple[str, str],
     iterable: Collection[Tuple[Any, Any]],
+) -> Tuple[str, list]: ...
+
+
+@overload
+def make_tuple_in_list_sql_clause(
+    database_engine: BaseDatabaseEngine,
+    columns: Tuple[str, str, str],
+    iterable: Collection[Tuple[Any, Any, Any]],
 ) -> Tuple[str, list]: ...
 
 

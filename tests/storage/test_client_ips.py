@@ -35,7 +35,7 @@ from synapse.storage.databases.main.client_ips import (
     DeviceLastConnectionInfo,
 )
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import make_request

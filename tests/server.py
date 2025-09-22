@@ -103,7 +103,7 @@ from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.utils import (
     LEAVE_DB,

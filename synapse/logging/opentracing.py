@@ -204,7 +204,7 @@ from twisted.web.http import Request
 from twisted.web.http_headers import Headers
 
 from synapse.config import ConfigError
-from synapse.util import json_decoder, json_encoder
+from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
     from synapse.http.site import SynapseRequest
