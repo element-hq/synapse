@@ -2146,6 +2146,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         Returns:
             A dict of event ID -> sender of the event.
+
+        If a given event ID does not exist in the `events` table, then no entry
+        for that event ID will be returned.
         """
 
         def _get_senders_for_event_ids(txn: LoggingTransaction) -> Dict[str, str]:

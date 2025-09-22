@@ -252,16 +252,27 @@ class DelayedEventsHandler:
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
 
-            sender_str = event_id_and_sender_dict.get(delta.event_id, None)
+            sentinel = object()
+            sender_str = event_id_and_sender_dict.get(delta.event_id, sentinel)
             if sender_str is None:
                 logger.error(
                     "Skipping state delta with event ID '%s' as 'sender' was unknown. This is unexpected - please report it as a bug!",
                     delta.event_id,
                 )
                 continue
+            if sender_str is sentinel:
+                # This can happen if a room is purged. State deltas related to
+                # the room are left behind, but the event/room no longer exist.
+                logger.warning(
+                    "Skipping state delta with event ID '%s' as it is an unknown event - the room may have been purged",
+                    delta.event_id,
+                )
+                continue
 
             try:
-                sender = UserID.from_string(sender_str)
+                # Ignore the type error: if `sender_str` is an object, then it
+                # will have been caught by the `if` conditional just above.
+                sender = UserID.from_string(sender_str)  # type: ignore[arg-type]
             except SynapseError as e:
                 logger.error(
                     "Skipping state delta with Matrix User ID '%s' that failed to parse: %s",
