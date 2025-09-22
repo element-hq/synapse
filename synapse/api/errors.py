@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from twisted.web import http
 
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if typing.TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig

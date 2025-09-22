@@ -83,9 +83,9 @@ from synapse.types import (
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
-from synapse.util import json_encoder
 from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:

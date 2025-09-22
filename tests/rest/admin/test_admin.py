@@ -33,7 +33,7 @@ from synapse.rest.admin import VersionServlet
 from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG

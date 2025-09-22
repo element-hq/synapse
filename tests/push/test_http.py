@@ -32,7 +32,7 @@ from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import login, push_rule, pusher, receipts, room, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 

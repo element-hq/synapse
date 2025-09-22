@@ -50,7 +50,7 @@ from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import test_timeout

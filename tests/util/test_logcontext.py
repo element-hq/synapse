@@ -34,7 +34,7 @@ from synapse.logging.context import (
     run_in_background,
 )
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from .. import unittest
 
