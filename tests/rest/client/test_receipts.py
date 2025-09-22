@@ -28,7 +28,7 @@ from synapse.api.constants import EduTypes, EventTypes, HistoryVisibility, Recei
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

@@ -54,8 +54,8 @@ from synapse.logging.context import (
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.util import Clock
 from synapse.util.async_helpers import DeferredEvent
+from synapse.util.clock import Clock
 from synapse.util.stringutils import is_ascii
 
 if TYPE_CHECKING:

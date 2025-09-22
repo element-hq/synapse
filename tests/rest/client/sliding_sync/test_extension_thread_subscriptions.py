@@ -21,7 +21,7 @@ import synapse.rest.admin
 from synapse.rest.client import login, room, sync, thread_subscriptions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 

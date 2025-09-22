@@ -32,7 +32,7 @@ from synapse.api.errors import Codes
 from synapse.media.filepath import MediaFilePaths
 from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
