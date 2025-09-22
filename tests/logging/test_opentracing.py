@@ -314,7 +314,7 @@ class TracingScopeTestCase(TestCase):
             # We shouldn't see any active spans outside of the scope
             self.assertIsNone(self._tracer.active_span)
 
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
             # Start the test off
             d_root = defer.ensureDeferred(root())
 
