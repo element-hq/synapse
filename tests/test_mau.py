@@ -30,7 +30,7 @@ from synapse.appservice import ApplicationService
 from synapse.rest.client import register, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

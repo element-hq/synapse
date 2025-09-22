@@ -30,7 +30,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, register, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import (
     random_string,
 )

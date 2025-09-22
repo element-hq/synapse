@@ -1,0 +1,1 @@
+Fix `run_as_background_process` not be awaited properly causing `LoggingContext` problems in experimental [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Delayed events implementation.

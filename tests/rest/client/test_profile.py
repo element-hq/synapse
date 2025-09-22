@@ -36,7 +36,7 @@ from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import USE_POSTGRES_FOR_TESTS

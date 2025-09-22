@@ -32,7 +32,7 @@ from synapse.events import EventBase
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomID, StateMap, UserID
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

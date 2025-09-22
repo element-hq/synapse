@@ -45,7 +45,7 @@ from synapse.types import (
     StreamKeyType,
     UserID,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest

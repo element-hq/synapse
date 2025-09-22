@@ -65,7 +65,8 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util import Clock
+from synapse.types import ISynapseThreadlessReactor
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -566,7 +567,7 @@ class Linearizer:
         if not clock:
             from twisted.internet import reactor
 
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
         self._clock = clock
         self.max_count = max_count
 

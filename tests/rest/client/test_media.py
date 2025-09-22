@@ -59,7 +59,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest

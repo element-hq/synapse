@@ -39,7 +39,7 @@ from synapse.rest.synapse.client.password_reset import PasswordResetSubmitTokenR
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeSite, make_request

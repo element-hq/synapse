@@ -54,7 +54,7 @@ from synapse.rest import admin
 from synapse.rest.client import account, devices, keys, login, logout, register
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import FakeChannel
 from tests.test_utils import get_awaitable_result
@@ -1219,7 +1219,11 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         channel = self.make_request(
             "POST",
             "/_matrix/client/v3/register",
-            {"username": "alice", "type": "m.login.application_service"},
+            {
+                "username": "alice",
+                "type": "m.login.application_service",
+                "inhibit_login": True,
+            },
             shorthand=False,
             access_token="i_am_an_app_service",
         )
