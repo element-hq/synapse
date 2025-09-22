@@ -455,7 +455,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
             self._client_ip_looper = self._clock.looping_call(
                 self._update_client_ips_batch, 5 * 1000
             )
-            self.hs.get_reactor().addSystemEventTrigger(
+            self.hs.get_clock().add_system_event_trigger(
                 "before", "shutdown", self._update_client_ips_batch
             )
 

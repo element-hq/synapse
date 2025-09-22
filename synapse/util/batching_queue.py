@@ -39,7 +39,7 @@ from twisted.internet import defer
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 

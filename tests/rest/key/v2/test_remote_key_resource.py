@@ -36,7 +36,7 @@ from synapse.rest.key.v2 import KeyResource
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.stringutils import random_string
 

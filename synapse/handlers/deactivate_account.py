@@ -62,7 +62,7 @@ class DeactivateAccountHandler:
         # Start the user parter loop so it can resume parting users from rooms where
         # it left off (if it has work left to do).
         if hs.config.worker.worker_app is None:
-            hs.get_reactor().callWhenRunning(self._start_user_parting)
+            hs.get_clock().call_when_running(self._start_user_parting)
         else:
             self._notify_account_deactivated_client = (
                 ReplicationNotifyAccountDeactivatedServlet.make_client(hs)

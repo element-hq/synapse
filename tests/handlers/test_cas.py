@@ -25,7 +25,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.cas import CasResponse
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 

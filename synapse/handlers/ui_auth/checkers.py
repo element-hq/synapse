@@ -27,7 +27,7 @@ from twisted.web.client import PartialDownloadError
 
 from synapse.api.constants import LoginType
 from synapse.api.errors import Codes, LoginError, SynapseError
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

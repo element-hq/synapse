@@ -24,7 +24,7 @@ from synapse.storage.databases.main.thread_subscriptions import (
 )
 from synapse.storage.engines.sqlite import Sqlite3Engine
 from synapse.types import EventOrderings
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
