@@ -2137,7 +2137,7 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_senders_for_event_ids(
         self, event_ids: Collection[str]
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Optional[str]]:
         """
         Given a sequence of event IDs, return the sender associated with each.
 
@@ -2151,7 +2151,9 @@ class EventsWorkerStore(SQLBaseStore):
         for that event ID will be returned.
         """
 
-        def _get_senders_for_event_ids(txn: LoggingTransaction) -> Dict[str, str]:
+        def _get_senders_for_event_ids(
+            txn: LoggingTransaction,
+        ) -> Dict[str, Optional[str]]:
             rows = self.db_pool.simple_select_many_txn(
                 txn=txn,
                 table="events",

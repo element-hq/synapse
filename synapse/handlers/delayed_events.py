@@ -45,6 +45,7 @@ from synapse.types import (
 )
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
+from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -259,8 +260,9 @@ class DelayedEventsHandler:
                 )
                 continue
 
-            sentinel = object()
-            sender_str = event_id_and_sender_dict.get(delta.event_id, sentinel)
+            sender_str = event_id_and_sender_dict.get(
+                delta.event_id, Sentinel.UNSET_SENTINEL
+            )
             if sender_str is None:
                 # An event exists, but the `sender` field was "null" and Synapse
                 # incorrectly accepted the event. This is not expected.
@@ -269,7 +271,7 @@ class DelayedEventsHandler:
                     delta.event_id,
                 )
                 continue
-            if sender_str is sentinel:
+            if sender_str is Sentinel.UNSET_SENTINEL:
                 # This can happen if a room is purged. State deltas related to
                 # the room are left behind, but the event/room both no longer exist.
                 logger.warning(
@@ -279,9 +281,7 @@ class DelayedEventsHandler:
                 continue
 
             try:
-                # Ignore the type error: if `sender_str` is an object, then it
-                # will have been caught by the `if` conditional just above.
-                sender = UserID.from_string(sender_str)  # type: ignore[arg-type]
+                sender = UserID.from_string(sender_str)
             except SynapseError as e:
                 logger.error(
                     "Skipping state delta with Matrix User ID '%s' that failed to parse: %s",
