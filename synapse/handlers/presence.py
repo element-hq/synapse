@@ -541,7 +541,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
         )
 
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             run_as_background_process,
@@ -842,7 +842,7 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             run_as_background_process,

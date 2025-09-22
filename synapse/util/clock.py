@@ -268,3 +268,59 @@ class Clock:
         # We can ignore the lint here since this class is the one location
         # callWhenRunning should be called.
         self._reactor.callWhenRunning(wrapped_callback, *args, **kwargs)  # type: ignore[prefer-synapse-clock-call-when-running]
+
+    def add_system_event_trigger(
+        self,
+        phase: str,
+        event_type: str,
+        callback: Callable[P, object],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        """
+        Add a function to be called when a system event occurs.
+
+        Equivalent to `reactor.addSystemEventTrigger` (see the that docstring for more
+        details), but ensures that the callback is run in a logging context.
+
+        Args:
+            phase: a time to call the event -- either the string 'before', 'after', or
+                'during', describing when to call it relative to the event's execution.
+            eventType: this is a string describing the type of event.
+            callback: Function to call
+            *args: Postional arguments to pass to function.
+            **kwargs: Key arguments to pass to function.
+        """
+
+        def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+            assert context.current_context() is context.SENTINEL_CONTEXT, (
+                "Expected `add_system_event_trigger` callback from the reactor to start with the sentinel logcontext "
+                f"but saw {context.current_context()}. In other words, another task shouldn't have "
+                "leaked their logcontext to us."
+            )
+
+            # Because this is a callback from the reactor, we will be using the
+            # `sentinel` log context at this point. We want the function to log with
+            # some logcontext as we want to know which server the logs came from.
+            #
+            # We use `PreserveLoggingContext` to prevent our new `system_event`
+            # logcontext from finishing as soon as we exit this function, in case `f`
+            # returns an awaitable/deferred which would continue running and may try to
+            # restore the `loop_call` context when it's done (because it's trying to
+            # adhere to the Synapse logcontext rules.)
+            #
+            # This also ensures that we return to the `sentinel` context when we exit
+            # this function and yield control back to the reactor to avoid leaking the
+            # current logcontext to the reactor (which would then get picked up and
+            # associated with the next thing the reactor does)
+            with context.PreserveLoggingContext(context.LoggingContext("system_event")):
+                # We use `run_in_background` to reset the logcontext after `f` (or the
+                # awaitable returned by `f`) completes to avoid leaking the current
+                # logcontext to the reactor
+                context.run_in_background(callback, *args, **kwargs)
+
+        # We can ignore the lint here since this class is the one location
+        # `addSystemEventTrigger` should be called.
+        self._reactor.addSystemEventTrigger(
+            phase, event_type, wrapped_callback, *args, **kwargs
+        )  # type: ignore[prefer-synapse-clock-add-system-event-trigger]
