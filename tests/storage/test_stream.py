@@ -49,7 +49,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
 from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase

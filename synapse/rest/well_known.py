@@ -28,7 +28,7 @@ from synapse.api.errors import NotFoundError
 from synapse.http.server import DirectServeJsonResource
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_server_name
 
 if TYPE_CHECKING:

@@ -24,7 +24,7 @@ from twisted.internet.testing import MemoryReactor, StringTransport
 
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

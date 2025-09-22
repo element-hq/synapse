@@ -36,8 +36,8 @@ from synapse.http.server import (
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.logging.context import make_deferred_yieldable
 from synapse.types import JsonDict
-from synapse.util import Clock
 from synapse.util.cancellation import cancellable
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.http.server._base import test_disconnect

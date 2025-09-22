@@ -241,7 +241,7 @@ def redirect_stdio_to_logs() -> None:
 
 
 def register_start(
-    cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
+    hs: "HomeServer", cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
 ) -> None:
     """Register a callback with the reactor, to be called once it is running
 
@@ -278,7 +278,8 @@ def register_start(
             # on as normal.
             os._exit(1)
 
-    reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
+    clock = hs.get_clock()
+    clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
 
 
 def listen_metrics(bind_addresses: StrCollection, port: int) -> None:

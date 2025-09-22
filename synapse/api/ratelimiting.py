@@ -26,7 +26,7 @@ from synapse.api.errors import LimitExceededError
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.storage.databases.main import DataStore
 from synapse.types import Requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
     # To avoid circular imports:

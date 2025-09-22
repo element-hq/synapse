@@ -30,7 +30,7 @@ from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

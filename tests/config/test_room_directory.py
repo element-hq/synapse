@@ -27,7 +27,7 @@ import synapse.rest.client.room
 from synapse.config._base import RootConfig
 from synapse.config.room_directory import RoomDirectoryConfig
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
