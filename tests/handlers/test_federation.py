@@ -38,7 +38,6 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.federation.federation_client import SendJoinResult
-from synapse.logging.context import LoggingContext, run_in_background
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -149,11 +148,9 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             room_version,
         )
 
-        with LoggingContext("send_rejected"):
-            d = run_in_background(
-                self.hs.get_federation_event_handler().on_receive_pdu, OTHER_SERVER, ev
-            )
-        self.get_success(d)
+        self.get_success(
+            self.hs.get_federation_event_handler().on_receive_pdu(OTHER_SERVER, ev)
+        )
 
         # that should have been rejected
         e = self.get_success(self.store.get_event(ev.event_id, allow_rejected=True))
@@ -203,11 +200,9 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
             room_version,
         )
 
-        with LoggingContext("send_rejected"):
-            d = run_in_background(
-                self.hs.get_federation_event_handler().on_receive_pdu, OTHER_SERVER, ev
-            )
-        self.get_success(d)
+        self.get_success(
+            self.hs.get_federation_event_handler().on_receive_pdu(OTHER_SERVER, ev)
+        )
 
         # that should have been rejected
         e = self.get_success(self.store.get_event(ev.event_id, allow_rejected=True))
@@ -323,15 +318,14 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
 
         current_depth = 1
         limit = 100
-        with LoggingContext("receive_pdu"):
-            # Make sure backfill still works
-            d = run_in_background(
-                self.hs.get_federation_handler().maybe_backfill,
+        # Make sure backfill still works
+        self.get_success(
+            self.hs.get_federation_handler().maybe_backfill(
                 room_id,
                 current_depth,
                 limit,
             )
-        self.get_success(d)
+        )
 
     def test_backfill_ignores_known_events(self) -> None:
         """
@@ -491,13 +485,11 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
         # the auth code requires that a signature exists, but doesn't check that
         # signature... go figure.
         join_event.signatures[other_server] = {"x": "y"}
-        with LoggingContext("send_join"):
-            d = run_in_background(
-                self.hs.get_federation_event_handler().on_send_membership_event,
-                other_server,
-                join_event,
+        self.get_success(
+            self.hs.get_federation_event_handler().on_send_membership_event(
+                other_server, join_event
             )
-        self.get_success(d)
+        )
 
         # sanity-check: the room should show that the new user is a member
         r = self.get_success(self.store.get_partial_current_state_ids(room_id))
