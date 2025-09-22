@@ -58,7 +58,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
     @logcontext_clean
     def test_with_context(self) -> None:
-        with LoggingContext("test"):
+        with LoggingContext(name="test", server_name="test_server"):
             self._check_test_key("test")
 
     @logcontext_clean
@@ -80,7 +80,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # other words, another task shouldn't have leaked their context to us.
                 self._check_test_key("sentinel")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -92,7 +92,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             await clock.sleep(0)
             self._check_test_key("foo")
             await clock.sleep(0)
@@ -125,7 +125,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # which server spawned this loop and which server the logs came from.
                 self._check_test_key("looping_call")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -135,7 +135,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             lc = clock.looping_call(
                 lambda: defer.ensureDeferred(competing_callback()), 0
             )
@@ -175,7 +175,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # which server spawned this loop and which server the logs came from.
                 self._check_test_key("looping_call")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -185,7 +185,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             lc = clock.looping_call_now(
                 lambda: defer.ensureDeferred(competing_callback()), 0
             )
@@ -223,7 +223,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # which server spawned this loop and which server the logs came from.
                 self._check_test_key("call_later")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -233,7 +233,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
             await clock.sleep(0)
@@ -254,7 +254,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         callback_completed = False
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             # fire off function, but don't wait on it.
             d2 = run_in_background(function)
 
@@ -346,7 +346,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         sentinel_context = current_context()
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d1 = make_deferred_yieldable(blocking_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -363,7 +363,7 @@ class LoggingContextTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[object]", object, None]:
         sentinel_context = current_context()
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d1 = make_deferred_yieldable(_chained_deferred_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -375,7 +375,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
     @logcontext_clean
     def test_nested_logging_context(self) -> None:
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             nested_context = nested_logging_context(suffix="bar")
             self.assertEqual(nested_context.name, "foo-bar")
 
