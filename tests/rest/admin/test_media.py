@@ -59,6 +59,8 @@ class _AdminMediaTests(unittest.HomeserverTestCase):
 
 class QueryMediaByIDTestCase(_AdminMediaTests):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.hs = hs
+        self.clock = clock
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
 
@@ -67,10 +69,10 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
 
         self.filepaths = MediaFilePaths(hs.config.media.media_store_path)
 
-        file_id = "abcdefg12345"
+    def _cache_remote_media(self, file_id: str) -> None:
         file_info = FileInfo(server_name="remote.com", file_id=file_id)
 
-        media_storage = hs.get_media_repository().media_storage
+        media_storage = self.hs.get_media_repository().media_storage
 
         ctx = media_storage.store_into_file(file_info)
         (f, fname) = self.get_success(ctx.__aenter__())
@@ -80,22 +82,35 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         self.get_success(
             self.store.store_cached_remote_media(
                 origin="remote.com",
-                media_id="abcdefg12345",
+                media_id=file_id,
                 media_type="image/png",
-                media_length=1,
-                time_now_ms=clock.time_msec(),
+                media_length=len(SMALL_PNG),
+                time_now_ms=self.clock.time_msec(),
                 upload_name="test.png",
                 filesystem_id=file_id,
                 sha256=file_id,
             )
         )
 
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/remote.com/{file_id}",
+            shorthand=False,
+            access_token=self.admin_user_tok,
+        )
+
+        # Should be successful
+        self.assertEqual(
+            200,
+            channel.code,
+            msg=("Expected to receive a 200 on accessing media"),
+        )
+
     def test_no_auth(self) -> None:
         """
         Try to query media without authentication.
         """
-        url = "/_synapse/admin/v1/media/%s/%s" % (self.server_name, "12345")
-
+        url = f"/_synapse/admin/v1/media/{self.server_name}/12345"
         channel = self.make_request("GET", url)
 
         self.assertEqual(
@@ -112,11 +127,9 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         self.other_user = self.register_user("user", "pass")
         self.other_user_token = self.login("user", "pass")
 
-        url = "/_synapse/admin/v1/media/%s/%s" % (self.server_name, "12345")
-
         channel = self.make_request(
             "GET",
-            url,
+            f"/_synapse/admin/v1/media/{self.server_name}/12345",
             access_token=self.other_user_token,
         )
 
@@ -127,11 +140,9 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         """
         Tests that a lookup for local media that does not exist returns a 404
         """
-        url = "/_synapse/admin/v1/media/%s/%s" % (self.server_name, "12345")
-
         channel = self.make_request(
             "GET",
-            url,
+            f"/_synapse/admin/v1/media/{self.server_name}/12345",
             access_token=self.admin_user_tok,
         )
 
@@ -142,11 +153,9 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         """
         Tests that a lookup for remote media that is not cached returns a 404
         """
-        url = "/_synapse/admin/v1/media/%s/%s" % (self.server_name, "12345")
-
         channel = self.make_request(
             "GET",
-            url,
+            f"/_synapse/admin/v1/media/{self.server_name}/12345",
             access_token=self.admin_user_tok,
         )
 
@@ -167,43 +176,20 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         # Extract media ID from the response
         server_and_media_id = response["content_uri"][6:]  # Cut off 'mxc://'
         server_name, media_id = server_and_media_id.split("/")
-
         self.assertEqual(server_name, self.server_name)
 
-        # Attempt to access media
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/v1/media/download/{server_name}/{media_id}",
-            shorthand=False,
-            access_token=self.admin_user_tok,
-        )
-
-        # Should be successful
-        self.assertEqual(
-            200,
-            channel.code,
-            msg=(
-                "Expected to receive a 200 on accessing media: %s" % server_and_media_id
-            ),
-        )
-
-        # Test if the file exists
-        local_path = self.filepaths.local_media_filepath(media_id)
-        self.assertTrue(os.path.exists(local_path))
-
-        url = "/_synapse/admin/v1/media/%s/%s" % (self.server_name, media_id)
-
-        channel = self.make_request(
-            "GET",
-            url,
+            f"/_synapse/admin/v1/media/{self.server_name}/{media_id}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        print(channel.json_body)
-        self.assertEqual(channel.json_body["media_info"]["authenticated"], 1)
+        self.assertEqual(channel.json_body["media_info"]["authenticated"], True)
         self.assertEqual(channel.json_body["media_info"]["media_id"], media_id)
-        self.assertEqual(channel.json_body["media_info"]["media_length"], 67)
+        self.assertEqual(
+            channel.json_body["media_info"]["media_length"], len(SMALL_PNG)
+        )
         self.assertEqual(
             channel.json_body["media_info"]["media_type"], "application/json"
         )
@@ -211,33 +197,21 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         self.assertEqual(channel.json_body["media_info"]["user_id"], "@admin:test")
 
     def test_query_remote_media(self) -> None:
-        channel = self.make_request(
-            "GET",
-            "/_matrix/client/v1/media/download/remote.com/abcdefg12345",
-            shorthand=False,
-            access_token=self.admin_user_tok,
-        )
-
-        # Should be successful
-        self.assertEqual(
-            200,
-            channel.code,
-            msg=("Expected to receive a 200 on accessing media"),
-        )
-
-        url = "/_synapse/admin/v1/media/%s/%s" % ("remote.com", "abcdefg12345")
+        file_id = "abcdefg12345"
+        self._cache_remote_media(file_id)
 
         channel = self.make_request(
             "GET",
-            url,
+            f"/_synapse/admin/v1/media/remote.com/{file_id}",
             access_token=self.admin_user_tok,
         )
 
         self.assertEqual(200, channel.code, msg=channel.json_body)
-        print(channel.json_body)
-        self.assertEqual(channel.json_body["media_info"]["authenticated"], 1)
-        self.assertEqual(channel.json_body["media_info"]["media_id"], "abcdefg12345")
-        self.assertEqual(channel.json_body["media_info"]["media_length"], 1)
+        self.assertEqual(channel.json_body["media_info"]["authenticated"], True)
+        self.assertEqual(channel.json_body["media_info"]["media_id"], file_id)
+        self.assertEqual(
+            channel.json_body["media_info"]["media_length"], len(SMALL_PNG)
+        )
         self.assertEqual(channel.json_body["media_info"]["media_type"], "image/png")
         self.assertEqual(channel.json_body["media_info"]["upload_name"], "test.png")
         self.assertEqual(channel.json_body["media_info"]["media_origin"], "remote.com")

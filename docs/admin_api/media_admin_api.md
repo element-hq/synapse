@@ -40,54 +40,38 @@ the use of the
 Admin API.
 
 ## Query a piece of media by ID
-This API returns information about a piece of local or cached remote media given the origin server name and media id.
 
-The API is:
-```
+This API returns information about a piece of local or cached remote media given the origin server name and media id. If
+information is requested for remote media which is not cached the endpoint will return 404. 
+
+Request:
+```http
 GET /_synapse/admin/v1/media/<origin>/<media_id>
 ```
 
-The API returns a JSON body with media info like the following. Note that the media info response varies slightly
-for remote and local media.
-Remote example:
+The API returns a JSON body with media info like the following:
 
+Response:
 ```json
 {
   "media_info": {
     "media_origin": "remote.com",
+    "user_id": null,
     "media_id": "sdginwegWEG",
     "media_type": "img/png",
     "media_length": 67,
     "upload_name":  "test.png",
     "created_ts":  300,
     "filesystem_id":  "wgeweg",
+    "url_cache": null,
     "last_access_ts": 400,
-    "quarantined_by":  None,
-    "authenticated":  1,
+    "quarantined_by":  null,
+    "authenticated":  false,
+    "safe_from_quarantine": null,
     "sha256": "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
     }
 }
 ```
-Local example:
-```json
-{
-  "media_info": {
-      "authenticated": 1,
-      "created_ts": 400,
-      "last_access_ts": None,
-      "media_id": "zjyHDOzxCdOMhGlSasDshXGr",
-      "media_length": 67,
-      "media_type": "application/json",
-      "quarantined_by": None,
-      "safe_from_quarantine": 0,
-      "sha256": "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
-      "upload_name": "test.png",
-      "url_cache": None,
-      "user_id": "@admin:test"
-    }
-}
-```
-
 
 # Quarantine media
 
