@@ -247,14 +247,24 @@ class DelayedEventsHandler:
             # cases (see the docstring of
             # `get_current_state_delta_membership_changes_for_user` for details).
             if delta.event_id is None:
-                # TODO: Differentiate whether this is a state reset or the
-                # homeserver has simply left the room. We can do so by checking
+                # TODO: Differentiate between this being caused by a state reset
+                # which removed a user from a room, or the homeserver
+                # purposefully having left the room. We can do so by checking
                 # whether there are any local memberships still left in the
-                # room. If so, then this *is* a state reset, and we should log
-                # appropriately.
-                logger.debug(
-                    "Skipping state delta (%r, %r) without corresponding event ID."
-                    "This can happen if the homeserver has left the room, or if there has been a state reset",
+                # room. If so, then this is the result of a state reset.
+                #
+                # If it is a state reset, we should avoid cancelling new,
+                # delayed state events due to old state resurfacing. So we
+                # should skip and log a warning in this case.
+                #
+                # If the homeserver has left the room, then we should cancel all
+                # delayed state events intended for this room, as there is no
+                # need to try and send a delayed event into a room we've left.
+                logger.warning(
+                    "Skipping state delta (%r, %r) without corresponding event ID. "
+                    "This can happen if the homeserver has left the room (in which "
+                    "case this can be ignored), or if there has been a state reset "
+                    "which has caused the sender to be kicked out of the room",
                     delta.event_type,
                     delta.state_key,
                 )
@@ -267,15 +277,21 @@ class DelayedEventsHandler:
                 # An event exists, but the `sender` field was "null" and Synapse
                 # incorrectly accepted the event. This is not expected.
                 logger.error(
-                    "Skipping state delta with event ID '%s' as 'sender' was None. This is unexpected - please report it as a bug!",
+                    "Skipping state delta with event ID '%s' as 'sender' was None. "
+                    "This is unexpected - please report it as a bug!",
                     delta.event_id,
                 )
                 continue
             if sender_str is Sentinel.UNSET_SENTINEL:
-                # This can happen if a room is purged. State deltas related to
-                # the room are left behind, but the event/room both no longer exist.
-                logger.warning(
-                    "Skipping state delta with event ID '%s' as it is an unknown event - the room may have been purged",
+                # We have an event ID, but the event was not found in the
+                # datastore. This can happen if a room, or its history, is
+                # purged. State deltas related to the room are left behind, but
+                # the event no longer exists.
+                #
+                # As we cannot get the sender of this event, we can't calculate
+                # whether to cancel delayed events related to this one. So we skip.
+                logger.debug(
+                    "Skipping state delta with event ID '%s' - the room, or its history, may have been purged",
                     delta.event_id,
                 )
                 continue
