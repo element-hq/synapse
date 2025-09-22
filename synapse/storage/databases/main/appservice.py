@@ -83,6 +83,10 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
             hs.hostname, hs.config.appservice.app_service_config_files
         )
         self.exclusive_user_regex = _make_exclusive_regex(self.services_cache)
+        # When OAuth is enabled, force all appservices to enable MSC4190 too.
+        if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+            for appservice in self.services_cache:
+                appservice.msc4190_device_management = True
 
         def get_max_as_txn_id(txn: Cursor) -> int:
             logger.warning("Falling back to slow query, you should port to postgres")

@@ -1014,13 +1014,36 @@ class EventCreationHandler:
             await self.clock.sleep(random.randint(1, 10))
             raise ShadowBanError()
 
-        if ratelimit:
+        room_version = None
+
+        if (
+            event_dict["type"] == EventTypes.Redaction
+            and "redacts" in event_dict["content"]
+            and self.hs.config.experimental.msc4169_enabled
+        ):
             room_id = event_dict["room_id"]
             try:
                 room_version = await self.store.get_room_version(room_id)
             except NotFoundError:
-                # The room doesn't exist.
                 raise AuthError(403, f"User {requester.user} not in room {room_id}")
+
+            if not room_version.updated_redaction_rules:
+                # Legacy room versions need the "redacts" field outside of the event's
+                # content. However clients may still send it within the content, so move
+                # the field if necessary for compatibility.
+                redacts = event_dict.get("redacts") or event_dict["content"].pop(
+                    "redacts", None
+                )
+                if redacts is not None and "redacts" not in event_dict:
+                    event_dict["redacts"] = redacts
+
+        if ratelimit:
+            if room_version is None:
+                room_id = event_dict["room_id"]
+                try:
+                    room_version = await self.store.get_room_version(room_id)
+                except NotFoundError:
+                    raise AuthError(403, f"User {requester.user} not in room {room_id}")
 
             if room_version.updated_redaction_rules:
                 redacts = event_dict["content"].get("redacts")

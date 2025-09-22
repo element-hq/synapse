@@ -782,8 +782,12 @@ class RegisterRestServlet(RestServlet):
         user_id, appservice = await self.registration_handler.appservice_register(
             username, as_token
         )
-        if appservice.msc4190_device_management:
-            body["inhibit_login"] = True
+        if appservice.msc4190_device_management and not body.get("inhibit_login"):
+            raise SynapseError(
+                400,
+                "This appservice has MSC4190 enabled, so the inhibit_login parameter must be set to true.",
+                errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            )
 
         return await self._create_registration_details(
             user_id,
@@ -922,6 +926,12 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
                 403,
                 "Registration has been disabled. Only m.login.application_service registrations are allowed.",
                 errcode=Codes.FORBIDDEN,
+            )
+        if not body.get("inhibit_login"):
+            raise SynapseError(
+                400,
+                "This server uses OAuth2, so the inhibit_login parameter must be set to true for appservice registrations.",
+                errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
             )
 
         kind = parse_string(request, "kind", default="user")

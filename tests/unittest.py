@@ -782,6 +782,7 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         appservice_token: str,
+        inhibit_login: bool = False,
     ) -> Tuple[str, Optional[str]]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
@@ -802,6 +803,7 @@ class HomeserverTestCase(TestCase):
             {
                 "username": username,
                 "type": "m.login.application_service",
+                "inhibit_login": inhibit_login,
             },
             access_token=appservice_token,
         )
