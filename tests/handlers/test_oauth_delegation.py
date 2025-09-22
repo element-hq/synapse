@@ -1219,7 +1219,11 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         channel = self.make_request(
             "POST",
             "/_matrix/client/v3/register",
-            {"username": "alice", "type": "m.login.application_service"},
+            {
+                "username": "alice",
+                "type": "m.login.application_service",
+                "inhibit_login": True,
+            },
             shorthand=False,
             access_token="i_am_an_app_service",
         )

@@ -494,7 +494,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         return self.hs
 
     def test_PUT_device(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
         self.register_appservice_user("bob", self.pre_msc_service.token)
 
         channel = self.make_request(
@@ -542,7 +544,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 404, channel.json_body)
 
     def test_DELETE_device(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
 
         # There should be no device
         channel = self.make_request(
@@ -589,7 +593,9 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body, {"devices": []})
 
     def test_POST_delete_devices(self) -> None:
-        self.register_appservice_user("alice", self.msc4190_service.token)
+        self.register_appservice_user(
+            "alice", self.msc4190_service.token, inhibit_login=True
+        )
 
         # There should be no device
         channel = self.make_request(

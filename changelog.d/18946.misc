@@ -1,0 +1,1 @@
+Update [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) support to return correct errors and allow appservices to reset cross-signing keys without user-interactive authentication. Contributed by @tulir @ Beeper.
