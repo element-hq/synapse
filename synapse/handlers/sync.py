@@ -20,6 +20,7 @@
 #
 import itertools
 import logging
+import time
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -626,6 +627,7 @@ class SyncHandler:
             events are included, and a dict mapping from room_id to a list of
             sticky event IDs for that room.
         """
+        now = round(time.time() * 1000)
         with Measure(
             self.clock, name="sticky_events_by_room", server_name=self.server_name
         ):
@@ -634,7 +636,9 @@ class SyncHandler:
             room_ids = sync_result_builder.joined_room_ids
 
             to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
-                room_ids, from_id
+                room_ids,
+                from_id,
+                now,
             )
             now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
 
