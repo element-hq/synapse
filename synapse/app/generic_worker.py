@@ -310,13 +310,26 @@ class GenericWorkerServer(HomeServer):
         self.get_replication_command_handler().start_replication(self)
 
 
-def start(config_options: List[str]) -> None:
+def load_config(argv_options: List[str]) -> HomeServerConfig:
+    """
+    Parse the commandline and config files (does not generate config)
+
+    Args:
+        argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
+
+    Returns:
+        Config object.
+    """
     try:
-        config = HomeServerConfig.load_config("Synapse worker", config_options)
+        config = HomeServerConfig.load_config("Synapse worker", argv_options)
     except ConfigError as e:
         sys.stderr.write("\n" + str(e) + "\n")
         sys.exit(1)
 
+    return config
+
+
+def start(config: HomeServerConfig) -> None:
     # For backwards compatibility let any of the old app names.
     assert config.worker.worker_app in (
         "synapse.app.appservice",
@@ -368,8 +381,9 @@ def start(config_options: List[str]) -> None:
 
 
 def main() -> None:
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    homeserver_config = load_config(sys.argv[1:])
+    with LoggingContext(name="main"):
+        start(homeserver_config)
 
 
 if __name__ == "__main__":
