@@ -317,6 +317,13 @@ class LoggingContextTestCase(unittest.TestCase):
 
     @logcontext_clean
     async def test_run_in_background_with_coroutine(self):
+        """
+        Test `run_in_background` with a coroutine that yields control back to the
+        reactor.
+
+        This will stress the logic around incomplete deferreds in `run_in_background`.
+        """
+
         async def testfunc() -> None:
             self._check_test_key("foo")
             d = defer.ensureDeferred(Clock(reactor).sleep(0))
@@ -328,6 +335,13 @@ class LoggingContextTestCase(unittest.TestCase):
 
     @logcontext_clean
     async def test_run_in_background_with_nonblocking_coroutine(self):
+        """
+        Test `run_in_background` with a "nonblocking" coroutine (never yields control
+        back to the reactor).
+
+        This will stress the logic around completed deferreds in `run_in_background`.
+        """
+
         async def testfunc() -> None:
             self._check_test_key("foo")
 
@@ -336,7 +350,10 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     async def test_run_coroutine_in_background(self) -> None:
         """
-        Test `run_coroutine_in_background`
+        Test `run_coroutine_in_background` with a coroutine that yields control back to the
+        reactor.
+
+        This will stress the logic around incomplete deferreds in `run_coroutine_in_background`.
         """
         clock = Clock(reactor)
 
@@ -378,7 +395,10 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     async def test_run_coroutine_in_background_already_complete(self) -> None:
         """
-        Test `run_coroutine_in_background` with a coroutine that is already complete
+        Test `run_coroutine_in_background` with a "nonblocking" coroutine (never yields control
+        back to the reactor).
+
+        This will stress the logic around completed deferreds in `run_coroutine_in_background`.
         """
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
