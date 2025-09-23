@@ -914,6 +914,12 @@ def run_coroutine_in_background(
     # coroutine in the background.
     d = defer.ensureDeferred(coroutine)
 
+    # The deferred has already completed
+    if d.called and not d.paused:
+        # The function should have maintained the logcontext, so we can
+        # optimise out the messing about
+        return d
+
     # The function may have reset the context before returning, so we need to restore it
     # now.
     #
