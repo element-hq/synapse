@@ -36,7 +36,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.synapse_rust.push import PushRuleEvaluator
 from synapse.types import JsonDict, JsonMapping, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 from tests import unittest

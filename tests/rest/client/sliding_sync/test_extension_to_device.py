@@ -22,7 +22,7 @@ import synapse.rest.admin
 from synapse.rest.client import login, sendtodevice, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, StreamKeyType
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.server import TimedOutException

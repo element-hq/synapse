@@ -37,4 +37,7 @@ class HomeserverAppStartTestCase(ConfigFileTestCase):
         self.add_lines_to_config(["  main:", "    host: 127.0.0.1", "    port: 1234"])
         # Ensure that starting master process with worker config raises an exception
         with self.assertRaises(ConfigError):
-            synapse.app.homeserver.setup(["-c", self.config_file])
+            homeserver_config = synapse.app.homeserver.load_or_generate_config(
+                ["-c", self.config_file]
+            )
+            synapse.app.homeserver.setup(homeserver_config)

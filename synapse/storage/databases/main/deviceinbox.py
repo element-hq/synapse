@@ -53,10 +53,11 @@ from synapse.storage.database import (
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Duration, json_encoder
+from synapse.util import Duration
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
