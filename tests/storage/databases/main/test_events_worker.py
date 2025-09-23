@@ -38,8 +38,8 @@ from synapse.storage.databases.main.events_worker import (
     EventsWorkerStore,
 )
 from synapse.storage.types import Connection
-from synapse.util import Clock
 from synapse.util.async_helpers import yieldable_gather_results
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils.event_injection import create_event, inject_event

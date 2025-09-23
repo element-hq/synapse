@@ -23,6 +23,8 @@ import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
+import attr
+
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
@@ -56,8 +58,8 @@ from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
-from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.json import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
 
@@ -632,11 +634,20 @@ class SyncRestServlet(RestServlet):
 
 class SlidingSyncRestServlet(RestServlet):
     """
-    API endpoint for MSC3575 Sliding Sync `/sync`. Allows for clients to request a
+    API endpoint for MSC4186 Simplified Sliding Sync `/sync`, which was historically derived
+    from MSC3575 (Sliding Sync; now abandoned). Allows for clients to request a
     subset (sliding window) of rooms, state, and timeline events (just what they need)
     in order to bootstrap quickly and subscribe to only what the client cares about.
     Because the client can specify what it cares about, we can respond quickly and skip
     all of the work we would normally have to do with a sync v2 response.
+
+    Extensions of various features are defined in:
+        - to-device messaging (MSC3885)
+        - end-to-end encryption (MSC3884)
+        - typing notifications (MSC3961)
+        - receipts (MSC3960)
+        - account data (MSC3959)
+        - thread subscriptions (MSC4308)
 
     Request query parameters:
         timeout: How long to wait for new events in milliseconds.
@@ -1074,7 +1085,46 @@ class SlidingSyncRestServlet(RestServlet):
                 "rooms": extensions.typing.room_id_to_typing_map,
             }
 
+        # excludes both None and falsy `thread_subscriptions`
+        if extensions.thread_subscriptions:
+            serialized_extensions["io.element.msc4308.thread_subscriptions"] = (
+                _serialise_thread_subscriptions(extensions.thread_subscriptions)
+            )
+
         return serialized_extensions
+
+
+def _serialise_thread_subscriptions(
+    thread_subscriptions: SlidingSyncResult.Extensions.ThreadSubscriptionsExtension,
+) -> JsonDict:
+    out: JsonDict = {}
+
+    if thread_subscriptions.subscribed:
+        out["subscribed"] = {
+            room_id: {
+                thread_root_id: attr.asdict(
+                    change, filter=lambda _attr, v: v is not None
+                )
+                for thread_root_id, change in room_threads.items()
+            }
+            for room_id, room_threads in thread_subscriptions.subscribed.items()
+        }
+
+    if thread_subscriptions.unsubscribed:
+        out["unsubscribed"] = {
+            room_id: {
+                thread_root_id: attr.asdict(
+                    change, filter=lambda _attr, v: v is not None
+                )
+                for thread_root_id, change in room_threads.items()
+            }
+            for room_id, room_threads in thread_subscriptions.unsubscribed.items()
+        }
+
+    if thread_subscriptions.prev_batch:
+        out["prev_batch"] = thread_subscriptions.prev_batch.to_string()
+
+    return out
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

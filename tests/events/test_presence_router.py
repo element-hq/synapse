@@ -34,7 +34,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, presence, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, StreamToken, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.handlers.test_sync import SyncRequestKey, generate_sync_config
 from tests.unittest import (

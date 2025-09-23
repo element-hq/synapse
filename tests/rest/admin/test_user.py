@@ -61,7 +61,7 @@ from synapse.rest.client import (
 from synapse.server import HomeServer
 from synapse.storage.databases.main.client_ips import LAST_SEEN_GRANULARITY
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase

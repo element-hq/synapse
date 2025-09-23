@@ -37,7 +37,7 @@ from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.events import _LinkMap
 from synapse.storage.types import Cursor
 from synapse.types import create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

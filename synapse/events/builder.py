@@ -38,7 +38,7 @@ from synapse.storage.databases.main import DataStore
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import EventID, JsonDict, StrCollection
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
