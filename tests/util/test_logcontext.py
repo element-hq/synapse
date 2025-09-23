@@ -375,7 +375,7 @@ class LoggingContextTestCase(unittest.TestCase):
         # Back to the sentinel context
         self._check_test_key("sentinel")
 
-    # @logcontext_clean
+    @logcontext_clean
     async def test_run_coroutine_in_background_already_complete(self) -> None:
         """
         Test `run_coroutine_in_background` with a coroutine that is already complete
