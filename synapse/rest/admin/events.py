@@ -1,13 +1,15 @@
 from http import HTTPStatus
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import NotFoundError
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
 from synapse.rest.admin import admin_patterns, assert_requester_is_admin
-from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import JsonDict
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 
 class EventRestServlet(RestServlet):
