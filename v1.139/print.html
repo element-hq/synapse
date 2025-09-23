@@ -1904,6 +1904,17 @@ stacking them up. You can monitor the currently running background updates with
 <p>Ubuntu 24.10 Oracular Oriole <a href="https://endoflife.date/ubuntu">has been end-of-life since 10 Jul
 2025</a>. This release drops support for Ubuntu
 24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.</p>
+<h2 id="register-requests-from-old-application-service-implementations-may-break-when-using-mas"><a class="header" href="#register-requests-from-old-application-service-implementations-may-break-when-using-mas"><code>/register</code> requests from old application service implementations may break when using MAS</a></h2>
+<p>Application Services that do not set <code>inhibit_login=true</code> when calling <code>POST /_matrix/client/v3/register</code> will receive the error
+<code>IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED</code> in response. This is a
+result of <a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4190">MSC4190: Device management for application
+services</a> which
+adds new endpoints for application services to create encryption-ready devices
+with other than <code>/login</code> or <code>/register</code> without <code>inhibit_login=true</code>.</p>
+<p>If an application service you use starts to fail with the mentioned error,
+ensure it is up to date. If it is, then kindly let the author know that they
+need to update their implementation to call <code>/register</code> with
+<code>inhibit_login=true</code>.</p>
 <h1 id="upgrading-to-v11360"><a class="header" href="#upgrading-to-v11360">Upgrading to v1.136.0</a></h1>
 <h2 id="deprecate-run_as_background_process-exported-as-part-of-the-module-api-interface-in-favor-of-moduleapirun_as_background_process"><a class="header" href="#deprecate-run_as_background_process-exported-as-part-of-the-module-api-interface-in-favor-of-moduleapirun_as_background_process">Deprecate <code>run_as_background_process</code> exported as part of the module API interface in favor of <code>ModuleApi.run_as_background_process</code></a></h2>
 <p>The <code>run_as_background_process</code> function is now a method of the <code>ModuleApi</code> class. If
