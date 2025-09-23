@@ -623,7 +623,7 @@ class SyncRestServlet(RestServlet):
                 serialized_sticky = await self._event_serializer.serialize_events(
                     room.sticky, time_now, config=serialize_options
                 )
-                result["sticky"] = {"events": serialized_sticky}
+                result["msc4354_sticky"] = {"events": serialized_sticky}
             if room.unread_thread_notifications:
                 result["unread_thread_notifications"] = room.unread_thread_notifications
                 if self._msc3773_enabled:
@@ -653,6 +653,7 @@ class SlidingSyncRestServlet(RestServlet):
         - receipts (MSC3960)
         - account data (MSC3959)
         - thread subscriptions (MSC4308)
+        - sticky events (MSC4354)
 
     Request query parameters:
         timeout: How long to wait for new events in milliseconds.
@@ -1096,7 +1097,34 @@ class SlidingSyncRestServlet(RestServlet):
                 _serialise_thread_subscriptions(extensions.thread_subscriptions)
             )
 
+        if extensions.sticky_events:
+            serialized_extensions[
+                "org.matrix.msc4354.sticky_events"
+            ] = await self._serialise_sticky_events(requester, extensions.sticky_events)
+
         return serialized_extensions
+
+    async def _serialise_sticky_events(
+        self,
+        requester: Requester,
+        sticky_events: SlidingSyncResult.Extensions.StickyEventsExtension,
+    ) -> JsonDict:
+        time_now = self.clock.time_msec()
+        # Same as SSS timelines. TODO: support more options like /sync does.
+        serialize_options = SerializeEventConfig(
+            event_format=format_event_for_client_v2_without_room_id,
+            requester=requester,
+        )
+        return {
+            "rooms": {
+                room_id: {
+                    "events": await self.event_serializer.serialize_events(
+                        sticky_events, time_now, config=serialize_options
+                    )
+                }
+                for room_id, sticky_events in sticky_events.room_id_to_sticky_events.items()
+            },
+        }
 
 
 def _serialise_thread_subscriptions(

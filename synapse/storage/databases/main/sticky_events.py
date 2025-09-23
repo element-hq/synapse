@@ -118,6 +118,7 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         self,
         room_ids: Collection[str],
         from_id: int,
+        to_id: int,
         now: int,
     ) -> Tuple[int, Dict[str, Set[str]]]:
         """
@@ -125,7 +126,8 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
 
         Args:
             room_ids: The room IDs to return sticky events in.
-            from_id: The sticky stream ID that sticky events should be returned from.
+            from_id: The sticky stream ID that sticky events should be returned from (exclusive).
+            to_id: The sticky stream ID that sticky events should end at (inclusive).
             now: The current time in unix millis, used for skipping expired events.
         Returns:
             A tuple of (to_id, map[room_id, event_ids])
@@ -135,22 +137,24 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
             self._get_sticky_events_in_rooms_txn,
             room_ids,
             from_id,
+            to_id,
             now,
         )
-        to_id = from_id
+        new_to_id = from_id
         room_to_events: Dict[str, Set[str]] = {}
         for stream_id, room_id, event_id in sticky_events_rows:
-            to_id = max(to_id, stream_id)
+            new_to_id = max(new_to_id, stream_id)
             events = room_to_events.get(room_id, set())
             events.add(event_id)
             room_to_events[room_id] = events
-        return (to_id, room_to_events)
+        return (new_to_id, room_to_events)
 
     def _get_sticky_events_in_rooms_txn(
         self,
         txn: LoggingTransaction,
         room_ids: Collection[str],
         from_id: int,
+        to_id: int,
         now: int,
     ) -> List[Tuple[int, str, str]]:
         if len(room_ids) == 0:
@@ -160,9 +164,10 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         )
         txn.execute(
             f"""
-            SELECT stream_id, room_id, event_id FROM sticky_events WHERE soft_failed=FALSE AND expires_at > ?  AND stream_id > ? AND {clause}
+            SELECT stream_id, room_id, event_id FROM sticky_events
+            WHERE soft_failed=FALSE AND expires_at > ? AND stream_id > ? AND stream_id <= ? AND {clause}
             """,
-            (now, from_id, room_id_values),
+            (now, from_id, to_id, room_id_values),
         )
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 

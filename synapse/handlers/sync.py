@@ -620,8 +620,7 @@ class SyncHandler:
         Args:
             sync_result_builder
             now_token: Where the server is currently up to.
-            since_token: Where the server was when the client
-                last synced.
+            since_token: Where the server was when the client last synced.
         Returns:
             A tuple of the now StreamToken, updated to reflect the which sticky
             events are included, and a dict mapping from room_id to a list of
@@ -638,6 +637,7 @@ class SyncHandler:
             to_id, sticky_by_room = await self.store.get_sticky_events_in_rooms(
                 room_ids,
                 from_id,
+                now_token.sticky_events_key,
                 now,
             )
             now_token = now_token.copy_and_replace(StreamKeyType.STICKY_EVENTS, to_id)
