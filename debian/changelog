@@ -1,3 +1,9 @@
+matrix-synapse-py3 (1.139.0~rc1) stable; urgency=medium
+
+  * New Synapse release 1.139.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 23 Sep 2025 13:24:50 +0100
+
 matrix-synapse-py3 (1.138.0) stable; urgency=medium
 
   * New Synapse release 1.138.0.

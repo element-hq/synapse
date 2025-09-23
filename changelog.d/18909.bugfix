@@ -1,1 +1,0 @@
-Fix open redirect in legacy SSO flow with the `idp` query parameter.

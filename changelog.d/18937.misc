@@ -1,1 +1,0 @@
-Fix `run_in_background` not be awaited properly in some tests causing `LoggingContext` problems.
