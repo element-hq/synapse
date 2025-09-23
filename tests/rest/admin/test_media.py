@@ -67,8 +67,6 @@ class QueryMediaByIDTestCase(_AdminMediaTests):
         self.admin_user = self.register_user("admin", "pass", admin=True)
         self.admin_user_tok = self.login("admin", "pass")
 
-        self.filepaths = MediaFilePaths(hs.config.media.media_store_path)
-
     def _cache_remote_media(self, file_id: str) -> None:
         file_info = FileInfo(server_name="remote.com", file_id=file_id)
 

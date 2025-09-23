@@ -68,8 +68,8 @@ Response:
     "quarantined_by":  null,
     "authenticated":  false,
     "safe_from_quarantine": null,
-    "sha256": "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a",
-    }
+    "sha256": "ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a"
+  }
 }
 ```
 
