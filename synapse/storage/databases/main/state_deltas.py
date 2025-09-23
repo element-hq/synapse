@@ -133,7 +133,8 @@ class StateDeltasStore(SQLBaseStore):
 
             for stream_id, count in txn:
                 total += count
-                if total > 100:
+
+                if total >= 100:
                     # We arbitrarily limit to 100 entries to ensure we don't
                     # select toooo many.
                     logger.debug(
