@@ -290,14 +290,14 @@ class LoggingContextTestCase(unittest.TestCase):
         self._check_test_key("sentinel")
 
     @logcontext_clean
-    async def test_run_in_background_with_blocking_fn(self):
+    async def test_run_in_background_with_blocking_fn(self) -> None:
         async def blocking_function() -> None:
             await Clock(reactor).sleep(0)
 
         await self._test_run_in_background(blocking_function)
 
     @logcontext_clean
-    async def test_run_in_background_with_non_blocking_fn(self):
+    async def test_run_in_background_with_non_blocking_fn(self) -> None:
         @defer.inlineCallbacks
         def nonblocking_function() -> Generator["defer.Deferred[object]", object, None]:
             with PreserveLoggingContext():
@@ -306,7 +306,7 @@ class LoggingContextTestCase(unittest.TestCase):
         await self._test_run_in_background(nonblocking_function)
 
     @logcontext_clean
-    async def test_run_in_background_with_chained_deferred(self):
+    async def test_run_in_background_with_chained_deferred(self) -> None:
         # a function which returns a deferred which looks like it has been
         # called, but is actually paused
         def testfunc() -> defer.Deferred:
@@ -315,7 +315,7 @@ class LoggingContextTestCase(unittest.TestCase):
         await self._test_run_in_background(testfunc)
 
     @logcontext_clean
-    async def test_run_in_background_with_coroutine(self):
+    async def test_run_in_background_with_coroutine(self) -> None:
         """
         Test `run_in_background` with a coroutine that yields control back to the
         reactor.
@@ -333,7 +333,7 @@ class LoggingContextTestCase(unittest.TestCase):
         await self._test_run_in_background(testfunc)
 
     @logcontext_clean
-    async def test_run_in_background_with_nonblocking_coroutine(self):
+    async def test_run_in_background_with_nonblocking_coroutine(self) -> None:
         """
         Test `run_in_background` with a "nonblocking" coroutine (never yields control
         back to the reactor).
