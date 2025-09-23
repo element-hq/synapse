@@ -33,6 +33,7 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
     nested_logging_context,
+    run_coroutine_in_background,
     run_in_background,
 )
 from synapse.types import ISynapseReactor
@@ -331,6 +332,90 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("foo")
 
         return self._test_run_in_background(testfunc)
+
+    @logcontext_clean
+    async def test_run_coroutine_in_background(self) -> None:
+        """
+        Test `run_coroutine_in_background`
+        """
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            try:
+                # The callback should have the same logcontext as the caller
+                self._check_test_key("foo")
+
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
+
+                self._check_test_key("foo")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        with LoggingContext("foo"):
+            run_coroutine_in_background(competing_callback())
+            self._check_test_key("foo")
+            await clock.sleep(0)
+            self._check_test_key("foo")
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
+    # @logcontext_clean
+    async def test_run_coroutine_in_background_already_complete(self) -> None:
+        """
+        Test `run_coroutine_in_background` with a coroutine that is already complete
+        """
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            try:
+                # The callback should have the same logcontext as the caller
+                self._check_test_key("foo")
+
+                with LoggingContext("competing"):
+                    # We `await` here but there is nothing to wait for here since the
+                    # deferred is already complete so we should immediately continue
+                    # executing in the same context.
+                    await defer.succeed(None)
+
+                    self._check_test_key("competing")
+
+                self._check_test_key("foo")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        with LoggingContext("foo"):
+            run_coroutine_in_background(competing_callback())
+            self._check_test_key("foo")
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
 
     @logcontext_clean
     @defer.inlineCallbacks
