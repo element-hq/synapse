@@ -22,7 +22,6 @@
 import logging
 from typing import Callable, Generator, cast
 
-import twisted.python.failure
 from twisted.internet import defer, reactor as _reactor
 
 from synapse.logging.context import (
@@ -393,7 +392,7 @@ class LoggingContextTestCase(unittest.TestCase):
         self._check_test_key("sentinel")
 
     @logcontext_clean
-    async def test_run_coroutine_in_background_already_complete(self) -> None:
+    async def test_run_coroutine_in_background_with_nonblocking_coroutine(self) -> None:
         """
         Test `run_coroutine_in_background` with a "nonblocking" coroutine (never yields control
         back to the reactor).
