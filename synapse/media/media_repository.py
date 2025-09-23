@@ -423,6 +423,23 @@ class MediaRepository:
             send_cors=True,
         )
 
+    async def get_cached_remote_media_info(
+        self, origin: str, media_id: str
+    ) -> Optional[RemoteMedia]:
+        """
+        Get cached remote media info for a given origin/media ID combo. If the requested
+        media is not found locally, it will not be requested over federation and the
+        call will return None.
+
+        Args:
+            origin: The origin of the remote media
+            media_id: The media ID of the requested content
+
+        Returns:
+            The info for the cached remote media or None if it was not found
+        """
+        return await self.store.get_cached_remote_media(origin, media_id)
+
     async def get_local_media_info(
         self, request: SynapseRequest, media_id: str, max_timeout_ms: int
     ) -> Optional[LocalMedia]:
