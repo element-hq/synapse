@@ -117,6 +117,14 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.139.0
+
+## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 24.10 Oracular Oriole [has been end-of-life since 10 Jul
+2025](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.
+
 # Upgrading to v1.136.0
 
 ## Deprecate `run_as_background_process` exported as part of the module API interface in favor of `ModuleApi.run_as_background_process`
