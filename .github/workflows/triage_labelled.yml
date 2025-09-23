@@ -15,7 +15,8 @@ jobs:
       # This token must have the following scopes: ["repo:public_repo", "admin:org->read:org", "user->read:user", "project"]
       GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
       PROJECT_OWNER: matrix-org
-      # Backend issue triage board
+      # Backend issue triage board.
+      # https://github.com/orgs/matrix-org/projects/67/views/1
       PROJECT_NUMBER: 67
       ISSUE_URL: ${{ github.event.issue.html_url }}
       # This field is case-sensitive.
