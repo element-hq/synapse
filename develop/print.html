@@ -13176,6 +13176,33 @@ However, it only shows media from unencrypted events or rooms.</p>
 the use of the
 <a href="admin_api/user_admin_api.html#list-media-uploaded-by-a-user">List media uploaded by a user</a>
 Admin API.</p>
+<h2 id="query-a-piece-of-media-by-id"><a class="header" href="#query-a-piece-of-media-by-id">Query a piece of media by ID</a></h2>
+<p>This API returns information about a piece of local or cached remote media given the origin server name and media id. If
+information is requested for remote media which is not cached the endpoint will return 404. </p>
+<p>Request:</p>
+<pre><code class="language-http">GET /_synapse/admin/v1/media/&lt;origin&gt;/&lt;media_id&gt;
+</code></pre>
+<p>The API returns a JSON body with media info like the following:</p>
+<p>Response:</p>
+<pre><code class="language-json">{
+  &quot;media_info&quot;: {
+    &quot;media_origin&quot;: &quot;remote.com&quot;,
+    &quot;user_id&quot;: null,
+    &quot;media_id&quot;: &quot;sdginwegWEG&quot;,
+    &quot;media_type&quot;: &quot;img/png&quot;,
+    &quot;media_length&quot;: 67,
+    &quot;upload_name&quot;:  &quot;test.png&quot;,
+    &quot;created_ts&quot;:  300,
+    &quot;filesystem_id&quot;:  &quot;wgeweg&quot;,
+    &quot;url_cache&quot;: null,
+    &quot;last_access_ts&quot;: 400,
+    &quot;quarantined_by&quot;:  null,
+    &quot;authenticated&quot;:  false,
+    &quot;safe_from_quarantine&quot;: null,
+    &quot;sha256&quot;: &quot;ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a&quot;
+  }
+}
+</code></pre>
 <h1 id="quarantine-media"><a class="header" href="#quarantine-media">Quarantine media</a></h1>
 <p>Quarantining media means that it is marked as inaccessible by users. It applies
 to any local media, and any locally-cached copies of remote media.</p>
