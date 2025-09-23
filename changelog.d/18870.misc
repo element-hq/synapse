@@ -1,1 +1,0 @@
-Remove `sentinel` logcontext usage where we log in `setup`, `start` and exit.
