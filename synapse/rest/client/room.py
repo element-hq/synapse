@@ -328,6 +328,10 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
+        sticky_duration_ms: Optional[int] = None
+        if self.msc4354_enabled:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
         delay = _parse_request_delay(request, self._max_event_delay_ms)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
@@ -338,6 +342,7 @@ class RoomStateEventRestServlet(RestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
+                sticky_duration_ms=sticky_duration_ms,
             )
 
             set_tag("delay_id", delay_id)
@@ -365,14 +370,10 @@ class RoomStateEventRestServlet(RestServlet):
                     "room_id": room_id,
                     "sender": requester.user.to_string(),
                 }
-                if self.msc4354_enabled:
-                    sticky_duration_ms = parse_integer(
-                        request, StickyEvent.QUERY_PARAM_NAME
-                    )
-                    if sticky_duration_ms is not None:
-                        event_dict[StickyEvent.FIELD_NAME] = {
-                            "duration_ms": sticky_duration_ms,
-                        }
+                if sticky_duration_ms is not None:
+                    event_dict[StickyEvent.FIELD_NAME] = {
+                        "duration_ms": sticky_duration_ms,
+                    }
 
                 if state_key is not None:
                     event_dict["state_key"] = state_key
@@ -426,6 +427,10 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
+        sticky_duration_ms: Optional[int] = None
+        if self.msc4354_enabled:
+            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
+
         delay = _parse_request_delay(request, self._max_event_delay_ms)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
@@ -436,6 +441,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
+                sticky_duration_ms=sticky_duration_ms,
             )
 
             set_tag("delay_id", delay_id)
@@ -452,12 +458,10 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if origin_server_ts is not None:
             event_dict["origin_server_ts"] = origin_server_ts
 
-        if self.msc4354_enabled:
-            sticky_duration_ms = parse_integer(request, StickyEvent.QUERY_PARAM_NAME)
-            if sticky_duration_ms is not None:
-                event_dict[StickyEvent.FIELD_NAME] = {
-                    "duration_ms": sticky_duration_ms,
-                }
+        if sticky_duration_ms is not None:
+            event_dict[StickyEvent.FIELD_NAME] = {
+                "duration_ms": sticky_duration_ms,
+            }
 
         try:
             (

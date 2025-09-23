@@ -45,6 +45,7 @@ class EventDetails:
     origin_server_ts: Optional[Timestamp]
     content: JsonDict
     device_id: Optional[DeviceID]
+    sticky_duration_ms: Optional[int]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -92,6 +93,7 @@ class DelayedEventsStore(SQLBaseStore):
         origin_server_ts: Optional[int],
         content: JsonDict,
         delay: int,
+        sticky_duration_ms: Optional[int],
     ) -> Tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
@@ -118,6 +120,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "state_key": state_key,
                     "origin_server_ts": origin_server_ts,
                     "content": json_encoder.encode(content),
+                    "sticky_duration_ms": sticky_duration_ms,
                 },
             )
 
@@ -249,6 +252,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "send_ts",
                     "content",
                     "device_id",
+                    "sticky_duration_ms",
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
@@ -289,6 +293,7 @@ class DelayedEventsStore(SQLBaseStore):
                     Timestamp(row[5] if row[5] is not None else row[6]),
                     db_to_json(row[7]),
                     DeviceID(row[8]) if row[8] is not None else None,
+                    int(row[9]) if row[9] is not None else None,
                     DelayID(row[0]),
                     UserLocalpart(row[1]),
                 )
@@ -339,6 +344,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "origin_server_ts",
                     "content",
                     "device_id",
+                    "sticky_duration_ms",
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
@@ -366,6 +372,7 @@ class DelayedEventsStore(SQLBaseStore):
                 Timestamp(row[3]) if row[3] is not None else None,
                 db_to_json(row[4]),
                 DeviceID(row[5]) if row[5] is not None else None,
+                int(row[6]) if row[6] is not None else None,
             )
 
             return event, self._get_next_delayed_event_send_ts_txn(txn)
