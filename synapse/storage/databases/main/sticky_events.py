@@ -167,7 +167,7 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
             SELECT stream_id, room_id, event_id FROM sticky_events
             WHERE soft_failed=FALSE AND expires_at > ? AND stream_id > ? AND stream_id <= ? AND {clause}
             """,
-            (now, from_id, to_id, room_id_values),
+            (now, from_id, to_id, *room_id_values),
         )
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 
