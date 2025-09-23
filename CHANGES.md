@@ -1,3 +1,12 @@
+# Synapse 1.139.0rc2 (2025-09-23)
+
+## Internal Changes
+
+- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
+
+
+
+
 # Synapse 1.139.0rc1 (2025-09-23)
 
 ## Features
