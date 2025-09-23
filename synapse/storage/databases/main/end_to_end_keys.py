@@ -354,6 +354,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             if d is not None and d.keys is not None
         )
 
+        # 1000 is an arbitrary batch size. It helped performance on a very
+        # large-scale deployment (matrix.org), but has not been tested against
+        # any other setup.
         for batch in batch_iter(signature_query, 1000):
             cross_sigs_result = (
                 await self._get_e2e_cross_signing_signatures_for_devices(batch)
