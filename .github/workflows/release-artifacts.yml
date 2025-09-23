@@ -35,7 +35,8 @@ jobs:
         run: |
           # if we're running from a tag, get the full list of distros; otherwise just use debian:sid
           # NOTE: inside the actual Dockerfile-dhvirtualenv, the image name is expanded into its full image path
-          dists='["debian:sid"]'
+          # REVERT ME: Test that 'ubuntu:plucky' builds in PR #18962.
+          dists='["ubuntu:plucky"]'
           if [[ $GITHUB_REF == refs/tags/* ]]; then
               dists=$(scripts-dev/build_debian_packages.py --show-dists-json)
           fi
