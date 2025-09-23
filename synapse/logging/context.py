@@ -857,8 +857,11 @@ def run_in_background(
 
     # The deferred has already completed
     if d.called and not d.paused:
-        # The function should have maintained the logcontext, so we can
-        # optimise out the messing about
+        # The function should have maintained the calling logcontext, so we can avoid
+        # messing with it further. Additionally, if the deferred has already completed,
+        # then it would be a mistake to then add a deferred callback (below) to reset
+        # the logcontext to the sentinel logcontext as that would run immediately
+        # (remember our goal is to maintain the calling logcontext).
         return d
 
     # The function may have reset the context before returning, so we need to restore it
