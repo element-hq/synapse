@@ -894,10 +894,9 @@ def run_coroutine_in_background(
     Useful for wrapping coroutines that you don't yield or await on (for
     instance because you want to pass it to deferred.gatherResults()).
 
-    This is a special case of `run_in_background` where we can accept a
-    coroutine directly rather than a function. We can do this because coroutines
-    do not run until called, and so calling an async function without awaiting
-    cannot change the log contexts.
+    This is a special case of `run_in_background` where we can accept a coroutine
+    directly rather than a function. We can do this because coroutines do not continue
+    running once they have yielded.
 
     This is an ergonomic helper so we can do this:
     ```python
@@ -908,39 +907,7 @@ def run_coroutine_in_background(
     run_in_background(lambda: func1(arg1))
     ```
     """
-    calling_context = current_context()
-
-    # Wrap the coroutine in a deferred, which will have the side effect of executing the
-    # coroutine in the background.
-    d = defer.ensureDeferred(coroutine)
-
-    # The deferred has already completed
-    if d.called and not d.paused:
-        # The function should have maintained the logcontext, so we can
-        # optimise out the messing about
-        return d
-
-    # The function may have reset the context before returning, so we need to restore it
-    # now.
-    #
-    # Our goal is to have the caller logcontext unchanged after firing off the
-    # background task and returning.
-    set_current_context(calling_context)
-
-    # The original logcontext will be restored when the deferred completes, but
-    # there is nothing waiting for it, so it will get leaked into the reactor (which
-    # would then get picked up by the next thing the reactor does). We therefore
-    # need to reset the logcontext here (set the `sentinel` logcontext) before
-    # yielding control back to the reactor.
-    #
-    # (If this feels asymmetric, consider it this way: we are
-    # effectively forking a new thread of execution. We are
-    # probably currently within a ``with LoggingContext()`` block,
-    # which is supposed to have a single entry and exit point. But
-    # by spawning off another deferred, we are effectively
-    # adding a new exit point.)
-    d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
-    return d
+    return run_in_background(lambda: coroutine)
 
 
 T = TypeVar("T")
