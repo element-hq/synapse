@@ -643,3 +643,101 @@ class StateStoreTestCase(HomeserverTestCase):
                     ),
                 )
                 self.assertEqual(context.state_group_before_event, groups[0][0])
+
+
+class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+        self.store = hs.get_datastores().main
+        self.storage = hs.get_storage_controllers()
+        self.state_datastore = self.storage.state.stores.state
+        self.event_creation_handler = hs.get_event_creation_handler()
+        self.event_builder_factory = hs.get_event_builder_factory()
+
+        # Create a made-up room and a user.
+        self.alice_user_id = UserID.from_string("@alice:test")
+        self.room = RoomID.from_string("!abc1234:test")
+
+        self.get_success(
+            self.store.store_room(
+                self.room.to_string(),
+                room_creator_user_id="@creator:text",
+                is_public=True,
+                room_version=RoomVersions.V1,
+            )
+        )
+
+    def inject_state_event(
+        self, room: RoomID, sender: UserID, typ: str, state_key: str, content: JsonDict
+    ) -> EventBase:
+        builder = self.event_builder_factory.for_room_version(
+            RoomVersions.V1,
+            {
+                "type": typ,
+                "sender": sender.to_string(),
+                "state_key": state_key,
+                "room_id": room.to_string(),
+                "content": content,
+            },
+        )
+
+        event, unpersisted_context = self.get_success(
+            self.event_creation_handler.create_new_client_event(builder)
+        )
+
+        context = self.get_success(unpersisted_context.persist(event))
+
+        assert self.storage.persistence is not None
+        self.get_success(self.storage.persistence.persist_event(event, context))
+
+        return event
+
+    def test_current_state_delta_stream_is_limited_to_100(self) -> None:
+        """
+        Tests that `get_partial_current_state_deltas` returns max 100 rows.
+
+        Regression test for https://github.com/element-hq/synapse/pull/18960.
+        """
+        # Fetch the current state group to pass into store_state_deltas_for_batched
+        self.inject_state_event(
+            self.room, self.alice_user_id, EventTypes.Create, "", {}
+        )
+
+        # Make >100 state changes in the room.
+        for i in range(101):
+            self.inject_state_event(
+                self.room,
+                self.alice_user_id,
+                EventTypes.Name,
+                "",
+                {"name": f"rename #{i}"},
+            )
+
+        # Sanity check: count how many rows exist between prev=0 and max, it should be >100.
+        max_stream_id = self.store.get_room_max_stream_ordering()
+
+        # Call the function under test. With the >= 100 clipping fix, this must return <= 100 rows.
+        clipped_stream_id, deltas = self.get_success(
+            self.store.get_partial_current_state_deltas(
+                prev_stream_id=0, max_stream_id=max_stream_id
+            )
+        )
+
+        self.assertLessEqual(
+            len(deltas), 100, f"Returned {len(deltas)} rows, expected at most 100"
+        )
+
+        # Advancing from the clipped point should eventually drain the remainder.
+        # Make sure we make progress and don’t get stuck.
+        if deltas:
+            next_prev = clipped_stream_id
+            next_clipped, next_deltas = self.get_success(
+                self.store.get_partial_current_state_deltas(
+                    prev_stream_id=next_prev, max_stream_id=max_stream_id
+                )
+            )
+            self.assertNotEqual(
+                next_clipped, clipped_stream_id, "Did not advance clipped_stream_id"
+            )
+            # Still should respect the 100-row limit.
+            self.assertLessEqual(len(next_deltas), 100)
