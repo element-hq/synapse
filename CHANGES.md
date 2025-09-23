@@ -7,6 +7,7 @@
 - Add `get_media_upload_limits_for_user` and `on_media_upload_limit_exceeded` module API callbacks to the media repository. ([\#18848](https://github.com/element-hq/synapse/issues/18848))
 - Support [MSC4169](https://github.com/matrix-org/matrix-spec-proposals/pull/4169) for backwards-compatible redaction sending using the `/send` endpoint. Contributed by @SpiritCroc @ Beeper. ([\#18898](https://github.com/element-hq/synapse/issues/18898))
 - Add an in-memory cache to `_get_e2e_cross_signing_signatures_for_devices` to reduce DB load. ([\#18899](https://github.com/element-hq/synapse/issues/18899))
+- Update [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) support to return correct errors and allow appservices to reset cross-signing keys without user-interactive authentication. Contributed by @tulir @ Beeper. ([\#18946](https://github.com/element-hq/synapse/issues/18946))
 
 ## Bugfixes
 
@@ -44,7 +45,6 @@
 - Fix `run_as_background_process` not being awaited properly causing `LoggingContext` problems in experimental [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140): Delayed events implementation. ([\#18938](https://github.com/element-hq/synapse/issues/18938))
 - Introduce `Clock.call_when_running(...)` to wrap startup code in a logcontext, ensuring we can identify which server generated the logs. ([\#18944](https://github.com/element-hq/synapse/issues/18944))
 - Introduce `Clock.add_system_event_trigger(...)` to wrap system event callback code in a logcontext, ensuring we can identify which server generated the logs. ([\#18945](https://github.com/element-hq/synapse/issues/18945))
-- Update [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) support to return correct errors and allow appservices to reset cross-signing keys without user-interactive authentication. Contributed by @tulir @ Beeper. ([\#18946](https://github.com/element-hq/synapse/issues/18946))
 
 
 
