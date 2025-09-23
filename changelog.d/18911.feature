@@ -1,0 +1,2 @@
+Add an Admin API that allows server admins to to query and investigate the metadata of local or cached remote media via
+the `origin/media_id` identifier found in a [Matrix Content URI](https://spec.matrix.org/v1.14/client-server-api/#matrix-content-mxc-uris).
