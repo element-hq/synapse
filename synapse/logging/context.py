@@ -802,13 +802,15 @@ def run_in_background(
     deferred returned by the function completes.
 
     To explain how the log contexts work here:
-     - When `run_in_background` is called, the current context is stored ("original"),
-       we kick off the background task in the current context, and we restore that
-       original context before returning
-     - When the background task finishes, we don't want to leak our context into the
-       reactor which would erroneously get attached to the next operation picked up by
-       the event loop. We add a callback to the deferred which will clear the logging
-       context after it finishes and yields control back to the reactor.
+     - When `run_in_background` is called, the calling logcontext is stored
+       ("original"), we kick off the background task in the current context, and we
+       restore that original context before returning.
+     - For a completed deferred, that's the end of the story.
+     - For an incomplete deferred, when the background task finishes, we don't want to
+       leak our context into the reactor which would erroneously get attached to the
+       next operation picked up by the event loop. We add a callback to the deferred
+       which will clear the logging context after it finishes and yields control back to
+       the reactor.
 
     Useful for wrapping functions that return a deferred or coroutine, which you don't
     yield or await on (for instance because you want to pass it to
@@ -861,7 +863,7 @@ def run_in_background(
         # messing with it further. Additionally, if the deferred has already completed,
         # then it would be a mistake to then add a deferred callback (below) to reset
         # the logcontext to the sentinel logcontext as that would run immediately
-        # (remember our goal is to maintain the calling logcontext).
+        # (remember our goal is to maintain the calling logcontext when we return).
         return d
 
     # The function may have reset the context before returning, so we need to restore it
