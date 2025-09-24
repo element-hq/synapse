@@ -1186,6 +1186,9 @@ class PersistEventsStore:
                 sliding_sync_table_changes,
             )
 
+        if self.msc4354_sticky_events:
+            self.store.insert_sticky_events_txn(txn, events_and_contexts)
+
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
             txn, room_id, events_and_contexts
