@@ -63,13 +63,13 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "time",
             "level",
             "namespace",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
 
     def test_extra_data(self) -> None:
@@ -87,7 +87,7 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "time",
             "level",
@@ -96,8 +96,8 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
             "foo",
             "int",
             "bool",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
 
         # Check the values of the extra fields.
         self.assertEqual(log["foo"], "bar")
@@ -117,12 +117,12 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
 
     def test_with_context(self) -> None:
@@ -140,13 +140,14 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
             "request",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+            "server_name",
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertEqual(log["request"], "name")
 
@@ -196,7 +197,7 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger includes additional request information, if possible.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
@@ -209,8 +210,9 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
             "url",
             "protocol",
             "user_agent",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+            "server_name",
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertTrue(log["request"].startswith("POST-"))
         self.assertEqual(log["ip_address"], "127.0.0.1")
@@ -238,14 +240,14 @@ class TerseJsonTestCase(LoggerCleanupMixin, TestCase):
         log = self.get_log_line()
 
         # The terse logger should give us these keys.
-        expected_log_keys = [
+        expected_log_keys = {
             "log",
             "level",
             "namespace",
             "exc_type",
             "exc_value",
-        ]
-        self.assertCountEqual(log.keys(), expected_log_keys)
+        }
+        self.assertIncludes(log.keys(), expected_log_keys, exact=True)
         self.assertEqual(log["log"], "Hello there, wally!")
         self.assertEqual(log["exc_type"], "ValueError")
         self.assertEqual(log["exc_value"], "That's wrong, you wally!")
