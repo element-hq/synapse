@@ -693,9 +693,10 @@ class RoomCreationHandler:
                 additional_creators,
             )
 
-        # We construct what the body of a call to /createRoom would look like for passing
-        # to the spam checker. We don't include a preset here, as we expect the
+        # We construct a subset of what the body of a call to /createRoom would look like
+        # for passing to the spam checker. We don't include a preset here, as we expect the
         # initial state to contain everything we need.
+        # TODO: given we are upgrading, it would make sense to pass the room_version
         spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
             user_id,
             {
