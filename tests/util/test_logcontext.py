@@ -249,6 +249,204 @@ class LoggingContextTestCase(unittest.TestCase):
         # Back to the sentinel context
         self._check_test_key("sentinel")
 
+    @logcontext_clean
+    async def test_deferred_callback_await_in_current_logcontext(self) -> None:
+        """
+        Test that calling the deferred callback in the current logcontext ("foo") and
+        waiting for it to finish in a logcontext blocks works as expected.
+
+        Works because "always await your awaitables".
+
+        Demonstrates one pattern that we can use fix the naive case where we just call
+        `d.callback(None)` without anything else. See the *Deferred callbacks* section
+        of docs/log_contexts.md for more details.
+        """
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            try:
+                # The deferred callback should have the same logcontext as the caller
+                self._check_test_key("foo")
+
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
+
+                self._check_test_key("foo")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        with LoggingContext("foo"):
+            d: defer.Deferred[None] = defer.Deferred()
+            d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+            self._check_test_key("foo")
+            d.callback(None)
+            # The fix for the naive case is here (i.e. things don't work correctly if we
+            # don't await here).
+            #
+            # Wait for `d` to finish before continuing so the "main" logcontext is
+            # still active. This works because `d` already follows our logcontext
+            # rules. If not, we would also have to use `make_deferred_yieldable(d)`.
+            await d
+            self._check_test_key("foo")
+
+        await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
+    @logcontext_clean
+    async def test_deferred_callback_preserve_logging_context(self) -> None:
+        """
+        Test that calling the deferred callback inside `PreserveLoggingContext()` (in
+        the sentinel context) works as expected.
+
+        Demonstrates one pattern that we can use fix the naive case where we just call
+        `d.callback(None)` without anything else. See the *Deferred callbacks* section
+        of docs/log_contexts.md for more details.
+        """
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            try:
+                # The deferred callback should have the same logcontext as the caller
+                self._check_test_key("sentinel")
+
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
+
+                self._check_test_key("sentinel")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        with LoggingContext("foo"):
+            d: defer.Deferred[None] = defer.Deferred()
+            d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+            self._check_test_key("foo")
+            # The fix for the naive case is here (i.e. things don't work correctly if we
+            # don't `PreserveLoggingContext()` here).
+            #
+            # `PreserveLoggingContext` will reset the logcontext to the sentinel before
+            # calling the callback, and restore the "foo" logcontext afterwards before
+            # continuing the foo block. This solves the problem because when the
+            # "competing" logcontext exits, it will restore the sentinel logcontext
+            # which is never finished by its nature, so there is no warning and no
+            # leakage into the reactor.
+            with PreserveLoggingContext():
+                d.callback(None)
+            self._check_test_key("foo")
+
+        await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
+    @logcontext_clean
+    async def test_deferred_callback_fire_and_forget_with_current_context(self) -> None:
+        """
+        Test that it's possible to call the deferred callback with the current context
+        while fire-and-forgetting the callback (no adverse effects like leaking the
+        logcontext into the reactor or restarting an already finished logcontext).
+
+        Demonstrates one pattern that we can use fix the naive case where we just call
+        `d.callback(None)` without anything else. See the *Deferred callbacks* section
+        of docs/log_contexts.md for more details.
+        """
+        clock = Clock(reactor)
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            try:
+                # The deferred callback should have the same logcontext as the caller
+                self._check_test_key("foo")
+
+                with LoggingContext("competing"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
+
+                self._check_test_key("foo")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        # Part of fix for the naive case is here (i.e. things don't work correctly if we
+        # don't `PreserveLoggingContext(...)` here).
+        #
+        # We can extend the lifetime of the "foo" logcontext is to avoid calling the
+        # context manager lifetime methods of `LoggingContext` (`__enter__`/`__exit__`).
+        # And we can still set the current logcontext by using `PreserveLoggingContext`
+        # and passing in the "foo" logcontext.
+        with PreserveLoggingContext(LoggingContext("foo")):
+            d: defer.Deferred[None] = defer.Deferred()
+            d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+            self._check_test_key("foo")
+            # Other part of fix for the naive case is here (i.e. things don't work
+            # correctly if we don't `run_in_background(...)` here).
+            #
+            # `run_in_background(...)` will run the whole lambda in the current
+            # logcontext and it handles the magic behind the scenes of a) restoring the
+            # calling logcontext before returning to the caller and b) resetting the
+            # logcontext to the sentinel after the deferred completes and we yield
+            # control back to the reactor to avoid leaking the logcontext into the
+            # reactor.
+            #
+            # We're using a lambda here as a little trick so we can still get everything
+            # to run in the "foo" logcontext, but return the deferred `d` itself so that
+            # `run_in_background` will wait on that to complete before resetting the
+            # logcontext to the sentinel.
+            #
+            # type-ignore[call-overload]: This appears like a mypy type inference bug. A
+            # function that returns a deferred is exactly what `run_in_background`
+            # expects.
+            #
+            # type-ignore[func-returns-value]: This appears like a mypy type inference
+            # bug. We're always returning the deferred `d`.
+            run_in_background(lambda: (d.callback(None), d)[1])  # type: ignore[call-overload, func-returns-value]
+            self._check_test_key("foo")
+
+        await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
     async def _test_run_in_background(self, function: Callable[[], object]) -> None:
         clock = Clock(reactor)
 
