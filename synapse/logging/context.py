@@ -859,25 +859,36 @@ def run_in_background(
 
     # The deferred has already completed
     if d.called and not d.paused:
-        # The function should have maintained the calling logcontext, so we can avoid
-        # messing with it further. Additionally, if the deferred has already completed,
-        # then it would be a mistake to then add a deferred callback (below) to reset
-        # the logcontext to the sentinel logcontext as that would run immediately
-        # (remember our goal is to maintain the calling logcontext when we return).
+        # If the function messes with logcontexts, we can assume it follows the Synapse
+        # logcontext rules (Rules for functions returning awaitables: "If the awaitable
+        # is already complete, the function returns with the same logcontext it started
+        # with."). If it function doesn't touch logcontexts at all, we can also assume
+        # the logcontext is unchanged.
+        #
+        # Either way, the function should have maintained the calling logcontext, so we
+        # can avoid messing with it further. Additionally, if the deferred has already
+        # completed, then it would be a mistake to then add a deferred callback (below)
+        # to reset the logcontext to the sentinel logcontext as that would run
+        # immediately (remember our goal is to maintain the calling logcontext when we
+        # return).
         return d
 
-    # The function may have reset the context before returning, so we need to restore it
-    # now.
+    # Since the function we called may follow the Synapse logcontext rules (Rules for
+    # functions returning awaitables: "If the awaitable is incomplete, the function
+    # clears the logcontext before returning"), the function may have reset the
+    # logcontext before returning, so we need to restore the calling logcontext now
+    # before we return ourselves.
     #
     # Our goal is to have the caller logcontext unchanged after firing off the
     # background task and returning.
     set_current_context(calling_context)
 
-    # The original logcontext will be restored when the deferred completes, but
-    # there is nothing waiting for it, so it will get leaked into the reactor (which
-    # would then get picked up by the next thing the reactor does). We therefore
-    # need to reset the logcontext here (set the `sentinel` logcontext) before
-    # yielding control back to the reactor.
+    # If the function we called is playing nice and following the Synapse logcontext
+    # rules, it will restore original calling logcontext when the deferred completes;
+    # but there is nothing waiting for it, so it will get leaked into the reactor (which
+    # would then get picked up by the next thing the reactor does). We therefore need to
+    # reset the logcontext here (set the `sentinel` logcontext) before yielding control
+    # back to the reactor.
     #
     # (If this feels asymmetric, consider it this way: we are
     # effectively forking a new thread of execution. We are
