@@ -1049,7 +1049,7 @@ class TestHomeServer(HomeServer):
 
 
 def setup_test_homeserver(
-    cleanup_func: Callable[[Callable[[], None]], None],
+    cleanup_func: Callable[[Callable[[], Optional[Deferred[None]]]], None],
     name: str = "test",
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
@@ -1064,7 +1064,9 @@ def setup_test_homeserver(
 
     Args:
         cleanup_func : The function used to register a cleanup routine for
-                       after the test.
+                       after the test. If the function returns a Deferred, the
+                       test case will wait until the Deferred has fired before
+                       proceeding to the next cleanup function.
 
     Calling this method directly is deprecated: you should instead derive from
     HomeserverTestCase.
@@ -1178,10 +1180,12 @@ def setup_test_homeserver(
     # cleanup functions result in holding the `hs` in memory.
     cleanup_hs_ref = weakref.ref(hs)
 
-    def shutdown_hs_on_cleanup() -> None:
+    def shutdown_hs_on_cleanup() -> Deferred[None]:
         cleanup_hs = cleanup_hs_ref()
+        deferred: Deferred[None] = defer.succeed(None)
         if cleanup_hs is not None:
-            defer.ensureDeferred(cleanup_hs.shutdown())
+            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
+        return deferred
 
     # Register the cleanup hook for the homeserver.
     # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
