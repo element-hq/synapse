@@ -50,7 +50,7 @@ class MatrixRTCRestServlet(RestServlet):
         services = self.hs.config.matrix_rtc.services
 
         if services:
-            return 200, {"services": services}
+            return 200, {"rtc_services": services}
         else:
             return 200, {}
 

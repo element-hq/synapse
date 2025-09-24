@@ -51,5 +51,5 @@ class MatrixRtcTestCase(unittest.HomeserverTestCase):
         channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/services", access_token=tok)
         self.assertEqual(200, channel.code)
 
-        self.assert_dict({"services": [RTC_ENDPOINT]}, channel.json_body)
+        self.assert_dict({"rtc_services": [RTC_ENDPOINT]}, channel.json_body)
 
