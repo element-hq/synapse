@@ -27,7 +27,9 @@ from typing import (
 
 from twisted.internet.defer import Deferred
 
+from synapse import event_auth
 from synapse.api.constants import EventTypes, StickyEvent
+from synapse.api.errors import AuthError
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -40,7 +42,10 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events import DeltaState
+from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types.state import StateFilter
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -54,7 +59,7 @@ logger = logging.getLogger(__name__)
 DELETE_EXPIRED_STICKY_EVENTS_MS = 60 * 1000 * 60  # 1 hour
 
 
-class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
+class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -203,14 +208,13 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         )
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 
-    def handle_sticky_events_txn(
+    async def handle_sticky_events(
         self,
-        txn: LoggingTransaction,
         room_id: str,
         events_and_contexts: List[EventPersistencePair],
         state_delta_for_room: Optional[DeltaState],
     ) -> None:
-        """Update the sticky events table, used in MSC4354. Intended to be called within the persist
+        """Update the sticky events table, used in MSC4354. Intended to be called after the persist
         events transaction.
 
         This function assumes that `_store_event_txn()` (to persist the event) and
@@ -222,7 +226,6 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
          - for each still-sticky soft-failed event in the room, re-evaluate soft-failedness.
 
         Args:
-            txn
             room_id: The room that all of the events belong to
             events_and_contexts: The events being persisted.
             state_delta_for_room: The changes to the current state, used to detect if we need to
@@ -233,16 +236,28 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
 
         assert self._can_write_to_sticky_events
 
-        # TODO: finish the impl
         # fetch soft failed sticky events to recheck now, before we insert new sticky events, else
-        # we could incorrectly re-evaluate new sticky events
-        # event_ids_to_check = self._get_soft_failed_sticky_events_to_recheck(txn, room_id, state_delta_for_room)
-        # logger.info(f"_get_soft_failed_sticky_events_to_recheck => {event_ids_to_check}")
-        # recheck them and update any that now pass soft-fail checks.
-        # self._recheck_soft_failed_events(txn, room_id, event_ids_to_check)
+        # we could incorrectly re-evaluate new sticky events in events_and_contexts
+        event_ids_to_check = await self._get_soft_failed_sticky_events_to_recheck(
+            room_id, state_delta_for_room
+        )
+        if event_ids_to_check:
+            logger.info(
+                "_get_soft_failed_sticky_events_to_recheck => %s", event_ids_to_check
+            )
+            # recheck them and update any that now pass soft-fail checks.
+            await self._recheck_soft_failed_events(room_id, event_ids_to_check)
 
         # insert brand new sticky events.
-        self._insert_sticky_events_txn(txn, events_and_contexts)
+        await self._insert_sticky_events(events_and_contexts)
+
+    async def _insert_sticky_events(
+        self,
+        events_and_contexts: List[EventPersistencePair],
+    ) -> None:
+        await self.db_pool.runInteraction(
+            "_insert_sticky_events", self._insert_sticky_events_txn, events_and_contexts
+        )
 
     def _insert_sticky_events_txn(
         self,
@@ -314,9 +329,8 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
             ],
         )
 
-    def _get_soft_failed_sticky_events_to_recheck(
+    async def _get_soft_failed_sticky_events_to_recheck(
         self,
-        txn: LoggingTransaction,
         room_id: str,
         state_delta_for_room: Optional[DeltaState],
     ) -> List[str]:
@@ -324,7 +338,7 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
 
         Soft-failed events are not rejected, so they pass auth at the state before
         the event and at the auth_events in the event. Instead, soft-failed events failed auth at
-        the _current state of the room_. We only need to recheck soft failure if we have a reason to
+        the *current* state of the room. We only need to recheck soft failure if we have a reason to
         believe the event may pass that check now.
 
         Note that we don't bother rechecking accepted events that may now be soft-failed, because
@@ -384,9 +398,11 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
                     if typ == EventTypes.Member
                 ]
             )
+
             # pull out senders of sticky events in this room
-            events_to_recheck: List[Tuple[str]] = self.db_pool.simple_select_many_txn(
-                txn,
+            events_to_recheck: List[
+                Tuple[str]
+            ] = await self.db_pool.simple_select_many_batch(
                 table="sticky_events",
                 column="sender",
                 iterable=new_membership_changes,
@@ -394,7 +410,8 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
                     "room_id": room_id,
                     "soft_failed": True,
                 },
-                retcols=("event_id"),
+                retcols=("event_id",),
+                desc="_get_soft_failed_sticky_events_to_recheck_members",
             )
             return [event_id for (event_id,) in events_to_recheck]
 
@@ -407,32 +424,32 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         # an admin user's membership changes which causes a PL event to be allowed, as when the PL event
         # gets allowed we will re-evaluate anyway. E.g:
         #
-        #  PL(send_event=0, sender=Admin)
+        #  PL(send_event=0, sender=Admin) #1
         #            ^              ^_____________________
         #            |                                   |
-        # . PL(send_event=50, sender=Mod)              sticky event (sender=User)
+        # . PL(send_event=50, sender=Mod) #2            sticky event (sender=User) #3
         #
         # In this scenario, the sticky event is soft-failed due to the Mod updating the PL event to
         # set send_event=50, which User does not have. If we learn of an event which makes Mod's PL
         # event invalid (say, Mod was banned by Admin concurrently to Mod setting the PL event), then
         # the act of seeing the ban event will cause the old PL event to be in the state delta, meaning
-        # we will re-evaluate the sticky event due to the PL changing. We don't need to specially handle case.a
-        events_to_recheck = self.db_pool.simple_select_list_txn(
-            txn,
+        # we will re-evaluate the sticky event due to the PL changing. We don't need to specially handle
+        # this case.
+        events_to_recheck = await self.db_pool.simple_select_list(
             table="sticky_events",
             keyvalues={
                 "room_id": room_id,
                 "soft_failed": True,
             },
-            retcols=("event_id"),
+            retcols=("event_id",),
+            desc="_get_soft_failed_sticky_events_to_recheck",
         )
         return [event_id for (event_id,) in events_to_recheck]
 
-    def _recheck_soft_failed_events(
+    async def _recheck_soft_failed_events(
         self,
-        txn: LoggingTransaction,
         room_id: str,
-        event_ids: List[str],
+        soft_failed_event_ids: List[str],
     ) -> None:
         """
         Recheck authorised but soft-failed events. The provided event IDs must have already passed
@@ -441,10 +458,95 @@ class StickyEventsWorkerStore(CacheInvalidationWorkerStore):
         Args:
             txn: The SQL transaction
             room_id: The room the event IDs are in.
-            event_ids: The soft-failed events to re-evaluate.
+            soft_failed_event_ids: The soft-failed events to re-evaluate.
         """
-        # We know the events are otherwise authorised, so we only need to load the current state
-        # and check if the events pass auth at the current state.
+        # Load all the soft-failed events to recheck, and pull out the precise state tuples we need
+        soft_failed_event_map = await self.get_events(
+            soft_failed_event_ids, allow_rejected=False
+        )
+        needed_tuples: Set[Tuple[str, str]] = set()
+        for ev in soft_failed_event_map.values():
+            needed_tuples.update(event_auth.auth_types_for_event(ev.room_version, ev))
+
+        # We know the events are otherwise authorised, so we only need to load the needed tuples from
+        # the current state to check if the events pass auth.
+        current_state_map = await self.get_partial_filtered_current_state_ids(
+            room_id, StateFilter.from_types(needed_tuples)
+        )
+        current_state_ids_list = [e for _, e in current_state_map.items()]
+        current_auth_events = await self.get_events_as_list(current_state_ids_list)
+        passing_event_ids: Set[str] = set()
+        for soft_failed_event in soft_failed_event_map.values():
+            try:
+                # We don't need to check_state_independent_auth_rules as that doesn't depend on room state,
+                # so if it passed once it'll pass again.
+                event_auth.check_state_dependent_auth_rules(
+                    soft_failed_event, current_auth_events
+                )
+                passing_event_ids.add(soft_failed_event.event_id)
+            except AuthError:
+                pass
+
+        if not passing_event_ids:
+            return
+
+        logger.info(
+            "%s soft-failed events now pass current state checks in room %s : %s",
+            len(passing_event_ids),
+            room_id,
+            shortstr(passing_event_ids),
+        )
+        # Update the DB with the new soft-failure status
+        await self.db_pool.runInteraction(
+            "_recheck_soft_failed_events",
+            self._update_soft_failure_status_txn,
+            passing_event_ids,
+        )
+
+    def _update_soft_failure_status_txn(
+        self, txn: LoggingTransaction, passing_event_ids: Set[str]
+    ) -> None:
+        # Update the sticky events table so we notify downstream of the change in soft-failure status
+        new_stream_ids: List[Tuple[str, int]] = [
+            (event_id, self._sticky_events_id_gen.get_next_txn(txn))
+            for event_id in passing_event_ids
+        ]
+        values_placeholders = ", ".join(["(?, ?)"] * len(new_stream_ids))
+        params = [p for pair in new_stream_ids for p in pair]
+        txn.execute(
+            f"""
+            UPDATE sticky_events AS se
+            SET
+                soft_failed = FALSE,
+                stream_id   = v.stream_id
+            FROM (VALUES
+                {values_placeholders}
+            ) AS v(event_id, stream_id)
+            WHERE se.event_id = v.event_id;
+            """,
+            params,
+        )
+        # Also update the internal metadata on the event itself, so when we filter_events_for_client
+        # we don't filter them out. It's a bit sad internal_metadata is TEXT and not JSONB...
+        clause, args = make_in_list_sql_clause(
+            txn.database_engine,
+            "event_id",
+            passing_event_ids,
+        )
+        txn.execute(
+            """
+            UPDATE event_json
+            SET internal_metadata = (
+                jsonb_set(internal_metadata::jsonb, '{soft_failed}', 'false'::jsonb)
+            )::text
+            WHERE %s
+            """
+            % clause,
+            args,
+        )
+        # finally, invalidate caches
+        for event_id in passing_event_ids:
+            self.invalidate_get_event_cache_after_txn(txn, event_id)
 
     async def _delete_expired_sticky_events(self) -> None:
         logger.info("delete_expired_sticky_events")

@@ -371,6 +371,21 @@ class PersistEventsStore:
                 len(events_and_contexts)
             )
 
+            # TODO: are we guaranteed to call the below code if we were to die now?
+            # On startup we will already think we have persisted the events?
+
+            # This was originally in _persist_events_txn but it relies on non-txn functions like
+            # get_events_as_list and get_partial_filtered_current_state_ids to handle soft-failure
+            # re-evaluation, so it can't do that without leaking out the txn currently, hence it
+            # now just lives outside.
+            if self.msc4354_sticky_events:
+                # process events which are sticky as well as re-evaluate soft-failed sticky events.
+                await self.store.handle_sticky_events(
+                    room_id,
+                    events_and_contexts,
+                    state_delta_for_room,
+                )
+
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
                 # stream_ordering.
@@ -1175,15 +1190,6 @@ class PersistEventsStore:
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
             txn, room_id, events_and_contexts
         )
-
-        if self.msc4354_sticky_events:
-            # process events which are sticky as well as re-evaluate soft-failed sticky events.
-            self.store.handle_sticky_events_txn(
-                txn,
-                room_id,
-                events_and_contexts,
-                state_delta_for_room,
-            )
 
     def _persist_event_auth_chain_txn(
         self,
