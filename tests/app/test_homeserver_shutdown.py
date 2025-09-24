@@ -70,3 +70,40 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # weakref to it.
         if hs_ref() is not None:
             self.fail("HomeServer reference should not be valid at this point")
+
+            # To help debug this test when it fails, it is useful to leverage the
+            # `objgraph` module.
+            # The following code serves as an example of what I have found to be useful
+            # when tracking down references holding the `SynapseHomeServer` in memory:
+            #
+            # all_objects = gc.get_objects()
+            # for obj in all_objects:
+            #     try:
+            #         # These are a subset of types that are typically involved with
+            #         # holding the `HomeServer` in memory. You may want to inspect
+            #         # other types as well.
+            #         if isinstance(obj, DataStore):
+            #             print(sys.getrefcount(obj), "refs to", obj)
+            #             if not isinstance(obj, weakref.ProxyType):
+            #                 db_obj = obj
+            #         if isinstance(obj, SynapseHomeServer):
+            #             print(sys.getrefcount(obj), "refs to", obj)
+            #             if not isinstance(obj, weakref.ProxyType):
+            #                 synapse_hs = obj
+            #         if isinstance(obj, SynapseSite):
+            #             print(sys.getrefcount(obj), "refs to", obj)
+            #             if not isinstance(obj, weakref.ProxyType):
+            #                 sysite = obj
+            #         if isinstance(obj, DatabasePool):
+            #             print(sys.getrefcount(obj), "refs to", obj)
+            #             if not isinstance(obj, weakref.ProxyType):
+            #                 dbpool = obj
+            #     except Exception:
+            #         pass
+            #
+            # print(sys.getrefcount(hs_ref()), "refs to", hs_ref())
+            #
+            # # The following values for `max_depth` and `too_many` have been found to
+            # # render a useful amount of information without taking an overly long time
+            # # to generate the result.
+            # objgraph.show_backrefs(synapse_hs, max_depth=10, too_many=10)
