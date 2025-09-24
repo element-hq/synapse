@@ -1,3 +1,12 @@
+# Synapse 1.138.1 (2025-09-24)
+
+## Bugfixes
+
+- Fix a performance regression related to the experimental Delayed Events ([MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)) feature. ([\#18926](https://github.com/element-hq/synapse/issues/18926))
+
+
+
+
 # Synapse 1.138.0 (2025-09-09)
 
 No significant changes since 1.138.0rc1.
