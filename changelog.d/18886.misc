@@ -1,1 +1,0 @@
-Start background tasks after we fork the process (daemonize).

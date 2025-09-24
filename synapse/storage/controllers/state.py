@@ -684,6 +684,8 @@ class StateStorageController:
                - the stream id which these results go up to
                - list of current_state_delta_stream rows. If it is empty, we are
                  up to date.
+
+            A maximum of 100 rows will be returned.
         """
         # FIXME(faster_joins): what do we do here?
         #   https://github.com/matrix-org/synapse/issues/13008

@@ -183,6 +183,21 @@ class DelayedEventsStore(SQLBaseStore):
             "restart_delayed_event", restart_delayed_event_txn
         )
 
+    async def get_count_of_delayed_events(self) -> int:
+        """Returns the number of pending delayed events in the DB."""
+
+        def _get_count_of_delayed_events(txn: LoggingTransaction) -> int:
+            sql = "SELECT count(*) FROM delayed_events"
+
+            txn.execute(sql)
+            resp = txn.fetchone()
+            return resp[0] if resp is not None else 0
+
+        return await self.db_pool.runInteraction(
+            "get_count_of_delayed_events",
+            _get_count_of_delayed_events,
+        )
+
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,

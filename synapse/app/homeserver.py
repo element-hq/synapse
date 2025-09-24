@@ -29,7 +29,6 @@ from twisted.web.resource import EncodingResourceWrapper, Resource
 from twisted.web.server import GzipEncoderFactory
 
 import synapse
-import synapse.config.logger
 from synapse import events
 from synapse.api.urls import (
     CLIENT_API_PREFIX,
@@ -50,6 +49,7 @@ from synapse.app._base import (
 )
 from synapse.config._base import ConfigError, format_config_error
 from synapse.config.homeserver import HomeServerConfig
+from synapse.config.logger import setup_logging
 from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.additional_resource import AdditionalResource
@@ -60,6 +60,7 @@ from synapse.http.server import (
     StaticResource,
 )
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -385,7 +386,10 @@ def setup(config: HomeServerConfig) -> SynapseHomeServer:
         version_string=f"Synapse/{VERSION}",
     )
 
-    synapse.config.logger.setup_logging(hs, config, use_worker_options=False)
+    setup_logging(hs, config, use_worker_options=False)
+
+    # Start the tracer
+    init_tracer(hs)  # noqa
 
     logger.info("Setting up server")
 

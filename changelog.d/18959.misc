@@ -1,0 +1,1 @@
+Fix `no active span when trying to log` tracing error on startup (when OpenTracing is enabled).
