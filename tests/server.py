@@ -526,17 +526,57 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
-    def shutdown(self) -> None:
-        """Cleanup any outstanding resources referenced by this reactor. Useful when
-        trying to remove any references to the `HomeServer` that may have been
-        registered with this fake reactor"""
+    # type-ignore: `MemoryReactor` returns `None` whereas the
+    #     `twisted.internet.interfaces.IReactorCore` interface allows a return type
+    #     of `Any`, so long as the ID type matches that used by `removeSystemEventTrigger`.
+    def addSystemEventTrigger(  # type: ignore[override]
+        self,
+        phase: str,
+        eventType: str,
+        callable: Callable[P, object],
+        *args: P.args,
+        **kw: P.kwargs,
+    ) -> int:
+        """
+        Override the call from `MemoryReactorClock` in order to track registered event
+        triggers by `triggerID`.
+        Otherwise the code here has been copied from `MemoryReactorClock`.
+        """
+        phaseTriggers = self.triggers.setdefault(phase, {})
+        eventTypeTriggers = phaseTriggers.setdefault(eventType, [])
+        trigger = (callable, args, kw)
+        eventTypeTriggers.append(trigger)
+        return id(trigger)
 
-        # `MemoryReactorClock.removeSystemEventTrigger` is not implemented.
-        # So manually clear the triggers here.
-        self.triggers.clear()
+    def removeSystemEventTrigger(self, triggerID: int) -> None:
+        """
+        Override the unimplemented call from `MemoryReactorClock` in order to actually remove
+        registered event triggers.
+        This is necessary for a clean shutdown to occur as these triggers can hold
+        references to the `SynapseHomeServer`.
 
-        # `MemoryReactorClock` never clears the hooks made when `callWhenRunning` is
-        # called. So manually clear the hooks here.
+        args:
+            triggerID: Unique ID obtained from `addSystemEventTrigger`.
+        """
+        for phase_triggers in self.triggers.values():
+            for event_type_triggers in phase_triggers.values():
+                triggers_to_remove = [
+                    item for item in event_type_triggers if id(item) == triggerID
+                ]
+                for trigger in triggers_to_remove:
+                    event_type_triggers.remove(trigger)
+
+    def run(self) -> None:
+        """
+        Override the call from `MemoryReactorClock` to add an additional step that
+        cleans up any `whenRunningHooks` that have been called.
+        This is necessary for a clean shutdown to occur as these hooks can hold
+        references to the `SynapseHomeServer`.
+        """
+        super().run()
+
+        # `MemoryReactorClock` never clears the hooks that have already been called.
+        # So manually clear the hooks here after they have been run.
         self.whenRunningHooks.clear()
 
     def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
