@@ -22,5 +22,10 @@ jobs:
       # This field is case-sensitive.
       TARGET_STATUS: Needs info
     steps:
-      - name: Ensure item exists, then set Status
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # Only clone the script file we care about, instead of the whole repo.
+          sparse-checkout: .ci/scripts/triage_labelled_issue.sh
+
+      - name: Ensure issue exists on the board, then set Status
         run: .ci/scripts/triage_labelled_issue.sh
