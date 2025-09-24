@@ -541,7 +541,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
             self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
         )
 
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             run_as_background_process,
@@ -842,7 +842,7 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             run_as_background_process,
@@ -1548,7 +1548,7 @@ class PresenceHandler(BasePresenceHandler):
                 self.clock, name="presence_delta", server_name=self.server_name
             ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
-                if self._event_pos == room_max_stream_ordering:
+                if self._event_pos >= room_max_stream_ordering:
                     return
 
                 logger.debug(

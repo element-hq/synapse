@@ -21,7 +21,7 @@ from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin, login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
 from synapse.types import Codes, JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import FakeChannel
 from tests.unittest import HomeserverTestCase

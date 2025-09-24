@@ -74,7 +74,7 @@ def run_background_updates(hs: HomeServer) -> None:
             )
         )
 
-    reactor.callWhenRunning(run)
+    hs.get_clock().call_when_running(run)
 
     reactor.run()
 

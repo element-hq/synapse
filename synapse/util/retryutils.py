@@ -27,7 +27,7 @@ from synapse.api.errors import CodeMessageException
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage import DataStore
 from synapse.types import StrCollection
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
     from synapse.notifier import Notifier

@@ -52,7 +52,7 @@ from synapse.rest.client.account import WhoamiRestServlet
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.handlers.test_oidc import HAS_OIDC
@@ -1498,9 +1498,23 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
                 ApplicationService.NS_ALIASES: [],
             },
         )
+        self.msc4190_service = ApplicationService(
+            id="third__identifier",
+            token="third_token",
+            sender=UserID.from_string("@as3bot:example.com"),
+            namespaces={
+                ApplicationService.NS_USERS: [
+                    {"regex": r"@as3_user.*", "exclusive": False}
+                ],
+                ApplicationService.NS_ROOMS: [],
+                ApplicationService.NS_ALIASES: [],
+            },
+            msc4190_device_management=True,
+        )
 
         self.hs.get_datastores().main.services_cache.append(self.service)
         self.hs.get_datastores().main.services_cache.append(self.another_service)
+        self.hs.get_datastores().main.services_cache.append(self.msc4190_service)
         return self.hs
 
     def test_login_appservice_user(self) -> None:
@@ -1516,6 +1530,27 @@ class AppserviceLoginRestServletTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 200, msg=channel.result)
+
+    def test_login_appservice_msc4190_fail(self) -> None:
+        """Test that an appservice user can use /login"""
+        self.register_appservice_user(
+            "as3_user_alice", self.msc4190_service.token, inhibit_login=True
+        )
+
+        params = {
+            "type": login.LoginRestServlet.APPSERVICE_TYPE,
+            "identifier": {"type": "m.id.user", "user": "as3_user_alice"},
+        }
+        channel = self.make_request(
+            b"POST", LOGIN_URL, params, access_token=self.msc4190_service.token
+        )
+
+        self.assertEqual(channel.code, 400, msg=channel.result)
+        self.assertEqual(
+            channel.json_body.get("errcode"),
+            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            channel.json_body,
+        )
 
     def test_login_appservice_user_bot(self) -> None:
         """Test that the appservice bot can use /login"""

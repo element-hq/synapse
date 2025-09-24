@@ -27,7 +27,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.api.constants import EduTypes, ReceiptTypes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

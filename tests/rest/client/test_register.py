@@ -39,7 +39,7 @@ from synapse.rest.client import account, account_validity, login, logout, regist
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -136,6 +136,7 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         request_data = {
             "username": "as_user_kermit",
             "type": APP_SERVICE_REGISTRATION_TYPE,
+            "inhibit_login": True,
         }
 
         channel = self.make_request(
@@ -146,6 +147,34 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         det_data = {"user_id": user_id, "home_server": self.hs.hostname}
         self.assertLessEqual(det_data.items(), channel.json_body.items())
         self.assertNotIn("access_token", channel.json_body)
+
+    def test_POST_appservice_msc4190_enabled_fail(self) -> None:
+        # With MSC4190 enabled, the registration should fail unless inhibit_login is set
+        as_token = "i_am_an_app_service"
+
+        appservice = ApplicationService(
+            as_token,
+            id="1234",
+            namespaces={"users": [{"regex": r"@as_user.*", "exclusive": True}]},
+            sender=UserID.from_string("@as:test"),
+            msc4190_device_management=True,
+        )
+
+        self.hs.get_datastores().main.services_cache.append(appservice)
+        request_data = {
+            "username": "as_user_kermit",
+            "type": APP_SERVICE_REGISTRATION_TYPE,
+        }
+
+        channel = self.make_request(
+            b"POST", self.url + b"?access_token=i_am_an_app_service", request_data
+        )
+        self.assertEqual(channel.code, 400, channel.json_body)
+        self.assertEqual(
+            channel.json_body.get("errcode"),
+            Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+            channel.json_body,
+        )
 
     def test_POST_bad_password(self) -> None:
         request_data = {"username": "kermit", "password": 666}

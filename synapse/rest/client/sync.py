@@ -58,8 +58,8 @@ from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
-from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.json import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
 
