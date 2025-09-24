@@ -19403,6 +19403,139 @@ def get_sleep_deferred(seconds):
 <pre><code class="language-python">async def sleep(seconds):
     return await context.make_deferred_yieldable(get_sleep_deferred(seconds))
 </code></pre>
+<h2 id="deferred-callbacks"><a class="header" href="#deferred-callbacks">Deferred callbacks</a></h2>
+<p>When a deferred callback is called, it inherits the current logcontext. The deferred
+callback chain can resume a coroutine, which if following our logcontext rules, will
+restore its own logcontext, then run:</p>
+<ul>
+<li>until it yields control back to the reactor, setting the sentinel logcontext</li>
+<li>or until it finishes, restoring the logcontext it was started with (calling context)</li>
+</ul>
+<p>This behavior creates two specific issues:</p>
+<p><strong>Issue 1:</strong> The first issue is that the callback may have reset the logcontext to the
+sentinel before returning. This means our calling function will continue with the
+sentinel logcontext instead of the logcontext it was started with (bad).</p>
+<p><strong>Issue 2:</strong> The second issue is that the current logcontext that called the deferred
+callback could finish before the callback finishes (bad).</p>
+<p>In the following example, the deferred callback is called with the &quot;main&quot; logcontext and
+runs until we yield control back to the reactor in the <code>await</code> inside <code>clock.sleep(0)</code>.
+Since <code>clock.sleep(0)</code> follows our logcontext rules, it sets the logcontext to the
+sentinel before yielding control back to the reactor. Our <code>main</code> function continues with
+the sentinel logcontext (first bad thing) instead of the &quot;main&quot; logcontext. Then the
+<code>with LoggingContext(&quot;main&quot;)</code> block exits, finishing the &quot;main&quot; logcontext and yielding
+control back to the reactor again. Finally, later on when <code>clock.sleep(0)</code> completes,
+our <code>with LoggingContext(&quot;competing&quot;)</code> block exits, and restores the previous &quot;main&quot;
+logcontext which has already finished, resulting in <code>WARNING: Re-starting finished log context main</code> and leaking the <code>main</code> logcontext into the reactor which will then
+erronously be associated with the next task the reactor picks up.</p>
+<pre><code class="language-python">async def competing_callback():
+    # Since this is run with the &quot;main&quot; logcontext, when the &quot;competing&quot;
+    # logcontext exits, it will restore the previous &quot;main&quot; logcontext which has
+    # already finished and results in &quot;WARNING: Re-starting finished log context main&quot;
+    # and leaking the `main` logcontext into the reactor.
+    with LoggingContext(&quot;competing&quot;):
+        await clock.sleep(0)
+
+def main():
+    with LoggingContext(&quot;main&quot;):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        # Call the callback within the &quot;main&quot; logcontext.
+        d.callback(None)
+        # Bad: This will be logged against sentinel logcontext
+        logger.debug(&quot;ugh&quot;)
+
+main()
+</code></pre>
+<p><strong>Solution 1:</strong> We could of course fix this by following the general rule of &quot;always
+await your awaitables&quot;:</p>
+<pre><code class="language-python">async def main():
+    with LoggingContext(&quot;main&quot;):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        # Wait for `d` to finish before continuing so the &quot;main&quot; logcontext is
+        # still active. This works because `d` already follows our logcontext
+        # rules. If not, we would also have to use `make_deferred_yieldable(d)`.
+        await d
+        # Good: This will be logged against the &quot;main&quot; logcontext
+        logger.debug(&quot;phew&quot;)
+</code></pre>
+<p><strong>Solution 2:</strong> We could also fix this by surrounding the call to <code>d.callback</code> with a
+<code>PreserveLoggingContext</code>, which will reset the logcontext to the sentinel before calling
+the callback, and restore the &quot;main&quot; logcontext afterwards before continuing the <code>main</code>
+function. This solves the problem because when the &quot;competing&quot; logcontext exits, it will
+restore the sentinel logcontext which is never finished by its nature, so there is no
+warning and no leakage into the reactor.</p>
+<pre><code class="language-python">async def main():
+    with LoggingContext(&quot;main&quot;):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        with PreserveLoggingContext():
+            # Call the callback with the sentinel logcontext.
+            d.callback(None)
+        # Good: This will be logged against the &quot;main&quot; logcontext
+        logger.debug(&quot;phew&quot;)
+</code></pre>
+<p><strong>Solution 3:</strong> But let's say you <em>do</em> want to run (fire-and-forget) the deferred
+callback in the current context without running into issues:</p>
+<p>We can solve the first issue by using <code>run_in_background(...)</code> to run the callback in
+the current logcontext and it handles the magic behind the scenes of a) restoring the
+calling logcontext before returning to the caller and b) resetting the logcontext to the
+sentinel after the deferred completes and we yield control back to the reactor to avoid
+leaking the logcontext into the reactor.</p>
+<p>To solve the second issue, we can extend the lifetime of the &quot;main&quot; logcontext by
+avoiding the <code>LoggingContext</code>'s context manager lifetime methods
+(<code>__enter__</code>/<code>__exit__</code>). We can still set &quot;main&quot; as the current logcontext by using
+<code>PreserveLoggingContext</code> and passing in the &quot;main&quot; logcontext.</p>
+<pre><code class="language-python">async def main():
+    main_context = LoggingContext(&quot;main&quot;)
+    with PreserveLoggingContext(main_context):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        # The whole lambda will be run in the &quot;main&quot; logcontext. But we're using
+        # a trick to return the deferred `d` itself so that `run_in_background`
+        # will wait on that to complete and reset the logcontext to the sentinel
+        # when it does to avoid leaking the &quot;main&quot; logcontext into the reactor.
+        run_in_background(lambda: (d.callback(None), d)[1])
+        # Good: This will be logged against the &quot;main&quot; logcontext
+        logger.debug(&quot;phew&quot;)
+
+...
+
+# Wherever possible, it's best to finish the logcontext by calling `__exit__` at some
+# point. This allows us to catch bugs if we later try to erroneously restart a finished
+# logcontext.
+#
+# Since the &quot;main&quot; logcontext stores the `LoggingContext.previous_context` when it is
+# created, we can wrap this call in `PreserveLoggingContext()` to restore the correct
+# previous logcontext. Our goal is to have the calling context remain unchanged after
+# finishing the &quot;main&quot; logcontext.
+with PreserveLoggingContext():
+    # Finish the &quot;main&quot; logcontext
+    with main_context:
+        # Empty block - We're just trying to call `__exit__` on the &quot;main&quot; context
+        # manager to finish it. We can't call `__exit__` directly as the code expects us
+        # to `__enter__` before calling `__exit__` to `start`/`stop` things
+        # appropriately. And in any case, it's probably best not to call the internal
+        # methods directly.
+        pass
+</code></pre>
+<p>The same thing applies if you have some deferreds stored somewhere which you want to
+callback in the current logcontext.</p>
+<h3 id="deferred-errbacks-and-cancellations"><a class="header" href="#deferred-errbacks-and-cancellations">Deferred errbacks and cancellations</a></h3>
+<p>The same care should be taken when calling errbacks on deferreds. An errback and
+callback act the same in this regard (see section above).</p>
+<pre><code class="language-python">d = defer.Deferred()
+d.addErrback(some_other_function)
+d.errback(failure)
+</code></pre>
+<p>Additionally, cancellation is the same as directly calling the errback with a
+<code>twisted.internet.defer.CancelledError</code>:</p>
+<pre><code class="language-python">d = defer.Deferred()
+d.addErrback(some_other_function)
+d.cancel()
+</code></pre>
 <h2 id="fire-and-forget"><a class="header" href="#fire-and-forget">Fire-and-forget</a></h2>
 <p>Sometimes you want to fire off a chain of execution, but not wait for
 its result. That might look a bit like this:</p>
