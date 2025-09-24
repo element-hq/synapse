@@ -477,6 +477,9 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         current_auth_events = await self.get_events_as_list(current_state_ids_list)
         passing_event_ids: Set[str] = set()
         for soft_failed_event in soft_failed_event_map.values():
+            if soft_failed_event.internal_metadata.policy_server_spammy:
+                # don't re-evaluate spam.
+                continue
             try:
                 # We don't need to check_state_independent_auth_rules as that doesn't depend on room state,
                 # so if it passed once it'll pass again.
