@@ -1,0 +1,1 @@
+Compute a user's last seen timestamp from their devices' last seen timestamps instead of IPs, because the latter are automatically cleared according to `user_ips_max_age`.
