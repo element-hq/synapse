@@ -119,12 +119,6 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.139.0
 
-## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
-
-Ubuntu 24.10 Oracular Oriole [has been end-of-life since 10 Jul
-2025](https://endoflife.date/ubuntu). This release drops support for Ubuntu
-24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.
-
 ## `/register` requests from old application service implementations may break when using MAS
 
 Application Services that do not set `inhibit_login=true` when calling `POST
@@ -139,6 +133,16 @@ If an application service you use starts to fail with the mentioned error,
 ensure it is up to date. If it is, then kindly let the author know that they
 need to update their implementation to call `/register` with
 `inhibit_login=true`.
+
+# Upgrading to v1.138.2
+
+## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
+
+Ubuntu 24.10 Oracular Oriole [has been end-of-life since 10 Jul
+2025](https://endoflife.date/ubuntu). This release drops support for Ubuntu
+24.10, and in its place adds support for Ubuntu 25.04 Plucky Puffin.
+
+This notice also applies to the v1.139.0 release.
 
 # Upgrading to v1.136.0
 
