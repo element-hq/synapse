@@ -16,6 +16,7 @@ from typing import Literal, Union
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.api.constants import EventContentFields, EventTypes
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.rest import admin, login, room, room_upgrade_rest_servlet
 from synapse.server import HomeServer
@@ -51,8 +52,8 @@ class SpamCheckerTestCase(HomeserverTestCase):
 
         return channel
 
-    def test_may_user_create_room(self) -> None:
-        """Test that the may_user_create_room callback is called when a user
+    def test_user_may_create_room(self) -> None:
+        """Test that the user_may_create_room callback is called when a user
         creates a room, and that it receives the correct parameters.
         """
 
@@ -67,16 +68,50 @@ class SpamCheckerTestCase(HomeserverTestCase):
             user_may_create_room=user_may_create_room
         )
 
-        channel = self.create_room({"foo": "baa"})
+        expected_room_config = {"foo": "baa"}
+        channel = self.create_room(expected_room_config)
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
-        self.assertEqual(self.last_room_config["foo"], "baa")
+        self.assertEqual(self.last_room_config, expected_room_config)
 
-    def test_may_user_create_room_on_upgrade(self) -> None:
-        """Test that the may_user_create_room callback is called when a room is upgraded."""
+    def test_user_may_create_room_with_initial_state(self) -> None:
+        """Test that the user_may_create_room callback is called when a user
+        creates a room with some initial state events, and that it receives the correct parameters.
+        """
+
+        async def user_may_create_room(
+            user_id: str, room_config: JsonDict
+        ) -> Union[Literal["NOT_SPAM"], Codes]:
+            self.last_room_config = room_config
+            self.last_user_id = user_id
+            return "NOT_SPAM"
+
+        self._module_api.register_spam_checker_callbacks(
+            user_may_create_room=user_may_create_room
+        )
+
+        expected_room_config = {
+            "foo": "baa",
+            "initial_state": [
+                {
+                    "type": EventTypes.Topic,
+                    "content": {EventContentFields.TOPIC: "foo"},
+                }
+            ],
+        }
+        channel = self.create_room(expected_room_config)
+
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(self.last_user_id, self.user_id)
+        self.assertEqual(self.last_room_config, expected_room_config)
+
+    def test_user_may_create_room_on_upgrade(self) -> None:
+        """Test that the user_may_create_room callback is called when a room is upgraded."""
 
         # First, create a room to upgrade.
-        channel = self.create_room({"topic": "foo"})
+        channel = self.create_room({EventContentFields.TOPIC: "foo"})
+
         self.assertEqual(channel.code, 200)
         room_id = channel.json_body["room_id"]
 
@@ -107,13 +142,15 @@ class SpamCheckerTestCase(HomeserverTestCase):
         # Check that the initial state received by callback contains the topic event.
         self.assertTrue(
             any(
-                event[0][0] == "m.room.topic" and event[1].get("topic") == "foo"
+                event.get("type") == EventTypes.Topic
+                and event.get("state_key") == ""
+                and event.get("content").get(EventContentFields.TOPIC) == "foo"
                 for event in self.last_room_config["initial_state"]
             )
         )
 
-    def test_may_user_create_room_disallowed(self) -> None:
-        """Test that the codes response from may_user_create_room callback is respected
+    def test_user_may_create_room_disallowed(self) -> None:
+        """Test that the codes response from user_may_create_room callback is respected
         and returned via the API.
         """
 
@@ -128,14 +165,16 @@ class SpamCheckerTestCase(HomeserverTestCase):
             user_may_create_room=user_may_create_room
         )
 
-        channel = self.create_room({"foo": "baa"})
+        expected_room_config = {"foo": "baa"}
+        channel = self.create_room(expected_room_config)
+
         self.assertEqual(channel.code, 403)
         self.assertEqual(channel.json_body["errcode"], Codes.UNAUTHORIZED)
         self.assertEqual(self.last_user_id, self.user_id)
-        self.assertEqual(self.last_room_config["foo"], "baa")
+        self.assertEqual(self.last_room_config, expected_room_config)
 
-    def test_may_user_create_room_compatibility(self) -> None:
-        """Test that the may_user_create_room callback is called when a user
+    def test_user_may_create_room_compatibility(self) -> None:
+        """Test that the user_may_create_room callback is called when a user
         creates a room for a module that uses the old callback signature
         (without the `room_config` parameter)
         """
@@ -151,6 +190,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         channel = self.create_room({"foo": "baa"})
+
         self.assertEqual(channel.code, 200)
         self.assertEqual(self.last_user_id, self.user_id)
 
@@ -178,6 +218,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         channel = self.create_room({})
+
         self.assertEqual(channel.code, 200)
 
         room_id = channel.json_body["room_id"]
@@ -222,6 +263,7 @@ class SpamCheckerTestCase(HomeserverTestCase):
         )
 
         channel = self.create_room({})
+
         self.assertEqual(channel.code, 200)
 
         room_id = channel.json_body["room_id"]
