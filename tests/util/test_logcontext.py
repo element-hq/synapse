@@ -261,7 +261,7 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -274,7 +274,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The deferred callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -284,7 +284,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo", server_name="test_server"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
@@ -318,7 +318,7 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -331,7 +331,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The deferred callback should have the same logcontext as the caller
                 self._check_test_key("sentinel")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -341,7 +341,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
@@ -379,7 +379,7 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -392,7 +392,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The deferred callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -409,7 +409,9 @@ class LoggingContextTestCase(unittest.TestCase):
         # context manager lifetime methods of `LoggingContext` (`__enter__`/`__exit__`).
         # And we can still set the current logcontext by using `PreserveLoggingContext`
         # and passing in the "foo" logcontext.
-        with PreserveLoggingContext(LoggingContext("foo")):
+        with PreserveLoggingContext(
+            LoggingContext(name="foo", server_name="test_server")
+        ):
             d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
@@ -448,14 +450,14 @@ class LoggingContextTestCase(unittest.TestCase):
         self._check_test_key("sentinel")
 
     async def _test_run_in_background(self, function: Callable[[], object]) -> None:
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
 
         callback_finished = False
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             # Fire off the function, but don't wait on it.
             deferred = run_in_background(function)
             self._check_test_key("foo")
@@ -552,7 +554,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         This will stress the logic around incomplete deferreds in `run_coroutine_in_background`.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -565,7 +567,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -575,7 +577,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             run_coroutine_in_background(competing_callback())
             self._check_test_key("foo")
             await clock.sleep(0)
@@ -608,7 +610,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     # We `await` here but there is nothing to wait for here since the
                     # deferred is already complete so we should immediately continue
                     # executing in the same context.
@@ -622,7 +624,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             run_coroutine_in_background(competing_callback())
             self._check_test_key("foo")
 
