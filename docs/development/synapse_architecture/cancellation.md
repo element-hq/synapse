@@ -318,7 +318,7 @@ async def do_something() -> None:
 
     await make_deferred_yieldable(cache.observe())
 
-with LoggingContext(name="request-1"):
+with LoggingContext("request-1"):
     await do_something()
 ```
 </td>
@@ -348,7 +348,7 @@ async def do_something() -> None:
     else:
         await make_deferred_yieldable(cache.observe())
 
-with LoggingContext(name="request-1"):
+with LoggingContext("request-1"):
     await do_something()
 ```
 </td>
@@ -382,7 +382,7 @@ async def do_something() -> None:
 
     await make_deferred_yieldable(cache.observe())
 
-with LoggingContext(name="request-1"):
+with LoggingContext("request-1"):
     await do_something()
 ```
 </td>
