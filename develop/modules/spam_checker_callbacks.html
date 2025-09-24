@@ -320,11 +320,14 @@ this callback.</p>
 <p><em>Changed in Synapse v1.132.0: Added the <code>room_config</code> argument. Callbacks that only expect a single <code>user_id</code> argument are still supported.</em></p>
 <pre><code class="language-python">async def user_may_create_room(user_id: str, room_config: synapse.module_api.JsonDict) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;, bool]
 </code></pre>
-<p>Called when processing a room creation request.</p>
+<p>Called when processing a room creation or room upgrade request.</p>
 <p>The arguments passed to this callback are:</p>
 <ul>
 <li><code>user_id</code>: The Matrix user ID of the user (e.g. <code>@alice:example.com</code>).</li>
-<li><code>room_config</code>: The contents of the body of a <a href="https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom">/createRoom request</a> as a dictionary.</li>
+<li><code>room_config</code>: The contents of the body of the <a href="https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3createroom"><code>/createRoom</code> request</a> as a dictionary.
+For a <a href="https://spec.matrix.org/v1.15/client-server-api/#post_matrixclientv3roomsroomidupgrade">room upgrade request</a> it is a synthesised subset of what an equivalent
+<code>/createRoom</code> request would have looked like. Specifically, it contains the <code>creation_content</code> (linking to the previous room) and <code>initial_state</code> (containing a
+subset of the state of the previous room).</li>
 </ul>
 <p>The callback must return one of:</p>
 <ul>
