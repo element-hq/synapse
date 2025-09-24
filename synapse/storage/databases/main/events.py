@@ -379,8 +379,8 @@ class PersistEventsStore:
             # re-evaluation, so it can't do that without leaking out the txn currently, hence it
             # now just lives outside.
             if self.msc4354_sticky_events:
-                # process events which are sticky as well as re-evaluate soft-failed sticky events.
-                await self.store.handle_sticky_events(
+                # re-evaluate soft-failed sticky events.
+                await self.store.reevaluate_soft_failed_sticky_events(
                     room_id,
                     events_and_contexts,
                     state_delta_for_room,

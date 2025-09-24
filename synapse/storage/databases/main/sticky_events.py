@@ -209,26 +209,17 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 
-    async def handle_sticky_events(
+    async def reevaluate_soft_failed_sticky_events(
         self,
         room_id: str,
         events_and_contexts: List[EventPersistencePair],
         state_delta_for_room: Optional[DeltaState],
     ) -> None:
-        """Update the sticky events table, used in MSC4354. Intended to be called after the persist
-        events transaction.
-
-        This function assumes that `_store_event_txn()` (to persist the event) and
-        `_update_current_state_txn(...)` (so the current state has taken the events into account)
-        have already been run.
-
-        "Handling" sticky events is broken into two phases:
-         - for each sticky event in events_and_contexts, mark them as sticky in the sticky events table.
-         - for each still-sticky soft-failed event in the room, re-evaluate soft-failedness.
+        """Re-evaluate soft failed events in the room provided.
 
         Args:
             room_id: The room that all of the events belong to
-            events_and_contexts: The events being persisted.
+            events_and_contexts: The events just persisted. These are not eligible for re-evaluation.
             state_delta_for_room: The changes to the current state, used to detect if we need to
             re-evaluate soft-failed sticky events.
         """
