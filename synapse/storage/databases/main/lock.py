@@ -38,7 +38,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:

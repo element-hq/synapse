@@ -46,9 +46,9 @@ from synapse.media.oembed import OEmbedProvider
 from synapse.media.preview_html import decode_body, parse_html_to_open_graph
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import JsonDict, UserID
-from synapse.util import json_encoder
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:

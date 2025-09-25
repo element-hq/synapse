@@ -36,7 +36,7 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
-from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 
 from . import push_tools
 

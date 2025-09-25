@@ -109,8 +109,8 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.types import JsonDict, StrCollection
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

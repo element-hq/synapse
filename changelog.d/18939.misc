@@ -1,0 +1,1 @@
+Reduce overall number of calls to `_get_e2e_cross_signing_signatures_for_devices` by increasing the batch size of devices the query is called with, reducing DB load.

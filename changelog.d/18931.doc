@@ -1,2 +1,0 @@
-Clarify necessary `jwt_config` parameter in OIDC documentation for authentik.
-Contributed by @maxkratz.

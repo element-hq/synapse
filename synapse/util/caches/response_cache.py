@@ -41,9 +41,9 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.util import Clock
 from synapse.util.async_helpers import AbstractObservableDeferred, ObservableDeferred
 from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 

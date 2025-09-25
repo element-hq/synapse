@@ -84,7 +84,7 @@ from synapse.logging.context import run_in_background
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main import DataStore
 from synapse.types import DeviceListUpdates, JsonMapping
-from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

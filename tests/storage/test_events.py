@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -32,11 +32,82 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import StateMap
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
+
+
+class EventsTestCase(HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self._store = self.hs.get_datastores().main
+
+    def test_get_senders_for_event_ids(self) -> None:
+        """Tests the `get_senders_for_event_ids` storage function."""
+
+        users_and_tokens: Dict[str, str] = {}
+        for localpart_suffix in range(10):
+            localpart = f"user_{localpart_suffix}"
+            user_id = self.register_user(localpart, "rabbit")
+            token = self.login(localpart, "rabbit")
+
+            users_and_tokens[user_id] = token
+
+        room_creator_user_id = self.register_user("room_creator", "rabbit")
+        room_creator_token = self.login("room_creator", "rabbit")
+        users_and_tokens[room_creator_user_id] = room_creator_token
+
+        # Create a room and invite some users.
+        room_id = self.helper.create_room_as(
+            room_creator_user_id, tok=room_creator_token
+        )
+        event_ids_to_senders: Dict[str, str] = {}
+        for user_id, token in users_and_tokens.items():
+            if user_id == room_creator_user_id:
+                continue
+
+            self.helper.invite(
+                room=room_id,
+                targ=user_id,
+                tok=room_creator_token,
+            )
+
+            # Have the user accept the invite and join the room.
+            self.helper.join(
+                room=room_id,
+                user=user_id,
+                tok=token,
+            )
+
+            # Have the user send an event.
+            response = self.helper.send_event(
+                room_id=room_id,
+                type="m.room.message",
+                content={
+                    "msgtype": "m.text",
+                    "body": f"hello, I'm {user_id}!",
+                },
+                tok=token,
+            )
+
+            # Record the event ID and sender.
+            event_id = response["event_id"]
+            event_ids_to_senders[event_id] = user_id
+
+        # Check that `get_senders_for_event_ids` returns the correct data.
+        response = self.get_success(
+            self._store.get_senders_for_event_ids(list(event_ids_to_senders.keys()))
+        )
+        self.assert_dict(event_ids_to_senders, response)
 
 
 class ExtremPruneTestCase(HomeserverTestCase):

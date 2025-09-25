@@ -86,8 +86,9 @@ from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
-from synapse.util import Clock, json_decoder
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.clock import Clock
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

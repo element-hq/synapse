@@ -42,7 +42,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 

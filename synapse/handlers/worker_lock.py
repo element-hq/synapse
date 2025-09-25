@@ -42,8 +42,8 @@ from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
-from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 from synapse.util.constants import ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:

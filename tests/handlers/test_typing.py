@@ -36,7 +36,7 @@ from synapse.handlers.typing import FORGET_TIMEOUT, TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock

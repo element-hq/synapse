@@ -116,13 +116,27 @@ StrSequence = Union[Tuple[str, ...], List[str]]
 
 # Note that this seems to require inheriting *directly* from Interface in order
 # for mypy-zope to realize it is an interface.
-class ISynapseReactor(
+class ISynapseThreadlessReactor(
     IReactorTCP,
     IReactorSSL,
     IReactorUNIX,
     IReactorPluggableNameResolver,
     IReactorTime,
     IReactorCore,
+    Interface,
+):
+    """
+    The interfaces necessary for Synapse to function (without threads).
+
+    Helpful because we use `twisted.internet.testing.MemoryReactorClock` in tests which
+    doesn't implement `IReactorThreads`.
+    """
+
+
+# Note that this seems to require inheriting *directly* from Interface in order
+# for mypy-zope to realize it is an interface.
+class ISynapseReactor(
+    ISynapseThreadlessReactor,
     IReactorThreads,
     Interface,
 ):

@@ -48,7 +48,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import FakeTransport

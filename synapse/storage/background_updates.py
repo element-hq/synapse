@@ -45,7 +45,8 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Clock, json_encoder
+from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from . import engines
 

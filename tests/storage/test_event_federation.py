@@ -53,7 +53,8 @@ from synapse.storage.database import LoggingTransaction
 from synapse.storage.types import Cursor
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict
-from synapse.util import Clock, json_encoder
+from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 import tests.unittest
 import tests.utils

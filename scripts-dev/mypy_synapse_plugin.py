@@ -80,6 +80,18 @@ PREFER_SYNAPSE_CLOCK_LOOPING_CALL = ErrorCode(
     category="synapse-reactor-clock",
 )
 
+PREFER_SYNAPSE_CLOCK_CALL_WHEN_RUNNING = ErrorCode(
+    "prefer-synapse-clock-call-when-running",
+    "`synapse.util.Clock.call_when_running` should be used instead of `reactor.callWhenRunning`",
+    category="synapse-reactor-clock",
+)
+
+PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER = ErrorCode(
+    "prefer-synapse-clock-add-system-event-trigger",
+    "`synapse.util.Clock.add_system_event_trigger` should be used instead of `reactor.addSystemEventTrigger`",
+    category="synapse-reactor-clock",
+)
+
 
 class Sentinel(enum.Enum):
     # defining a sentinel in this way allows mypy to correctly handle the
@@ -244,8 +256,26 @@ class SynapsePlugin(Plugin):
         ):
             return check_is_cacheable_wrapper
 
-        if fullname == "twisted.internet.interfaces.IReactorTime.callLater":
+        if fullname in (
+            "twisted.internet.interfaces.IReactorTime.callLater",
+            "synapse.types.ISynapseThreadlessReactor.callLater",
+            "synapse.types.ISynapseReactor.callLater",
+        ):
             return check_call_later
+
+        if fullname in (
+            "twisted.internet.interfaces.IReactorCore.callWhenRunning",
+            "synapse.types.ISynapseThreadlessReactor.callWhenRunning",
+            "synapse.types.ISynapseReactor.callWhenRunning",
+        ):
+            return check_call_when_running
+
+        if fullname in (
+            "twisted.internet.interfaces.IReactorCore.addSystemEventTrigger",
+            "synapse.types.ISynapseThreadlessReactor.addSystemEventTrigger",
+            "synapse.types.ISynapseReactor.addSystemEventTrigger",
+        ):
+            return check_add_system_event_trigger
 
         return None
 
@@ -296,6 +326,60 @@ def check_looping_call(ctx: FunctionSigContext) -> CallableType:
         "server shutdown",
         ctx.context,
         code=PREFER_SYNAPSE_CLOCK_LOOPING_CALL,
+    )
+
+    return signature
+
+
+def check_call_when_running(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.callWhenRunning` callsites aren't used.
+
+    `synapse.util.Clock.call_when_running` should always be used instead of
+    `reactor.callWhenRunning`.
+
+    Since `reactor.callWhenRunning` is a reactor callback, the callback will start out
+    with the sentinel logcontext. `synapse.util.Clock` starts a default logcontext as we
+    want to know which server the logs came from.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        (
+            "Expected all `reactor.callWhenRunning` calls to use `synapse.util.Clock.call_when_running` instead. "
+            "This is so all Synapse code runs with a logcontext as we want to know which server the logs came from."
+        ),
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_CALL_WHEN_RUNNING,
+    )
+
+    return signature
+
+
+def check_add_system_event_trigger(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.addSystemEventTrigger` callsites aren't used.
+
+    `synapse.util.Clock.add_system_event_trigger` should always be used instead of
+    `reactor.addSystemEventTrigger`.
+
+    Since `reactor.addSystemEventTrigger` is a reactor callback, the callback will start out
+    with the sentinel logcontext. `synapse.util.Clock` starts a default logcontext as we
+    want to know which server the logs came from.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        (
+            "Expected all `reactor.addSystemEventTrigger` calls to use `synapse.util.Clock.add_system_event_trigger` instead. "
+            "This is so all Synapse code runs with a logcontext as we want to know which server the logs came from."
+        ),
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER,
     )
 
     return signature

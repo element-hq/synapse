@@ -61,10 +61,10 @@ from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping, MultiWriterStreamToken
-from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
     from synapse.handlers.e2e_keys import SignatureListItem
@@ -354,7 +354,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             if d is not None and d.keys is not None
         )
 
-        for batch in batch_iter(signature_query, 50):
+        # 1000 is an arbitrary batch size. It helped performance on a very
+        # large-scale deployment (matrix.org), but has not been tested against
+        # any other setup.
+        for batch in batch_iter(signature_query, 1000):
             cross_sigs_result = (
                 await self._get_e2e_cross_signing_signatures_for_devices(batch)
             )

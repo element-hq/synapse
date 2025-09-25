@@ -158,9 +158,9 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import Clock
 from synapse.util.async_helpers import maybe_awaitable
 from synapse.util.caches.descriptors import CachedFunction, cached as _cached
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:

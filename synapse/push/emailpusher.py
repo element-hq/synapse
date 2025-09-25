@@ -30,7 +30,7 @@ from synapse.push import Pusher, PusherConfig, PusherConfigException, ThrottlePa
 from synapse.push.mailer import Mailer
 from synapse.push.push_types import EmailReason
 from synapse.storage.databases.main.event_push_actions import EmailPushAction
-from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 from synapse.util.threepids import validate_email
 
 if TYPE_CHECKING:

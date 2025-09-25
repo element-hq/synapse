@@ -56,7 +56,6 @@ from typing_extensions import Concatenate, ParamSpec, Unpack
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import IReactorTime
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (
@@ -65,7 +64,8 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
+from synapse.types import ISynapseThreadlessReactor
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 logger = logging.getLogger(__name__)
 
@@ -566,7 +566,7 @@ class Linearizer:
         if not clock:
             from twisted.internet import reactor
 
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
         self._clock = clock
         self.max_count = max_count
 
@@ -820,7 +820,9 @@ def timeout_deferred(
         timed_out[0] = True
 
         try:
+            logger.error("Cancelling deferred in timeout")
             deferred.cancel()
+            logger.error("Cancelled deferred in timeout")
         except Exception:  # if we throw any exception it'll break time outs
             logger.exception("Canceller failed during timeout")
 

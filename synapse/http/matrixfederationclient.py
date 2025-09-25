@@ -89,8 +89,9 @@ from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util import Clock, json_decoder
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
+from synapse.util.clock import Clock
+from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
 from synapse.util.stringutils import parse_and_validate_server_name
 

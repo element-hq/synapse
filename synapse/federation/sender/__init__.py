@@ -178,7 +178,7 @@ from synapse.types import (
     StrCollection,
     get_domain_from_id,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
 

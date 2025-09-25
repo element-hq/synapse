@@ -29,7 +29,6 @@ from twisted.web.resource import EncodingResourceWrapper, Resource
 from twisted.web.server import GzipEncoderFactory
 
 import synapse
-import synapse.config.logger
 from synapse import events
 from synapse.api.urls import (
     CLIENT_API_PREFIX,
@@ -50,6 +49,7 @@ from synapse.app._base import (
 )
 from synapse.config._base import ConfigError, format_config_error
 from synapse.config.homeserver import HomeServerConfig
+from synapse.config.logger import setup_logging
 from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.additional_resource import AdditionalResource
@@ -60,6 +60,7 @@ from synapse.http.server import (
     StaticResource,
 )
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -313,28 +314,21 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-def setup(
-    config_options: List[str],
-    reactor: Optional[ISynapseReactor] = None,
-    freeze: bool = True,
-) -> SynapseHomeServer:
+def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     """
+    Parse the commandline and config files
+
+    Supports generation of config files, so is used for the main homeserver app.
+
     Args:
-        config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.
-        reactor: Optionally provide a reactor to use. Can be useful in different
-            scenarios that you want control over the reactor, such as tests.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+        argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
     Returns:
         A homeserver instance.
     """
     try:
         config = HomeServerConfig.load_or_generate_config(
-            "Synapse Homeserver", config_options
+            "Synapse Homeserver", argv_options
         )
     except ConfigError as e:
         sys.stderr.write("\n")
@@ -347,6 +341,31 @@ def setup(
         # If a config isn't returned, and an exception isn't raised, we're just
         # generating config files and shouldn't try to continue.
         sys.exit(0)
+
+    return config
+
+
+def setup(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+    freeze: bool = True,
+) -> SynapseHomeServer:
+    """
+    Create and setup a Synapse homeserver instance given a configuration.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+
+    Returns:
+        A homeserver instance.
+    """
 
     if config.worker.worker_app:
         raise ConfigError(
@@ -384,7 +403,10 @@ def setup(
         reactor=reactor,
     )
 
-    synapse.config.logger.setup_logging(hs, config, use_worker_options=False)
+    setup_logging(hs, config, use_worker_options=False)
+
+    # Start the tracer
+    init_tracer(hs)  # noqa
 
     logger.info("Setting up server")
 
@@ -394,19 +416,17 @@ def setup(
         handle_startup_exception(e)
 
     async def start() -> None:
-        # Re-establish log context now that we're back from the reactor
-        with LoggingContext("start"):
-            # Load the OIDC provider metadatas, if OIDC is enabled.
-            if hs.config.oidc.oidc_enabled:
-                oidc = hs.get_oidc_handler()
-                # Loading the provider metadata also ensures the provider config is valid.
-                await oidc.load_metadata()
+        # Load the OIDC provider metadatas, if OIDC is enabled.
+        if hs.config.oidc.oidc_enabled:
+            oidc = hs.get_oidc_handler()
+            # Loading the provider metadata also ensures the provider config is valid.
+            await oidc.load_metadata()
 
-            await _base.start(hs, freeze)
+        await _base.start(hs, freeze)
 
-            hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
+        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
-    register_start(start)
+    register_start(hs, start)
 
     return hs
 
@@ -424,10 +444,12 @@ def run(hs: HomeServer) -> None:
 
 
 def main() -> None:
+    homeserver_config = load_or_generate_config(sys.argv[1:])
+
     with LoggingContext("main"):
         # check base requirements
         check_requirements()
-        hs = setup(sys.argv[1:])
+        hs = setup(homeserver_config)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:

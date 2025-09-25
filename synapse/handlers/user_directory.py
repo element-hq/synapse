@@ -41,7 +41,7 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
-from synapse.util import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none

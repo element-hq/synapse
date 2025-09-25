@@ -36,7 +36,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func
 
 if TYPE_CHECKING:

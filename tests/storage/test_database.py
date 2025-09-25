@@ -33,7 +33,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_comparison_clause,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

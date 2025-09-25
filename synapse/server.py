@@ -174,8 +174,8 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
-from synapse.util import Clock
 from synapse.util.caches import CACHE_METRIC_REGISTRY
+from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -459,14 +459,14 @@ class HomeServer(metaclass=abc.ABCMeta):
         Register a system event trigger with the HomeServer so it can be cleanly
         removed when the HomeServer is shutdown.
         """
-        id = self.get_reactor().addSystemEventTrigger(
+        id = self.get_clock().add_system_event_trigger(
             phase,
             eventType,
             run_as_background_process,
             desc,
             self.config.server.server_name,
             shutdown_func,
-            **kwargs,
+            kwargs,
         )
         self._async_shutdown_handlers.append(
             ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
@@ -485,11 +485,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         Register a system event trigger with the HomeServer so it can be cleanly
         removed when the HomeServer is shutdown.
         """
-        id = self.get_reactor().addSystemEventTrigger(
+        id = self.get_clock().add_system_event_trigger(
             phase,
             eventType,
             shutdown_func,
-            **kwargs,
+            kwargs,
         )
         self._sync_shutdown_handlers.append(
             ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
