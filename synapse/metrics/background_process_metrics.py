@@ -350,8 +350,8 @@ def run_as_background_process(
                         tracing_scope = combined_context_manager()
 
                     else:
-                        # Otherwise, when there is no active span, we will already be
-                        # creating a disconnected root span already and we don't have to
+                        # Otherwise, when there is no active span, we will be creating
+                        # a disconnected root span already and we don't have to
                         # worry about cross-linking to anything.
                         tracing_scope = start_active_span(
                             f"bgproc.{desc}",
