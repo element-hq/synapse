@@ -452,6 +452,8 @@ class RoomPolicyTestCase(unittest.FederatingHomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         filter_id = channel.json_body["filter_id"]
+        # Note: we could use `/context`, but given we don't test that neutral events are
+        # delivered over `/sync` anywhere else, might as well implicitly test it here.
         channel = self.make_request(
             "GET",
             "/sync?filter=%s" % filter_id,
