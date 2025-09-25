@@ -201,45 +201,79 @@ class TimeoutDeferredTest(TestCase):
         self.failureResultOf(timing_out_d, defer.TimeoutError)
 
     async def test_logcontext_is_preserved_on_cancellation(self) -> None:
-        blocking_was_cancelled = False
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
-        def mark_blocking_was_cancelled(res: Failure) -> None:
-            nonlocal blocking_was_cancelled
+        incomplete_deferred_was_cancelled = False
+
+        def mark_was_cancelled(res: Failure) -> None:
+            """
+            A passthrough errback which sets `incomplete_deferred_was_cancelled`.
+
+            This means we re-raise any exception and allows further errbacks (in
+            `timeout_deferred(...)`) to do their thing. Just trying to be a transparent
+            proxy of any exception while doing our internal test book-keeping.
+            """
+            nonlocal incomplete_deferred_was_cancelled
             if res.check(CancelledError):
-                blocking_was_cancelled = True
-                res.raiseException()
+                incomplete_deferred_was_cancelled = True
             else:
-                logger.error("Expected incomplete_d to be cancelled but saw %s", res)
+                logger.error(
+                    "Expected incomplete_d to fail with `CancelledError` because our "
+                    "`timeout_deferred(...)` utility canceled it but saw %s",
+                    res,
+                )
 
+            # Re-raise the exception so that any further errbacks can do their thing as
+            # normal
+            res.raiseException()
+
+        # Create a deferred which we will never complete
         incomplete_d: Deferred = Deferred()
-        incomplete_d.addErrback(mark_blocking_was_cancelled)
+        incomplete_d.addErrback(mark_was_cancelled)
 
         with LoggingContext("one") as context_one:
-            # original_deferred = blocking()
-            original_deferred = incomplete_d
             timing_out_d = timeout_deferred(
-                deferred=original_deferred,
+                deferred=incomplete_d,
                 timeout=1.0,
                 cancel_on_shutdown=False,
                 clock=self.clock,
             )
             self.assertNoResult(timing_out_d)
+            # We should still be in the logcontext we started in
             self.assertIs(current_context(), context_one)
 
-            # We're yielding control to the reactor (and calling any pending callbacks)
-            # so we need to be in the sentinel logcontext to avoid leaking our current
-            # logcontext into the reactor.
+            # Pump the reactor until we trigger the timeout
+            #
+            # We're manually pumping the reactor (and causing any pending callbacks to
+            # be called) so we need to be in the sentinel logcontext to avoid leaking
+            # our current logcontext into the reactor (which would then get picked up
+            # and associated with the next thing the reactor does). `with
+            # PreserveLoggingContext()` will reset the logcontext to the sentinel while
+            # we're pumping the reactor in the block and return us back to our current
+            # logcontext after the block.
             with PreserveLoggingContext():
-                self.reactor.pump((2.0,))
+                self.reactor.pump(
+                    # This is `2.0` (seconds) as we set `timeout_deferred(timeout=1.0)` above
+                    (2.0,)
+                )
 
+            # We expect the incomplete deferred to have been cancelled because of the
+            # timeout by this point
             self.assertTrue(
-                blocking_was_cancelled, "incomplete deferred was not cancelled"
+                incomplete_deferred_was_cancelled,
+                "incomplete deferred was not cancelled",
             )
+            # We should see the `TimeoutError` (instead of a `CancelledError`)
             self.failureResultOf(timing_out_d, defer.TimeoutError)
+            # We're still in the same logcontext
             self.assertIs(current_context(), context_one)
 
+        # Back to the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
-class _TestException(Exception):
+
+class _TestException(Exception):  #
     pass
 
 
