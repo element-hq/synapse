@@ -587,13 +587,35 @@ class LoggingContextFilter(logging.Filter):
     record.
     """
 
+    def __init__(
+        self,
+        # `request` is here for backwards compatibility since we previously recommended
+        # people manually configure `LoggingContextFilter` like the following.
+        #
+        # ```yaml
+        # filters:
+        #   context:
+        #       (): synapse.logging.context.LoggingContextFilter
+        #       request: ""
+        # ```
+        #
+        # TODO: Since we now configure `LoggingContextFilter` automatically since #8051
+        # (2020-08-11), we could consider removing this useless parameter. This would
+        # require people to remove their own manual configuration of
+        # `LoggingContextFilter` as it would cause `TypeError: Filter.__init__() got an
+        # unexpected keyword argument 'request'` -> `ValueError: Unable to configure
+        # filter 'context'`
+        request: str = "",
+    ):
+        self._default_request = request
+
     def filter(self, record: logging.LogRecord) -> Literal[True]:
         """Add each fields from the logging contexts to the record.
         Returns:
             True to include the record in the log output.
         """
         context = current_context()
-        record.request = ""
+        record.request = self._default_request
         record.server_name = "unknown_server_from_no_context"
 
         # context should never be None, but if it somehow ends up being, then
