@@ -171,8 +171,9 @@ class RoomPolicyHandler:
             timeout=3000,
         )
         if (
+            # the policy server returns {} if it refuses to sign the event.
             signature and len(signature) > 0
-        ):  # the policy server returns {} if it refuses to sign the event.
+        ):
             event.signatures.update(signature)
             if verify:
                 is_valid = await self._verify_policy_server_signature(
