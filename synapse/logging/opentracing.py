@@ -593,8 +593,15 @@ def start_active_span_follows_from(
            span will be the parent. (If there is no currently active span, the first
            span in `contexts` will be the parent.)
 
+        tags: an optional dictionary of span tags. The caller gives up ownership of that
+            dictionary, because the :class:`Tracer` may use it as-is to avoid extra data
+            copying.
+
         start_time: optional override for the start time of the created span. Seconds
             since the epoch.
+
+        ignore_active_span: an explicit flag that ignores the current active
+            scope and creates a root span.
 
         inherit_force_tracing: if set, and any of the previous contexts have had tracing
            forced, the new span will also have tracing forced.
