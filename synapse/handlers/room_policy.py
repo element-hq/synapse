@@ -125,7 +125,7 @@ class RoomPolicyHandler:
             verify_key = decode_verify_key_bytes(POLICY_SERVER_KEY_ID, key_bytes)
             # We would normally use KeyRing.verify_event_for_server but we can't here as we don't
             # want to fetch the server key, and instead want to use the public key in the state event.
-            await self._hs.get_keyring()._process_json(verify_key, verify_json_req)
+            await self._hs.get_keyring().process_json(verify_key, verify_json_req)
             # if the event is correctly signed by the public key in the policy server state event = Allow
             return True
         except Exception as ex:
