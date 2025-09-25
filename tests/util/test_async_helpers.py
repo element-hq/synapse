@@ -17,8 +17,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 import traceback
-from typing import Any, Coroutine, Generator, List, NoReturn, Optional, Tuple, TypeVar
+from typing import Any, Coroutine, List, NoReturn, Optional, Tuple, TypeVar
 
 from parameterized import parameterized_class
 
@@ -45,6 +46,8 @@ from synapse.util.async_helpers import (
 
 from tests.server import get_clock
 from tests.unittest import TestCase
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -197,34 +200,23 @@ class TimeoutDeferredTest(TestCase):
 
         self.failureResultOf(timing_out_d, defer.TimeoutError)
 
-    def test_logcontext_is_preserved_on_cancellation(self) -> None:
+    async def test_logcontext_is_preserved_on_cancellation(self) -> None:
         blocking_was_cancelled = False
 
-        @defer.inlineCallbacks
-        def blocking() -> Generator["Deferred[object]", object, None]:
+        def mark_blocking_was_cancelled(res: Failure) -> None:
             nonlocal blocking_was_cancelled
+            if res.check(CancelledError):
+                blocking_was_cancelled = True
+                res.raiseException()
+            else:
+                logger.error("Expected incomplete_d to be cancelled but saw %s", res)
 
-            non_completing_d: Deferred = Deferred()
-            with PreserveLoggingContext():
-                try:
-                    yield non_completing_d
-                except CancelledError:
-                    blocking_was_cancelled = True
-                    raise
+        incomplete_d: Deferred = Deferred()
+        incomplete_d.addErrback(mark_blocking_was_cancelled)
 
         with LoggingContext("one") as context_one:
-            # the errbacks should be run in the test logcontext
-            def errback(res: Failure, deferred_name: str) -> Failure:
-                self.assertIs(
-                    current_context(),
-                    context_one,
-                    "errback %s run in unexpected logcontext %s"
-                    % (deferred_name, current_context()),
-                )
-                return res
-
-            original_deferred = blocking()
-            original_deferred.addErrback(errback, "orig")
+            # original_deferred = blocking()
+            original_deferred = incomplete_d
             timing_out_d = timeout_deferred(
                 deferred=original_deferred,
                 timeout=1.0,
@@ -232,13 +224,16 @@ class TimeoutDeferredTest(TestCase):
                 clock=self.clock,
             )
             self.assertNoResult(timing_out_d)
-            self.assertIs(current_context(), SENTINEL_CONTEXT)
-            timing_out_d.addErrback(errback, "timingout")
+            self.assertIs(current_context(), context_one)
 
-            self.reactor.pump((2.0,))
+            # We're yielding control to the reactor (and calling any pending callbacks)
+            # so we need to be in the sentinel logcontext to avoid leaking our current
+            # logcontext into the reactor.
+            with PreserveLoggingContext():
+                self.reactor.pump((2.0,))
 
             self.assertTrue(
-                blocking_was_cancelled, "non-completing deferred was not cancelled"
+                blocking_was_cancelled, "incomplete deferred was not cancelled"
             )
             self.failureResultOf(timing_out_d, defer.TimeoutError)
             self.assertIs(current_context(), context_one)
