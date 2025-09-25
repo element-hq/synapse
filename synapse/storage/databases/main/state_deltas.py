@@ -98,6 +98,11 @@ class StateDeltasStore(SQLBaseStore):
         """
         prev_stream_id = int(prev_stream_id)
 
+        if limit <= 0:
+            raise ValueError(
+                "Invalid `limit` passed to `get_partial_current_state_deltas"
+            )
+
         # check we're not going backwards
         assert prev_stream_id <= max_stream_id, (
             f"New stream id {max_stream_id} is smaller than prev stream id {prev_stream_id}"
@@ -114,46 +119,23 @@ class StateDeltasStore(SQLBaseStore):
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
         ) -> Tuple[int, List[StateDelta]]:
-            # First we calculate the max stream id that will give us less than
-            # N results.
-            # We limit the number of returned stream_id entries to ensure we
-            # don't select toooo many.
-            sql = """
-                SELECT stream_id, count(*)
-                FROM current_state_delta_stream
-                WHERE stream_id > ? AND stream_id <= ?
-                GROUP BY stream_id
-                ORDER BY stream_id ASC
-                LIMIT ?
-            """
-            txn.execute(sql, (prev_stream_id, max_stream_id, limit))
-
-            total = 0
-
-            for stream_id, count in txn:
-                total += count
-
-                if total >= limit:
-                    # We limit the number of returned entries to ensure we don't
-                    # select toooo many.
-                    logger.debug(
-                        "Clipping current_state_delta_stream rows to stream_id %i",
-                        stream_id,
-                    )
-                    clipped_stream_id = stream_id
-                    break
-            else:
-                # if there's no problem, we may as well go right up to the max_stream_id
-                clipped_stream_id = max_stream_id
-
-            # Now actually get the deltas
             sql = """
                 SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
                 FROM current_state_delta_stream
                 WHERE ? < stream_id AND stream_id <= ?
                 ORDER BY stream_id ASC
+                LIMIT ?
             """
-            txn.execute(sql, (prev_stream_id, clipped_stream_id))
+            txn.execute(sql, (prev_stream_id, max_stream_id, limit))
+            rows = txn.fetchall()
+
+            # In the case that we hit the given `limit` rather than fetching the
+            # most recent rows, return the `stream_id` of the last row.
+            #
+            # With this, the caller knows from what stream_id to call this
+            # function again with.
+            clipped_stream_id = rows[-1][0]
+
             return clipped_stream_id, [
                 StateDelta(
                     stream_id=row[0],
@@ -163,7 +145,7 @@ class StateDeltasStore(SQLBaseStore):
                     event_id=row[4],
                     prev_event_id=row[5],
                 )
-                for row in txn.fetchall()
+                for row in rows
             ]
 
         return await self.db_pool.runInteraction(
