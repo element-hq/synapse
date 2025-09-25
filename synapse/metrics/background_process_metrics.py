@@ -292,7 +292,8 @@ def run_as_background_process(
                     # part of the heuristic to initiate things.
                     #
                     # We don't care about the value from the context manager as it's not
-                    # used.
+                    # used (so we just use `Any` for the type). Ideally, we'd be able to
+                    # mark this as unused like an `assert_never` of sorts.
                     tracing_scope: ContextManager[Any]
                     if original_active_tracing_span is not None:
                         # With the OpenTracing client that we're using, it's impossible to
