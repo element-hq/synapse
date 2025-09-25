@@ -244,8 +244,9 @@ class TimeoutDeferredTest(TestCase):
             # logcontext after the block.
             with PreserveLoggingContext():
                 self.clock.pump(
-                    # This is `2.0` (seconds) as we set `timeout_deferred(timeout=1.0)` above
-                    (2.0,)
+                    # We only need to pump `1.0` (seconds) as we set
+                    # `timeout_deferred(timeout=1.0)` above
+                    (1.0,)
                 )
 
             # We expect the incomplete deferred to have been cancelled because of the
