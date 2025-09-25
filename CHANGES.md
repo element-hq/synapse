@@ -1,3 +1,12 @@
+# Synapse 1.139.0rc3 (2025-09-25)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.139.0rc1 where `run_coroutine_in_background(...)` incorrectly handled logcontexts, resulting in partially broken logging. ([\#18964](https://github.com/element-hq/synapse/issues/18964))
+
+
+
+
 # Synapse 1.139.0rc2 (2025-09-23)
 
 ## Internal Changes
