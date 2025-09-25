@@ -177,7 +177,7 @@ class TransportLayerClient:
         sign the event as not spam.
 
         If the policy server could not be contacted or the policy server
-        returned an error, this returns no signature.
+        returned an error, this raises that error.
 
         Args:
             destination: The host name of the policy server / homeserver.
