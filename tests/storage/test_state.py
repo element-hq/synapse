@@ -694,17 +694,20 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
 
     def test_current_state_delta_stream_is_limited_to_100(self) -> None:
         """
-        Tests that `get_partial_current_state_deltas` returns max 100 rows.
+        Tests that `get_partial_current_state_deltas` actually returns `limit` rows.
 
         Regression test for https://github.com/element-hq/synapse/pull/18960.
         """
-        # Fetch the current state group to pass into store_state_deltas_for_batched
+        # Inject a create event which other events can auth with.
         self.inject_state_event(
             self.room, self.alice_user_id, EventTypes.Create, "", {}
         )
 
-        # Make >100 state changes in the room.
-        for i in range(101):
+        limit = 2
+
+        # Make N*2 state changes in the room, resulting in 2N+1 total state
+        # events (including the create event) in the room.
+        for i in range(limit * 2):
             self.inject_state_event(
                 self.room,
                 self.alice_user_id,
@@ -713,18 +716,18 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
                 {"name": f"rename #{i}"},
             )
 
-        # Sanity check: count how many rows exist between prev=0 and max, it should be >100.
+        # Call the function under test. This must return <= `limit` rows.
         max_stream_id = self.store.get_room_max_stream_ordering()
-
-        # Call the function under test. With the >= 100 clipping fix, this must return <= 100 rows.
         clipped_stream_id, deltas = self.get_success(
             self.store.get_partial_current_state_deltas(
-                prev_stream_id=0, max_stream_id=max_stream_id
+                prev_stream_id=0,
+                max_stream_id=max_stream_id,
+                limit=limit,
             )
         )
 
         self.assertLessEqual(
-            len(deltas), 100, f"Returned {len(deltas)} rows, expected at most 100"
+            len(deltas), limit, f"Returned {len(deltas)} rows, expected at most {limit}"
         )
 
         # Advancing from the clipped point should eventually drain the remainder.
@@ -733,11 +736,11 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
             next_prev = clipped_stream_id
             next_clipped, next_deltas = self.get_success(
                 self.store.get_partial_current_state_deltas(
-                    prev_stream_id=next_prev, max_stream_id=max_stream_id
+                    prev_stream_id=next_prev, max_stream_id=max_stream_id, limit=limit
                 )
             )
             self.assertNotEqual(
                 next_clipped, clipped_stream_id, "Did not advance clipped_stream_id"
             )
-            # Still should respect the 100-row limit.
-            self.assertLessEqual(len(next_deltas), 100)
+            # Still should respect the limit.
+            self.assertLessEqual(len(next_deltas), limit)

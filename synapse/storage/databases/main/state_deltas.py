@@ -78,7 +78,7 @@ class StateDeltasStore(SQLBaseStore):
         )
 
     async def get_partial_current_state_deltas(
-        self, prev_stream_id: int, max_stream_id: int
+        self, prev_stream_id: int, max_stream_id: int, limit: int = 100
     ) -> Tuple[int, List[StateDelta]]:
         """Fetch a list of room state changes since the given stream id
 
@@ -88,14 +88,13 @@ class StateDeltasStore(SQLBaseStore):
             prev_stream_id: point to get changes since (exclusive)
             max_stream_id: the point that we know has been correctly persisted
                 - ie, an upper limit to return changes from.
+            limit: the maximum number of rows to return.
 
         Returns:
             A tuple consisting of:
                 - the stream id which these results go up to
                 - list of current_state_delta_stream rows. If it is empty, we are
                   up to date.
-
-            A maximum of 100 rows will be returned.
         """
         prev_stream_id = int(prev_stream_id)
 
@@ -117,25 +116,25 @@ class StateDeltasStore(SQLBaseStore):
         ) -> Tuple[int, List[StateDelta]]:
             # First we calculate the max stream id that will give us less than
             # N results.
-            # We arbitrarily limit to 100 stream_id entries to ensure we don't
-            # select toooo many.
+            # We limit the number of returned stream_id entries to ensure we
+            # don't select toooo many.
             sql = """
                 SELECT stream_id, count(*)
                 FROM current_state_delta_stream
                 WHERE stream_id > ? AND stream_id <= ?
                 GROUP BY stream_id
                 ORDER BY stream_id ASC
-                LIMIT 100
+                LIMIT ?
             """
-            txn.execute(sql, (prev_stream_id, max_stream_id))
+            txn.execute(sql, (prev_stream_id, max_stream_id, limit))
 
             total = 0
 
             for stream_id, count in txn:
                 total += count
 
-                if total >= 100:
-                    # We arbitrarily limit to 100 entries to ensure we don't
+                if total >= limit:
+                    # We limit the number of returned entries to ensure we don't
                     # select toooo many.
                     logger.debug(
                         "Clipping current_state_delta_stream rows to stream_id %i",
