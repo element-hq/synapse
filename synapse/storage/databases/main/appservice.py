@@ -42,8 +42,8 @@ from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import DeviceListUpdates, JsonMapping
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import _CacheContext, cached
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -83,6 +83,10 @@ class ApplicationServiceWorkerStore(RoomMemberWorkerStore):
             hs.hostname, hs.config.appservice.app_service_config_files
         )
         self.exclusive_user_regex = _make_exclusive_regex(self.services_cache)
+        # When OAuth is enabled, force all appservices to enable MSC4190 too.
+        if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
+            for appservice in self.services_cache:
+                appservice.msc4190_device_management = True
 
         def get_max_as_txn_id(txn: Cursor) -> int:
             logger.warning("Falling back to slow query, you should port to postgres")

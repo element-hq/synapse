@@ -46,7 +46,7 @@ from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StateMap, StreamToken, UserID, create_requester
 from synapse.types.handlers.sliding_sync import PerConnectionState, SlidingSyncConfig
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase

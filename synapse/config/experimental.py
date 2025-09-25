@@ -556,6 +556,9 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        # MSC4169: Backwards-compatible redaction sending using `/send`
+        self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)
+
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
 

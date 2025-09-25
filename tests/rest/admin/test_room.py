@@ -45,7 +45,7 @@ from synapse.storage.databases.main.purge_events import (
     purge_room_tables_with_room_id_column,
 )
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest

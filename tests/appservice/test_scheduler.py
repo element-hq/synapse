@@ -41,7 +41,7 @@ from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import DeviceListUpdates, JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

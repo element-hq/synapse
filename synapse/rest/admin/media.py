@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Tuple
@@ -41,13 +40,81 @@ from synapse.rest.admin._base import (
     assert_requester_is_admin,
     assert_user_is_admin,
 )
-from synapse.storage.databases.main.media_repository import MediaSortOrder
+from synapse.storage.databases.main.media_repository import (
+    MediaSortOrder,
+)
 from synapse.types import JsonDict, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class QueryMediaById(RestServlet):
+    """
+    Fetch info about a piece of local or cached remote media.
+    """
+
+    PATTERNS = admin_patterns("/media/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.store = hs.get_datastores().main
+        self.auth = hs.get_auth()
+        self.server_name = hs.hostname
+        self.hs = hs
+        self.media_repo = hs.get_media_repository()
+
+    async def on_GET(
+        self, request: SynapseRequest, server_name: str, media_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        await assert_user_is_admin(self.auth, requester)
+
+        if not self.hs.is_mine_server_name(server_name):
+            remote_media_info = await self.media_repo.get_cached_remote_media_info(
+                server_name, media_id
+            )
+            if remote_media_info is None:
+                raise NotFoundError("Unknown media")
+            resp = {
+                "media_origin": remote_media_info.media_origin,
+                "user_id": None,
+                "media_id": remote_media_info.media_id,
+                "media_type": remote_media_info.media_type,
+                "media_length": remote_media_info.media_length,
+                "upload_name": remote_media_info.upload_name,
+                "created_ts": remote_media_info.created_ts,
+                "filesystem_id": remote_media_info.filesystem_id,
+                "url_cache": None,
+                "last_access_ts": remote_media_info.last_access_ts,
+                "quarantined_by": remote_media_info.quarantined_by,
+                "authenticated": remote_media_info.authenticated,
+                "safe_from_quarantine": None,
+                "sha256": remote_media_info.sha256,
+            }
+        else:
+            local_media_info = await self.store.get_local_media(media_id)
+            if local_media_info is None:
+                raise NotFoundError("Unknown media")
+            resp = {
+                "media_origin": None,
+                "user_id": local_media_info.user_id,
+                "media_id": local_media_info.media_id,
+                "media_type": local_media_info.media_type,
+                "media_length": local_media_info.media_length,
+                "upload_name": local_media_info.upload_name,
+                "created_ts": local_media_info.created_ts,
+                "filesystem_id": None,
+                "url_cache": local_media_info.url_cache,
+                "last_access_ts": local_media_info.last_access_ts,
+                "quarantined_by": local_media_info.quarantined_by,
+                "authenticated": local_media_info.authenticated,
+                "safe_from_quarantine": local_media_info.safe_from_quarantine,
+                "sha256": local_media_info.sha256,
+            }
+
+        return HTTPStatus.OK, {"media_info": resp}
 
 
 class QuarantineMediaInRoom(RestServlet):
@@ -470,3 +537,4 @@ def register_servlets_for_media_repo(hs: "HomeServer", http_server: HttpServer) 
     DeleteMediaByDateSize(hs).register(http_server)
     DeleteMediaByID(hs).register(http_server)
     UserMediaRestServlet(hs).register(http_server)
+    QueryMediaById(hs).register(http_server)

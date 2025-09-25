@@ -21,13 +21,14 @@
 
 import sys
 
-from synapse.app.generic_worker import start
+from synapse.app.generic_worker import load_config, start
 from synapse.util.logcontext import LoggingContext
 
 
 def main() -> None:
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    homeserver_config = load_config(sys.argv[1:])
+    with LoggingContext(name="main"):
+        start(homeserver_config)
 
 
 if __name__ == "__main__":

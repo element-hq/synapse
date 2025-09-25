@@ -43,7 +43,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import override_config
 from tests.utils import mock_getRawHeaders

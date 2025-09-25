@@ -29,7 +29,7 @@ from synapse.rest.client import filter, login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.types.handlers.policy_server import RECOMMENDATION_OK, RECOMMENDATION_SPAM
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import event_injection

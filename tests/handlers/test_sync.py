@@ -50,7 +50,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 import tests.unittest
 import tests.utils

@@ -27,7 +27,7 @@ import attr
 
 from synapse.media.preview_html import parse_html_description
 from synapse.types import JsonDict
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from lxml import etree

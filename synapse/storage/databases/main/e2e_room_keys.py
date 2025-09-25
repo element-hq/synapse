@@ -41,7 +41,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.types import JsonDict, JsonSerializable, StreamKeyType
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

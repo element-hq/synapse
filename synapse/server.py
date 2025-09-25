@@ -156,7 +156,7 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -1007,7 +1007,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        self.get_reactor().addSystemEventTrigger(
+        self.get_clock().add_system_event_trigger(
             "during", "shutdown", media_threadpool.stop
         )
 
