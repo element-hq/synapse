@@ -1140,6 +1140,12 @@ class EventCreationHandler:
                 assert self.hs.is_mine_id(event.sender), "User must be our own: %s" % (
                     event.sender,
                 )
+                # if this room uses a policy server, try to get a signature now.
+                # We use verify=False here as we are about to call is_event_allowed on the same event
+                # which will do sig checks.
+                await self._policy_handler.ask_policy_server_to_sign_event(
+                    event, verify=False
+                )
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)
                 if not policy_allowed:
