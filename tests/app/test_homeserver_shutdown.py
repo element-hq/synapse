@@ -22,6 +22,7 @@ import gc
 import weakref
 
 from synapse.app.homeserver import SynapseHomeServer
+from synapse.storage.background_updates import UpdaterStatus
 from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 
 from tests.server import get_clock, setup_test_homeserver
@@ -125,7 +126,9 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # Pump the background updates by a single iteration, just to ensure any extra
         # resources it uses have been started.
         store = weakref.proxy(self.hs.get_datastores().main)
-        self.get_success(store.db_pool.updates.do_next_background_update(False), by=0.1)
+        self.get_success(
+            store.db_pool.updates.do_next_background_update(False), by=0.1
+        )
 
         hs_ref = weakref.ref(self.hs)
 
@@ -136,6 +139,9 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # `hs.shutdown()` otherwise they will be scheduled later during the test when we
         # advance the reactor to wait out any non-tracked delayed calls.
         self.reactor.advance(CALL_LATER_DELAY_TRACKING_THRESHOLD_S)
+
+        # Ensure the background updates are not complete.
+        self.assertNotEqual(store.db_pool.updates.get_status(), UpdaterStatus.COMPLETE)
 
         # Cleanup the homeserver.
         self.get_success(self.hs.shutdown())
