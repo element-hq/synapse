@@ -341,6 +341,7 @@ def wrap_as_background_process(
     multiple places.
     """
 
+    # TODO: ensure it has a hs object, not just servername
     def wrapper(
         func: Callable[Concatenate[HasServerName, P], Awaitable[Optional[R]]],
     ) -> Callable[P, "defer.Deferred[Optional[R]]"]:

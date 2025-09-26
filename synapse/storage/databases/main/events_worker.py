@@ -70,7 +70,6 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.tcp.streams import BackfillStream, UnPartialStatedEventStream
@@ -1154,9 +1153,7 @@ class EventsWorkerStore(SQLBaseStore):
                 should_start = False
 
         if should_start:
-            run_as_background_process(
-                "fetch_events", self.server_name, self._fetch_thread
-            )
+            self.hs.run_as_background_process("fetch_events", self._fetch_thread)
 
     async def _fetch_thread(self) -> None:
         """Services requests for events from `_event_fetch_list`."""

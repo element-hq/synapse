@@ -172,7 +172,7 @@ class Keyring:
             _FetchKeyRequest, Dict[str, Dict[str, FetchKeyResult]]
         ] = BatchingQueue(
             name="keyring_server",
-            server_name=self.server_name,
+            hs=hs,
             clock=hs.get_clock(),
             # The method called to fetch each key
             process_batch_callback=self._inner_fetch_key_requests,
@@ -487,7 +487,7 @@ class KeyFetcher(metaclass=abc.ABCMeta):
         self.server_name = hs.hostname
         self._queue = BatchingQueue(
             name=self.__class__.__name__,
-            server_name=self.server_name,
+            hs=hs,
             clock=hs.get_clock(),
             process_batch_callback=self._fetch_keys,
         )

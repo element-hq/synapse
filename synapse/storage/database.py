@@ -688,7 +688,7 @@ class DatabasePool:
         if background_update_names:
             self._clock.call_later(
                 15.0,
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 "upsert_safety_check",
                 self.server_name,
                 self._check_safe_to_upsert,

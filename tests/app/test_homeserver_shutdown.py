@@ -126,9 +126,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # Pump the background updates by a single iteration, just to ensure any extra
         # resources it uses have been started.
         store = weakref.proxy(self.hs.get_datastores().main)
-        self.get_success(
-            store.db_pool.updates.do_next_background_update(False), by=0.1
-        )
+        self.get_success(store.db_pool.updates.do_next_background_update(False), by=0.1)
 
         hs_ref = weakref.ref(self.hs)
 
@@ -148,11 +146,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Cleanup the internal reference in our test case
         del self.hs
-
-        # Advance the reactor to allow for any outstanding calls to be run.
-        # The limit of 15 is currently set by having to wait for the delayed call
-        # `synapse.storage.database.py -> _check_safe_to_upsert`.
-        self.reactor.advance(15)
 
         # Force garbage collection.
         gc.collect()

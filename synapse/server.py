@@ -32,6 +32,7 @@ from threading import Thread
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
     Dict,
     List,
@@ -217,6 +218,7 @@ if TYPE_CHECKING:
 
 T: TypeAlias = object
 F = TypeVar("F", bound=Callable[["HomeServer"], T])
+R = TypeVar("R")
 
 
 def cache_in_self(builder: F) -> F:
@@ -359,6 +361,55 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         self._async_shutdown_handlers: List[ShutdownInfo] = []
         self._sync_shutdown_handlers: List[ShutdownInfo] = []
+        self._background_processes: set[defer.Deferred[Optional[Any]]] = set()
+
+    def run_as_background_process(
+        self,
+        desc: "LiteralString",
+        func: Callable[..., Awaitable[Optional[R]]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> "defer.Deferred[Optional[R]]":
+        """Run the given function in its own logcontext, with resource metrics
+
+        This should be used to wrap processes which are fired off to run in the
+        background, instead of being associated with a particular request.
+
+        It returns a Deferred which completes when the function completes, but it doesn't
+        follow the synapse logcontext rules, which makes it appropriate for passing to
+        clock.looping_call and friends (or for firing-and-forgetting in the middle of a
+        normal synapse async function).
+
+        Because the returned Deferred does not follow the synapse logcontext rules, awaiting
+        the result of this function will result in the log context being cleared (bad). In
+        order to properly await the result of this function and maintain the current log
+        context, use `make_deferred_yieldable`.
+
+        Args:
+            desc: a description for this background process type
+            server_name: The homeserver name that this background process is being run for
+                (this should be `hs.hostname`).
+            func: a function, which may return a Deferred or a coroutine
+            bg_start_span: Whether to start an opentracing span. Defaults to True.
+                Should only be disabled for processes that will not log to or tag
+                a span.
+            args: positional args for func
+            kwargs: keyword args for func
+
+        Returns:
+            Deferred which returns the result of func, or `None` if func raises.
+            Note that the returned Deferred does not follow the synapse logcontext
+            rules.
+        """
+        deferred = run_as_background_process(desc, self.hostname, func, *args, **kwargs)
+        self._background_processes.add(deferred)
+
+        def on_done(res: R) -> R:
+            self._background_processes.remove(deferred)
+            return res
+
+        deferred.addBoth(on_done)
+        return deferred
 
     async def shutdown(self) -> None:
         """
@@ -429,6 +480,13 @@ class HomeServer(metaclass=abc.ABCMeta):
                 pass
 
         self.get_clock().shutdown()
+
+        for background_process in list(self._background_processes):
+            try:
+                background_process.cancel()
+            except Exception:
+                pass
+        self._background_processes.clear()
 
         for shutdown_handler in self._async_shutdown_handlers:
             try:
