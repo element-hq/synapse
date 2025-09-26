@@ -409,7 +409,6 @@ class BackgroundUpdater:
             )
 
     async def run_background_updates(self, sleep: bool) -> None:
-        logger.error("running background updates")
         if self._running or not self.enabled:
             return
 

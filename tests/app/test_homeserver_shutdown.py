@@ -25,7 +25,11 @@ from synapse.app.homeserver import SynapseHomeServer
 from synapse.storage.background_updates import UpdaterStatus
 from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 
-from tests.server import get_clock, setup_test_homeserver
+from tests.server import (
+    cleanup_test_reactor_system_event_triggers,
+    get_clock,
+    setup_test_homeserver,
+)
 from tests.unittest import HomeserverTestCase
 
 
@@ -56,6 +60,9 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
+        # Cleanup the registered system event triggers since the `MemoryReactor` doesn't
+        # do this on it's own.
+        cleanup_test_reactor_system_event_triggers(self.reactor)
 
         # Cleanup the homeserver.
         self.get_success(self.hs.shutdown())
@@ -132,6 +139,10 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
+        # Cleanup the registered system event triggers since the `MemoryReactor` doesn't
+        # do this on it's own.
+        cleanup_test_reactor_system_event_triggers(self.reactor)
+
         # Also advance the reactor by the delay tracking threshold to ensure all
         # cancellable delayed calls have been scheduled. Must be done prior to
         # `hs.shutdown()` otherwise they will be scheduled later during the test when we

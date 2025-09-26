@@ -526,46 +526,6 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
-    # type-ignore: `MemoryReactor` returns `None` whereas the
-    #     `twisted.internet.interfaces.IReactorCore` interface allows a return type
-    #     of `Any`, so long as the ID type matches that used by `removeSystemEventTrigger`.
-    def addSystemEventTrigger(  # type: ignore[override]
-        self,
-        phase: str,
-        eventType: str,
-        callable: Callable[P, object],
-        *args: P.args,
-        **kw: P.kwargs,
-    ) -> int:
-        """
-        Override the call from `MemoryReactorClock` in order to track registered event
-        triggers by `triggerID`.
-        Otherwise the code here has been copied from `MemoryReactorClock`.
-        """
-        phaseTriggers = self.triggers.setdefault(phase, {})
-        eventTypeTriggers = phaseTriggers.setdefault(eventType, [])
-        trigger = (callable, args, kw)
-        eventTypeTriggers.append(trigger)
-        return id(trigger)
-
-    def removeSystemEventTrigger(self, triggerID: int) -> None:
-        """
-        Override the unimplemented call from `MemoryReactorClock` in order to actually remove
-        registered event triggers.
-        This is necessary for a clean shutdown to occur as these triggers can hold
-        references to the `SynapseHomeServer`.
-
-        args:
-            triggerID: Unique ID obtained from `addSystemEventTrigger`.
-        """
-        for phase_triggers in self.triggers.values():
-            for event_type_triggers in phase_triggers.values():
-                triggers_to_remove = [
-                    item for item in event_type_triggers if id(item) == triggerID
-                ]
-                for trigger in triggers_to_remove:
-                    event_type_triggers.remove(trigger)
-
     def run(self) -> None:
         """
         Override the call from `MemoryReactorClock` to add an additional step that
@@ -702,6 +662,19 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
             # reactor.callFromThread to feed results back from the db functions to the
             # main thread.
             super().advance(0)
+
+
+def cleanup_test_reactor_system_event_triggers(
+    reactor: ThreadedMemoryReactorClock,
+) -> None:
+    """Cleanup any registered system event triggers.
+    The `twisted.internet.test.ThreadedMemoryReactor` does not implement
+    `removeSystemEventTrigger` so won't clean these triggers up on it's own properly.
+    When trying to override `removeSystemEventTrigger` in `ThreadedMemoryReactorClock`
+    in order to implement this functionality, twisted complains about the reactor being
+    unclean and fails some tests.
+    """
+    reactor.triggers.clear()
 
 
 def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
