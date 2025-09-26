@@ -101,6 +101,7 @@ class PerDestinationQueue:
         self._instance_name = hs.get_instance_name()
         self._federation_shard_config = hs.config.worker.federation_shard_config
         self._state = hs.get_state_handler()
+        self.msc4354_enabled = hs.config.experimental.msc4354_enabled
 
         self._should_send_on_this_instance = True
         if not self._federation_shard_config.should_handle(
@@ -557,6 +558,33 @@ class PerDestinationQueue:
                     # If not, fetch the extremities and figure out which we can
                     # send.
                     extrem_events = await self._store.get_events_as_list(extrems)
+
+                    if self.msc4354_enabled:
+                        # we also want to send sticky events that are still active in this room
+                        sticky_event_ids = (
+                            await self._store.get_sticky_event_ids_sent_by_self(
+                                pdu.room_id,
+                                last_successful_stream_ordering,
+                            )
+                        )
+                        # skip any that are actually the forward extremities we want to send anyway
+                        sticky_events = await self._store.get_events_as_list(
+                            [
+                                event_id
+                                for event_id in sticky_event_ids
+                                if event_id not in extrems
+                            ]
+                        )
+                        if sticky_events:
+                            # *prepend* these to the extrem list, so they are processed first.
+                            # This ensures they will show up before the forward extrem in stream order
+                            extrem_events = sticky_events + extrem_events
+                            logger.info(
+                                "Sending %d missed sticky events to %s: %r",
+                                len(sticky_events),
+                                self._destination,
+                                pdu.room_id,
+                            )
 
                     new_pdus = []
                     for p in extrem_events:

@@ -209,6 +209,43 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 
+    async def get_sticky_event_ids_sent_by_self(
+        self, room_id: str, from_stream_pos: int
+    ) -> List[str]:
+        """Get sticky event IDs which have been sent by users on this homeserver.
+
+        Used when sending sticky events eagerly to newly joined servers, or when catching up over federation.
+
+        Args:
+            room_id: The room to fetch sticky events in.
+            from_stream_pos: The stream position to return events from. May be 0 for newly joined servers.
+        Returns:
+            A list of event IDs, which may be empty.
+        """
+        return await self.db_pool.runInteraction(
+            "get_sticky_event_ids_sent_by_self",
+            self._get_sticky_event_ids_sent_by_self_txn,
+            room_id,
+            from_stream_pos,
+        )
+
+    def _get_sticky_event_ids_sent_by_self_txn(
+        self, txn: LoggingTransaction, room_id: str, from_stream_pos: int
+    ) -> List[str]:
+        now_ms = self._now()
+        txn.execute(
+            """
+            SELECT sticky_events.event_id, sticky_events.sender, events.stream_ordering FROM sticky_events
+            INNER JOIN events ON events.event_id = sticky_events.event_id
+            WHERE soft_failed=FALSE AND expires_at > ? AND sticky_events.room_id = ?
+            """,
+            (now_ms, room_id),
+        )
+        rows = cast(List[Tuple[str, str, int]], txn.fetchall())
+        return [
+            row[0] for row in rows if row[2] > from_stream_pos and self.hs.is_mine_id(row[1])
+        ]
+
     async def reevaluate_soft_failed_sticky_events(
         self,
         room_id: str,
