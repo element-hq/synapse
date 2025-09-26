@@ -21,7 +21,7 @@
 
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import attr
 
@@ -133,6 +133,9 @@ class MediaUploadLimit:
 
     time_period_ms: int
     """The time period in milliseconds."""
+
+    msc4335_info_url: Optional[str] = None
+    """Used for experimental MSC4335 error code feature"""
 
 
 class ContentRepositoryConfig(Config):
@@ -302,8 +305,11 @@ class ContentRepositoryConfig(Config):
         for limit_config in config.get("media_upload_limits", []):
             time_period_ms = self.parse_duration(limit_config["time_period"])
             max_bytes = self.parse_size(limit_config["max_size"])
+            msc4335_info_url = limit_config.get("msc4335_info_url", None)
 
-            self.media_upload_limits.append(MediaUploadLimit(max_bytes, time_period_ms))
+            self.media_upload_limits.append(
+                MediaUploadLimit(max_bytes, time_period_ms, msc4335_info_url)
+            )
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None
