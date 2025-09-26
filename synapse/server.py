@@ -504,6 +504,9 @@ class HomeServer(metaclass=abc.ABCMeta):
                 logger.error("Error calling shutdown sync handler: %s", e)
         self._sync_shutdown_handlers.clear()
 
+        for db in self.get_datastores().databases:
+            db._db_pool.close()
+
     def register_async_shutdown_handler(
         self,
         *,

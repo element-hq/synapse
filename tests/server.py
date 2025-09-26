@@ -1232,14 +1232,18 @@ def setup_test_homeserver(
     hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
 
     if USE_POSTGRES_FOR_TESTS:
-        database_pool = hs.get_datastores().databases[0]
+        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
+        # cleanup functions result in holding the `hs` in memory.
+        database_pool = weakref.ref(hs.get_datastores().databases[0])
 
         # We need to do cleanup on PostgreSQL
         def cleanup() -> None:
             import psycopg2
 
             # Close all the db pools
-            database_pool._db_pool.close()
+            db_pool = database_pool()
+            if db_pool is not None:
+                db_pool._db_pool.close()
 
             dropped = False
 
