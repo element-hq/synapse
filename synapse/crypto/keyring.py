@@ -324,7 +324,7 @@ class Keyring:
             if key_result.valid_until_ts < verify_request.minimum_valid_until_ts:
                 continue
 
-            await self._process_json(key_result.verify_key, verify_request)
+            await self.process_json(key_result.verify_key, verify_request)
             verified = True
 
         if not verified:
@@ -334,7 +334,7 @@ class Keyring:
                 Codes.UNAUTHORIZED,
             )
 
-    async def _process_json(
+    async def process_json(
         self, verify_key: VerifyKey, verify_request: VerifyJsonRequest
     ) -> None:
         """Processes the `VerifyJsonRequest`. Raises if the signature can't be
