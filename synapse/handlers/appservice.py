@@ -98,6 +98,7 @@ class ApplicationServicesHandler:
         self.is_processing = False
 
         self._ephemeral_events_linearizer = Linearizer(
+            hs.get_clock(),
             name="appservice_ephemeral_events",
         )
 

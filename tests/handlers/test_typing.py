@@ -88,7 +88,8 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         self.mock_federation_client.put_json.return_value = (200, "OK")
         self.mock_federation_client.agent = MatrixFederationAgent(
             server_name="OUR_STUB_HOMESERVER_NAME",
-            reactor=reactor,
+            reactor=self.reactor,
+            clock=self.clock,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
@@ -97,7 +98,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
         )
 
         # the tests assume that we are starting at unix time 1000
-        reactor.pump((1000,))
+        self.reactor.pump((1000,))
 
         self.mock_hs_notifier = Mock()
         hs = self.setup_test_homeserver(

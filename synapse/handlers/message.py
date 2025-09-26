@@ -519,6 +519,7 @@ class EventCreationHandler:
         # We limit concurrent event creation for a room to 1. This prevents state resolution
         # from occurring when sending bursts of events to a local room
         self.limiter = Linearizer(
+            hs.get_clock(),
             max_count=1,
             name="room_event_creation_limit",
         )

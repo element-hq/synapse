@@ -90,7 +90,9 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[Any]", object, None]:
         @defer.inlineCallbacks
         def cb() -> Generator["defer.Deferred[object]", object, Tuple[int, JsonDict]]:
-            yield defer.ensureDeferred(Clock(reactor).sleep(0))
+            # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
+            # for testing purposes.
+            yield defer.ensureDeferred(Clock(reactor).sleep(0))  # type: ignore[multiple-internal-clocks]
             return 1, {}
 
         @defer.inlineCallbacks

@@ -65,7 +65,7 @@ class PushRuleRestServlet(RestServlet):
             hs.get_instance_name() in hs.config.worker.writers.push_rules
         )
         self._push_rules_handler = hs.get_push_rules_handler()
-        self._push_rule_linearizer = Linearizer(name="push_rules")
+        self._push_rule_linearizer = Linearizer(hs.get_clock(), name="push_rules")
 
     async def on_PUT(self, request: SynapseRequest, path: str) -> Tuple[int, JsonDict]:
         if not self._is_push_worker:

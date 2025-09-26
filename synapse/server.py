@@ -672,7 +672,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_clock(self) -> Clock:
-        return Clock(self._reactor)
+        # Ignore the linter error since this is the one place the `Clock` should be created.
+        return Clock(self._reactor)  # type: ignore[multiple-internal-clocks]
 
     def get_datastores(self) -> Databases:
         if not self.datastores:

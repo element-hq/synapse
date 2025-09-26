@@ -49,6 +49,7 @@ from synapse.http.federation.well_known_resolver import WellKnownResolver
 from synapse.http.proxyagent import ProxyAgent
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.types import ISynapseReactor
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,9 @@ class MatrixFederationAgent:
 
     Args:
         reactor: twisted reactor to use for underlying requests
+
+        clock: Internal `HomeServer` clock used to track delayed and looping calls.
+            Should be obtained from `hs.get_clock()`.
 
         tls_client_options_factory:
             factory to use for fetching client tls options, or none to disable TLS.
@@ -96,6 +100,7 @@ class MatrixFederationAgent:
         *,
         server_name: str,
         reactor: ISynapseReactor,
+        clock: Clock,
         tls_client_options_factory: Optional[FederationPolicyForHTTPS],
         user_agent: bytes,
         ip_allowlist: Optional[IPSet],
@@ -108,6 +113,7 @@ class MatrixFederationAgent:
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             reactor
+            clock: Should be the `hs` clock from `hs.get_clock()`
             tls_client_options_factory
             user_agent
             ip_allowlist
@@ -145,6 +151,7 @@ class MatrixFederationAgent:
             _well_known_resolver = WellKnownResolver(
                 server_name=server_name,
                 reactor=reactor,
+                clock=clock,
                 agent=BlocklistingAgentWrapper(
                     ProxyAgent(
                         reactor=reactor,

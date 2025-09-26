@@ -66,7 +66,8 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.sleep`
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -111,7 +112,8 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.looping_call`
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -161,7 +163,8 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.looping_call_now`
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -209,7 +212,8 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.call_later`
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -261,7 +265,8 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -318,7 +323,8 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -379,7 +385,8 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -448,7 +455,8 @@ class LoggingContextTestCase(unittest.TestCase):
         self._check_test_key("sentinel")
 
     async def _test_run_in_background(self, function: Callable[[], object]) -> None:
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -490,7 +498,8 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     async def test_run_in_background_with_blocking_fn(self) -> None:
         async def blocking_function() -> None:
-            await Clock(reactor).sleep(0)
+            # Ignore linter error since we are creating a `Clock` for testing purposes.
+            await Clock(reactor).sleep(0)  # type: ignore[multiple-internal-clocks]
 
         await self._test_run_in_background(blocking_function)
 
@@ -523,7 +532,8 @@ class LoggingContextTestCase(unittest.TestCase):
 
         async def testfunc() -> None:
             self._check_test_key("foo")
-            d = defer.ensureDeferred(Clock(reactor).sleep(0))
+            # Ignore linter error since we are creating a `Clock` for testing purposes.
+            d = defer.ensureDeferred(Clock(reactor).sleep(0))  # type: ignore[multiple-internal-clocks]
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             await d
             self._check_test_key("foo")
@@ -552,7 +562,8 @@ class LoggingContextTestCase(unittest.TestCase):
 
         This will stress the logic around incomplete deferreds in `run_coroutine_in_background`.
         """
-        clock = Clock(reactor)
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor)  # type: ignore[multiple-internal-clocks]
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")

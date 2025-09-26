@@ -109,6 +109,7 @@ class MediaRepository:
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
         self.remote_media_linearizer = Linearizer(
+            hs.get_clock(),
             name="media_remote",
         )
 

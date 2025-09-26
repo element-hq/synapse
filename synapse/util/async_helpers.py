@@ -47,7 +47,6 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
     overload,
 )
 
@@ -64,7 +63,6 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.types import ISynapseThreadlessReactor
 from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 logger = logging.getLogger(__name__)
@@ -550,9 +548,9 @@ class Linearizer:
 
     def __init__(
         self,
+        clock: Clock,
         name: Optional[str] = None,
         max_count: int = 1,
-        clock: Optional[Clock] = None,
     ):
         """
         Args:
@@ -563,10 +561,6 @@ class Linearizer:
         else:
             self.name = name
 
-        if not clock:
-            from twisted.internet import reactor
-
-            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
         self._clock = clock
         self.max_count = max_count
 

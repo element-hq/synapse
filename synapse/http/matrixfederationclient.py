@@ -418,6 +418,7 @@ class MatrixFederationHttpClient:
         self.server_name = hs.hostname
 
         self.reactor = hs.get_reactor()
+        self.clock = hs.get_clock()
 
         user_agent = hs.version_string
         if hs.config.server.user_agent_suffix:
@@ -431,6 +432,7 @@ class MatrixFederationHttpClient:
             federation_agent: IAgent = MatrixFederationAgent(
                 server_name=self.server_name,
                 reactor=self.reactor,
+                clock=self.clock,
                 tls_client_options_factory=tls_client_options_factory,
                 user_agent=user_agent.encode("ascii"),
                 ip_allowlist=hs.config.server.federation_ip_range_allowlist,
@@ -464,7 +466,6 @@ class MatrixFederationHttpClient:
             ip_blocklist=hs.config.server.federation_ip_range_blocklist,
         )
 
-        self.clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self.version_string_bytes = hs.version_string.encode("ascii")
         self.default_timeout_seconds = hs.config.federation.client_timeout_ms / 1000
@@ -488,7 +489,9 @@ class MatrixFederationHttpClient:
             use_proxy=True,
         )
 
-        self.remote_download_linearizer = Linearizer("remote_download_linearizer", 6)
+        self.remote_download_linearizer = Linearizer(
+            hs.get_clock(), "remote_download_linearizer", 6
+        )
         self._is_shutdown = False
 
     def shutdown(self) -> None:

@@ -643,6 +643,7 @@ class StateResolutionHandler:
         self.clock = hs.get_clock()
 
         self.resolve_linearizer = Linearizer(
+            hs.get_clock(),
             name="state_resolve_lock",
         )
 
