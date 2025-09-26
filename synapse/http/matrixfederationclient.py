@@ -481,7 +481,9 @@ class MatrixFederationHttpClient:
             use_proxy=True,
         )
 
-        self.remote_download_linearizer = Linearizer("remote_download_linearizer", 6)
+        self.remote_download_linearizer = Linearizer(
+            name="remote_download_linearizer", max_count=6, clock=self.clock
+        )
 
     def wake_destination(self, destination: str) -> None:
         """Called when the remote server may have come back online."""

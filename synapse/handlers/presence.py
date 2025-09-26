@@ -872,7 +872,9 @@ class PresenceHandler(BasePresenceHandler):
         ] = {}
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer")
+        self.external_sync_linearizer = Linearizer(
+            name="external_sync_linearizer", clock=self.clock
+        )
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.

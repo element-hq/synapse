@@ -108,7 +108,7 @@ class MediaRepository:
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
-        self.remote_media_linearizer = Linearizer(name="media_remote")
+        self.remote_media_linearizer = Linearizer(name="media_remote", clock=self.clock)
 
         self.recently_accessed_remotes: Set[Tuple[str, str]] = set()
         self.recently_accessed_locals: Set[str] = set()

@@ -429,7 +429,7 @@ def run(hs: HomeServer) -> None:
 def main() -> None:
     homeserver_config = load_or_generate_config(sys.argv[1:])
 
-    with LoggingContext("main"):
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         # check base requirements
         check_requirements()
         hs = setup(homeserver_config)

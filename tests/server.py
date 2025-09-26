@@ -787,7 +787,7 @@ class ThreadPool:
 
 def get_clock() -> Tuple[ThreadedMemoryReactorClock, Clock]:
     clock = ThreadedMemoryReactorClock()
-    hs_clock = Clock(clock)
+    hs_clock = Clock(clock, server_name="test_server")
     return clock, hs_clock
 
 

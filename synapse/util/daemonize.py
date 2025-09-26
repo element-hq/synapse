@@ -32,6 +32,7 @@ from typing import NoReturn, Optional, Type
 from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
+    current_context,
 )
 
 
@@ -149,9 +150,12 @@ def daemonize_process(pid_file: str, logger: logging.Logger, chdir: str = "/") -
 
     signal.signal(signal.SIGTERM, sigterm)
 
+    # Copy the `server_name` from the current logcontext
+    server_name = current_context().server_name
+
     # Cleanup pid file at exit.
     def exit() -> None:
-        with LoggingContext("atexit"):
+        with LoggingContext(name="atexit", server_name=server_name):
             logger.warning("Stopping daemon.")
             os.remove(pid_file)
             sys.exit(0)

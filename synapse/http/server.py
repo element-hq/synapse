@@ -411,8 +411,19 @@ class DirectServeJsonResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            canonical_json: TODO
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
+
         if clock is None:
-            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
+            clock = Clock(
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
@@ -590,8 +601,17 @@ class DirectServeHtmlResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
         if clock is None:
-            clock = Clock(cast(ISynapseThreadlessReactor, reactor))
+            clock = Clock(
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
 

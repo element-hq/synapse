@@ -58,7 +58,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
     @logcontext_clean
     def test_with_context(self) -> None:
-        with LoggingContext("test"):
+        with LoggingContext(name="test", server_name="test_server"):
             self._check_test_key("test")
 
     @logcontext_clean
@@ -66,7 +66,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.sleep`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -80,7 +80,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # other words, another task shouldn't have leaked their context to us.
                 self._check_test_key("sentinel")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -92,7 +92,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         reactor.callLater(0, lambda: defer.ensureDeferred(competing_callback()))
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             await clock.sleep(0)
             self._check_test_key("foo")
             await clock.sleep(0)
@@ -111,7 +111,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.looping_call`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -125,7 +125,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # which server spawned this loop and which server the logs came from.
                 self._check_test_key("looping_call")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -135,7 +135,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             lc = clock.looping_call(
                 lambda: defer.ensureDeferred(competing_callback()), 0
             )
@@ -161,7 +161,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.looping_call_now`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -175,7 +175,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # which server spawned this loop and which server the logs came from.
                 self._check_test_key("looping_call")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -185,7 +185,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             lc = clock.looping_call_now(
                 lambda: defer.ensureDeferred(competing_callback()), 0
             )
@@ -209,7 +209,7 @@ class LoggingContextTestCase(unittest.TestCase):
         """
         Test `Clock.call_later`
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -223,7 +223,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # which server spawned this loop and which server the logs came from.
                 self._check_test_key("call_later")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -233,7 +233,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             clock.call_later(0, lambda: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
             await clock.sleep(0)
@@ -261,7 +261,7 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -274,7 +274,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The deferred callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -284,7 +284,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
@@ -318,7 +318,7 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -331,7 +331,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The deferred callback should have the same logcontext as the caller
                 self._check_test_key("sentinel")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -341,7 +341,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
@@ -379,7 +379,7 @@ class LoggingContextTestCase(unittest.TestCase):
         `d.callback(None)` without anything else. See the *Deferred callbacks* section
         of docs/log_contexts.md for more details.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -392,7 +392,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The deferred callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -409,7 +409,9 @@ class LoggingContextTestCase(unittest.TestCase):
         # context manager lifetime methods of `LoggingContext` (`__enter__`/`__exit__`).
         # And we can still set the current logcontext by using `PreserveLoggingContext`
         # and passing in the "foo" logcontext.
-        with PreserveLoggingContext(LoggingContext("foo")):
+        with PreserveLoggingContext(
+            LoggingContext(name="foo", server_name="test_server")
+        ):
             d: defer.Deferred[None] = defer.Deferred()
             d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
             self._check_test_key("foo")
@@ -448,14 +450,14 @@ class LoggingContextTestCase(unittest.TestCase):
         self._check_test_key("sentinel")
 
     async def _test_run_in_background(self, function: Callable[[], object]) -> None:
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
 
         callback_finished = False
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             # Fire off the function, but don't wait on it.
             deferred = run_in_background(function)
             self._check_test_key("foo")
@@ -490,7 +492,7 @@ class LoggingContextTestCase(unittest.TestCase):
     @logcontext_clean
     async def test_run_in_background_with_blocking_fn(self) -> None:
         async def blocking_function() -> None:
-            await Clock(reactor).sleep(0)
+            await Clock(reactor, server_name="test_server").sleep(0)
 
         await self._test_run_in_background(blocking_function)
 
@@ -523,7 +525,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         async def testfunc() -> None:
             self._check_test_key("foo")
-            d = defer.ensureDeferred(Clock(reactor).sleep(0))
+            d = defer.ensureDeferred(Clock(reactor, server_name="test_server").sleep(0))
             self.assertIs(current_context(), SENTINEL_CONTEXT)
             await d
             self._check_test_key("foo")
@@ -552,7 +554,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         This will stress the logic around incomplete deferreds in `run_coroutine_in_background`.
         """
-        clock = Clock(reactor)
+        clock = Clock(reactor, server_name="test_server")
 
         # Sanity check that we start in the sentinel context
         self._check_test_key("sentinel")
@@ -565,7 +567,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     await clock.sleep(0)
                     self._check_test_key("competing")
 
@@ -575,7 +577,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             run_coroutine_in_background(competing_callback())
             self._check_test_key("foo")
             await clock.sleep(0)
@@ -608,7 +610,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # The callback should have the same logcontext as the caller
                 self._check_test_key("foo")
 
-                with LoggingContext("competing"):
+                with LoggingContext(name="competing", server_name="test_server"):
                     # We `await` here but there is nothing to wait for here since the
                     # deferred is already complete so we should immediately continue
                     # executing in the same context.
@@ -622,7 +624,7 @@ class LoggingContextTestCase(unittest.TestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             run_coroutine_in_background(competing_callback())
             self._check_test_key("foo")
 
@@ -648,7 +650,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
         sentinel_context = current_context()
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d1 = make_deferred_yieldable(blocking_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -665,7 +667,7 @@ class LoggingContextTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[object]", object, None]:
         sentinel_context = current_context()
 
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             d1 = make_deferred_yieldable(_chained_deferred_function())
             # make sure that the context was reset by make_deferred_yieldable
             self.assertIs(current_context(), sentinel_context)
@@ -677,7 +679,7 @@ class LoggingContextTestCase(unittest.TestCase):
 
     @logcontext_clean
     def test_nested_logging_context(self) -> None:
-        with LoggingContext("foo"):
+        with LoggingContext(name="foo", server_name="test_server"):
             nested_context = nested_logging_context(suffix="bar")
             self.assertEqual(nested_context.name, "foo-bar")
 

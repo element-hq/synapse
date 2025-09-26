@@ -86,7 +86,7 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     hs_config = Config()
 
     # To be able to sleep.
-    clock = Clock(reactor)
+    clock = Clock(reactor, server_name=hs_config.server.server_name)
 
     errors = StringIO()
     publisher = LogPublisher()

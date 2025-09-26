@@ -642,7 +642,9 @@ class StateResolutionHandler:
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
 
-        self.resolve_linearizer = Linearizer(name="state_resolve_lock")
+        self.resolve_linearizer = Linearizer(
+            name="state_resolve_lock", clock=self.clock
+        )
 
         # dict of set of event_ids -> _StateCacheEntry.
         self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
