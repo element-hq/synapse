@@ -2529,6 +2529,84 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             )
         )
 
+    @override_config({"media_redirect": {"enabled": True, "secret": "supersecret"}})
+    def test_download_signed_redirect(self) -> None:
+        """When media redirects are enabled, we should redirect to a signed URL for downloads"""
+        # Create local media
+        content = io.BytesIO(b"file_to_stream")
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "text/plain",
+                "test_upload",
+                content,
+                14,
+                UserID.from_string(f"@user:{self.hs.hostname}"),
+            )
+        )
+
+        # Request the download
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/download/{self.hs.hostname}/{content_uri.media_id}",
+            shorthand=False,
+            access_token=self.tok,
+        )
+
+        # Should get a redirect response
+        self.assertEqual(channel.code, 307)
+
+        # Check the Location header for the signed URL
+        location_headers = channel.headers.getRawHeaders("Location")
+        self.assertIsNotNone(location_headers)
+        assert location_headers is not None
+        self.assertEqual(len(location_headers), 1)
+        location = location_headers[0]
+
+        # Verify the signed URL format
+        self.assertRegex(
+            location,
+            rf"^https://test/_synapse/media/download/{content_uri.media_id}\?exp=\d+&sig=\w+$",
+        )
+
+    @override_config({"media_redirect": {"enabled": True, "secret": "supersecret"}})
+    def test_thumbnail_signed_redirect(self) -> None:
+        """When media redirects are enabled, we should redirect to a signed URL for thumbnails (scaled)"""
+        # Create local media with an image
+        content = io.BytesIO(small_png.data)
+        content_uri = self.get_success(
+            self.media_repo.create_or_update_content(
+                "image/png",
+                "test_png_thumbnail",
+                content,
+                67,
+                UserID.from_string(f"@user:{self.hs.hostname}"),
+            )
+        )
+
+        # Request a scaled thumbnail
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.hs.hostname}/{content_uri.media_id}?width=32&height=32",
+            shorthand=False,
+            access_token=self.tok,
+        )
+
+        # Should get a redirect response
+        self.assertEqual(channel.code, 307)
+
+        # Check the Location header for the signed URL
+        location_headers = channel.headers.getRawHeaders("Location")
+        self.assertIsNotNone(location_headers)
+        assert location_headers is not None
+        self.assertEqual(len(location_headers), 1)
+        location = location_headers[0]
+
+        # Verify the signed URL format
+        self.assertRegex(
+            location,
+            rf"^https://test/_synapse/media/thumbnail/{content_uri.media_id}/[^?]+\?exp=\d+&sig=\w+$",
+        )
+
 
 configs = [
     {"extra_config": {"dynamic_thumbnails": True}},

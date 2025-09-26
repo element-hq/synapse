@@ -765,6 +765,7 @@ Handles the media repository. It can handle all endpoints starting with:
     /_matrix/media/
     /_matrix/client/v1/media/
     /_matrix/federation/v1/media/
+    /_synapse/media/
 
 ... and the following regular expressions matching media-specific administration APIs:
 
