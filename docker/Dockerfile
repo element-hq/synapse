@@ -174,7 +174,7 @@ ARG TARGETARCH
 LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
 LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
-LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
+LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
 
 # On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
 # libraries to the right place, else the `COPY` won't work.
