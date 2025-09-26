@@ -80,9 +80,18 @@ class StateDeltasStore(SQLBaseStore):
     async def get_partial_current_state_deltas(
         self, prev_stream_id: int, max_stream_id: int, limit: int = 100
     ) -> Tuple[int, List[StateDelta]]:
-        """Fetch a list of room state changes since the given stream id
+        """Fetch a list of room state changes since the given stream id.
 
         This may be the partial state if we're lazy joining the room.
+
+        This method takes care to handle state deltas that share the same
+        `stream_id`. That can happen when persisting state in a batch,
+        potentially as the result of state resolution (both adding new state and
+        undo'ing previous state).
+
+        State deltas are grouped by `stream_id`. When hitting the given `limit`
+        would return only part of a "group" of state deltas, that entire group
+        is omitted. Thus, this function may return *up to* `limit` state deltas.
 
         Args:
             prev_stream_id: point to get changes since (exclusive)
@@ -119,22 +128,70 @@ class StateDeltasStore(SQLBaseStore):
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
         ) -> Tuple[int, List[StateDelta]]:
-            sql = """
-                SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
-                FROM current_state_delta_stream
-                WHERE ? < stream_id AND stream_id <= ?
-                ORDER BY stream_id ASC
-                LIMIT ?
-            """
-            txn.execute(sql, (prev_stream_id, max_stream_id, limit))
-            rows = txn.fetchall()
+            # First we group state deltas by `stream_id` and calculate the
+            # stream id that will give us the most amount of state deltas (under
+            # the provided `limit`) without splitting any group up.
 
-            # In the case that we hit the given `limit` rather than fetching the
-            # most recent rows, return the `stream_id` of the last row.
-            #
-            # With this, the caller knows from what stream_id to call this
-            # function again with.
-            clipped_stream_id = rows[-1][0]
+            # 1) Figure out which stream_id groups fit within `limit`
+            #    and whether we consumed everything up to max_stream_id.
+            sql_meta = """
+            WITH grouped AS (
+                SELECT stream_id, COUNT(*) AS c
+                FROM current_state_delta_stream
+                WHERE stream_id > ? AND stream_id <= ?
+                GROUP BY stream_id
+                ORDER BY stream_id
+                LIMIT ?
+            ),
+            accum AS (
+                SELECT
+                    stream_id,
+                    c,
+                    SUM(c) OVER (ORDER BY stream_id) AS running
+                FROM grouped
+            ),
+            included AS (
+                SELECT stream_id, running
+                FROM accum
+                WHERE running <= ?
+            )
+            SELECT
+                COALESCE((SELECT SUM(c)        FROM grouped), 0) AS total_rows,
+                COALESCE((SELECT MAX(running)  FROM included), 0) AS included_rows,
+                COALESCE((SELECT MAX(stream_id) FROM included), ?) AS last_included_sid
+            """
+            txn.execute(
+                sql_meta, (prev_stream_id, max_stream_id, limit, limit, prev_stream_id)
+            )
+            total_rows, included_rows, last_included_sid = txn.fetchone()  # type: ignore
+
+            if total_rows == 0:
+                # Nothing to return in the range; we are up to date through max_stream_id.
+                return max_stream_id, []
+
+            if included_rows == 0:
+                # The first group itself would exceed the limit. Return nothing
+                # and do not advance beyond prev_stream_id.
+                #
+                # TODO: In this case, we should return *more* than the given `limit`.
+                # Otherwise we'll either deadlock the caller (they'll keep calling us
+                # with the same prev_stream_id) or make the caller think there's no
+                # more rows to consume (when there are).
+                return prev_stream_id, []
+
+            # If we included every row up to max_stream_id, we can safely report progress to max_stream_id.
+            consumed_all = included_rows == total_rows
+            clipped_stream_id = max_stream_id if consumed_all else last_included_sid
+
+            # 2) Fetch the actual rows for only the included stream_id groups.
+            sql_rows = """
+            SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
+            FROM current_state_delta_stream
+            WHERE ? < stream_id AND stream_id <= ?
+            ORDER BY stream_id ASC
+            """
+            txn.execute(sql_rows, (prev_stream_id, clipped_stream_id))
+            rows = txn.fetchall()
 
             return clipped_stream_id, [
                 StateDelta(

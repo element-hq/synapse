@@ -19,6 +19,7 @@
 #
 #
 
+import json
 import logging
 from typing import List, Tuple, cast
 
@@ -33,6 +34,7 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomID, StateMap, UserID
 from synapse.types.state import StateFilter
 from synapse.util.clock import Clock
+from synapse.util.stringutils import random_string
 
 from tests.unittest import HomeserverTestCase
 
@@ -692,7 +694,7 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
 
         return event
 
-    def test_current_state_delta_stream_is_limited_to_100(self) -> None:
+    def test_get_partial_current_state_deltas_limit(self) -> None:
         """
         Tests that `get_partial_current_state_deltas` actually returns `limit` rows.
 
@@ -744,3 +746,116 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
             )
             # Still should respect the limit.
             self.assertLessEqual(len(next_deltas), limit)
+
+    def test_non_unique_stream_ids_in_current_state_delta_stream(self) -> None:
+        """
+        Tests that `get_partial_current_state_deltas` always returns entire
+        groups of state deltas (grouped by `stream_id`), and never part of one.
+
+        We check by passing a `limit` that to the function that, if followed
+        blindly, would split a group of state deltas that share a `stream_id`.
+        The test passes if that group is not returned at all (because doing so
+        would overshoot the limit of returned state deltas).
+
+        Regression test for https://github.com/element-hq/synapse/pull/18960.
+        """
+        # Inject a create event to start with.
+        self.inject_state_event(
+            self.room, self.alice_user_id, EventTypes.Create, "", {}
+        )
+
+        # Then inject one "real" m.room.name event. This will give us a stream_id that
+        # we can create some more (fake) events with.
+        self.inject_state_event(
+            self.room,
+            self.alice_user_id,
+            EventTypes.Name,
+            "",
+            {"name": "rename #1"},
+        )
+
+        # Get the stream_id of the last-inserted event.
+        max_stream_id = self.store.get_room_max_stream_ordering()
+
+        # Make 3 more state changes in the room, resulting in 5 total state
+        # events (including the create event, and the first name update) in
+        # the room.
+        #
+        # All of these state deltas have the same `stream_id`. Do so by editing
+        # the table directly as that's the simplest way to have all share the
+        # same `stream_id`.
+        self.get_success(
+            self.store.db_pool.simple_insert_many(
+                "current_state_delta_stream",
+                keys=(
+                    "stream_id",
+                    "room_id",
+                    "type",
+                    "state_key",
+                    "event_id",
+                    "prev_event_id",
+                    "instance_name",
+                ),
+                values=[
+                    (
+                        max_stream_id,
+                        self.room.to_string(),
+                        "m.room.name",
+                        "",
+                        f"${random_string(5)}:test",
+                        json.dumps({"name": f"rename #{i}"}),
+                        "master",
+                    )
+                    for i in range(3)
+                ],
+                desc="inject_room_name_state_events",
+            )
+        )
+
+        # Call the function under test with a limit of 4. Without the limit, we would return
+        # 5 state deltas:
+        #
+        # C T T T T
+        # 1 2 3 4 5
+        #
+        # C = m.room.create
+        # T = m.room.topic
+        #
+        # With the limit, we should return only the create event, as returning 4
+        # state deltas would result in splitting a group:
+        #
+        # C T T T T
+        # 1 2 3 4 X
+
+        clipped_stream_id, deltas = self.get_success(
+            self.store.get_partial_current_state_deltas(
+                prev_stream_id=0,
+                max_stream_id=max_stream_id,
+                limit=4,
+            )
+        )
+
+        # 2 is the stream ID of the m.room.create event.
+        self.assertEqual(clipped_stream_id, 2)
+        self.assertEqual(
+            len(deltas),
+            1,
+            f"Returned {len(deltas)} rows, expected only one (the create event): {deltas}",
+        )
+
+        # Advance once more with our limit of 4. We should now get all 4
+        # `m.room.name` state deltas as they can fit under the limit.
+        clipped_stream_id, next_deltas = self.get_success(
+            self.store.get_partial_current_state_deltas(
+                prev_stream_id=clipped_stream_id, max_stream_id=max_stream_id, limit=4
+            )
+        )
+        self.assertEqual(
+            clipped_stream_id, 3
+        )  # The stream ID of the 4 m.room.name events.
+
+        self.assertEqual(
+            len(next_deltas),
+            4,
+            f"Returned {len(next_deltas)} rows, expected all 4 m.room.name events: {next_deltas}",
+        )
