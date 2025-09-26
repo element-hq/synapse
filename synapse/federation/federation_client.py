@@ -497,6 +497,43 @@ class FederationClient(FederationBase):
 
     @trace
     @tag_args
+    async def ask_policy_server_to_sign_event(
+        self, destination: str, pdu: EventBase, timeout: Optional[int] = None
+    ) -> Optional[JsonDict]:
+        """Requests that the destination server (typically a policy server)
+        sign the event as not spam.
+
+        If the policy server could not be contacted or the policy server
+        returned an error, this returns no signature.
+
+        Args:
+            destination: The remote homeserver to ask (a policy server)
+            pdu: The event to sign
+            timeout: How long to try (in ms) the destination for before
+                giving up. None indicates no timeout.
+        Returns:
+            The signature from the policy server, structured in the same was as the 'signatures'
+            JSON in the event e.g { "$policy_server_via_domain" : { "ed25519:policy_server": "signature_base64" }}
+        """
+        logger.debug(
+            "ask_policy_server_to_sign_event for event_id=%s from %s",
+            pdu.event_id,
+            destination,
+        )
+        try:
+            return await self.transport_layer.ask_policy_server_to_sign_event(
+                destination, pdu, timeout=timeout
+            )
+        except Exception as e:
+            logger.warning(
+                "ask_policy_server_to_sign_event: server %s responded with error: %s",
+                destination,
+                e,
+            )
+        return None
+
+    @trace
+    @tag_args
     async def get_pdu(
         self,
         destinations: Collection[str],

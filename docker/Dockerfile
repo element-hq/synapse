@@ -171,8 +171,8 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
 
 ARG TARGETARCH
 
-LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
-LABEL org.opencontainers.image.documentation='https://github.com/element-hq/synapse/blob/master/docker/README.md'
+LABEL org.opencontainers.image.url='https://github.com/element-hq/synapse'
+LABEL org.opencontainers.image.documentation='https://element-hq.github.io/synapse/latest/'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later OR LicenseRef-Element-Commercial'
 
