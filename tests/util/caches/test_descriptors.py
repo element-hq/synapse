@@ -49,6 +49,7 @@ from synapse.util.caches import descriptors
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
 
 from tests import unittest
+from tests.server import get_clock
 from tests.test_utils import get_awaitable_result
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> str:
@@ -105,6 +107,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(num_args=1)
             def fn(self, arg1: int, arg2: int) -> str:
@@ -151,6 +154,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
         obj = Cls()
         obj.mock.return_value = "fish"
@@ -182,6 +186,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, kwarg1: int = 2) -> str:
@@ -217,6 +222,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> NoReturn:
@@ -242,6 +248,7 @@ class DescriptorTestCase(unittest.TestCase):
             result: Optional[Deferred] = None
             call_count = 0
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> Deferred:
@@ -296,6 +303,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int) -> "Deferred[int]":
@@ -340,6 +348,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int) -> Deferred:
@@ -384,6 +393,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int = 2, arg3: int = 3) -> str:
@@ -422,6 +432,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(iterable=True)
             def fn(self, arg1: int, arg2: int) -> Tuple[str, ...]:
@@ -456,6 +467,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(iterable=True)
             def fn(self, arg1: int) -> NoReturn:
@@ -479,6 +491,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached(cache_context=True)
             async def func1(self, key: str, cache_context: _CacheContext) -> int:
@@ -507,6 +520,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             async def fn(self, arg1: int) -> str:
@@ -540,6 +554,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             inner_context_was_finished = False
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             async def fn(self, arg1: int) -> str:
@@ -586,6 +601,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
     def test_passthrough(self) -> Generator["Deferred[Any]", object, None]:
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -602,6 +618,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -622,6 +639,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -642,6 +660,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
     def test_invalidate_missing(self) -> None:
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -655,6 +674,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached(max_entries=10)
             def func(self, key: int) -> int:
@@ -684,6 +704,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> "Deferred[int]":
@@ -704,6 +725,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -739,6 +761,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached(max_entries=2)
             def func(self, key: str) -> str:
@@ -778,6 +801,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -827,6 +851,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> None:
@@ -893,6 +918,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int) -> None:
@@ -937,6 +963,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> None:
@@ -978,6 +1005,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> None:
@@ -1014,6 +1042,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         class Cls:
             inner_context_was_finished = False
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> None:
@@ -1058,6 +1087,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(tree=True)
             def fn(self, room_id: str, event_id: str) -> None:

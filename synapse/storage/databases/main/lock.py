@@ -108,7 +108,7 @@ class LockStore(SQLBaseStore):
 
         self._acquiring_locks: Set[Tuple[str, str]] = set()
 
-        self._clock.looping_call(
+        self.clock.looping_call(
             self._reap_stale_read_write_locks, _LOCK_TIMEOUT_MS / 10.0
         )
 
@@ -154,7 +154,7 @@ class LockStore(SQLBaseStore):
         if lock and await lock.is_still_valid():
             return None
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         token = random_string(6)
 
         def _try_acquire_lock_txn(txn: LoggingTransaction) -> bool:
@@ -203,7 +203,7 @@ class LockStore(SQLBaseStore):
         lock = Lock(
             self.server_name,
             self._reactor,
-            self._clock,
+            self.clock,
             self,
             read_write=False,
             lock_name=lock_name,
@@ -252,7 +252,7 @@ class LockStore(SQLBaseStore):
         # constraints. If it doesn't then we have acquired the lock,
         # otherwise we haven't.
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         token = random_string(6)
 
         self.db_pool.simple_insert_txn(
@@ -271,7 +271,7 @@ class LockStore(SQLBaseStore):
         lock = Lock(
             self.server_name,
             self._reactor,
-            self._clock,
+            self.clock,
             self,
             read_write=True,
             lock_name=lock_name,
@@ -339,7 +339,7 @@ class LockStore(SQLBaseStore):
         """
 
         def reap_stale_read_write_locks_txn(txn: LoggingTransaction) -> None:
-            txn.execute(delete_sql, (self._clock.time_msec() - _LOCK_TIMEOUT_MS,))
+            txn.execute(delete_sql, (self.clock.time_msec() - _LOCK_TIMEOUT_MS,))
             if txn.rowcount:
                 logger.info("Reaped %d stale locks", txn.rowcount)
 

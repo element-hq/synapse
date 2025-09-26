@@ -982,6 +982,7 @@ class SyncHandler:
             logger.debug("creating LruCache for %r", cache_key)
             cache = LruCache(
                 max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
+                clock=self.clock,
             )
             self.lazy_loaded_members_cache[cache_key] = cache
         else:

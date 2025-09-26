@@ -23,6 +23,7 @@ from pyperf import perf_counter
 
 from synapse.types import ISynapseReactor
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.clock import Clock
 
 
 async def main(reactor: ISynapseReactor, loops: int) -> float:
@@ -30,7 +31,7 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     Benchmark `loops` number of insertions into LruCache where half of them are
     evicted.
     """
-    cache: LruCache[int, bool] = LruCache(max_size=loops // 2)
+    cache: LruCache[int, bool] = LruCache(max_size=loops // 2, clock=Clock(reactor))  # type: ignore[multiple-internal-clocks]
 
     start = perf_counter()
 

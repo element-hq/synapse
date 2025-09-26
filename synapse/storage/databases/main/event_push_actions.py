@@ -267,7 +267,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         super().__init__(database, db_conn, hs)
 
         # Track when the process started.
-        self._started_ts = self._clock.time_msec()
+        self._started_ts = self.clock.time_msec()
 
         # These get correctly set by _find_stream_orderings_for_times_txn
         self.stream_ordering_month_ago: Optional[int] = None
@@ -277,14 +277,14 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         self._find_stream_orderings_for_times_txn(cur)
         cur.close()
 
-        self._clock.looping_call(self._find_stream_orderings_for_times, 10 * 60 * 1000)
+        self.clock.looping_call(self._find_stream_orderings_for_times, 10 * 60 * 1000)
 
         self._rotate_count = 10000
         self._doing_notif_rotation = False
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(self._rotate_notifs, 30 * 1000)
+            self.clock.looping_call(self._rotate_notifs, 30 * 1000)
 
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self._clear_old_push_actions_staging, 30 * 60 * 1000
             )
 
@@ -1190,7 +1190,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 is_highlight,  # highlight column
                 int(count_as_unread),  # unread column
                 thread_id,  # thread_id column
-                self._clock.time_msec(),  # inserted_ts column
+                self.clock.time_msec(),  # inserted_ts column
             )
 
         await self.db_pool.simple_insert_many(
@@ -1241,14 +1241,14 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
     def _find_stream_orderings_for_times_txn(self, txn: LoggingTransaction) -> None:
         logger.info("Searching for stream ordering 1 month ago")
         self.stream_ordering_month_ago = self._find_first_stream_ordering_after_ts_txn(
-            txn, self._clock.time_msec() - 30 * 24 * 60 * 60 * 1000
+            txn, self.clock.time_msec() - 30 * 24 * 60 * 60 * 1000
         )
         logger.info(
             "Found stream ordering 1 month ago: it's %d", self.stream_ordering_month_ago
         )
         logger.info("Searching for stream ordering 1 day ago")
         self.stream_ordering_day_ago = self._find_first_stream_ordering_after_ts_txn(
-            txn, self._clock.time_msec() - 24 * 60 * 60 * 1000
+            txn, self.clock.time_msec() - 24 * 60 * 60 * 1000
         )
         logger.info(
             "Found stream ordering 1 day ago: it's %d", self.stream_ordering_day_ago
@@ -1787,7 +1787,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         # We delete anything more than an hour old, on the assumption that we'll
         # never take more than an hour to persist an event.
-        delete_before_ts = self._clock.time_msec() - 60 * 60 * 1000
+        delete_before_ts = self.clock.time_msec() - 60 * 60 * 1000
 
         if self._started_ts > delete_before_ts:
             # We need to wait for at least an hour before we started deleting,
@@ -1824,7 +1824,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 return
 
             # We sleep to ensure that we don't overwhelm the DB.
-            await self._clock.sleep(1.0)
+            await self.clock.sleep(1.0)
 
     async def get_push_actions_for_user(
         self,

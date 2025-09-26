@@ -1003,7 +1003,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         with Measure(
-            self._clock,
+            self.clock,
             name="get_joined_user_ids_from_state",
             server_name=self.server_name,
         ):

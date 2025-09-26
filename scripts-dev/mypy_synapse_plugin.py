@@ -92,6 +92,12 @@ PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER = ErrorCode(
     category="synapse-reactor-clock",
 )
 
+MULTIPLE_INTERNAL_CLOCKS_CREATED = ErrorCode(
+    "multiple-internal-clocks",
+    "Only one instance of `clock.Clock` should be created",
+    category="synapse-reactor-clock",
+)
+
 
 class Sentinel(enum.Enum):
     # defining a sentinel in this way allows mypy to correctly handle the
@@ -237,6 +243,9 @@ class SynapsePlugin(Plugin):
         if fullname == "twisted.internet.task.LoopingCall":
             return check_looping_call
 
+        if fullname == "synapse.util.clock.Clock":
+            return check_clock_creation
+
         return None
 
     def get_method_signature_hook(
@@ -326,6 +335,25 @@ def check_looping_call(ctx: FunctionSigContext) -> CallableType:
         "server shutdown",
         ctx.context,
         code=PREFER_SYNAPSE_CLOCK_LOOPING_CALL,
+    )
+
+    return signature
+
+
+def check_clock_creation(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the only `clock.Clock` is the one used by the `HomeServer`.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected the only `clock.Clock` instance to be the one used by the `HomeServer`. "
+        "This is so that the `HomeServer` can cancel any tracked delayed or looping calls "
+        "during server shutdown",
+        ctx.context,
+        code=MULTIPLE_INTERNAL_CLOCKS_CREATED,
     )
 
     return signature
