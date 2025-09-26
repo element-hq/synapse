@@ -76,7 +76,7 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.config.homeserver import HomeServerConfig
-from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
+from synapse.logging.context import defer_to_thread, preserve_fn
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
@@ -113,7 +113,7 @@ HTML_ERROR_TEMPLATE = """<!DOCTYPE html>
 HTTP_STATUS_REQUEST_CANCELLED = 499
 
 
-def return_json_error(
+async def return_json_error(
     f: failure.Failure, request: "SynapseRequest", config: Optional[HomeServerConfig]
 ) -> None:
     """Sends a JSON error response to clients."""
@@ -165,7 +165,7 @@ def return_json_error(
                 # abortConnection throws if the connection is already closed
                 pass
     else:
-        respond_with_json(
+        await respond_with_json(
             request,
             error_code,
             error_dict,
@@ -344,13 +344,13 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
 
                 if callback_return is not None:
                     code, response = callback_return
-                    self._send_response(request, code, response)
+                    await self._send_response(request, code, response)
         except Exception:
             # failure.Failure() fishes the original Failure out
             # of our stack, and thus gives us a sensible stack
             # trace.
             f = failure.Failure()
-            self._send_error_response(f, request)
+            await self._send_error_response(f, request)
 
     async def _async_render(
         self, request: "SynapseRequest"
@@ -382,7 +382,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
         raise UnrecognizedRequestError(code=405)
 
     @abc.abstractmethod
-    def _send_response(
+    async def _send_response(
         self,
         request: "SynapseRequest",
         code: int,
@@ -391,7 +391,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _send_error_response(
+    async def _send_error_response(
         self,
         f: failure.Failure,
         request: "SynapseRequest",
@@ -417,7 +417,7 @@ class DirectServeJsonResource(_AsyncResource):
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
 
-    def _send_response(
+    async def _send_response(
         self,
         request: "SynapseRequest",
         code: int,
@@ -425,7 +425,7 @@ class DirectServeJsonResource(_AsyncResource):
     ) -> None:
         """Implements _AsyncResource._send_response"""
         # TODO: Only enable CORS for the requests that need it.
-        respond_with_json(
+        await respond_with_json(
             request,
             code,
             response_object,
@@ -433,13 +433,13 @@ class DirectServeJsonResource(_AsyncResource):
             canonical_json=self.canonical_json,
         )
 
-    def _send_error_response(
+    async def _send_error_response(
         self,
         f: failure.Failure,
         request: "SynapseRequest",
     ) -> None:
         """Implements _AsyncResource._send_error_response"""
-        return_json_error(f, request, None)
+        await return_json_error(f, request, None)
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -567,13 +567,13 @@ class JsonResource(DirectServeJsonResource):
 
         return callback_return
 
-    def _send_error_response(
+    async def _send_error_response(
         self,
         f: failure.Failure,
         request: "SynapseRequest",
     ) -> None:
         """Implements _AsyncResource._send_error_response"""
-        return_json_error(f, request, self.hs.config)
+        await return_json_error(f, request, self.hs.config)
 
 
 class DirectServeHtmlResource(_AsyncResource):
@@ -595,7 +595,7 @@ class DirectServeHtmlResource(_AsyncResource):
 
         super().__init__(clock, extract_context)
 
-    def _send_response(
+    async def _send_response(
         self,
         request: "SynapseRequest",
         code: int,
@@ -608,7 +608,7 @@ class DirectServeHtmlResource(_AsyncResource):
 
         respond_with_html_bytes(request, code, html_bytes)
 
-    def _send_error_response(
+    async def _send_error_response(
         self,
         f: failure.Failure,
         request: "SynapseRequest",
@@ -794,7 +794,7 @@ def _encode_json_bytes(json_object: object) -> bytes:
     return json_encoder.encode(json_object).encode("utf-8")
 
 
-def respond_with_json(
+async def respond_with_json(
     request: "SynapseRequest",
     code: int,
     json_object: Any,
@@ -838,9 +838,7 @@ def respond_with_json(
     if send_cors:
         set_cors_headers(request)
 
-    run_in_background(
-        _async_write_json_to_request_in_thread, request, encoder, json_object
-    )
+    await _async_write_json_to_request_in_thread(request, encoder, json_object)
     return NOT_DONE_YET
 
 
@@ -896,6 +894,8 @@ async def _async_write_json_to_request_in_thread(
     Note: We don't use JsonEncoder.iterencode here as that falls back to the
     Python implementation (rather than the C backend), which is *much* more
     expensive.
+
+    The actual writing of bytes is not finished when this returns.
     """
 
     def encode(opentracing_span: "Optional[opentracing.Span]") -> bytes:
