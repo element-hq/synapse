@@ -558,7 +558,7 @@ class Linearizer:
         Args:
             name: TODO
             max_count: The maximum number of concurrent accesses
-            clock: TODO
+            clock: (ideally, the homeserver clock `hs.get_clock()`)
         """
         self.name = name
         self.max_count = max_count
