@@ -287,6 +287,9 @@ class LoggingContext:
         server_name: The name of the server this context is associated with
             (`config.server.server_name` or `hs.hostname`)
         parent_context (LoggingContext|None): The parent of the new context
+        request: Synapse Request Context object. Useful to associate all the logs
+            happening to a given request.
+
     """
 
     __slots__ = [
