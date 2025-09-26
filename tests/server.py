@@ -1220,9 +1220,9 @@ def setup_test_homeserver(
     # cleanup functions result in holding the `hs` in memory.
     cleanup_hs_ref = weakref.ref(hs)
 
-    def shutdown_hs_on_cleanup() -> Deferred[None]:
+    def shutdown_hs_on_cleanup() -> "Deferred[None]":
         cleanup_hs = cleanup_hs_ref()
-        deferred: Deferred[None] = defer.succeed(None)
+        deferred: "Deferred[None]" = defer.succeed(None)
         if cleanup_hs is not None:
             deferred = defer.ensureDeferred(cleanup_hs.shutdown())
         return deferred
