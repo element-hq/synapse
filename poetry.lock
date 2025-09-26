@@ -2935,14 +2935,14 @@ referencing = "*"
 
 [[package]]
 name = "types-netaddr"
-version = "1.3.0.20240530"
+version = "1.3.0.20250822"
 description = "Typing stubs for netaddr"
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types-netaddr-1.3.0.20240530.tar.gz", hash = "sha256:742c2ec1f202b666f544223e2616b34f1f13df80c91e5aeaaa93a72e4d0774ea"},
-    {file = "types_netaddr-1.3.0.20240530-py3-none-any.whl", hash = "sha256:354998d018e326da4f1d9b005fc91137b7c2c473aaf03c4ef64bf83c6861b440"},
+    {file = "types_netaddr-1.3.0.20250822-py3-none-any.whl", hash = "sha256:2800fdcc5455fdeb9c8b1015f4363fae6b737e7a0b1244d5c9f82c6fd0b6e200"},
+    {file = "types_netaddr-1.3.0.20250822.tar.gz", hash = "sha256:a80c1e338f6bafcfbd8c211b732ddca2afe4e07350b87bbf4fc72098db830e0d"},
 ]
 
 [[package]]
