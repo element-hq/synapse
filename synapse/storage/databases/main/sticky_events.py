@@ -243,7 +243,9 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         )
         rows = cast(List[Tuple[str, str, int]], txn.fetchall())
         return [
-            row[0] for row in rows if row[2] > from_stream_pos and self.hs.is_mine_id(row[1])
+            row[0]
+            for row in rows
+            if row[2] > from_stream_pos and self.hs.is_mine_id(row[1])
         ]
 
     async def reevaluate_soft_failed_sticky_events(
