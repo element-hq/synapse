@@ -1089,7 +1089,7 @@ class TestHomeServer(HomeServer):
 
 
 def setup_test_homeserver(
-    cleanup_func: Callable[[Callable[[], Optional[Deferred[None]]]], None],
+    cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
     name: str = "test",
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
