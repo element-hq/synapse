@@ -973,6 +973,10 @@ def set_cors_headers(request: "SynapseRequest") -> None:
     request.setHeader(
         b"Access-Control-Allow-Methods", b"GET, HEAD, POST, PUT, DELETE, OPTIONS"
     )
+
+    # Allow browsers to cache preflight responses for 10 minutes
+    request.setHeader(b"Access-Control-Max-Age", b"600")
+
     if request.path is not None and (
         request.path == b"/_matrix/client/unstable/org.matrix.msc4108/rendezvous"
         or request.path.startswith(b"/_synapse/client/rendezvous")
