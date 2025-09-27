@@ -96,7 +96,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
             server_name=self.server_name,
-            clock=self._clock,
+            clock=self.clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
         )
@@ -154,7 +154,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         )
 
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 run_as_background_process,
                 DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
@@ -826,7 +826,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                             )
 
         async with self._to_device_msg_id_gen.get_next() as stream_id:
-            now_ms = self._clock.time_msec()
+            now_ms = self.clock.time_msec()
             await self.db_pool.runInteraction(
                 "add_messages_to_device_inbox", add_messages_txn, now_ms, stream_id
             )
@@ -881,7 +881,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             )
 
         async with self._to_device_msg_id_gen.get_next() as stream_id:
-            now_ms = self._clock.time_msec()
+            now_ms = self.clock.time_msec()
             await self.db_pool.runInteraction(
                 "add_messages_from_remote_to_device_inbox",
                 add_messages_txn,
@@ -1002,7 +1002,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # We delete at most 100 rows that are older than
             # DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
             delete_before_ts = (
-                self._clock.time_msec() - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
+                self.clock.time_msec() - DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS
             )
             sql = """
                 WITH to_delete AS (
@@ -1032,7 +1032,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
-            await self._clock.sleep(1)
+            await self.clock.sleep(1)
 
     async def get_devices_with_messages(
         self, user_id: str, device_ids: StrCollection

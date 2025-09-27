@@ -2190,7 +2190,11 @@ class RoomForgetterHandler(StateDeltasHandler):
             self._notifier.add_replication_callback(self.notify_new_event)
 
             # We kick this off to pick up outstanding work from before the last restart.
-            self._clock.call_later(0, self.notify_new_event)
+            self._clock.call_later(
+                0,
+                self.notify_new_event,
+                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
+            )
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""

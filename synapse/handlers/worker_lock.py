@@ -37,13 +37,13 @@ from weakref import WeakSet
 import attr
 
 from twisted.internet import defer
-from twisted.internet.interfaces import IReactorTime
 
 from synapse.logging.context import PreserveLoggingContext
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 from synapse.util.constants import ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
@@ -69,7 +69,7 @@ class WorkerLocksHandler:
         self.server_name = (
             hs.hostname
         )  # nb must be called this for @wrap_as_background_process
-        self._reactor = hs.get_reactor()
+        self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()
         self._notifier = hs.get_notifier()
@@ -98,7 +98,7 @@ class WorkerLocksHandler:
         """
 
         lock = WaitingLock(
-            reactor=self._reactor,
+            clock=self._clock,
             store=self._store,
             handler=self,
             lock_name=lock_name,
@@ -129,7 +129,7 @@ class WorkerLocksHandler:
         """
 
         lock = WaitingLock(
-            reactor=self._reactor,
+            clock=self._clock,
             store=self._store,
             handler=self,
             lock_name=lock_name,
@@ -160,7 +160,7 @@ class WorkerLocksHandler:
         lock = WaitingMultiLock(
             lock_names=lock_names,
             write=write,
-            reactor=self._reactor,
+            clock=self._clock,
             store=self._store,
             handler=self,
         )
@@ -197,7 +197,12 @@ class WorkerLocksHandler:
                 if not deferred.called:
                     deferred.callback(None)
 
-        self._clock.call_later(0, _wake_all_locks, locks)
+        self._clock.call_later(
+            0,
+            _wake_all_locks,
+            locks,
+            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
+        )
 
     @wrap_as_background_process("_cleanup_locks")
     async def _cleanup_locks(self) -> None:
@@ -207,7 +212,7 @@ class WorkerLocksHandler:
 
 @attr.s(auto_attribs=True, eq=False)
 class WaitingLock:
-    reactor: IReactorTime
+    clock: Clock
     store: LockStore
     handler: WorkerLocksHandler
     lock_name: str
@@ -246,10 +251,15 @@ class WaitingLock:
                     # periodically wake up in case the lock was released but we
                     # weren't notified.
                     with PreserveLoggingContext():
+                        timeout = self._get_next_retry_interval()
                         await timeout_deferred(
                             deferred=self.deferred,
-                            timeout=self._get_next_retry_interval(),
-                            reactor=self.reactor,
+                            timeout=timeout,
+                            # Only track this call if it would delay shutdown substantially
+                            cancel_on_shutdown=True
+                            if timeout > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                            else False,
+                            clock=self.clock,
                         )
                 except Exception:
                     pass
@@ -290,7 +300,7 @@ class WaitingMultiLock:
 
     write: bool
 
-    reactor: IReactorTime
+    clock: Clock
     store: LockStore
     handler: WorkerLocksHandler
 
@@ -323,10 +333,15 @@ class WaitingMultiLock:
                     # periodically wake up in case the lock was released but we
                     # weren't notified.
                     with PreserveLoggingContext():
+                        timeout = self._get_next_retry_interval()
                         await timeout_deferred(
                             deferred=self.deferred,
-                            timeout=self._get_next_retry_interval(),
-                            reactor=self.reactor,
+                            timeout=timeout,
+                            # Only track this call if it would delay shutdown substantially
+                            cancel_on_shutdown=True
+                            if timeout > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                            else False,
+                            clock=self.clock,
                         )
                 except Exception:
                     pass

@@ -90,6 +90,7 @@ class WellKnownResolver:
         self,
         server_name: str,
         reactor: ISynapseThreadlessReactor,
+        clock: Clock,
         agent: IAgent,
         user_agent: bytes,
         well_known_cache: Optional[TTLCache[bytes, Optional[bytes]]] = None,
@@ -99,6 +100,7 @@ class WellKnownResolver:
         Args:
             server_name: Our homeserver name (used to label metrics) (`hs.hostname`).
             reactor
+            clock: Should be the `hs` clock from `hs.get_clock()`
             agent
             user_agent
             well_known_cache
@@ -107,7 +109,7 @@ class WellKnownResolver:
 
         self.server_name = server_name
         self._reactor = reactor
-        self._clock = Clock(reactor, server_name=server_name)
+        self._clock = clock
 
         if well_known_cache is None:
             well_known_cache = TTLCache(

@@ -233,6 +233,11 @@ WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC = 5
 
 class AbstractFederationSender(metaclass=abc.ABCMeta):
     @abc.abstractmethod
+    def shutdown(self) -> None:
+        """Stops this federation sender instance from sending further transactions."""
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to
         send out to other servers.
@@ -456,6 +461,10 @@ class FederationSender(AbstractFederationSender):
             self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
+        # It is important for `_is_shutdown` to be instantiated before the looping call
+        # for `wake_destinations_needing_catchup`.
+        self._is_shutdown = False
+
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call_now(
             run_as_background_process,
@@ -464,6 +473,11 @@ class FederationSender(AbstractFederationSender):
             self.server_name,
             self._wake_destinations_needing_catchup,
         )
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        for queue in self._per_destination_queues.values():
+            queue.shutdown()
 
     def _get_per_destination_queue(
         self, destination: str
@@ -512,7 +526,7 @@ class FederationSender(AbstractFederationSender):
     async def _process_event_queue_loop(self) -> None:
         try:
             self._is_processing = True
-            while True:
+            while not self._is_shutdown:
                 last_token = await self.store.get_federation_out_pos("events")
                 (
                     next_token,
@@ -1123,7 +1137,7 @@ class FederationSender(AbstractFederationSender):
 
         last_processed: Optional[str] = None
 
-        while True:
+        while not self._is_shutdown:
             destinations_to_wake = (
                 await self.store.get_catch_up_outstanding_destinations(last_processed)
             )

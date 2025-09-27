@@ -70,6 +70,9 @@ class TransportLayerClient:
         self.client = hs.get_federation_http_client()
         self._is_mine_server_name = hs.is_mine_server_name
 
+    def shutdown(self) -> None:
+        self.client.shutdown()
+
     async def get_room_state_ids(
         self, destination: str, room_id: str, event_id: str
     ) -> JsonDict:

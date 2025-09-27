@@ -537,19 +537,16 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self._send_stop_syncing_loop = self.clock.looping_call(
-            self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
+
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            desc="generic_presence.on_shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
-        hs.get_clock().add_system_event_trigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "generic_presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
-        )
-
+    @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_command(
@@ -842,13 +839,11 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_clock().add_system_event_trigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            desc="presence.on_shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
         # Keeps track of the number of *ongoing* syncs on this process. While
@@ -881,7 +876,11 @@ class PresenceHandler(BasePresenceHandler):
             # The initial delay is to allow disconnected clients a chance to
             # reconnect before we treat them as offline.
             self.clock.call_later(
-                30, self.clock.looping_call, self._handle_timeouts, 5000
+                30,
+                self.clock.looping_call,
+                self._handle_timeouts,
+                5000,
+                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
         # Presence information is persisted, whether or not it is being tracked
@@ -892,6 +891,7 @@ class PresenceHandler(BasePresenceHandler):
                 self.clock.looping_call,
                 self._persist_unpersisted_changes,
                 60 * 1000,
+                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
         presence_wheel_timer_size_gauge.register_hook(

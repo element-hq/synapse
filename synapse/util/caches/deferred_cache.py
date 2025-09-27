@@ -47,6 +47,7 @@ from synapse.metrics import SERVER_NAME_LABEL
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache, iterate_tree_cache_entry
+from synapse.util.clock import Clock
 
 cache_pending_metric = Gauge(
     "synapse_util_caches_cache_pending",
@@ -82,6 +83,7 @@ class DeferredCache(Generic[KT, VT]):
         self,
         *,
         name: str,
+        clock: Clock,
         server_name: str,
         max_entries: int = 1000,
         tree: bool = False,
@@ -103,6 +105,7 @@ class DeferredCache(Generic[KT, VT]):
             prune_unread_entries: If True, cache entries that haven't been read recently
                 will be evicted from the cache in the background. Set to False to
                 opt-out of this behaviour.
+            clock: The homeserver `Clock` instance
         """
         cache_type = TreeCache if tree else dict
 
@@ -120,6 +123,7 @@ class DeferredCache(Generic[KT, VT]):
         # a Deferred.
         self.cache: LruCache[KT, VT] = LruCache(
             max_size=max_entries,
+            clock=clock,
             server_name=server_name,
             cache_name=name,
             cache_type=cache_type,

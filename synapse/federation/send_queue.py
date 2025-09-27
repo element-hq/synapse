@@ -144,6 +144,9 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
         self.clock.looping_call(self._clear_queue, 30 * 1000)
 
+    def shutdown(self) -> None:
+        """Stops this federation sender instance from sending further transactions."""
+
     def _next_pos(self) -> int:
         pos = self.pos
         self.pos += 1

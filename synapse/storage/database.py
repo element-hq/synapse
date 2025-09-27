@@ -642,7 +642,14 @@ class DatabasePool:
             "upsert_safety_check",
             self.server_name,
             self._check_safe_to_upsert,
+            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
+
+    def stop_background_updates(self) -> None:
+        """
+        Stops the database from running any further background updates.
+        """
+        self.updates.shutdown()
 
     def name(self) -> str:
         "Return the name of this database"
@@ -681,10 +688,11 @@ class DatabasePool:
         if background_update_names:
             self._clock.call_later(
                 15.0,
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 "upsert_safety_check",
                 self.server_name,
                 self._check_safe_to_upsert,
+                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
     def start_profiling(self) -> None:

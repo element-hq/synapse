@@ -49,7 +49,6 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
-        self._clock = hs.get_clock()
         self.hs = hs
 
         if hs.config.redis.redis_enabled:
@@ -226,7 +225,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
                 reserved_users: reserved users to preserve
             """
 
-            thirty_days_ago = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24 * 30)
+            thirty_days_ago = int(self.clock.time_msec()) - (1000 * 60 * 60 * 24 * 30)
 
             in_clause, in_clause_args = make_in_list_sql_clause(
                 self.database_engine, "user_id", reserved_users
@@ -328,7 +327,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
                         txn,
                         table="monthly_active_users",
                         keyvalues={"user_id": user_id},
-                        values={"timestamp": int(self._clock.time_msec())},
+                        values={"timestamp": int(self.clock.time_msec())},
                     )
             else:
                 logger.warning("mau limit reserved threepid %s not found in db", tp)
@@ -391,7 +390,7 @@ class MonthlyActiveUsersWorkerStore(RegistrationWorkerStore):
             txn,
             table="monthly_active_users",
             keyvalues={"user_id": user_id},
-            values={"timestamp": int(self._clock.time_msec())},
+            values={"timestamp": int(self.clock.time_msec())},
         )
 
         self._invalidate_cache_and_stream(txn, self.get_monthly_active_count, ())

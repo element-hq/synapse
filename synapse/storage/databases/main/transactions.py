@@ -81,11 +81,11 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
         super().__init__(database, db_conn, hs)
 
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(self._cleanup_transactions, 30 * 60 * 1000)
+            self.clock.looping_call(self._cleanup_transactions, 30 * 60 * 1000)
 
     @wrap_as_background_process("cleanup_transactions")
     async def _cleanup_transactions(self) -> None:
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         day_ago = now - 24 * 60 * 60 * 1000
 
         def _cleanup_transactions_txn(txn: LoggingTransaction) -> None:
@@ -160,7 +160,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
             insertion_values={
                 "response_code": code,
                 "response_json": db_binary_type(encode_canonical_json(response_dict)),
-                "ts": self._clock.time_msec(),
+                "ts": self.clock.time_msec(),
             },
             desc="set_received_txn_response",
         )

@@ -55,7 +55,6 @@ from typing_extensions import Concatenate, ParamSpec, Unpack
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import IReactorTime
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (
@@ -64,7 +63,7 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util.clock import Clock
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 logger = logging.getLogger(__name__)
 
@@ -549,10 +548,9 @@ class Linearizer:
 
     def __init__(
         self,
-        *,
         name: str,
-        max_count: int = 1,
         clock: Clock,
+        max_count: int = 1,
     ):
         """
         Args:
@@ -772,7 +770,11 @@ class ReadWriteLock:
 
 
 def timeout_deferred(
-    deferred: "defer.Deferred[_T]", timeout: float, reactor: IReactorTime
+    *,
+    deferred: "defer.Deferred[_T]",
+    timeout: float,
+    cancel_on_shutdown: bool,
+    clock: Clock,
 ) -> "defer.Deferred[_T]":
     """The in built twisted `Deferred.addTimeout` fails to time out deferreds
     that have a canceller that throws exceptions. This method creates a new
@@ -790,7 +792,13 @@ def timeout_deferred(
     Args:
         deferred: The Deferred to potentially timeout.
         timeout: Timeout in seconds
-        reactor: The twisted reactor to use
+        cancel_on_shutdown: Whether this call should be tracked for cleanup during
+            shutdown. Any call with a long delay, or that is created infrequently,
+            should be tracked. Calls which are short or of 0 delay don't require
+            tracking since the small delay after shutdown before they trigger is
+            immaterial. It's not worth the overhead to track those calls as it blows up
+            the tracking collection on large server instances.
+        clock: The `Clock` instance used to track delayed calls.
 
 
     Returns:
@@ -804,7 +812,9 @@ def timeout_deferred(
         timed_out[0] = True
 
         try:
+            logger.error("Cancelling deferred in timeout")
             deferred.cancel()
+            logger.error("Cancelled deferred in timeout")
         except Exception:  # if we throw any exception it'll break time outs
             logger.exception("Canceller failed during timeout")
 
@@ -814,7 +824,10 @@ def timeout_deferred(
         if not new_d.called:
             new_d.errback(defer.TimeoutError("Timed out after %gs" % (timeout,)))
 
-    delayed_call = reactor.callLater(timeout, time_it_out)
+    # We don't track these calls since they are short.
+    delayed_call = clock.call_later(
+        timeout, time_it_out, call_later_cancel_on_shutdown=cancel_on_shutdown
+    )
 
     def convert_cancelled(value: Failure) -> Failure:
         # if the original deferred was cancelled, and our timeout has fired, then
@@ -956,9 +969,9 @@ class AwakenableSleeper:
     currently sleeping.
     """
 
-    def __init__(self, reactor: IReactorTime) -> None:
+    def __init__(self, clock: Clock) -> None:
         self._streams: Dict[str, Set[defer.Deferred[None]]] = {}
-        self._reactor = reactor
+        self._clock = clock
 
     def wake(self, name: str) -> None:
         """Wake everything related to `name` that is currently sleeping."""
@@ -977,7 +990,15 @@ class AwakenableSleeper:
 
         # Create a deferred that gets called in N seconds
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._reactor.callLater(delay_ms / 1000, sleep_deferred.callback, None)
+        call = self._clock.call_later(
+            delay_ms / 1000,
+            sleep_deferred.callback,
+            None,
+            # Only track this call if it would delay shutdown by a substantial amount
+            call_later_cancel_on_shutdown=True
+            if delay_ms / 1000 > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+            else False,
+        )
 
         # Create a deferred that will get called if `wake` is called with
         # the same `name`.
@@ -1011,8 +1032,8 @@ class AwakenableSleeper:
 class DeferredEvent:
     """Like threading.Event but for async code"""
 
-    def __init__(self, reactor: IReactorTime) -> None:
-        self._reactor = reactor
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
         self._deferred: "defer.Deferred[None]" = defer.Deferred()
 
     def set(self) -> None:
@@ -1032,7 +1053,15 @@ class DeferredEvent:
 
         # Create a deferred that gets called in N seconds
         sleep_deferred: "defer.Deferred[None]" = defer.Deferred()
-        call = self._reactor.callLater(timeout_seconds, sleep_deferred.callback, None)
+        call = self._clock.call_later(
+            timeout_seconds,
+            sleep_deferred.callback,
+            None,
+            # Only track this call if it would delay shutdown by a substantial amount
+            call_later_cancel_on_shutdown=True
+            if timeout_seconds > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+            else False,
+        )
 
         try:
             await make_deferred_yieldable(

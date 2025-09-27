@@ -125,6 +125,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         self._state_group_cache: DictionaryCache[int, StateKey, str] = DictionaryCache(
             name="*stateGroupCache*",
+            clock=hs.get_clock(),
             server_name=self.server_name,
             # TODO: this hasn't been tuned yet
             max_entries=50000,
@@ -132,6 +133,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         self._state_group_members_cache: DictionaryCache[int, StateKey, str] = (
             DictionaryCache(
                 name="*stateGroupMembersCache*",
+                clock=hs.get_clock(),
                 server_name=self.server_name,
                 max_entries=500000,
             )

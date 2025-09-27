@@ -1564,7 +1564,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 DELETE FROM e2e_one_time_keys_json
                 WHERE {clause} AND ts_added_ms < ? AND length(key_id) = 6
                 """
-            args.append(self._clock.time_msec() - (7 * 24 * 3600 * 1000))
+            args.append(self.clock.time_msec() - (7 * 24 * 3600 * 1000))
             txn.execute(sql, args)
 
             return users, txn.rowcount
@@ -1585,7 +1585,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             None, if there is no such key.
             Otherwise, the timestamp before which replacement is allowed without UIA.
         """
-        timestamp = self._clock.time_msec() + duration_ms
+        timestamp = self.clock.time_msec() + duration_ms
 
         def impl(txn: LoggingTransaction) -> Optional[int]:
             txn.execute(

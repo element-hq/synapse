@@ -26,20 +26,26 @@ from twisted.internet import defer
 
 from synapse.util.caches.deferred_cache import DeferredCache
 
+from tests.server import get_clock
 from tests.unittest import TestCase
 
 
 class DeferredCacheTestCase(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+
+        _, self.clock = get_clock()
+
     def test_empty(self) -> None:
         cache: DeferredCache[str, int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         with self.assertRaises(KeyError):
             cache.get("foo")
 
     def test_hit(self) -> None:
         cache: DeferredCache[str, int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         cache.prefill("foo", 123)
 
@@ -47,7 +53,7 @@ class DeferredCacheTestCase(TestCase):
 
     def test_hit_deferred(self) -> None:
         cache: DeferredCache[str, int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         origin_d: "defer.Deferred[int]" = defer.Deferred()
         set_d = cache.set("k1", origin_d)
@@ -72,7 +78,7 @@ class DeferredCacheTestCase(TestCase):
     def test_callbacks(self) -> None:
         """Invalidation callbacks are called at the right time"""
         cache: DeferredCache[str, int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         callbacks = set()
 
@@ -107,7 +113,7 @@ class DeferredCacheTestCase(TestCase):
 
     def test_set_fail(self) -> None:
         cache: DeferredCache[str, int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         callbacks = set()
 
@@ -146,7 +152,7 @@ class DeferredCacheTestCase(TestCase):
 
     def test_get_immediate(self) -> None:
         cache: DeferredCache[str, int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         d1: "defer.Deferred[int]" = defer.Deferred()
         cache.set("key1", d1)
@@ -164,7 +170,7 @@ class DeferredCacheTestCase(TestCase):
 
     def test_invalidate(self) -> None:
         cache: DeferredCache[Tuple[str], int] = DeferredCache(
-            name="test", server_name="test_server"
+            name="test", clock=self.clock, server_name="test_server"
         )
         cache.prefill(("foo",), 123)
         cache.invalidate(("foo",))
@@ -174,7 +180,7 @@ class DeferredCacheTestCase(TestCase):
 
     def test_invalidate_all(self) -> None:
         cache: DeferredCache[str, str] = DeferredCache(
-            name="testcache", server_name="test_server"
+            name="testcache", clock=self.clock, server_name="test_server"
         )
 
         callback_record = [False, False]
@@ -220,6 +226,7 @@ class DeferredCacheTestCase(TestCase):
     def test_eviction(self) -> None:
         cache: DeferredCache[int, str] = DeferredCache(
             name="test",
+            clock=self.clock,
             server_name="test_server",
             max_entries=2,
             apply_cache_factor_from_config=False,
@@ -238,6 +245,7 @@ class DeferredCacheTestCase(TestCase):
     def test_eviction_lru(self) -> None:
         cache: DeferredCache[int, str] = DeferredCache(
             name="test",
+            clock=self.clock,
             server_name="test_server",
             max_entries=2,
             apply_cache_factor_from_config=False,
@@ -260,6 +268,7 @@ class DeferredCacheTestCase(TestCase):
     def test_eviction_iterable(self) -> None:
         cache: DeferredCache[int, List[str]] = DeferredCache(
             name="test",
+            clock=self.clock,
             server_name="test_server",
             max_entries=3,
             apply_cache_factor_from_config=False,

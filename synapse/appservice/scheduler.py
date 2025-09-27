@@ -84,7 +84,7 @@ from synapse.logging.context import run_in_background
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main import DataStore
 from synapse.types import DeviceListUpdates, JsonMapping
-from synapse.util.clock import Clock
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -517,6 +517,10 @@ class _Recoverer:
             "as-recoverer",
             self.server_name,
             self.retry,
+            # Only track this call if it would delay shutdown by a substantial amount
+            call_later_cancel_on_shutdown=True
+            if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+            else False,
         )
 
     def _backoff(self) -> None:

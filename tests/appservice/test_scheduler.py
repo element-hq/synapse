@@ -171,6 +171,7 @@ class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
 class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.clock = MockClock()
+        self.hs = Mock()
         self.as_api = Mock()
         self.store = Mock()
         self.service = Mock()

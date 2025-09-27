@@ -78,7 +78,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         # Read the extrems every 60 minutes
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000)
+            self.clock.looping_call(self._read_forward_extremities, 60 * 60 * 1000)
 
         # Used in _generate_user_daily_visits to keep track of progress
         self._last_user_visit_update = self._get_start_of_day()
@@ -224,7 +224,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         """
         Counts the number of users who used this homeserver in the last 24 hours.
         """
-        yesterday = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24)
+        yesterday = int(self.clock.time_msec()) - (1000 * 60 * 60 * 24)
         return await self.db_pool.runInteraction(
             "count_daily_users", self._count_users, yesterday
         )
@@ -236,7 +236,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         from the mau figure in synapse.storage.monthly_active_users which,
         amongst other things, includes a 3 day grace period before a user counts.
         """
-        thirty_days_ago = int(self._clock.time_msec()) - (1000 * 60 * 60 * 24 * 30)
+        thirty_days_ago = int(self.clock.time_msec()) - (1000 * 60 * 60 * 24 * 30)
         return await self.db_pool.runInteraction(
             "count_monthly_users", self._count_users, thirty_days_ago
         )
@@ -281,7 +281,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
 
         def _count_r30v2_users(txn: LoggingTransaction) -> Dict[str, int]:
             thirty_days_in_secs = 86400 * 30
-            now = int(self._clock.time())
+            now = int(self.clock.time())
             sixty_days_ago_in_secs = now - 2 * thirty_days_in_secs
             one_day_from_now_in_secs = now + 86400
 
@@ -389,7 +389,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
         """
         Returns millisecond unixtime for start of UTC day.
         """
-        now = time.gmtime(self._clock.time())
+        now = time.gmtime(self.clock.time())
         today_start = calendar.timegm((now.tm_year, now.tm_mon, now.tm_mday, 0, 0, 0))
         return today_start * 1000
 
@@ -403,7 +403,7 @@ class ServerMetricsStore(EventPushActionsWorkerStore, SQLBaseStore):
             logger.info("Calling _generate_user_daily_visits")
             today_start = self._get_start_of_day()
             a_day_in_milliseconds = 24 * 60 * 60 * 1000
-            now = self._clock.time_msec()
+            now = self.clock.time_msec()
 
             # A note on user_agent. Technically a given device can have multiple
             # user agents, so we need to decide which one to pick. We could have

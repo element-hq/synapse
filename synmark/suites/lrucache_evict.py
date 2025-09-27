@@ -23,6 +23,7 @@ from pyperf import perf_counter
 
 from synapse.types import ISynapseReactor
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.clock import Clock
 
 
 async def main(reactor: ISynapseReactor, loops: int) -> float:
@@ -31,7 +32,9 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     evicted.
     """
     cache: LruCache[int, bool] = LruCache(
-        max_size=loops // 2, server_name="synmark_benchmark"
+        max_size=loops // 2,
+        clock=Clock(reactor, server_name="synmark_benchmark"),  # type: ignore[multiple-internal-clocks]
+        server_name="synmark_benchmark",
     )
 
     start = perf_counter()

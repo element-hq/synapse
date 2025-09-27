@@ -730,7 +730,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE ? <= event_id AND event_id <= ?
             """
 
-            txn.execute(sql, (self._clock.time_msec(), last_event_id, upper_event_id))
+            txn.execute(sql, (self.clock.time_msec(), last_event_id, upper_event_id))
 
             self.db_pool.updates._background_update_progress_txn(
                 txn, "redactions_received_ts", {"last_event_id": upper_event_id}

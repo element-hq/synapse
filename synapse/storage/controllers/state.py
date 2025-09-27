@@ -69,8 +69,8 @@ class StateStorageController:
 
     def __init__(self, hs: "HomeServer", stores: "Databases"):
         self.server_name = hs.hostname  # nb must be called this for @cached
+        self.clock = hs.get_clock()
         self._is_mine_id = hs.is_mine_id
-        self._clock = hs.get_clock()
         self.stores = stores
         self._partial_state_events_tracker = PartialStateEventsTracker(stores.main)
         self._partial_state_room_tracker = PartialCurrentStateTracker(stores.main)
@@ -78,7 +78,7 @@ class StateStorageController:
         # Used by `_get_joined_hosts` to ensure only one thing mutates the cache
         # at a time. Keyed by room_id.
         self._joined_host_linearizer = Linearizer(
-            name="_JoinedHostsCache", clock=self._clock
+            name="_JoinedHostsCache", clock=self.clock
         )
 
     def notify_event_un_partial_stated(self, event_id: str) -> None:
@@ -817,9 +817,7 @@ class StateStorageController:
             state_group = object()
 
         assert state_group is not None
-        with Measure(
-            self._clock, name="get_joined_hosts", server_name=self.server_name
-        ):
+        with Measure(self.clock, name="get_joined_hosts", server_name=self.server_name):
             return await self._get_joined_hosts(
                 room_id, state_group, state_entry=state_entry
             )

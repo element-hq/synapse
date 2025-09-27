@@ -37,6 +37,7 @@ import attr
 
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.treecache import TreeCache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +128,13 @@ class DictionaryCache(Generic[KT, DKT, DV]):
     for the '2' dict key.
     """
 
-    def __init__(self, *, name: str, server_name: str, max_entries: int = 1000):
+    def __init__(
+        self, *, name: str, clock: Clock, server_name: str, max_entries: int = 1000
+    ):
         """
         Args:
             name
+            clock: The homeserver `Clock` instance
             server_name: The homeserver name that this cache is associated with
                 (used to label the metric) (`hs.hostname`).
             max_entries
@@ -160,6 +164,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
             Union[_PerKeyValue, Dict[DKT, DV]],
         ] = LruCache(
             max_size=max_entries,
+            clock=clock,
             server_name=server_name,
             cache_name=name,
             cache_type=TreeCache,

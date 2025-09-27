@@ -46,6 +46,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
 from synapse.util.sentinel import Sentinel
@@ -94,7 +95,11 @@ class DelayedEventsHandler:
                 hs.get_notifier().add_replication_callback(self.notify_new_event)
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
-                self._clock.call_later(0, self.notify_new_event)
+                self._clock.call_later(
+                    0,
+                    self.notify_new_event,
+                    call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
+                )
 
                 # Delayed events that are already marked as processed on startup might not have been
                 # sent properly on the last run of the server, so unmark them to send them again.
@@ -546,6 +551,10 @@ class DelayedEventsHandler:
                 "_send_on_timeout",
                 self.server_name,
                 self._send_on_timeout,
+                # Only track this call if it would delay shutdown by a substantial amount
+                call_later_cancel_on_shutdown=True
+                if delay_sec > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
+                else False,
             )
         else:
             self._next_delayed_event_call.reset(delay_sec)

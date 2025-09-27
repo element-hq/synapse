@@ -175,6 +175,7 @@ class FederationEventHandler:
         )
         self._notifier = hs.get_notifier()
 
+        self._server_name = hs.hostname
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
         self._instance_name = hs.get_instance_name()

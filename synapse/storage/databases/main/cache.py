@@ -751,7 +751,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     "instance_name": self._instance_name,
                     "cache_func": cache_name,
                     "keys": keys,
-                    "invalidation_ts": self._clock.time_msec(),
+                    "invalidation_ts": self.clock.time_msec(),
                 },
             )
 
@@ -778,7 +778,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             assert self._cache_id_gen is not None
 
             stream_ids = self._cache_id_gen.get_next_mult_txn(txn, len(key_tuples))
-            ts = self._clock.time_msec()
+            ts = self.clock.time_msec()
             txn.call_after(self.hs.get_notifier().on_new_replication_data)
             self.db_pool.simple_insert_many_txn(
                 txn,
@@ -830,7 +830,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             next_interval = REGULAR_CLEANUP_INTERVAL_MS
 
         self.hs.get_clock().call_later(
-            next_interval / 1000, self._clean_up_cache_invalidation_wrapper
+            next_interval / 1000,
+            self._clean_up_cache_invalidation_wrapper,
         )
 
     async def _clean_up_batch_of_old_cache_invalidations(

@@ -172,7 +172,7 @@ class Keyring:
             _FetchKeyRequest, Dict[str, Dict[str, FetchKeyResult]]
         ] = BatchingQueue(
             name="keyring_server",
-            server_name=self.server_name,
+            hs=hs,
             clock=hs.get_clock(),
             # The method called to fetch each key
             process_batch_callback=self._inner_fetch_key_requests,
@@ -193,6 +193,14 @@ class Keyring:
             verify_key=vk,
             valid_until_ts=2**63,  # fake future timestamp
         )
+
+    def shutdown(self) -> None:
+        """
+        Prepares the KeyRing for garbage collection by shutting down it's queues.
+        """
+        self._fetch_keys_queue.shutdown()
+        for key_fetcher in self._key_fetchers:
+            key_fetcher.shutdown()
 
     async def verify_json_for_server(
         self,
@@ -479,10 +487,16 @@ class KeyFetcher(metaclass=abc.ABCMeta):
         self.server_name = hs.hostname
         self._queue = BatchingQueue(
             name=self.__class__.__name__,
-            server_name=self.server_name,
+            hs=hs,
             clock=hs.get_clock(),
             process_batch_callback=self._fetch_keys,
         )
+
+    def shutdown(self) -> None:
+        """
+        Prepares the KeyFetcher for garbage collection by shutting down it's queue.
+        """
+        self._queue.shutdown()
 
     async def get_keys(
         self, server_name: str, key_ids: List[str], minimum_valid_until_ts: int

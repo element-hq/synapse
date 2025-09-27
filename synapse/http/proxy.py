@@ -161,12 +161,13 @@ class ProxyResource(_AsyncResource):
             bodyProducer=QuieterFileBodyProducer(request.content),
         )
         request_deferred = timeout_deferred(
-            request_deferred,
+            deferred=request_deferred,
             # This should be set longer than the timeout in `MatrixFederationHttpClient`
             # so that it has enough time to complete and pass us the data before we give
             # up.
             timeout=90,
-            reactor=self.reactor,
+            cancel_on_shutdown=False,  # We don't track this call since it will typically be short
+            clock=self._clock,
         )
 
         response = await make_deferred_yieldable(request_deferred)

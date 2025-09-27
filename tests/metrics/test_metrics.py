@@ -164,7 +164,10 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         """
         CACHE_NAME = "cache_metrics_test_fgjkbdfg"
         cache: DeferredCache[str, str] = DeferredCache(
-            name=CACHE_NAME, server_name=self.hs.hostname, max_entries=777
+            name=CACHE_NAME,
+            clock=self.hs.get_clock(),
+            server_name=self.hs.hostname,
+            max_entries=777,
         )
 
         metrics_map = get_latest_metrics()
@@ -212,10 +215,10 @@ class CacheMetricsTests(unittest.HomeserverTestCase):
         """
         CACHE_NAME = "cache_metric_multiple_servers_test"
         cache1: DeferredCache[str, str] = DeferredCache(
-            name=CACHE_NAME, server_name="hs1", max_entries=777
+            name=CACHE_NAME, clock=self.clock, server_name="hs1", max_entries=777
         )
         cache2: DeferredCache[str, str] = DeferredCache(
-            name=CACHE_NAME, server_name="hs2", max_entries=777
+            name=CACHE_NAME, clock=self.clock, server_name="hs2", max_entries=777
         )
 
         metrics_map = get_latest_metrics()
