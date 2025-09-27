@@ -232,7 +232,7 @@ class TimeoutDeferredTest(TestCase):
         incomplete_d: Deferred = Deferred()
         incomplete_d.addErrback(mark_was_cancelled)
 
-        with LoggingContext("one") as context_one:
+        with LoggingContext(name="one", server_name="test_server") as context_one:
             timing_out_d = timeout_deferred(
                 deferred=incomplete_d,
                 timeout=1.0,
@@ -546,7 +546,7 @@ class DelayCancellationTests(TestCase):
             await make_deferred_yieldable(blocking_d)
 
         async def outer() -> None:
-            with LoggingContext("c") as c:
+            with LoggingContext(name="c", server_name="test_server") as c:
                 try:
                     await delay_cancellation(inner())
                     self.fail("`CancelledError` was not raised")
@@ -661,7 +661,7 @@ class GatherCoroutineTests(TestCase):
     def test_single(self) -> None:
         "Test passing in a single coroutine works"
 
-        with LoggingContext("test_ctx") as text_ctx:
+        with LoggingContext(name="test_ctx", server_name="test_server") as text_ctx:
             deferred: "defer.Deferred[None]"
             coroutine, deferred = self.make_coroutine()
 
@@ -687,7 +687,7 @@ class GatherCoroutineTests(TestCase):
     def test_multiple_resolve(self) -> None:
         "Test passing in multiple coroutine that all resolve works"
 
-        with LoggingContext("test_ctx") as test_ctx:
+        with LoggingContext(name="test_ctx", server_name="test_server") as test_ctx:
             deferred1: "defer.Deferred[int]"
             coroutine1, deferred1 = self.make_coroutine()
             deferred2: "defer.Deferred[str]"
@@ -720,7 +720,7 @@ class GatherCoroutineTests(TestCase):
     def test_multiple_fail(self) -> None:
         "Test passing in multiple coroutine where one fails does the right thing"
 
-        with LoggingContext("test_ctx") as test_ctx:
+        with LoggingContext(name="test_ctx", server_name="test_server") as test_ctx:
             deferred1: "defer.Deferred[int]"
             coroutine1, deferred1 = self.make_coroutine()
             deferred2: "defer.Deferred[str]"

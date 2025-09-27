@@ -440,8 +440,7 @@ class FederationSenderHandler:
         self.federation_position: Optional[int] = None
 
         self._fed_position_linearizer = Linearizer(
-            hs.get_clock(),
-            name="_fed_position_linearizer",
+            name="_fed_position_linearizer", clock=hs.get_clock()
         )
 
     async def process_replication_rows(

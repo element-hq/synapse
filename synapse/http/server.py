@@ -411,6 +411,14 @@ class DirectServeJsonResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            canonical_json: TODO
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
+
         if clock is None:
             # Ideally we wouldn't ignore the linter error here and instead enforce a
             # required `Clock` be passed into the `__init__` function.
@@ -420,7 +428,8 @@ class DirectServeJsonResource(_AsyncResource):
             # As of the time of writing this, all Synapse internal usages of
             # `DirectServeJsonResource` pass in the existing homeserver clock instance.
             clock = Clock(  # type: ignore[multiple-internal-clocks]
-                cast(ISynapseThreadlessReactor, reactor)
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
             )
 
         super().__init__(clock, extract_context)
@@ -599,6 +608,12 @@ class DirectServeHtmlResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
         if clock is None:
             # Ideally we wouldn't ignore the linter error here and instead enforce a
             # required `Clock` be passed into the `__init__` function.
@@ -608,7 +623,8 @@ class DirectServeHtmlResource(_AsyncResource):
             # As of the time of writing this, all Synapse internal usages of
             # `DirectServeHtmlResource` pass in the existing homeserver clock instance.
             clock = Clock(  # type: ignore[multiple-internal-clocks]
-                cast(ISynapseThreadlessReactor, reactor)
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
             )
 
         super().__init__(clock, extract_context)

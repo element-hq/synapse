@@ -819,7 +819,7 @@ def get_clock() -> Tuple[ThreadedMemoryReactorClock, Clock]:
     clock = ThreadedMemoryReactorClock()
     # Ignore the linter error since this is an expected usage of creating a `Clock` for
     # testing purposes.
-    hs_clock = Clock(clock)  # type: ignore[multiple-internal-clocks]
+    hs_clock = Clock(clock, server_name="test_server")  # type: ignore[multiple-internal-clocks]
     return clock, hs_clock
 
 

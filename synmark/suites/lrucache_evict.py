@@ -31,7 +31,11 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     Benchmark `loops` number of insertions into LruCache where half of them are
     evicted.
     """
-    cache: LruCache[int, bool] = LruCache(max_size=loops // 2, clock=Clock(reactor))  # type: ignore[multiple-internal-clocks]
+    cache: LruCache[int, bool] = LruCache(
+        max_size=loops // 2,
+        clock=Clock(reactor, server_name="synmark_benchmark"),  # type: ignore[multiple-internal-clocks]
+        server_name="synmark_benchmark",
+    )
 
     start = perf_counter()
 

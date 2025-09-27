@@ -77,7 +77,9 @@ class CacheConfigTests(TestCase):
         the default cache size in the interim, and then resized once the config
         is loaded.
         """
-        cache: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
 
         add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
         self.assertEqual(cache.max_size, 50)
@@ -98,7 +100,9 @@ class CacheConfigTests(TestCase):
         self.config.read_config(config, config_dir_path="", data_dir_path="")
         self.config.resize_all_caches()
 
-        cache: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
         add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
         self.assertEqual(cache.max_size, 200)
 
@@ -108,7 +112,9 @@ class CacheConfigTests(TestCase):
         the default cache size in the interim, and then resized to the new
         default cache size once the config is loaded.
         """
-        cache: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
         add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
         self.assertEqual(cache.max_size, 50)
 
@@ -128,7 +134,9 @@ class CacheConfigTests(TestCase):
         self.config.read_config(config, config_dir_path="", data_dir_path="")
         self.config.resize_all_caches()
 
-        cache: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
         add_resizable_cache("foo", cache_resize_callback=cache.set_cache_factor)
         self.assertEqual(cache.max_size, 150)
 
@@ -147,15 +155,21 @@ class CacheConfigTests(TestCase):
         self.config.read_config(config, config_dir_path="", data_dir_path="")
         self.config.resize_all_caches()
 
-        cache_a: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache_a: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
         add_resizable_cache("*cache_a*", cache_resize_callback=cache_a.set_cache_factor)
         self.assertEqual(cache_a.max_size, 200)
 
-        cache_b: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache_b: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
         add_resizable_cache("*Cache_b*", cache_resize_callback=cache_b.set_cache_factor)
         self.assertEqual(cache_b.max_size, 300)
 
-        cache_c: LruCache = LruCache(max_size=100, clock=self.clock)
+        cache_c: LruCache = LruCache(
+            max_size=100, clock=self.clock, server_name="test_server"
+        )
         add_resizable_cache("*cache_c*", cache_resize_callback=cache_c.set_cache_factor)
         self.assertEqual(cache_c.max_size, 200)
 
@@ -172,6 +186,7 @@ class CacheConfigTests(TestCase):
             max_size=self.config.event_cache_size,
             clock=self.clock,
             apply_cache_factor_from_config=False,
+            server_name="test_server",
         )
         add_resizable_cache("event_cache", cache_resize_callback=cache.set_cache_factor)
 

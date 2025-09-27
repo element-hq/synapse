@@ -224,7 +224,7 @@ class SsoHandler:
         )
 
         # a lock on the mappings
-        self._mapping_lock = Linearizer(hs.get_clock(), name="sso_user_mapping")
+        self._mapping_lock = Linearizer(clock=hs.get_clock(), name="sso_user_mapping")
 
         # a map from session id to session data
         self._username_mapping_sessions: Dict[str, UsernameMappingSession] = {}

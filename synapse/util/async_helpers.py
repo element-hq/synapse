@@ -548,21 +548,19 @@ class Linearizer:
 
     def __init__(
         self,
+        name: str,
         clock: Clock,
-        name: Optional[str] = None,
         max_count: int = 1,
     ):
         """
         Args:
+            name: TODO
             max_count: The maximum number of concurrent accesses
+            clock: (ideally, the homeserver clock `hs.get_clock()`)
         """
-        if name is None:
-            self.name: Union[str, int] = id(self)
-        else:
-            self.name = name
-
-        self._clock = clock
+        self.name = name
         self.max_count = max_count
+        self._clock = clock
 
         # key_to_defer is a map from the key to a _LinearizerEntry.
         self.key_to_defer: Dict[Hashable, _LinearizerEntry] = {}

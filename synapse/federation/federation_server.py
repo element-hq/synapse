@@ -159,7 +159,7 @@ class FederationServer(FederationBase):
         # with FederationHandlerRegistry.
         hs.get_directory_handler()
 
-        self._server_linearizer = Linearizer(hs.get_clock(), "fed_server")
+        self._server_linearizer = Linearizer(name="fed_server", clock=hs.get_clock())
 
         # origins that we are currently processing a transaction from.
         # a dict from origin to txn id.

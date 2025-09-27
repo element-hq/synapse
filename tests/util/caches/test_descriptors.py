@@ -317,7 +317,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         @defer.inlineCallbacks
         def do_lookup() -> Generator["Deferred[Any]", object, int]:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 r = yield obj.fn(1)
                 self.assertEqual(current_context(), c1)
             return cast(int, r)
@@ -362,7 +362,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         @defer.inlineCallbacks
         def do_lookup() -> Generator["Deferred[object]", object, None]:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 try:
                     d = obj.fn(1)
                     self.assertEqual(
@@ -565,7 +565,7 @@ class DescriptorTestCase(unittest.TestCase):
         obj = Cls()
 
         async def do_lookup() -> None:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 try:
                     await obj.fn(123)
                     self.fail("No CancelledError thrown")
@@ -871,7 +871,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
                 assert context.name == "c1"
                 return self.mock(args1, arg2)
 
-        with LoggingContext("c1") as c1:
+        with LoggingContext(name="c1", server_name="test_server") as c1:
             obj = Cls()
             obj.mock.return_value = {10: "fish", 20: "chips"}
 
@@ -1057,7 +1057,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         obj = Cls()
 
         async def do_lookup() -> None:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 try:
                     await obj.list_fn([123])
                     self.fail("No CancelledError thrown")

@@ -72,15 +72,10 @@ class LockTestCase(unittest.HomeserverTestCase):
         release_lock.callback(None)
 
         # Run the tasks to completion.
-        # To work around `Linearizer`s using a different reactor to sleep when
-        # contended (https://github.com/matrix-org/synapse/issues/12841), we call
-        # `runUntilCurrent` on `twisted.internet.reactor`, which is a different
-        # reactor to that used by the homeserver.
-        assert isinstance(reactor, ReactorBase)
         self.get_success(task1)
-        reactor.runUntilCurrent()
+        self.pump()
         self.get_success(task2)
-        reactor.runUntilCurrent()
+        self.pump()
         self.get_success(task3)
 
         # At most one task should have held the lock at a time.
@@ -223,15 +218,11 @@ class ReadWriteLockTestCase(unittest.HomeserverTestCase):
         release_lock.callback(None)
 
         # Run the tasks to completion.
-        # To work around `Linearizer`s using a different reactor to sleep when
-        # contended (https://github.com/matrix-org/synapse/issues/12841), we call
-        # `runUntilCurrent` on `twisted.internet.reactor`, which is a different
-        # reactor to that used by the homeserver.
         assert isinstance(reactor, ReactorBase)
         self.get_success(task1)
-        reactor.runUntilCurrent()
+        self.pump()
         self.get_success(task2)
-        reactor.runUntilCurrent()
+        self.pump()
         self.get_success(task3)
 
         # At most one task should have held the lock at a time.
@@ -275,15 +266,11 @@ class ReadWriteLockTestCase(unittest.HomeserverTestCase):
         release_lock.callback(None)
 
         # Run the tasks to completion.
-        # To work around `Linearizer`s using a different reactor to sleep when
-        # contended (https://github.com/matrix-org/synapse/issues/12841), we call
-        # `runUntilCurrent` on `twisted.internet.reactor`, which is a different
-        # reactor to that used by the homeserver.
         assert isinstance(reactor, ReactorBase)
         self.get_success(task1)
-        reactor.runUntilCurrent()
+        self.pump()
         self.get_success(task2)
-        reactor.runUntilCurrent()
+        self.pump()
         self.get_success(task3)
 
         # At most one task should have held the lock at a time.

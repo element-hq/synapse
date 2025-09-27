@@ -420,7 +420,7 @@ class LruCache(Generic[KT, VT]):
         *,
         max_size: int,
         clock: Clock,
-        server_name: Literal[None] = None,
+        server_name: str,
         cache_name: Literal[None] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
@@ -435,7 +435,7 @@ class LruCache(Generic[KT, VT]):
         *,
         max_size: int,
         clock: Clock,
-        server_name: Optional[str] = None,
+        server_name: str,
         cache_name: Optional[str] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
@@ -449,12 +449,10 @@ class LruCache(Generic[KT, VT]):
             max_size: The maximum amount of entries the cache can hold
 
             server_name: The homeserver name that this cache is associated with
-                (used to label the metric) (`hs.hostname`). Must be set if `cache_name` is
-                set. If unset, no metrics will be reported on this cache.
+                (used to label the metric) (`hs.hostname`).
 
-            cache_name: The name of this cache, for the prometheus metrics. Must be set
-                if `server_name` is set. If unset, no metrics will be reported on this
-                cache.
+            cache_name: The name of this cache, for the prometheus metrics. If unset, no
+                metrics will be reported on this cache.
 
             cache_type:
                 type of underlying cache to be used. Typically one of dict

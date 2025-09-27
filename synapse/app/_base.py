@@ -642,7 +642,7 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
     hs.get_pusherpool().start()
 
     def log_shutdown() -> None:
-        with LoggingContext("log_shutdown"):
+        with LoggingContext(name="log_shutdown", server_name=server_name):
             logger.info("Shutting down...")
 
     # Log when we start the shut down process.

@@ -121,7 +121,9 @@ class ApplicationService:
         # However this is not currently possible as there are places which use
         # `@cached` that aren't aware of the `HomeServer` instance.
         # nb must be called this for @cached
-        self.clock = Clock(cast(ISynapseThreadlessReactor, reactor))  # type: ignore[multiple-internal-clocks]
+        self.clock = Clock(
+            cast(ISynapseThreadlessReactor, reactor), server_name=self.server_name
+        )  # type: ignore[multiple-internal-clocks]
 
         self.namespaces = self._check_namespaces(namespaces)
         self.id = id

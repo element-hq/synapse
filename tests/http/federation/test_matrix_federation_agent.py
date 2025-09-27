@@ -201,7 +201,10 @@ class MatrixFederationAgentTests(unittest.TestCase):
         """
         Sends a simple GET request via the agent, and checks its logcontext management
         """
-        with LoggingContext("one") as context:
+        with LoggingContext(
+            name="one",
+            server_name="test_server",
+        ) as context:
             fetch_d: Deferred[IResponse] = self.agent.request(b"GET", uri)
 
             # Nothing happened yet

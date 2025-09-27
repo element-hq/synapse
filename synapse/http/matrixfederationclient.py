@@ -490,7 +490,7 @@ class MatrixFederationHttpClient:
         )
 
         self.remote_download_linearizer = Linearizer(
-            hs.get_clock(), "remote_download_linearizer", 6
+            name="remote_download_linearizer", max_count=6, clock=self.clock
         )
         self._is_shutdown = False
 
