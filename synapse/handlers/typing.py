@@ -77,7 +77,7 @@ class FollowerTypingHandler:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
         self.server_name = (

@@ -78,7 +78,7 @@ class ApplicationServicesHandler:
         self.server_name = (
             hs.hostname
         )  # nb must be called this for @wrap_as_background_process
-        self.hs = hs
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
         self.is_mine_id = hs.is_mine_id
         self.appservice_api = hs.get_application_service_api()

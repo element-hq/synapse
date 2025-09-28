@@ -330,6 +330,7 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    hs: "HomeServer" = attr.ib()
     server_name: str = attr.ib()
     """
     Our homeserver name (used to label metrics) (`hs.hostname`).
@@ -457,7 +458,11 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self,
+            hs,
+            self.server_name,
+            self.clock,
+            max_delay_s=rr_txn_interval_per_room_s,
         )
 
         # It is important for `_is_shutdown` to be instantiated before the looping call

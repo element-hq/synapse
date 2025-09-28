@@ -66,6 +66,8 @@ if TYPE_CHECKING:
     # Old versions don't have `LiteralString`
     from typing_extensions import LiteralString
 
+    from synapse.server import HomeServer
+
 
 logger = logging.getLogger(__name__)
 
@@ -397,11 +399,11 @@ def run_as_background_process(
 P = ParamSpec("P")
 
 
-class HasServerName(Protocol):
-    server_name: str
+class HasHomeServer(Protocol):
+    hs: "HomeServer"
     """
-    The homeserver name that this cache is associated with (used to label the metric)
-    (`hs.hostname`).
+    The homeserver that this cache is associated with (used to label the metric and
+    track backgroun processes for clean shutdown).
     """
 
 
@@ -431,19 +433,18 @@ def wrap_as_background_process(
     """
 
     def wrapper(
-        func: Callable[Concatenate[HasServerName, P], Awaitable[Optional[R]]],
+        func: Callable[Concatenate[HasHomeServer, P], Awaitable[Optional[R]]],
     ) -> Callable[P, "defer.Deferred[Optional[R]]"]:
         @wraps(func)
         def wrapped_func(
-            self: HasServerName, *args: P.args, **kwargs: P.kwargs
+            self: HasHomeServer, *args: P.args, **kwargs: P.kwargs
         ) -> "defer.Deferred[Optional[R]]":
-            assert self.server_name is not None, (
-                "The `server_name` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
+            assert self.hs is not None, (
+                "The `hs` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
             )
 
-            return run_as_background_process(  # type: ignore[untracked-background-process]
+            return self.hs.run_as_background_process(
                 desc,
-                self.server_name,
                 func,
                 self,
                 *args,
@@ -451,7 +452,7 @@ def wrap_as_background_process(
                 #     Argument 4 to "run_as_background_process" has incompatible type
                 #     "**P.kwargs"; expected "bool"
                 # See https://github.com/python/mypy/issues/8862
-                **kwargs,  # type: ignore[arg-type]
+                **kwargs,
             )
 
         # There are some shenanigans here, because we're decorating a method but
