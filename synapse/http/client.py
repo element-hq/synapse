@@ -175,7 +175,6 @@ def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCa
         return clock.call_later(
             _EPSILON,
             x,
-            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
     return _scheduler
@@ -440,7 +439,6 @@ class BaseHttpClient:
                 request_deferred = timeout_deferred(
                     deferred=request_deferred,
                     timeout=60,
-                    cancel_on_shutdown=False,  # We don't track this call since it's short
                     clock=self.hs.get_clock(),
                 )
 
@@ -769,7 +767,6 @@ class BaseHttpClient:
             d = timeout_deferred(
                 deferred=d,
                 timeout=30,
-                cancel_on_shutdown=False,  # We don't track this call since it's short
                 clock=self.hs.get_clock(),
             )
 
@@ -967,7 +964,6 @@ class ReplicationClient(BaseHttpClient):
                 request_deferred = timeout_deferred(
                     deferred=request_deferred,
                     timeout=60,
-                    cancel_on_shutdown=False,  # We don't track this call since it's short
                     clock=self.hs.get_clock(),
                 )
 

@@ -29,7 +29,6 @@ from synapse.push import Pusher, PusherConfig, PusherConfigException, ThrottlePa
 from synapse.push.mailer import Mailer
 from synapse.push.push_types import EmailReason
 from synapse.storage.databases.main.event_push_actions import EmailPushAction
-from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 from synapse.util.threepids import validate_email
 
 if TYPE_CHECKING:
@@ -232,10 +231,6 @@ class EmailPusher(Pusher):
             self.timed_call = self.hs.get_clock().call_later(
                 delay,
                 self.on_timer,
-                # Only track this call if it would delay shutdown substantially
-                call_later_cancel_on_shutdown=True
-                if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
-                else False,
             )
 
     async def save_last_stream_ordering_and_success(

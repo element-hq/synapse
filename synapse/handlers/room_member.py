@@ -2192,7 +2192,6 @@ class RoomForgetterHandler(StateDeltasHandler):
             self._clock.call_later(
                 0,
                 self.notify_new_event,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
     def notify_new_event(self) -> None:

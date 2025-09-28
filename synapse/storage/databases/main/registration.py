@@ -215,7 +215,6 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 self.clock.call_later(
                     0.0,
                     self._set_expiration_date_when_missing,
-                    call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
                 )
 
         # If support for MSC3866 is enabled and configured to require approval for new

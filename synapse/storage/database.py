@@ -642,7 +642,6 @@ class DatabasePool:
             "upsert_safety_check",
             self.server_name,
             self._check_safe_to_upsert,
-            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
     def stop_background_updates(self) -> None:
@@ -692,7 +691,6 @@ class DatabasePool:
                 "upsert_safety_check",
                 self.server_name,
                 self._check_safe_to_upsert,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
     def start_profiling(self) -> None:

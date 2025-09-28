@@ -475,7 +475,6 @@ class TaskScheduler:
             self._clock.call_later(
                 0.1,
                 self._launch_scheduled_tasks,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
         if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:

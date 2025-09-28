@@ -63,7 +63,7 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -773,7 +773,7 @@ def timeout_deferred(
     *,
     deferred: "defer.Deferred[_T]",
     timeout: float,
-    cancel_on_shutdown: bool,
+    cancel_on_shutdown: Optional[bool] = None,
     clock: Clock,
 ) -> "defer.Deferred[_T]":
     """The in built twisted `Deferred.addTimeout` fails to time out deferreds
@@ -798,6 +798,9 @@ def timeout_deferred(
             tracking since the small delay after shutdown before they trigger is
             immaterial. It's not worth the overhead to track those calls as it blows up
             the tracking collection on large server instances.
+            If this value is `None` then the function will decide whether to track
+            the call for cleanup by comparing whether the `delay` is longer than
+            `CALL_LATER_DELAY_TRACKING_THRESHOLD_S`.
         clock: The `Clock` instance used to track delayed calls.
 
 
@@ -994,10 +997,6 @@ class AwakenableSleeper:
             delay_ms / 1000,
             sleep_deferred.callback,
             None,
-            # Only track this call if it would delay shutdown by a substantial amount
-            call_later_cancel_on_shutdown=True
-            if delay_ms / 1000 > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
-            else False,
         )
 
         # Create a deferred that will get called if `wake` is called with
@@ -1057,10 +1056,6 @@ class DeferredEvent:
             timeout_seconds,
             sleep_deferred.callback,
             None,
-            # Only track this call if it would delay shutdown by a substantial amount
-            call_later_cancel_on_shutdown=True
-            if timeout_seconds > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
-            else False,
         )
 
         try:

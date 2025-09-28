@@ -40,7 +40,6 @@ from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
-from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import non_null_str_or_none
@@ -140,14 +139,12 @@ class UserDirectoryHandler(StateDeltasHandler):
             self.clock.call_later(
                 0,
                 self.notify_new_event,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
             # Kick off the profile refresh process on startup
             self._refresh_remote_profiles_call_later = self.clock.call_later(
                 10,
                 self.kick_off_remote_profile_refresh_process,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
 
     async def search_users(
@@ -564,13 +561,11 @@ class UserDirectoryHandler(StateDeltasHandler):
                 USER_DIRECTORY_STALE_REFRESH_TIME_MS // 1000 + 1,
                 self.kick_off_remote_profile_refresh_process_for_remote_server,
                 UserID.from_string(user_id).domain,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
             # Schedule a wake-up to handle any backoffs that may occur in the future.
             self.clock.call_later(
                 2 * USER_DIRECTORY_STALE_REFRESH_TIME_MS // 1000 + 1,
                 self.kick_off_remote_profile_refresh_process,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
             return
 
@@ -630,7 +625,6 @@ class UserDirectoryHandler(StateDeltasHandler):
             self._refresh_remote_profiles_call_later = self.clock.call_later(
                 INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES,
                 self.kick_off_remote_profile_refresh_process,
-                call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
             )
             return
 
@@ -666,10 +660,6 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._refresh_remote_profiles_call_later = self.clock.call_later(
                     delay,
                     self.kick_off_remote_profile_refresh_process,
-                    # Only track this call if it would delay shutdown by a substantial amount
-                    call_later_cancel_on_shutdown=True
-                    if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
-                    else False,
                 )
 
             return
@@ -682,7 +672,6 @@ class UserDirectoryHandler(StateDeltasHandler):
         self._refresh_remote_profiles_call_later = self.clock.call_later(
             INTERVAL_TO_ADD_MORE_SERVERS_TO_REFRESH_PROFILES,
             self.kick_off_remote_profile_refresh_process,
-            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
     def kick_off_remote_profile_refresh_process_for_remote_server(

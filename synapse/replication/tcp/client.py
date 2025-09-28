@@ -345,7 +345,6 @@ class ReplicationDataHandler:
         deferred = timeout_deferred(
             deferred=deferred,
             timeout=_WAIT_FOR_REPLICATION_TIMEOUT_SECONDS,
-            cancel_on_shutdown=False,  # We don't track this call since it's short
             clock=self._clock,
         )
 

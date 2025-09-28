@@ -43,7 +43,7 @@ from synapse.logging.opentracing import start_active_span
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases.main.lock import Lock, LockStore
 from synapse.util.async_helpers import timeout_deferred
-from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S, Clock
+from synapse.util.clock import Clock
 from synapse.util.constants import ONE_MINUTE_SECONDS
 
 if TYPE_CHECKING:
@@ -201,7 +201,6 @@ class WorkerLocksHandler:
             0,
             _wake_all_locks,
             locks,
-            call_later_cancel_on_shutdown=False,  # We don't track this call since it's short
         )
 
     @wrap_as_background_process("_cleanup_locks")
@@ -255,10 +254,6 @@ class WaitingLock:
                         await timeout_deferred(
                             deferred=self.deferred,
                             timeout=timeout,
-                            # Only track this call if it would delay shutdown substantially
-                            cancel_on_shutdown=True
-                            if timeout > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
-                            else False,
                             clock=self.clock,
                         )
                 except Exception:
@@ -337,10 +332,6 @@ class WaitingMultiLock:
                         await timeout_deferred(
                             deferred=self.deferred,
                             timeout=timeout,
-                            # Only track this call if it would delay shutdown substantially
-                            cancel_on_shutdown=True
-                            if timeout > CALL_LATER_DELAY_TRACKING_THRESHOLD_S
-                            else False,
                             clock=self.clock,
                         )
                 except Exception:

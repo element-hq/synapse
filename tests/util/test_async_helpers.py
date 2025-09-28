@@ -167,7 +167,6 @@ class TimeoutDeferredTest(TestCase):
         timing_out_d = timeout_deferred(
             deferred=non_completing_d,
             timeout=1.0,
-            cancel_on_shutdown=False,
             clock=self.clock,
         )
 
@@ -190,7 +189,6 @@ class TimeoutDeferredTest(TestCase):
         timing_out_d = timeout_deferred(
             deferred=non_completing_d,
             timeout=1.0,
-            cancel_on_shutdown=False,
             clock=self.clock,
         )
 
@@ -236,7 +234,6 @@ class TimeoutDeferredTest(TestCase):
             timing_out_d = timeout_deferred(
                 deferred=incomplete_d,
                 timeout=1.0,
-                cancel_on_shutdown=False,
                 clock=self.clock,
             )
             self.assertNoResult(timing_out_d)

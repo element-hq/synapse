@@ -19,6 +19,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Optional,
 )
 
 from typing_extensions import ParamSpec
@@ -36,7 +37,7 @@ from synapse.util import log_failure
 P = ParamSpec("P")
 
 
-CALL_LATER_DELAY_TRACKING_THRESHOLD_S = 60
+CALL_LATER_DELAY_TRACKING_THRESHOLD_S = 30
 """
 The length of time (in seconds) the `delay` in a call to `Clock.call_later` must be
 before it is tracked for cancellation on shutdown.
@@ -233,7 +234,7 @@ class Clock:
         delay: float,
         callback: Callable,
         *args: Any,
-        call_later_cancel_on_shutdown: bool = True,
+        call_later_cancel_on_shutdown: Optional[bool] = None,
         **kwargs: Any,
     ) -> IDelayedCall:
         """Call something later
@@ -252,6 +253,9 @@ class Clock:
                 tracking since the small delay after shutdown before they trigger is
                 immaterial. It's not worth the overhead to track those calls as it blows up
                 the tracking collection on large server instances.
+                If this value is `None` then the function will decide whether to track
+                the call for cleanup by comparing whether the `delay` is longer than
+                `CALL_LATER_DELAY_TRACKING_THRESHOLD_S`.
                 Placed in between `*args` and `**kwargs` in order to be able to set a
                 default value.
             **kwargs: Key arguments to pass to function.
@@ -302,7 +306,15 @@ class Clock:
 
             return wrapped_callback
 
-        if call_later_cancel_on_shutdown:
+        cancel_on_shutdown = False
+        if call_later_cancel_on_shutdown is None:
+            cancel_on_shutdown = (
+                True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False
+            )
+        else:
+            cancel_on_shutdown = call_later_cancel_on_shutdown
+
+        if cancel_on_shutdown:
             call_id = self._delayed_call_id
             self._delayed_call_id = self._delayed_call_id + 1
 
