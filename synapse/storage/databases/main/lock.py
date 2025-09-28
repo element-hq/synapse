@@ -28,7 +28,6 @@ from twisted.internet import defer
 from twisted.internet.task import LoopingCall
 
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.storage._base import SQLBaseStore
@@ -203,6 +202,7 @@ class LockStore(SQLBaseStore):
         lock = Lock(
             self.server_name,
             self._reactor,
+            self.hs,
             self.clock,
             self,
             read_write=False,
@@ -271,6 +271,7 @@ class LockStore(SQLBaseStore):
         lock = Lock(
             self.server_name,
             self._reactor,
+            self.hs,
             self.clock,
             self,
             read_write=True,
@@ -375,6 +376,7 @@ class Lock:
         self,
         server_name: str,
         reactor: ISynapseReactor,
+        hs: "HomeServer",
         clock: Clock,
         store: LockStore,
         read_write: bool,
@@ -388,6 +390,7 @@ class Lock:
         """
         self._server_name = server_name
         self._reactor = reactor
+        self._hs = hs
         self._clock = clock
         self._store = store
         self._read_write = read_write
@@ -411,6 +414,7 @@ class Lock:
             _RENEWAL_INTERVAL_MS,
             self._server_name,
             self._store,
+            self._hs,
             self._clock,
             self._read_write,
             self._lock_name,
@@ -422,6 +426,7 @@ class Lock:
     def _renew(
         server_name: str,
         store: LockStore,
+        hs: "HomeServer",
         clock: Clock,
         read_write: bool,
         lock_name: str,
@@ -458,9 +463,8 @@ class Lock:
                 desc="renew_lock",
             )
 
-        return run_as_background_process(
+        return hs.run_as_background_process(
             "Lock._renew",
-            server_name,
             _internal_renew,
             store,
             clock,

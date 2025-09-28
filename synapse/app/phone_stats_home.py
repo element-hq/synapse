@@ -29,9 +29,6 @@ from prometheus_client import Gauge
 from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-)
 from synapse.types import JsonDict
 from synapse.util.constants import ONE_HOUR_SECONDS, ONE_MINUTE_SECONDS
 
@@ -85,8 +82,6 @@ def phone_stats_home(
     stats: JsonDict,
     stats_process: List[Tuple[int, "resource.struct_rusage"]] = _stats_process,
 ) -> "defer.Deferred[None]":
-    server_name = hs.hostname
-
     async def _phone_stats_home(
         hs: "HomeServer",
         stats: JsonDict,
@@ -200,8 +195,8 @@ def phone_stats_home(
         except Exception as e:
             logger.warning("Error reporting stats: %s", e)
 
-    return run_as_background_process(
-        "phone_stats_home", server_name, _phone_stats_home, hs, stats, stats_process
+    return hs.run_as_background_process(
+        "phone_stats_home", _phone_stats_home, hs, stats, stats_process
     )
 
 
@@ -263,9 +258,8 @@ def start_phone_stats_home(hs: "HomeServer") -> None:
                 float(hs.config.server.max_mau_value)
             )
 
-        return run_as_background_process(
+        return hs.run_as_background_process(
             "generate_monthly_active_users",
-            server_name,
             _generate_monthly_active_users,
         )
 

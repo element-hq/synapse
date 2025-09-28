@@ -48,9 +48,6 @@ from typing import (
 from twisted.internet import defer
 
 from synapse.config import cache as cache_config
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-)
 from synapse.metrics.jemalloc import get_jemalloc_stats
 from synapse.util import caches
 from synapse.util.caches import CacheMetric, EvictionReason, register_cache
@@ -122,6 +119,7 @@ GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 def _expire_old_entries(
     server_name: str,
+    hs: "HomeServer",
     clock: Clock,
     expiry_seconds: float,
     autotune_config: Optional[dict],
@@ -227,9 +225,8 @@ def _expire_old_entries(
 
         logger.info("Dropped %d items from caches", i)
 
-    return run_as_background_process(
+    return hs.run_as_background_process(
         "LruCache._expire_old_entries",
-        server_name,
         _internal_expire_old_entries,
         clock,
         expiry_seconds,
@@ -260,6 +257,7 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
         _expire_old_entries,
         30 * 1000,
         server_name,
+        hs,
         clock,
         expiry_time,
         hs.config.caches.cache_autotuning,

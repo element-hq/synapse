@@ -27,7 +27,6 @@ from prometheus_client import Gauge
 from synapse.api.errors import Codes, SynapseError
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.push import Pusher, PusherConfig, PusherConfigException
@@ -112,9 +111,7 @@ class PusherPool:
         if not self._should_start_pushers:
             logger.info("Not starting pushers because they are disabled in the config")
             return
-        run_as_background_process(
-            "start_pushers", self.server_name, self._start_pushers
-        )
+        self.hs.run_as_background_process("start_pushers", self._start_pushers)
 
     async def add_or_update_pusher(
         self,

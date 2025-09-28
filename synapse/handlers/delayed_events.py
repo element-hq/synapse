@@ -24,9 +24,6 @@ from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-)
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
 )
@@ -59,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 class DelayedEventsHandler:
     def __init__(self, hs: "HomeServer"):
+        self.hs = hs
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -117,15 +115,14 @@ class DelayedEventsHandler:
                     self._schedule_next_at(next_send_ts)
 
                 # Can send the events in background after having awaited on marking them as processed
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "_send_events",
-                    self.server_name,
                     self._send_events,
                     events,
                 )
 
-            self._initialized_from_db = run_as_background_process(
-                "_schedule_db_events", self.server_name, _schedule_db_events
+            self._initialized_from_db = self.hs.run_as_background_process(
+                "_schedule_db_events", _schedule_db_events
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
@@ -150,9 +147,7 @@ class DelayedEventsHandler:
             finally:
                 self._event_processing = False
 
-        run_as_background_process(
-            "delayed_events.notify_new_event", self.server_name, process
-        )
+        self.hs.run_as_background_process("delayed_events.notify_new_event", process)
 
     async def _unsafe_process_new_event(self) -> None:
         # We purposefully fetch the current max room stream ordering before
@@ -547,9 +542,8 @@ class DelayedEventsHandler:
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
                 delay_sec,
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 "_send_on_timeout",
-                self.server_name,
                 self._send_on_timeout,
                 # Only track this call if it would delay shutdown by a substantial amount
                 call_later_cancel_on_shutdown=True

@@ -67,7 +67,6 @@ from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -100,6 +99,7 @@ class MessageHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self.hs = hs
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.state = hs.get_state_handler()
@@ -114,8 +114,8 @@ class MessageHandler:
         self._scheduled_expiry: Optional[IDelayedCall] = None
 
         if not hs.config.worker.worker_app:
-            run_as_background_process(
-                "_schedule_next_expiry", self.server_name, self._schedule_next_expiry
+            self.hs.run_as_background_process(
+                "_schedule_next_expiry", self._schedule_next_expiry
             )
 
     async def get_room_data(
@@ -445,9 +445,8 @@ class MessageHandler:
 
         self._scheduled_expiry = self.clock.call_later(
             delay,
-            run_as_background_process,
+            self.hs.run_as_background_process,
             "_expire_event",
-            self.server_name,
             self._expire_event,
             event_id,
             # Only track this call if it would delay shutdown by a substantial amount
@@ -553,9 +552,8 @@ class EventCreationHandler:
             and self.config.server.cleanup_extremities_with_dummy_events
         ):
             self.clock.looping_call(
-                lambda: run_as_background_process(
+                lambda: self.hs.run_as_background_process(
                     "send_dummy_events_to_fill_extremities",
-                    self.server_name,
                     self._send_dummy_events_to_fill_extremities,
                 ),
                 5 * 60 * 1000,
@@ -575,6 +573,7 @@ class EventCreationHandler:
             self._external_cache_joined_hosts_updates = ExpiringCache(
                 cache_name="_external_cache_joined_hosts_updates",
                 server_name=self.server_name,
+                hs=self.hs,
                 clock=self.clock,
                 expiry_ms=30 * 60 * 1000,
             )
@@ -2118,9 +2117,8 @@ class EventCreationHandler:
             if event.type == EventTypes.Message:
                 # We don't want to block sending messages on any presence code. This
                 # matters as sometimes presence code can take a while.
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "bump_presence_active_time",
-                    self.server_name,
                     self._bump_active_time,
                     requester.user,
                     requester.device_id,

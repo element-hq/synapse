@@ -488,7 +488,11 @@ class DelayedCallWrapper:
         underlying delayed_call.
         """
         self.delayed_call.cancel()
-        self.clock._call_id_to_delayed_call.pop(self.call_id)
+        try:
+            self.clock._call_id_to_delayed_call.pop(self.call_id)
+        except KeyError:
+            # If the delayed call isn't being tracked anymore we can just move on.
+            pass
 
     def getTime(self) -> float:
         """Propagate the call to the underlying delayed_call."""

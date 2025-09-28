@@ -35,6 +35,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         cache: ExpiringCache[str, str] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
+            hs=self.hs,
             clock=cast(Clock, clock),
             max_len=1,
         )
@@ -48,6 +49,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         cache: ExpiringCache[str, str] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
+            hs=self.hs,
             clock=cast(Clock, clock),
             max_len=2,
         )
@@ -67,6 +69,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         cache: ExpiringCache[str, List[int]] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
+            hs=self.hs,
             clock=cast(Clock, clock),
             max_len=5,
             iterable=True,
@@ -91,6 +94,7 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         cache: ExpiringCache[str, int] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
+            hs=self.hs,
             clock=cast(Clock, clock),
             expiry_ms=1000,
         )

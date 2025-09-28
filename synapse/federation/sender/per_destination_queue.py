@@ -43,7 +43,6 @@ from synapse.handlers.presence import format_user_presence_state
 from synapse.logging import issue9533_logger
 from synapse.logging.opentracing import SynapseTags, set_tag
 from synapse.metrics import SERVER_NAME_LABEL, sent_transactions_counter
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import JsonDict, ReadReceipt
 from synapse.util.retryutils import NotRetryingDestination, get_retry_limiter
 from synapse.visibility import filter_events_for_server
@@ -335,9 +334,8 @@ class PerDestinationQueue:
 
         logger.debug("TX [%s] Starting transaction loop", self._destination)
 
-        self.active_transmission_loop = run_as_background_process(
+        self.active_transmission_loop = self._hs.run_as_background_process(
             "federation_transaction_transmission_loop",
-            self.server_name,
             self._transaction_transmission_loop,
         )
 
@@ -351,6 +349,7 @@ class PerDestinationQueue:
             await get_retry_limiter(
                 destination=self._destination,
                 our_server_name=self.server_name,
+                hs=self._hs,
                 clock=self._clock,
                 store=self._store,
             )

@@ -107,7 +107,6 @@ from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.http.presence import (
@@ -1539,8 +1538,8 @@ class PresenceHandler(BasePresenceHandler):
             finally:
                 self._event_processing = False
 
-        run_as_background_process(
-            "presence.notify_new_event", self.server_name, _process_presence
+        self.hs.run_as_background_process(
+            "presence.notify_new_event", _process_presence
         )
 
     async def _unsafe_process(self) -> None:

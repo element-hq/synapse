@@ -442,7 +442,7 @@ def wrap_as_background_process(
                 "The `server_name` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
             )
 
-            return run_as_background_process(
+            return run_as_background_process(  # type: ignore[untracked-background-process]
                 desc,
                 self.server_name,
                 func,

@@ -36,7 +36,6 @@ from synapse.api.constants import (
 from synapse.api.errors import Codes, SynapseError
 from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.user_directory import SearchResult
 from synapse.storage.roommember import ProfileInfo
@@ -200,9 +199,7 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_processing = False
 
         self._is_processing = True
-        run_as_background_process(
-            "user_directory.notify_new_event", self.server_name, process
-        )
+        self._hs.run_as_background_process("user_directory.notify_new_event", process)
 
     async def handle_local_profile_change(
         self, user_id: str, profile: ProfileInfo
@@ -618,8 +615,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles = False
 
         self._is_refreshing_remote_profiles = True
-        run_as_background_process(
-            "user_directory.refresh_remote_profiles", self.server_name, process
+        self._hs.run_as_background_process(
+            "user_directory.refresh_remote_profiles", process
         )
 
     async def _unsafe_refresh_remote_profiles(self) -> None:
@@ -708,9 +705,8 @@ class UserDirectoryHandler(StateDeltasHandler):
                 self._is_refreshing_remote_profiles_for_servers.remove(server_name)
 
         self._is_refreshing_remote_profiles_for_servers.add(server_name)
-        run_as_background_process(
+        self._hs.run_as_background_process(
             "user_directory.refresh_remote_profiles_for_remote_server",
-            self.server_name,
             process,
         )
 

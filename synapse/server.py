@@ -359,6 +359,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         # This attribute is set by the free function `refresh_certificate`.
         self.tls_server_context_factory: Optional[IOpenSSLContextFactory] = None
 
+        self._is_shutdown = False
         self._async_shutdown_handlers: List[ShutdownInfo] = []
         self._sync_shutdown_handlers: List[ShutdownInfo] = []
         self._background_processes: set[defer.Deferred[Optional[Any]]] = set()
@@ -401,11 +402,21 @@ class HomeServer(metaclass=abc.ABCMeta):
             Note that the returned Deferred does not follow the synapse logcontext
             rules.
         """
-        deferred = run_as_background_process(desc, self.hostname, func, *args, **kwargs)
+        if self._is_shutdown:
+            raise Exception(
+                f"Cannot start background process. HomeServer has been shutdown {len(self._background_processes)} {len(self.get_clock()._looping_calls)} {len(self.get_clock()._call_id_to_delayed_call)}"
+            )
+
+        # Ignore linter error as this is the one location this should be called.
+        deferred = run_as_background_process(desc, self.hostname, func, *args, **kwargs)  # type: ignore[untracked-background-process]
         self._background_processes.add(deferred)
 
         def on_done(res: R) -> R:
-            self._background_processes.remove(deferred)
+            try:
+                self._background_processes.remove(deferred)
+            except KeyError:
+                # If the background process isn't being tracked anymore we can just move on.
+                pass
             return res
 
         deferred.addBoth(on_done)
@@ -421,6 +432,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         in order for it to be cleaned up. By default, Synapse freezes the HomeServer
         object in the garbage collector.
         """
+
+        self._is_shutdown = True
 
         logger.info(
             "Received shutdown request for %s (%s).",
@@ -479,15 +492,6 @@ class HomeServer(metaclass=abc.ABCMeta):
             except Exception:
                 pass
 
-        self.get_clock().shutdown()
-
-        for background_process in list(self._background_processes):
-            try:
-                background_process.cancel()
-            except Exception:
-                pass
-        self._background_processes.clear()
-
         for shutdown_handler in self._async_shutdown_handlers:
             try:
                 self.get_reactor().removeSystemEventTrigger(shutdown_handler.trigger_id)
@@ -503,6 +507,15 @@ class HomeServer(metaclass=abc.ABCMeta):
             except Exception as e:
                 logger.error("Error calling shutdown sync handler: %s", e)
         self._sync_shutdown_handlers.clear()
+
+        self.get_clock().shutdown()
+
+        for background_process in list(self._background_processes):
+            try:
+                background_process.cancel()
+            except Exception:
+                pass
+        self._background_processes.clear()
 
         for db in self.get_datastores().databases:
             db._db_pool.close()
@@ -523,9 +536,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         id = self.get_clock().add_system_event_trigger(
             phase,
             eventType,
-            run_as_background_process,
+            self.run_as_background_process,
             desc,
-            self.config.server.server_name,
             shutdown_func,
             kwargs,
         )
@@ -683,7 +695,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor(server_name=self.hostname)
+        return Distributor(hs=self)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:

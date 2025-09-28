@@ -168,7 +168,6 @@ from synapse.metrics import (
     events_processed_counter,
 )
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.types import (
@@ -467,10 +466,9 @@ class FederationSender(AbstractFederationSender):
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call_now(
-            run_as_background_process,
+            self.hs.run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
-            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
@@ -517,9 +515,8 @@ class FederationSender(AbstractFederationSender):
             return
 
         # fire off a processing loop in the background
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "process_event_queue_for_federation",
-            self.server_name,
             self._process_event_queue_loop,
         )
 

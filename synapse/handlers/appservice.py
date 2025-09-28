@@ -47,7 +47,6 @@ from synapse.metrics import (
     event_processing_loop_room_count,
 )
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.storage.databases.main.directory import RoomAliasMapping
@@ -79,6 +78,7 @@ class ApplicationServicesHandler:
         self.server_name = (
             hs.hostname
         )  # nb must be called this for @wrap_as_background_process
+        self.hs = hs
         self.store = hs.get_datastores().main
         self.is_mine_id = hs.is_mine_id
         self.appservice_api = hs.get_application_service_api()
@@ -171,8 +171,8 @@ class ApplicationServicesHandler:
                                 except Exception:
                                     logger.error("Application Services Failure")
 
-                            run_as_background_process(
-                                "as_scheduler", self.server_name, start_scheduler
+                            self.hs.run_as_background_process(
+                                "as_scheduler", start_scheduler
                             )
                             self.started_scheduler = True
 

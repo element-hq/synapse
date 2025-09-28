@@ -323,6 +323,7 @@ class SyncHandler:
         ] = ExpiringCache(
             cache_name="lazy_loaded_members_cache",
             server_name=self.server_name,
+            hs=hs,
             clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,

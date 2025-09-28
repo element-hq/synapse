@@ -32,7 +32,6 @@ from synapse.logging.context import (
 )
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
@@ -362,7 +361,7 @@ class TaskScheduler:
             finally:
                 self._launching_new_tasks = False
 
-        run_as_background_process("launch_scheduled_tasks", self.server_name, inner)
+        self._hs.run_as_background_process("launch_scheduled_tasks", inner)
 
     @wrap_as_background_process("clean_scheduled_tasks")
     async def _clean_scheduled_tasks(self) -> None:
@@ -497,4 +496,4 @@ class TaskScheduler:
 
         self._running_tasks.add(task.id)
         await self.update_task(task.id, status=TaskStatus.ACTIVE)
-        run_as_background_process(f"task-{task.action}", self.server_name, wrapper)
+        self._hs.run_as_background_process(f"task-{task.action}", wrapper)

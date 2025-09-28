@@ -641,6 +641,7 @@ class MatrixFederationHttpClient:
         limiter = await synapse.util.retryutils.get_retry_limiter(
             destination=request.destination,
             our_server_name=self.server_name,
+            hs=self.hs,
             clock=self.clock,
             store=self._store,
             backoff_on_404=backoff_on_404,

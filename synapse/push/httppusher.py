@@ -32,7 +32,6 @@ from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.push import Pusher, PusherConfig, PusherConfigException
 from synapse.storage.databases.main.event_push_actions import HttpPushAction
 from synapse.types import JsonDict, JsonMapping
@@ -183,8 +182,8 @@ class HttpPusher(Pusher):
 
         # We could check the receipts are actually m.read receipts here,
         # but currently that's the only type of receipt anyway...
-        run_as_background_process(
-            "http_pusher.on_new_receipts", self.server_name, self._update_badge
+        self.hs.run_as_background_process(
+            "http_pusher.on_new_receipts", self._update_badge
         )
 
     async def _update_badge(self) -> None:
@@ -220,7 +219,7 @@ class HttpPusher(Pusher):
         if self.failing_since and self.timed_call and self.timed_call.active():
             return
 
-        run_as_background_process("httppush.process", self.server_name, self._process)
+        self.hs.run_as_background_process("httppush.process", self._process)
 
     async def _process(self) -> None:
         # we should never get here if we are already processing

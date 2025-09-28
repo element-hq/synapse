@@ -44,7 +44,6 @@ from synapse.media._base import FileInfo, get_filename_from_headers
 from synapse.media.media_storage import MediaStorage, SHA256TransparentIOWriter
 from synapse.media.oembed import OEmbedProvider
 from synapse.media.preview_html import decode_body, parse_html_to_open_graph
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import JsonDict, UserID
 from synapse.util.async_helpers import ObservableDeferred
 from synapse.util.caches.expiringcache import ExpiringCache
@@ -167,6 +166,7 @@ class UrlPreviewer:
         media_storage: MediaStorage,
     ):
         self.clock = hs.get_clock()
+        self.hs = hs
         self.filepaths = media_repo.filepaths
         self.max_spider_size = hs.config.media.max_spider_size
         self.server_name = hs.hostname
@@ -201,6 +201,7 @@ class UrlPreviewer:
         self._cache: ExpiringCache[str, ObservableDeferred] = ExpiringCache(
             cache_name="url_previews",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self.clock,
             # don't spider URLs more often than once an hour
             expiry_ms=ONE_HOUR,
@@ -737,8 +738,8 @@ class UrlPreviewer:
         return open_graph_result, oembed_response.author_name, expiration_ms
 
     def _start_expire_url_cache_data(self) -> Deferred:
-        return run_as_background_process(
-            "expire_url_cache_data", self.server_name, self._expire_url_cache_data
+        return self.hs.run_as_background_process(
+            "expire_url_cache_data", self._expire_url_cache_data
         )
 
     async def _expire_url_cache_data(self) -> None:

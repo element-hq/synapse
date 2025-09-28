@@ -40,7 +40,6 @@ from synapse.logging.context import PreserveLoggingContext, make_deferred_yielda
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
     BackgroundProcessLoggingContext,
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.tcp.commands import (
@@ -109,6 +108,7 @@ class RedisSubscriber(SubscriberProtocol):
     """
 
     server_name: str
+    hs: "HomeServer"
     synapse_handler: "ReplicationCommandHandler"
     synapse_stream_prefix: str
     synapse_channel_names: List[str]
@@ -146,9 +146,7 @@ class RedisSubscriber(SubscriberProtocol):
     def connectionMade(self) -> None:
         logger.info("Connected to redis")
         super().connectionMade()
-        run_as_background_process(
-            "subscribe-replication", self.server_name, self._send_subscribe
-        )
+        self.hs.run_as_background_process("subscribe-replication", self._send_subscribe)
 
     async def _send_subscribe(self) -> None:
         # it's important to make sure that we only send the REPLICATE command once we
@@ -223,8 +221,8 @@ class RedisSubscriber(SubscriberProtocol):
         # if so.
 
         if isawaitable(res):
-            run_as_background_process(
-                "replication-" + cmd.get_logcontext_id(), self.server_name, lambda: res
+            self.hs.run_as_background_process(
+                "replication-" + cmd.get_logcontext_id(), lambda: res
             )
 
     def connectionLost(self, reason: Failure) -> None:  # type: ignore[override]
@@ -245,9 +243,8 @@ class RedisSubscriber(SubscriberProtocol):
         Args:
             cmd: The command to send
         """
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "send-cmd",
-            self.server_name,
             self._async_send_command,
             cmd,
             # We originally started tracing background processes to avoid `There was no
@@ -397,6 +394,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         )
 
         self.server_name = hs.hostname
+        self.hs = hs
         self.synapse_handler = hs.get_replication_command_handler()
         self.synapse_stream_prefix = hs.hostname
         self.synapse_channel_names = channel_names
@@ -412,6 +410,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         # the base method does some other things than just instantiating the
         # protocol.
         p.server_name = self.server_name
+        p.hs = self.hs
         p.synapse_handler = self.synapse_handler
         p.synapse_outbound_redis_connection = self.synapse_outbound_redis_connection
         p.synapse_stream_prefix = self.synapse_stream_prefix

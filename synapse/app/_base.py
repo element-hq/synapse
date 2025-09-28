@@ -589,7 +589,11 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
 
                 sdnotify(b"READY=1")
 
-            return run_as_background_process(
+            # It's okay to ignore the linter error here and call
+            # `run_as_background_process` directly because `_handle_sighup` operates
+            # outside of the scope of a specific `HomeServer` instance and holds no
+            # references to it which would prevent a clean shutdown.
+            return run_as_background_process(  # type: ignore[untracked-background-process]
                 "sighup",
                 server_name,
                 _handle_sighup,

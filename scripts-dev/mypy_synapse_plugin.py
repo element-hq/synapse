@@ -98,6 +98,12 @@ MULTIPLE_INTERNAL_CLOCKS_CREATED = ErrorCode(
     category="synapse-reactor-clock",
 )
 
+UNTRACKED_BACKGROUND_PROCESS = ErrorCode(
+    "untracked-background-process",
+    "All calls to `run_as_background_process` should use the `HomeServer` method",
+    category="synapse-tracked-calls",
+)
+
 
 class Sentinel(enum.Enum):
     # defining a sentinel in this way allows mypy to correctly handle the
@@ -246,6 +252,12 @@ class SynapsePlugin(Plugin):
         if fullname == "synapse.util.clock.Clock":
             return check_clock_creation
 
+        if (
+            fullname
+            == "synapse.metrics.background_process_metrics.run_as_background_process"
+        ):
+            return check_background_process
+
         return None
 
     def get_method_signature_hook(
@@ -354,6 +366,25 @@ def check_clock_creation(ctx: FunctionSigContext) -> CallableType:
         "during server shutdown",
         ctx.context,
         code=MULTIPLE_INTERNAL_CLOCKS_CREATED,
+    )
+
+    return signature
+
+
+def check_background_process(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that calls to `run_as_background_process` use the `HomeServer` method.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all calls to `run_as_background_process` to use the `HomeServer` method. "
+        "This is so that the `HomeServer` can cancel any background processes "
+        "during server shutdown",
+        ctx.context,
+        code=UNTRACKED_BACKGROUND_PROCESS,
     )
 
     return signature
