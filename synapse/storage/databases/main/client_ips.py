@@ -457,7 +457,6 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
             hs.register_async_shutdown_handler(
                 phase="before",
                 eventType="shutdown",
-                desc="ClientIpWorkerStore _update_client_ips_batch",
                 shutdown_func=self._update_client_ips_batch,
             )
 

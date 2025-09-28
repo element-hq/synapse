@@ -653,7 +653,6 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
     hs.register_sync_shutdown_handler(
         phase="before",
         eventType="shutdown",
-        desc="shutdown log entry",
         shutdown_func=log_shutdown,
     )
 

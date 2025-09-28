@@ -101,7 +101,6 @@ class LockStore(SQLBaseStore):
         hs.register_async_shutdown_handler(
             phase="before",
             eventType="shutdown",
-            desc="LockStore _on_shutdown",
             shutdown_func=self._on_shutdown,
         )
 

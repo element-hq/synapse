@@ -541,7 +541,6 @@ class WorkerPresenceHandler(BasePresenceHandler):
         hs.register_async_shutdown_handler(
             phase="before",
             eventType="shutdown",
-            desc="generic_presence.on_shutdown",
             shutdown_func=self._on_shutdown,
         )
 
@@ -841,7 +840,6 @@ class PresenceHandler(BasePresenceHandler):
         hs.register_async_shutdown_handler(
             phase="before",
             eventType="shutdown",
-            desc="presence.on_shutdown",
             shutdown_func=self._on_shutdown,
         )
 
@@ -905,6 +903,7 @@ class PresenceHandler(BasePresenceHandler):
         self._event_pos = self.store.get_room_max_stream_ordering()
         self._event_processing = False
 
+    @wrap_as_background_process("PresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         """Gets called when shutting down. This lets us persist any updates that
         we haven't yet persisted, e.g. updates that only changes some internal

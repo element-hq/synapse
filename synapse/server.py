@@ -268,14 +268,12 @@ class ShutdownInfo:
     """Information for callable functions called at time of shutdown.
 
     Attributes:
-        desc: a short description of the event trigger.
         func: the object to call before shutdown.
         trigger_id: an ID returned when registering this event trigger.
         args: the arguments to call the function with.
         kwargs: the keyword arguments to call the function with.
     """
 
-    desc: str
     func: Callable[..., Any]
     trigger_id: _SystemEventID
     kwargs: Dict[str, object]
@@ -525,7 +523,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         *,
         phase: str,
         eventType: str,
-        desc: "LiteralString",
         shutdown_func: Callable[..., Any],
         **kwargs: object,
     ) -> None:
@@ -536,13 +533,11 @@ class HomeServer(metaclass=abc.ABCMeta):
         id = self.get_clock().add_system_event_trigger(
             phase,
             eventType,
-            self.run_as_background_process,
-            desc,
             shutdown_func,
-            kwargs,
+            **kwargs,
         )
         self._async_shutdown_handlers.append(
-            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
+            ShutdownInfo(func=shutdown_func, trigger_id=id, kwargs=kwargs)
         )
 
     def register_sync_shutdown_handler(
@@ -550,7 +545,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         *,
         phase: str,
         eventType: str,
-        desc: "LiteralString",
         shutdown_func: Callable[..., Any],
         **kwargs: object,
     ) -> None:
@@ -562,10 +556,10 @@ class HomeServer(metaclass=abc.ABCMeta):
             phase,
             eventType,
             shutdown_func,
-            kwargs,
+            **kwargs,
         )
         self._sync_shutdown_handlers.append(
-            ShutdownInfo(desc=desc, func=shutdown_func, trigger_id=id, kwargs=kwargs)
+            ShutdownInfo(func=shutdown_func, trigger_id=id, kwargs=kwargs)
         )
 
     def register_module_web_resource(self, path: str, resource: Resource) -> None:
@@ -1253,7 +1247,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.register_sync_shutdown_handler(
             phase="during",
             eventType="shutdown",
-            desc="Homeserver media_threadpool.stop",
             shutdown_func=media_threadpool.stop,
         )
 

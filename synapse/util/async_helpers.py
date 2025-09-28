@@ -815,9 +815,7 @@ def timeout_deferred(
         timed_out[0] = True
 
         try:
-            logger.error("Cancelling deferred in timeout")
             deferred.cancel()
-            logger.error("Cancelled deferred in timeout")
         except Exception:  # if we throw any exception it'll break time outs
             logger.exception("Canceller failed during timeout")
 
