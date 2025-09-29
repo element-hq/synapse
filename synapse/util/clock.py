@@ -19,7 +19,6 @@ from typing import (
     Callable,
     Dict,
     List,
-    Optional,
 )
 
 from typing_extensions import ParamSpec
@@ -35,13 +34,6 @@ from synapse.types import ISynapseThreadlessReactor
 from synapse.util import log_failure
 
 P = ParamSpec("P")
-
-
-CALL_LATER_DELAY_TRACKING_THRESHOLD_S = 30
-"""
-The length of time (in seconds) the `delay` in a call to `Clock.call_later` must be
-before it is tracked for cancellation on shutdown.
-"""
 
 
 class Clock:
@@ -234,7 +226,7 @@ class Clock:
         delay: float,
         callback: Callable,
         *args: Any,
-        call_later_cancel_on_shutdown: Optional[bool] = None,
+        call_later_cancel_on_shutdown: bool = True,
         **kwargs: Any,
     ) -> IDelayedCall:
         """Call something later
@@ -247,17 +239,12 @@ class Clock:
             delay: How long to wait in seconds.
             callback: Function to call
             *args: Postional arguments to pass to function.
-            call_cater_cancel_on_shutdown: Whether this call should be tracked for cleanup during
-                shutdown. Any call with a long delay, or that is created infrequently,
-                should be tracked. Calls which are short or of 0 delay don't require
-                tracking since the small delay after shutdown before they trigger is
-                immaterial. It's not worth the overhead to track those calls as it blows up
-                the tracking collection on large server instances.
-                If this value is `None` then the function will decide whether to track
-                the call for cleanup by comparing whether the `delay` is longer than
-                `CALL_LATER_DELAY_TRACKING_THRESHOLD_S`.
-                Placed in between `*args` and `**kwargs` in order to be able to set a
-                default value.
+            call_later_cancel_on_shutdown: Whether this call should be tracked for cleanup during
+                shutdown. In general, all calls should be tracked. There may be a use case
+                not to track calls with a `timeout` of 0 (or similarly short) since tracking
+                them may result in rapid insertions and removals of tracked calls
+                unnecessarily. But unless a specific instance of tracking proves to be an
+                issue, we can just track all delayed calls.
             **kwargs: Key arguments to pass to function.
         """
 
@@ -306,15 +293,7 @@ class Clock:
 
             return wrapped_callback
 
-        cancel_on_shutdown = False
-        if call_later_cancel_on_shutdown is None:
-            cancel_on_shutdown = (
-                True if delay > CALL_LATER_DELAY_TRACKING_THRESHOLD_S else False
-            )
-        else:
-            cancel_on_shutdown = call_later_cancel_on_shutdown
-
-        if cancel_on_shutdown:
+        if call_later_cancel_on_shutdown:
             call_id = self._delayed_call_id
             self._delayed_call_id = self._delayed_call_id + 1
 

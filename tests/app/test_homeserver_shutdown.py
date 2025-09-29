@@ -23,7 +23,6 @@ import weakref
 
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.storage.background_updates import UpdaterStatus
-from synapse.util.clock import CALL_LATER_DELAY_TRACKING_THRESHOLD_S
 
 from tests.server import (
     cleanup_test_reactor_system_event_triggers,
@@ -69,10 +68,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Cleanup the internal reference in our test case
         del self.hs
-
-        # Advance the reactor to allow for any outstanding calls to be run.
-        # A value of 1 is not enough, so a value of 2 is used.
-        self.reactor.advance(2)
 
         # Force garbage collection.
         gc.collect()
@@ -142,12 +137,6 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
         # we use in tests doesn't handle this properly (see doc comment)
         cleanup_test_reactor_system_event_triggers(self.reactor)
-
-        # Also advance the reactor by the delay tracking threshold to ensure all
-        # cancellable delayed calls have been scheduled. Must be done prior to
-        # `hs.shutdown()` otherwise they will be scheduled later during the test when we
-        # advance the reactor to wait out any non-tracked delayed calls.
-        self.reactor.advance(CALL_LATER_DELAY_TRACKING_THRESHOLD_S)
 
         # Ensure the background updates are not complete.
         self.assertNotEqual(store.db_pool.updates.get_status(), UpdaterStatus.COMPLETE)

@@ -304,7 +304,6 @@ async def _handle_response(
         d = timeout_deferred(
             deferred=d,
             timeout=timeout_sec,
-            cancel_on_shutdown=False,  # We don't track this call since it's short
             clock=clock,
         )
 
@@ -748,7 +747,6 @@ class MatrixFederationHttpClient:
                             request_deferred = timeout_deferred(
                                 deferred=request_deferred,
                                 timeout=_sec_timeout,
-                                cancel_on_shutdown=False,  # We don't track this call since it will typically be short
                                 clock=self.clock,
                             )
 
@@ -809,7 +807,6 @@ class MatrixFederationHttpClient:
                         d = timeout_deferred(
                             deferred=d,
                             timeout=_sec_timeout,
-                            cancel_on_shutdown=False,  # We don't track this call since it will typically be short
                             clock=self.clock,
                         )
 

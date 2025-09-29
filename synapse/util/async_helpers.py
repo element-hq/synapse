@@ -773,7 +773,7 @@ def timeout_deferred(
     *,
     deferred: "defer.Deferred[_T]",
     timeout: float,
-    cancel_on_shutdown: Optional[bool] = None,
+    cancel_on_shutdown: bool = True,
     clock: Clock,
 ) -> "defer.Deferred[_T]":
     """The in built twisted `Deferred.addTimeout` fails to time out deferreds
@@ -793,14 +793,11 @@ def timeout_deferred(
         deferred: The Deferred to potentially timeout.
         timeout: Timeout in seconds
         cancel_on_shutdown: Whether this call should be tracked for cleanup during
-            shutdown. Any call with a long delay, or that is created infrequently,
-            should be tracked. Calls which are short or of 0 delay don't require
-            tracking since the small delay after shutdown before they trigger is
-            immaterial. It's not worth the overhead to track those calls as it blows up
-            the tracking collection on large server instances.
-            If this value is `None` then the function will decide whether to track
-            the call for cleanup by comparing whether the `delay` is longer than
-            `CALL_LATER_DELAY_TRACKING_THRESHOLD_S`.
+            shutdown. In general, all calls should be tracked. There may be a use case
+            not to track calls with a `timeout` of 0 (or similarly short) since tracking
+            them may result in rapid insertions and removals of tracked calls
+            unnecessarily. But unless a specific instance of tracking proves to be an
+            issue, we can just track all delayed calls.
         clock: The `Clock` instance used to track delayed calls.
 
 
