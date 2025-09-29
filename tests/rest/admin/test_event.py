@@ -69,6 +69,6 @@ class FetchEventTestCase(unittest.HomeserverTestCase):
             channel.json_body["event"]["content"],
             {"body": "Hey now", "msgtype": "m.text"},
         )
-        self.assertEqual(channel.json_body["event_id"], self.event_id)
+        self.assertEqual(channel.json_body["event"]["event_id"], self.event_id)
         self.assertEqual(channel.json_body["event"]["type"], "m.room.message")
         self.assertEqual(channel.json_body["event"]["sender"], self.other_user)

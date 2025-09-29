@@ -2,9 +2,15 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import NotFoundError
+from synapse.events.utils import (
+    SerializeEventConfig,
+    format_event_raw,
+    serialize_event,
+)
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
-from synapse.rest.admin import admin_patterns, assert_requester_is_admin
+from synapse.rest.admin import admin_patterns
+from synapse.rest.admin._base import assert_user_is_admin
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import JsonDict
 
@@ -33,18 +39,29 @@ class EventRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
         self._store = hs.get_datastores().main
+        self._clock = hs.get_clock()
 
     async def on_GET(
         self, request: SynapseRequest, event_id: str
     ) -> Tuple[int, JsonDict]:
-        await assert_requester_is_admin(self._auth, request)
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
 
         event = await self._store.get_event(
             event_id, EventRedactBehaviour.as_is, allow_none=True, allow_rejected=True
         )
+
         if event is None:
             raise NotFoundError("Event not found")
 
-        res = {"event_id": event.event_id, "event": event.get_dict()}
+        config = SerializeEventConfig(
+            as_client_event=False,
+            event_format=format_event_raw,
+            requester=requester,
+            only_event_fields=None,
+            include_stripped_room_state=True,
+            include_admin_metadata=True,
+        )
+        res = {"event": serialize_event(event, self._clock.time_msec(), config=config)}
 
         return HTTPStatus.OK, res
