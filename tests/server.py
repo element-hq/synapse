@@ -1020,6 +1020,7 @@ class TestHomeServer(HomeServer):
 
 
 def setup_test_homeserver(
+    *,
     cleanup_func: Callable[[Callable[[], None]], None],
     server_name: str = "test",
     config: Optional[HomeServerConfig] = None,

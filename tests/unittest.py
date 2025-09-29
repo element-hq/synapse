@@ -673,7 +673,7 @@ class HomeserverTestCase(TestCase):
             with LoggingContext(name="run_bg_updates", server_name=server_name):
                 self.get_success(stor.db_pool.updates.run_background_updates(False))
 
-        hs = setup_test_homeserver(self.addCleanup, **kwargs)
+        hs = setup_test_homeserver(cleanup_func=self.addCleanup, **kwargs)
         stor = hs.get_datastores().main
 
         # Run the database background updates, when running against "master".
