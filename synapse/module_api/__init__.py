@@ -1471,7 +1471,6 @@ class ModuleApi:
             self._hs.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
-            call_later_cancel_on_shutdown=False,  # We don't track calls in the module api since we don't know their purpose
         )
 
     async def sleep(self, seconds: float) -> None:
