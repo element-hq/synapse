@@ -641,7 +641,7 @@ class HomeserverTestCase(TestCase):
         config: Optional[JsonDict] = None,
         reactor: Optional[ISynapseReactor] = None,
         clock: Optional[Clock] = None,
-        **kwargs: Any,
+        **extra_homeserver_attributes: Any,
     ) -> HomeServer:
         """
         Set up the test homeserver, meant to be called by the overridable
@@ -657,7 +657,7 @@ class HomeserverTestCase(TestCase):
         if config is None:
             config = self.default_config()
         else:
-            config = kwargs["config"]
+            config = extra_homeserver_attributes["config"]
 
         # The sane default is to use the same reactor and clock as our other test utils
         if reactor is None:
@@ -689,7 +689,7 @@ class HomeserverTestCase(TestCase):
             config=config_obj,
             reactor=reactor,
             clock=clock,
-            **kwargs,
+            **extra_homeserver_attributes,
         )
         stor = hs.get_datastores().main
 
