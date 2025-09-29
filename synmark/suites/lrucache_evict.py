@@ -31,6 +31,8 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     Benchmark `loops` number of insertions into LruCache where half of them are
     evicted.
     """
+    # Ignore linter error here since we are running outside of the context of a
+    # Synapse `HomeServer`.
     cache: LruCache[int, bool] = LruCache(
         max_size=loops // 2,
         clock=Clock(reactor, server_name="synmark_benchmark"),  # type: ignore[multiple-internal-clocks]

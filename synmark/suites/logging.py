@@ -87,7 +87,7 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
 
     # To be able to sleep.
     # Ignore linter error here since we are running outside of the context of a
-    # `HomeServer`.
+    # Synapse `HomeServer`.
     clock = Clock(reactor, server_name=hs_config.server.server_name)  # type: ignore[multiple-internal-clocks]
 
     errors = StringIO()
