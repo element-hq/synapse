@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class MatrixRTCRestServlet(RestServlet):
-    PATTERNS = client_patterns(r"/org\.matrix\.msc4143/rtc/services$", releases=())
+    PATTERNS = client_patterns(r"/org\.matrix\.msc4143/rtc/transports$", releases=())
     CATEGORY = "Client API requests"
 
     def __init__(self, hs: "HomeServer"):
@@ -47,10 +47,10 @@ class MatrixRTCRestServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         logger.debug("hello %s", requester.user)
 
-        services = self.hs.config.matrix_rtc.services
+        transports = self.hs.config.matrix_rtc.transports
 
-        if services:
-            return 200, {"rtc_services": services}
+        if transports:
+            return 200, {"rtc_transports": transports}
         else:
             return 200, {}
 

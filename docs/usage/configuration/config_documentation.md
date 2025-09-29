@@ -2580,14 +2580,14 @@ turn_allow_guests: false
 Options related to advertise MatrixRTC backend infrastructure like SFUs.
 
 ---
-### `services`
+### `transports`
 
 *(array|null)*
 
 Example configuration:
 ```
 matrix_rtc:
-  services:
+  transports::
     - type: livekit
       livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```

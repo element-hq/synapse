@@ -31,7 +31,7 @@ PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4143"
 RTC_ENDPOINT = {"type": "focusA", "required_field": "theField"}
 
 class MatrixRtcTestCase(unittest.HomeserverTestCase):
-    """Tests /rtc/endpoints REST API."""
+    """Tests /rtc/transports REST API."""
 
     servlets = [
         admin.register_servlets,
@@ -41,15 +41,15 @@ class MatrixRtcTestCase(unittest.HomeserverTestCase):
         matrixrtc.register_servlets
     ]
 
-    @unittest.override_config({"matrix_rtc": {"services": [RTC_ENDPOINT]}})
+    @unittest.override_config({"matrix_rtc": {"transports": [RTC_ENDPOINT]}})
     def test_matrixrtc_endpoints(self) -> None:
-        channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/services")
+        channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/transports")
         self.assertEqual(401, channel.code)
 
         self.register_user("user", "password")
         tok = self.login("user", "password")
-        channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/services", access_token=tok)
+        channel = self.make_request("GET", f"{PATH_PREFIX}/rtc/transports", access_token=tok)
         self.assertEqual(200, channel.code)
 
-        self.assert_dict({"rtc_services": [RTC_ENDPOINT]}, channel.json_body)
+        self.assert_dict({"rtc_transports": [RTC_ENDPOINT]}, channel.json_body)
 

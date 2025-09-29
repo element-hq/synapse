@@ -32,13 +32,18 @@ class MatrixRtcConfig(Config):
     def read_config(
         self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
     ) -> None:
-        matrix_rtc: JsonDict = config.get("matrix_rtc", {})
-        self.services = matrix_rtc.get("services", [])
 
-        if not isinstance(self.services, list):
+        matrix_rtc: JsonDict = config.get("matrix_rtc", {})
+        self.transports = matrix_rtc.get("transports", [])
+
+        if not isinstance(self.transports, list):
             raise ConfigError(
-                "MatrixRTC endpoints needs to be an array of endpoints", ("matrix_rtc",)
+                "MatrixRTC transports needs to be an array of transports",
+                ("matrix_rtc",)
             )
 
-        if any(("type" not in e for e in self.services)):
-            raise ConfigError("MatrixRTC endpoint is missing type", ("matrix_rtc",))
+        if any(("type" not in e for e in self.transports)):
+            raise ConfigError(
+                "MatrixRTC transport is missing type",
+                ("matrix_rtc",)
+            )
