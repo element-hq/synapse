@@ -20,12 +20,22 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import attr
 from canonicaljson import encode_canonical_json
 from signedjson.key import VerifyKey, decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
+from typing_extensions import TypeAlias
 from unpaddedbase64 import decode_base64
 
 from twisted.internet import defer
@@ -58,6 +68,47 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ONE_TIME_KEY_UPLOAD = "one_time_key_upload_lock"
+
+
+@attr.s(frozen=True, slots=True, auto_attribs=True)
+class DeviceKeys:
+    algorithms: List[str]
+    """The encryption algorithms supported by this device."""
+
+    device_id: str
+    """The ID of the device these keys belong to. Must match the device ID used when logging in."""
+
+    keys: Mapping[str, str]
+    """
+    Public identity keys. The names of the properties should be in the
+    format `<algorithm>:<device_id>`. The keys themselves should be encoded as
+    specified by the key algorithm.
+    """
+
+    signatures: Mapping[UserID, Mapping[str, str]]
+    """Signatures for the device key object. A map from user ID, to a map from "<algorithm>:<device_id>" to the signature."""
+
+    user_id: UserID
+    """The ID of the user the device belongs to. Must match the user ID used when logging in."""
+
+
+@attr.s(frozen=True, slots=True, auto_attribs=True)
+class KeyObject:
+    key: str
+    """The key, encoded using unpadded base64."""
+
+    signatures: Mapping[UserID, Mapping[str, str]]
+    """Signature for the device. Mapped from user ID to another map of key signing identifier to the signature itself.
+
+    See the following for more detail: https://spec.matrix.org/v1.16/appendices/#signing-details
+    """
+
+    fallback: bool = False
+    """Whether this is a fallback key."""
+
+
+FallbackKeys: TypeAlias = Mapping[str, Union[str, KeyObject]]
+OneTimeKeys: TypeAlias = Mapping[str, Union[str, KeyObject]]
 
 
 class E2eKeysHandler:
@@ -833,7 +884,12 @@ class E2eKeysHandler:
 
     @tag_args
     async def upload_keys_for_user(
-        self, user_id: str, device_id: str, keys: JsonDict
+        self,
+        user_id: str,
+        device_id: str,
+        device_keys: Optional[DeviceKeys],
+        fallback_keys: Optional[FallbackKeys],
+        one_time_keys: Optional[OneTimeKeys],
     ) -> JsonDict:
         """
         Args:
@@ -847,18 +903,16 @@ class E2eKeysHandler:
         """
         time_now = self.clock.time_msec()
 
-        # TODO: Validate the JSON to make sure it has the right keys.
-        device_keys = keys.get("device_keys", None)
-        if device_keys and isinstance(device_keys, dict):
+        if device_keys:
             # Validate that user_id and device_id match the requesting user
             if (
-                device_keys["user_id"] == user_id
-                and device_keys["device_id"] == device_id
+                device_keys.user_id.to_string() == user_id
+                and device_keys.device_id == device_id
             ):
                 await self.upload_device_keys_for_user(
-                    user_id=user_id,
-                    device_id=device_id,
-                    keys={"device_keys": device_keys},
+                    user_id,
+                    device_id,
+                    device_keys,
                 )
             else:
                 log_kv(
@@ -870,8 +924,7 @@ class E2eKeysHandler:
         else:
             log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
 
-        one_time_keys = keys.get("one_time_keys", None)
-        if one_time_keys and isinstance(one_time_keys, dict):
+        if one_time_keys:
             log_kv(
                 {
                     "message": "Updating one_time_keys for device.",
@@ -888,10 +941,8 @@ class E2eKeysHandler:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
-        fallback_keys = keys.get("fallback_keys") or keys.get(
-            "org.matrix.msc2732.fallback_keys"
-        )
-        if fallback_keys and isinstance(fallback_keys, dict):
+
+        if fallback_keys:
             log_kv(
                 {
                     "message": "Updating fallback_keys for device.",
@@ -900,8 +951,6 @@ class E2eKeysHandler:
                 }
             )
             await self.store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
-        elif fallback_keys:
-            log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
         else:
             log_kv(
                 {"message": "Did not update fallback_keys", "reason": "no keys given"}
@@ -914,7 +963,10 @@ class E2eKeysHandler:
 
     @tag_args
     async def upload_device_keys_for_user(
-        self, user_id: str, device_id: str, keys: JsonDict
+        self,
+        user_id: str,
+        device_id: str,
+        device_keys: DeviceKeys,
     ) -> None:
         """
         Args:
@@ -925,7 +977,6 @@ class E2eKeysHandler:
         """
         time_now = self.clock.time_msec()
 
-        device_keys = keys["device_keys"]
         logger.info(
             "Updating device_keys for device %r for user %s at %d",
             device_id,
@@ -955,7 +1006,11 @@ class E2eKeysHandler:
         await self.device_handler.check_device_registered(user_id, device_id)
 
     async def _upload_one_time_keys_for_user(
-        self, user_id: str, device_id: str, time_now: int, one_time_keys: JsonDict
+        self,
+        user_id: str,
+        device_id: str,
+        time_now: int,
+        one_time_keys: OneTimeKeys,
     ) -> None:
         # We take out a lock so that we don't have to worry about a client
         # sending duplicate requests.
@@ -1742,20 +1797,20 @@ def _exception_to_failure(e: Exception) -> JsonDict:
     return {"status": 503, "message": str(e)}
 
 
-def _one_time_keys_match(old_key_json: str, new_key: JsonDict) -> bool:
+def _one_time_keys_match(old_key_json: str, new_key: Union[str, KeyObject]) -> bool:
     old_key = json_decoder.decode(old_key_json)
 
     # if either is a string rather than an object, they must match exactly
-    if not isinstance(old_key, dict) or not isinstance(new_key, dict):
+    if isinstance(old_key, str) or isinstance(new_key, str):
         return old_key == new_key
 
-    # otherwise, we strip off the 'signatures' if any, because it's legitimate
-    # for different upload attempts to have different signatures.
-    old_key.pop("signatures", None)
-    new_key_copy = dict(new_key)
-    new_key_copy.pop("signatures", None)
+    # new_key must be a `KeyObject`
 
-    return old_key == new_key_copy
+    # Otherwise, check whether the embedded keys match.
+    #
+    # We ignore signatures, because it's legitimate for different upload
+    # attempts to have different signatures.
+    return old_key["key"] == new_key.key
 
 
 @attr.s(slots=True, auto_attribs=True)

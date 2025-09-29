@@ -52,6 +52,7 @@ from synapse.types import (
     StreamToken,
     ThreadSubscriptionsToken,
     UserID,
+    UserIDType,
 )
 from synapse.types.rest.client import SlidingSyncBody
 
@@ -67,7 +68,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     extra fields that we need in the handler
     """
 
-    user: UserID
+    user: UserIDType
     requester: Requester
 
     # Pydantic config

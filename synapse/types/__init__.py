@@ -27,6 +27,7 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Annotated,
     Any,
     ClassVar,
     Dict,
@@ -48,6 +49,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
+from pydantic import BeforeValidator, PlainSerializer, WithJsonSchema
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
 from typing_extensions import Self
@@ -359,6 +361,37 @@ class RoomIdWithDomain(DomainSpecificString):
     """Structure representing a room ID with a domain suffix."""
 
     SIGIL = "!"
+
+
+def _parse_user_id(user_id_str: Any) -> Any:
+    if isinstance(user_id_str, str):
+        try:
+            return UserID.from_string(user_id_str)
+        except Exception as e:
+            raise ValueError(
+                f"Unable to parse string '{user_id_str}' as valid Matrix User ID"
+            ) from e
+    raise ValueError(f"Expected a string, found {type(user_id_str)}")
+
+
+UserIDType = Annotated[
+    UserID,
+    BeforeValidator(_parse_user_id),
+    PlainSerializer(lambda uid: uid.to_string(), return_type=str),
+    WithJsonSchema(
+        {
+            "type": "string",
+            "description": "Matrix User ID",
+            "pattern": r"^@[^:]+:[^:]+$",
+            "examples": ["@alice:example.org"],
+        }
+    ),
+]
+"""
+A User ID type that can be used in Pydantic models.
+
+Validates that the input value is a `str` and can be parsed as a Matrix User ID.
+"""
 
 
 # the set of urlsafe base64 characters, no padding.

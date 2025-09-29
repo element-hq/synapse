@@ -67,7 +67,7 @@ from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
-    from synapse.handlers.e2e_keys import SignatureListItem
+    from synapse.handlers.e2e_keys import DeviceKeys, FallbackKeys, SignatureListItem
     from synapse.server import HomeServer
 
 
@@ -802,7 +802,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     async def set_e2e_fallback_keys(
-        self, user_id: str, device_id: str, fallback_keys: JsonDict
+        self,
+        user_id: str,
+        device_id: str,
+        fallback_keys: "FallbackKeys",
     ) -> None:
         """Set the user's e2e fallback keys.
 
@@ -829,7 +832,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         txn: LoggingTransaction,
         user_id: str,
         device_id: str,
-        fallback_keys: JsonDict,
+        fallback_keys: "FallbackKeys",
     ) -> None:
         """Set the user's e2e fallback keys.
 
@@ -1650,16 +1653,20 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         )
 
     async def set_e2e_device_keys(
-        self, user_id: str, device_id: str, time_now: int, device_keys: JsonDict
+        self,
+        user_id: str,
+        device_id: str,
+        time_now: int,
+        device_keys: "DeviceKeys",
     ) -> bool:
         """Stores device keys for a device. Returns whether there was a change
         or the keys were already in the database.
 
-            Args:
-                user_id: user_id of the user to store keys for
-                device_id: device_id of the device to store keys for
-                time_now: time at the request to store the keys
-                device_keys: the keys to store
+        Args:
+            user_id: user_id of the user to store keys for
+            device_id: device_id of the device to store keys for
+            time_now: time at the request to store the keys
+            device_keys: the keys to store
         """
 
         return await self.db_pool.runInteraction(
@@ -1677,7 +1684,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         user_id: str,
         device_id: str,
         time_now: int,
-        device_keys: JsonDict,
+        device_keys: "DeviceKeys",
     ) -> bool:
         """Stores device keys for a device. Returns whether there was a change
         or the keys were already in the database.

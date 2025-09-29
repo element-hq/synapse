@@ -23,7 +23,25 @@
 import logging
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
+
+from pydantic import (
+    AfterValidator,
+    AliasChoices,
+    Field,
+    StrictBool,
+    StrictStr,
+)
 
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
@@ -31,9 +49,16 @@ from synapse.api.errors import (
     InvalidAPICallError,
     SynapseError,
 )
+from synapse.handlers.e2e_keys import (
+    DeviceKeys,
+    FallbackKeys,
+    KeyObject,
+    OneTimeKeys,
+)
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
+    parse_and_validate_json_object_from_request,
     parse_integer,
     parse_json_object_from_request,
     parse_string,
@@ -41,7 +66,8 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
-from synapse.types import JsonDict, StreamToken
+from synapse.types import JsonDict, StreamToken, UserIDType
+from synapse.types.rest import RequestBodyModel
 from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
@@ -111,12 +137,94 @@ class KeyUploadServlet(RestServlet):
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
 
+    class KeyUploadRequestBody(RequestBodyModel):
+        """
+        The body of a `POST /_matrix/client/v3/keys/upload` request.
+
+        Based on https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload.
+        """
+
+        class DeviceKeys(RequestBodyModel):
+            algorithms: List[StrictStr]
+            """The encryption algorithms supported by this device."""
+
+            device_id: StrictStr
+            """The ID of the device these keys belong to. Must match the device ID used when logging in."""
+
+            keys: Mapping[StrictStr, StrictStr]
+            """
+            Public identity keys. The names of the properties should be in the
+            format `<algorithm>:<device_id>`. The keys themselves should be encoded as
+            specified by the key algorithm.
+            """
+
+            signatures: Mapping[UserIDType, Mapping[StrictStr, StrictStr]]
+            """Signatures for the device key object. A map from user ID, to a map from "<algorithm>:<device_id>" to the signature."""
+
+            user_id: UserIDType
+            """The ID of the user the device belongs to. Must match the user ID used when logging in."""
+
+        class KeyObject(RequestBodyModel):
+            key: StrictStr
+            """The key, encoded using unpadded base64."""
+
+            # TODO: Is this only allowed on fallback keys?
+            fallback: StrictBool = False
+            """Whether this is a fallback key."""
+
+            signatures: Mapping[UserIDType, Mapping[StrictStr, StrictStr]]
+            """Signature for the device. Mapped from user ID to another map of key signing identifier to the signature itself.
+
+            See the following for more detail: https://spec.matrix.org/v1.16/appendices/#signing-details
+            """
+
+        device_keys: Optional[DeviceKeys] = None
+        """Identity keys for the device. May be absent if no new identity keys are required."""
+
+        fallback_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = (
+            Field(
+                default_factory=lambda: None,
+                validation_alias=AliasChoices(
+                    "fallback_keys",
+                    # Accept this field alias, which is the unstable equivalent to
+                    # the `fallback_keys` field from MSC2732.
+                    "org.matrix.msc2732.fallback_keys",
+                ),
+                serialization_alias="fallback_keys",
+            )
+        )
+        """
+        The public key which should be used if the device's one-time keys are
+        exhausted. The fallback key is not deleted once used, but should be
+        replaced when additional one-time keys are being uploaded. The server
+        will notify the client of the fallback key being used through `/sync`.
+
+        There can only be at most one key per algorithm uploaded, and the server
+        will only persist one key per algorithm.
+
+        When uploading a signed key, an additional fallback: true key should be
+        included to denote that the key is a fallback key.
+
+        May be absent if a new fallback key is not required.
+        """
+
+        one_time_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
+        """
+        One-time public keys for “pre-key” messages. The names of the properties
+        should be in the format `<algorithm>:<key_id>`.
+
+        The format of the key is determined by the key algorithm, see:
+        https://spec.matrix.org/v1.16/client-server-api/#key-algorithms.
+        """
+
     async def on_POST(
         self, request: SynapseRequest, device_id: Optional[str]
     ) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
-        body = parse_json_object_from_request(request)
+        body = parse_and_validate_json_object_from_request(
+            request, self.KeyUploadRequestBody
+        )
 
         if device_id is not None:
             # Providing the device_id should only be done for setting keys
@@ -149,11 +257,74 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
+        # Map the pydantic model to domain objects.
+        device_keys, fallback_keys, one_time_keys = (
+            self._map_pydantic_model_to_domain_objects(body)
+        )
+
         result = await self.e2e_keys_handler.upload_keys_for_user(
-            user_id=user_id, device_id=device_id, keys=body
+            user_id,
+            device_id,
+            device_keys,
+            fallback_keys,
+            one_time_keys,
         )
 
         return 200, result
+
+    def _map_pydantic_model_to_domain_objects(
+        self, body: KeyUploadRequestBody
+    ) -> Tuple[
+        Optional[DeviceKeys],
+        Optional[FallbackKeys],
+        Optional[OneTimeKeys],
+    ]:
+        """Map a validated pydantic model to internal data classes."""
+        device_keys: Optional[DeviceKeys] = None
+        if body.device_keys is not None:
+            device_keys = DeviceKeys(
+                algorithms=body.device_keys.algorithms,
+                device_id=body.device_keys.device_id,
+                keys=body.device_keys.keys,
+                signatures=body.device_keys.signatures,
+                user_id=body.device_keys.user_id,
+            )
+
+        fallback_keys: Optional[FallbackKeys] = None
+        if body.fallback_keys is not None:
+            fallback_keys = {}
+            for (
+                algorithm_and_key_id,
+                public_key_or_object,
+            ) in body.fallback_keys.items():
+                if isinstance(public_key_or_object, str):
+                    fallback_keys[algorithm_and_key_id] = public_key_or_object
+                else:
+                    fallback_key_object: KeyUploadServlet.KeyUploadRequestBody.KeyObject = public_key_or_object
+                    fallback_keys[algorithm_and_key_id] = KeyObject(
+                        key=fallback_key_object.key,
+                        signatures=fallback_key_object.signatures,
+                        fallback=fallback_key_object.fallback,
+                    )
+
+        one_time_keys: Optional[OneTimeKeys] = None
+        if body.one_time_keys is not None:
+            one_time_keys = {}
+            for (
+                algorithm_and_key_id,
+                public_key_or_object,
+            ) in body.one_time_keys.items():
+                if isinstance(public_key_or_object, str):
+                    one_time_keys[algorithm_and_key_id] = public_key_or_object
+                else:
+                    one_time_key_object: KeyUploadServlet.KeyUploadRequestBody.KeyObject = public_key_or_object
+                    one_time_keys[algorithm_and_key_id] = KeyObject(
+                        key=one_time_key_object.key,
+                        signatures=one_time_key_object.signatures,
+                        fallback=one_time_key_object.fallback,
+                    )
+
+        return device_keys, fallback_keys, one_time_keys
 
 
 class KeyQueryServlet(RestServlet):

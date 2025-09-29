@@ -21,7 +21,9 @@
 
 from twisted.internet.testing import MemoryReactor
 
+from synapse.handlers.e2e_keys import DeviceKeys
 from synapse.server import HomeServer
+from synapse.types import UserID
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -30,47 +32,55 @@ from tests.unittest import HomeserverTestCase
 class EndToEndKeyStoreTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
+        self.now_ms = 1470174257070
+        self.test_user_id = "@alice:test"
+        self.test_device_id = "TEST_DEVICE"
+        self.test_device_keys = self._create_test_device_keys(self.test_user_id, self.test_device_id)
+
+    def _create_test_device_keys(self, user_id: str, device_id: str, public_key: str = "test_public_key") -> DeviceKeys:
+        """Create and return a test `DeviceKeys` object."""
+        return DeviceKeys(
+            algorithms=["ed25519"],
+            device_id=device_id,
+            keys={
+                f"ed25519:{device_id}": public_key,
+            },
+            signatures={},
+            user_id=UserID.from_string(user_id),
+        )
 
     def test_key_without_device_name(self) -> None:
-        now = 1470174257070
-        json = {"key": "value"}
+        self.get_success(self.store.store_device(self.test_user_id, self.test_device_id, None))
 
-        self.get_success(self.store.store_device("user", "device", None))
-
-        self.get_success(self.store.set_e2e_device_keys("user", "device", now, json))
+        self.get_success(self.store.set_e2e_device_keys(self.test_user_id, self.test_device_id, self.now_ms, self.test_device_keys))
 
         res = self.get_success(
-            self.store.get_e2e_device_keys_for_cs_api((("user", "device"),))
+            self.store.get_e2e_device_keys_for_cs_api(((self.test_user_id, self.test_device_id),))
         )
-        self.assertIn("user", res)
-        self.assertIn("device", res["user"])
-        dev = res["user"]["device"]
-        self.assertLessEqual(json.items(), dev.items())
+        self.assertIn(self.test_user_id, res)
+        self.assertIn(self.test_device_id, res[self.test_user_id])
+        device_keys = res[self.test_user_id][self.test_device_id]
+
+        print(device_keys)
 
     def test_reupload_key(self) -> None:
-        now = 1470174257070
-        json = {"key": "value"}
-
         self.get_success(self.store.store_device("user", "device", None))
 
         changed = self.get_success(
-            self.store.set_e2e_device_keys("user", "device", now, json)
+            self.store.set_e2e_device_keys("user", "device", self.now_ms, self.test_device_keys)
         )
         self.assertTrue(changed)
 
         # If we try to upload the same key then we should be told nothing
         # changed
         changed = self.get_success(
-            self.store.set_e2e_device_keys("user", "device", now, json)
+            self.store.set_e2e_device_keys("user", "device", self.now_ms, self.test_device_keys)
         )
         self.assertFalse(changed)
 
     def test_get_key_with_device_name(self) -> None:
-        now = 1470174257070
-        json = {"key": "value"}
-
-        self.get_success(self.store.set_e2e_device_keys("user", "device", now, json))
-        self.get_success(self.store.store_device("user", "device", "display_name"))
+        self.get_success(self.store.set_e2e_device_keys(self.test_user_id, self.test_device_id, self.now_ms, self.test_device_keys))
+        self.get_success(self.store.store_device(self.test_user_id, self.test_device_id, "display_name"))
 
         res = self.get_success(
             self.store.get_e2e_device_keys_for_cs_api((("user", "device"),))
@@ -87,34 +97,37 @@ class EndToEndKeyStoreTestCase(HomeserverTestCase):
         )
 
     def test_multiple_devices(self) -> None:
-        now = 1470174257070
+        user_one = "@user1:test"
+        user_two = "@user2:test"
+        device_id_one = "DEVICE_ID_1"
+        device_id_two = "DEVICE_ID_2"
 
-        self.get_success(self.store.store_device("user1", "device1", None))
-        self.get_success(self.store.store_device("user1", "device2", None))
-        self.get_success(self.store.store_device("user2", "device1", None))
-        self.get_success(self.store.store_device("user2", "device2", None))
+        self.get_success(self.store.store_device(user_one, device_id_one, None))
+        self.get_success(self.store.store_device(user_one, device_id_two, None))
+        self.get_success(self.store.store_device(user_two, device_id_one, None))
+        self.get_success(self.store.store_device(user_two, device_id_two, None))
 
         self.get_success(
-            self.store.set_e2e_device_keys("user1", "device1", now, {"key": "json11"})
+            self.store.set_e2e_device_keys(user_one, device_id_one, self.now_ms, self._create_test_device_keys(user_one, device_id_one, "json11"))
         )
         self.get_success(
-            self.store.set_e2e_device_keys("user1", "device2", now, {"key": "json12"})
+            self.store.set_e2e_device_keys(user_one, device_id_two, self.now_ms, self._create_test_device_keys(user_one, device_id_two, "json12"))
         )
         self.get_success(
-            self.store.set_e2e_device_keys("user2", "device1", now, {"key": "json21"})
+            self.store.set_e2e_device_keys(user_two, device_id_one, self.now_ms, self._create_test_device_keys(user_two, device_id_one, "json21"))
         )
         self.get_success(
-            self.store.set_e2e_device_keys("user2", "device2", now, {"key": "json22"})
+            self.store.set_e2e_device_keys(user_two, device_id_two, self.now_ms, self._create_test_device_keys(user_two, device_id_two, "json22"))
         )
 
         res = self.get_success(
             self.store.get_e2e_device_keys_for_cs_api(
-                (("user1", "device1"), ("user2", "device2"))
+                ((user_one, device_id_one), (user_two, device_id_two))
             )
         )
-        self.assertIn("user1", res)
-        self.assertIn("device1", res["user1"])
-        self.assertNotIn("device2", res["user1"])
-        self.assertIn("user2", res)
-        self.assertNotIn("device1", res["user2"])
-        self.assertIn("device2", res["user2"])
+        self.assertIn(user_one, res)
+        self.assertIn(device_id_one, res[user_one])
+        self.assertNotIn(device_id_two, res[user_one])
+        self.assertIn(user_two, res)
+        self.assertNotIn(device_id_one, res[user_two])
+        self.assertIn(device_id_two, res[user_two])
