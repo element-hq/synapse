@@ -662,13 +662,9 @@ class HomeserverTestCase(TestCase):
         # The sane default is to use the same reactor and clock as our other test utils
         if reactor is None:
             reactor = self.reactor
-        else:
-            reactor = kwargs["reactor"]
 
         if clock is None:
             clock = self.clock
-        else:
-            clock = kwargs["clock"]
 
         # The server name can be specified using either the `name` argument or a config
         # override. The `name` argument takes precedence over any config overrides.
