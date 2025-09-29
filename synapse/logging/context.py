@@ -876,8 +876,10 @@ def run_in_background(
         rules.
     """
     instance_id = random_string(5)
-    logger.debug("run_in_background(%s): called", instance_id)
     calling_context = current_context()
+    logger.debug(
+        "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
+    )
     try:
         # (kick off the task in the current context)
         res = f(*args, **kwargs)
@@ -935,7 +937,9 @@ def run_in_background(
     # Our goal is to have the caller logcontext unchanged after firing off the
     # background task and returning.
     logger.debug(
-        "run_in_background(%s): restoring context %s", instance_id, calling_context
+        "run_in_background(%s): restoring calling logcontext %s",
+        instance_id,
+        calling_context,
     )
     set_current_context(calling_context)
 
@@ -954,14 +958,18 @@ def run_in_background(
     # adding a new exit point.)
     if logger.isEnabledFor(logging.DEBUG):
 
-        def _asdf(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
+        def _log_set_context_cb(
+            result: ResultT, context: LoggingContextOrSentinel
+        ) -> ResultT:
             logger.debug(
-                "run_in_background(%s): resetting context to %s", instance_id, context
+                "run_in_background(%s): resetting logcontext to %s",
+                instance_id,
+                context,
             )
-            _set_context_cb(result, context)
+            set_current_context(context)
             return result
 
-        d.addBoth(_asdf, SENTINEL_CONTEXT)
+        d.addBoth(_log_set_context_cb, SENTINEL_CONTEXT)
     else:
         d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
 
@@ -1021,7 +1029,11 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     reactor back to the code).
     """
     instance_id = random_string(5)
-    logger.debug("make_deferred_yieldable(%s): called", instance_id)
+    logger.debug(
+        "make_deferred_yieldable(%s): called with logcontext=%s",
+        instance_id,
+        current_context(),
+    )
 
     # The deferred has already completed
     if deferred.called and not deferred.paused:
@@ -1044,26 +1056,28 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     # active when the deferred completes.
 
     logger.debug(
-        "make_deferred_yieldable(%s): resetting context to %s",
+        "make_deferred_yieldable(%s): resetting logcontext to %s",
         instance_id,
         SENTINEL_CONTEXT,
     )
-    prev_context = set_current_context(SENTINEL_CONTEXT)
+    calling_context = set_current_context(SENTINEL_CONTEXT)
 
     if logger.isEnabledFor(logging.DEBUG):
 
-        def _asdf(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
+        def _log_set_context_cb(
+            result: ResultT, context: LoggingContextOrSentinel
+        ) -> ResultT:
             logger.debug(
-                "make_deferred_yieldable(%s): resetting context to %s",
+                "make_deferred_yieldable(%s): restoring calling logcontext to %s",
                 instance_id,
                 context,
             )
-            _set_context_cb(result, context)
+            set_current_context(context)
             return result
 
-        deferred.addBoth(_asdf, prev_context)
+        deferred.addBoth(_log_set_context_cb, calling_context)
     else:
-        deferred.addBoth(_set_context_cb, prev_context)
+        deferred.addBoth(_set_context_cb, calling_context)
 
     return deferred
 
