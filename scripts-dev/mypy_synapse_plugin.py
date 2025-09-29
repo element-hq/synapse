@@ -70,25 +70,25 @@ PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
 
 PREFER_SYNAPSE_CLOCK_CALL_LATER = ErrorCode(
     "call-later-not-tracked",
-    "`synapse.util.Clock.call_later` should be used instead of `reactor.callLater`",
+    "Prefer using `synapse.util.Clock.call_later` instead of `reactor.callLater`",
     category="synapse-reactor-clock",
 )
 
 PREFER_SYNAPSE_CLOCK_LOOPING_CALL = ErrorCode(
     "prefer-synapse-clock-looping-call",
-    "`synapse.util.Clock.looping_call` should be used instead of `task.LoopingCall`",
+    "Prefer using `synapse.util.Clock.looping_call` instead of `task.LoopingCall`",
     category="synapse-reactor-clock",
 )
 
 PREFER_SYNAPSE_CLOCK_CALL_WHEN_RUNNING = ErrorCode(
     "prefer-synapse-clock-call-when-running",
-    "`synapse.util.Clock.call_when_running` should be used instead of `reactor.callWhenRunning`",
+    "Prefer using `synapse.util.Clock.call_when_running` instead of `reactor.callWhenRunning`",
     category="synapse-reactor-clock",
 )
 
 PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER = ErrorCode(
     "prefer-synapse-clock-add-system-event-trigger",
-    "`synapse.util.Clock.add_system_event_trigger` should be used instead of `reactor.addSystemEventTrigger`",
+    "Prefer using `synapse.util.Clock.add_system_event_trigger` instead of `reactor.addSystemEventTrigger`",
     category="synapse-reactor-clock",
 )
 
@@ -344,7 +344,7 @@ def check_call_later(ctx: MethodSigContext) -> CallableType:
         "instead. This is so that long lived calls can be tracked for cancellation during "
         "server shutdown",
         ctx.context,
-        code=INTERNAL_CLOCK_CALL_LATER_NOT_USED,
+        code=PREFER_SYNAPSE_CLOCK_CALL_LATER,
     )
 
     return signature
