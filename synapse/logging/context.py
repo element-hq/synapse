@@ -732,14 +732,6 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
     """
     # everything blows up if we allow current_context to be set to None, so sanity-check
     # that now.
-    # import traceback
-
-    # logger.debug(
-    #     "set_current_context: %s --> %s - %s",
-    #     current_context(),
-    #     context,
-    #     traceback.format_stack(),
-    # )
     if context is None:
         raise TypeError("'context' argument may not be None")
 
