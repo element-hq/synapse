@@ -177,7 +177,9 @@ class StateDeltasStore(SQLBaseStore):
                 # Otherwise we'll either deadlock the caller (they'll keep calling us
                 # with the same prev_stream_id) or make the caller think there's no
                 # more rows to consume (when there are).
-                return prev_stream_id, []
+                #
+                # Set `clipped_stream_id` to that of the group that's too big to fit inside.
+                clipped_stream_id = ? # This isn't currently returned by the above query.
 
             # If we included every row up to max_stream_id, we can safely report progress to max_stream_id.
             consumed_all = included_rows == total_rows

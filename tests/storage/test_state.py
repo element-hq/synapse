@@ -859,3 +859,95 @@ class CurrentStateDeltaStreamTestCase(HomeserverTestCase):
             4,
             f"Returned {len(next_deltas)} rows, expected all 4 m.room.name events: {next_deltas}",
         )
+
+    def test_get_partial_current_state_deltas_does_not_deadlock(self) -> None:
+        """
+        Tests that `get_partial_current_state_deltas` does not repeatedly return
+        zero entries due to the passed `limit` parameter being less than the
+        size of the next group of state deltas from the given `prev_stream_id`.
+        """
+        # Inject a create event to start with.
+        self.inject_state_event(
+            self.room, self.alice_user_id, EventTypes.Create, "", {}
+        )
+
+        # Then inject one "real" m.room.name event. This will give us a stream_id that
+        # we can create some more (fake) events with.
+        self.inject_state_event(
+            self.room,
+            self.alice_user_id,
+            EventTypes.Name,
+            "",
+            {"name": "rename #1"},
+        )
+
+        # Get the stream_id of the last-inserted event.
+        max_stream_id = self.store.get_room_max_stream_ordering()
+
+        # Make 3 more state changes in the room, resulting in 5 total state
+        # events (including the create event, and the first name update) in
+        # the room.
+        #
+        # All of these state deltas have the same `stream_id`. Do so by editing
+        # the table directly as that's the simplest way to have all share the
+        # same `stream_id`.
+        self.get_success(
+            self.store.db_pool.simple_insert_many(
+                "current_state_delta_stream",
+                keys=(
+                    "stream_id",
+                    "room_id",
+                    "type",
+                    "state_key",
+                    "event_id",
+                    "prev_event_id",
+                    "instance_name",
+                ),
+                values=[
+                    (
+                        max_stream_id,
+                        self.room.to_string(),
+                        "m.room.name",
+                        "",
+                        f"${random_string(5)}:test",
+                        json.dumps({"name": f"rename #{i}"}),
+                        "master",
+                    )
+                    for i in range(3)
+                ],
+                desc="inject_room_name_state_events",
+            )
+        )
+
+        # Call the function under test with a limit of 4. Without the limit, we would return
+        # 5 state deltas:
+        #
+        # C T T T T
+        # 1 2 3 4 5
+        #
+        # C = m.room.create
+        # T = m.room.topic
+        #
+        # With the limit, we should return only the create event, as returning 4
+        # state deltas would result in splitting a group:
+        #
+        # C T T T T
+        # 1 2 3 4 X
+
+        clipped_stream_id, deltas = self.get_success(
+            self.store.get_partial_current_state_deltas(
+                prev_stream_id=2,
+                max_stream_id=max_stream_id,
+                limit=2,
+            )
+        )
+
+        # 2 is the stream ID of the m.room.create event.
+        # self.assertEqual(
+        #     clipped_stream_id, 3
+        # )
+        self.assertEqual(
+            len(deltas),
+            4,
+            f"Returned {len(deltas)} rows, expected 4 even though it broke our limit: {deltas}",
+        )
