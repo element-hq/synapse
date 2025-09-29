@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, Sequence, Tuple, cast
+from typing import List, Optional, Sequence, Tuple
 from unittest.mock import AsyncMock, Mock
 
 from typing_extensions import TypeAlias
@@ -44,13 +44,12 @@ from synapse.types import DeviceListUpdates, JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
-
-from ..utils import MockClock
+from tests.server import get_clock
 
 
 class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.clock = MockClock()
+        self.reactor, self.clock = get_clock()
         self.store = Mock()
         self.as_api = Mock()
 
@@ -170,14 +169,14 @@ class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
 
 class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.clock = MockClock()
+        self.reactor, self.clock = get_clock()
         self.as_api = Mock()
         self.store = Mock()
         self.service = Mock()
         self.callback = AsyncMock()
         self.recoverer = _Recoverer(
             server_name="test_server",
-            clock=cast(Clock, self.clock),
+            clock=self.clock,
             as_api=self.as_api,
             store=self.store,
             service=self.service,
@@ -202,7 +201,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
         txn.send = AsyncMock(return_value=True)
         txn.complete = AsyncMock(return_value=None)
         # wait for exp backoff
-        self.clock.advance_time(2)
+        self.reactor.advance(2)
         self.assertEqual(1, txn.send.call_count)
         self.assertEqual(1, txn.complete.call_count)
         # 2 because it needs to get None to know there are no more txns
@@ -229,21 +228,21 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
         self.assertEqual(0, self.store.get_oldest_unsent_txn.call_count)
         txn.send = AsyncMock(return_value=False)
         txn.complete = AsyncMock(return_value=None)
-        self.clock.advance_time(2)
+        self.reactor.advance(2)
         self.assertEqual(1, txn.send.call_count)
         self.assertEqual(0, txn.complete.call_count)
         self.assertEqual(0, self.callback.call_count)
-        self.clock.advance_time(4)
+        self.reactor.advance(4)
         self.assertEqual(2, txn.send.call_count)
         self.assertEqual(0, txn.complete.call_count)
         self.assertEqual(0, self.callback.call_count)
-        self.clock.advance_time(8)
+        self.reactor.advance(8)
         self.assertEqual(3, txn.send.call_count)
         self.assertEqual(0, txn.complete.call_count)
         self.assertEqual(0, self.callback.call_count)
         txn.send = AsyncMock(return_value=True)  # successfully send the txn
         pop_txn = True  # returns the txn the first time, then no more.
-        self.clock.advance_time(16)
+        self.reactor.advance(16)
         self.assertEqual(1, txn.send.call_count)  # new mock reset call count
         self.assertEqual(1, txn.complete.call_count)
         self.callback.assert_called_once_with(self.recoverer)
@@ -268,7 +267,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
         self.assertEqual(0, self.store.get_oldest_unsent_txn.call_count)
         txn.send = AsyncMock(return_value=False)
         txn.complete = AsyncMock(return_value=None)
-        self.clock.advance_time(2)
+        self.reactor.advance(2)
         self.assertEqual(1, txn.send.call_count)
         self.assertEqual(0, txn.complete.call_count)
         self.assertEqual(0, self.callback.call_count)

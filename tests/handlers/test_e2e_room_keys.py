@@ -21,7 +21,6 @@
 #
 
 import copy
-from unittest import mock
 
 from twisted.internet.testing import MemoryReactor
 

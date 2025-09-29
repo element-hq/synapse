@@ -1037,10 +1037,10 @@ def setup_test_homeserver(
     Args:
         cleanup_func: The function used to register a cleanup routine for after the
             test.
-        server_name: homeserver name
-        config: TODO
-        reactor: TODO
-        homeserver_to_use: TODO
+        server_name: Homeserver name
+        config: Homeserver config
+        reactor: Twisted reactor
+        homeserver_to_use: Homeserver class to instantiate.
         db_txn_limit: Gives the maximum number of database transactions to run per
             connection before reconnecting. 0 means no limit. If unset, defaults to None
             here which will default upstream to `0`.
