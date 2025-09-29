@@ -68,7 +68,7 @@ PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
     category="per-homeserver-tenant-metrics",
 )
 
-INTERNAL_CLOCK_CALL_LATER_NOT_USED = ErrorCode(
+PREFER_SYNAPSE_CLOCK_CALL_LATER = ErrorCode(
     "call-later-not-tracked",
     "`synapse.util.Clock.call_later` should be used instead of `reactor.callLater`",
     category="synapse-reactor-clock",
@@ -100,7 +100,7 @@ MULTIPLE_INTERNAL_CLOCKS_CREATED = ErrorCode(
 
 UNTRACKED_BACKGROUND_PROCESS = ErrorCode(
     "untracked-background-process",
-    "All calls to `run_as_background_process` should use the `HomeServer` method",
+    "Prefer using `HomeServer.run_as_background_process` method over the bare `run_as_background_process`",
     category="synapse-tracked-calls",
 )
 
@@ -301,6 +301,27 @@ class SynapsePlugin(Plugin):
         return None
 
 
+def check_clock_creation(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the only `clock.Clock` instance is the one used by the `HomeServer`.
+    This is so that the `HomeServer` can cancel any tracked delayed or looping calls
+    during server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected the only `clock.Clock` instance to be the one used by the `HomeServer`. "
+        "This is so that the `HomeServer` can cancel any tracked delayed or looping calls "
+        "during server shutdown",
+        ctx.context,
+        code=MULTIPLE_INTERNAL_CLOCKS_CREATED,
+    )
+
+    return signature
+
+
 def check_call_later(ctx: MethodSigContext) -> CallableType:
     """
     Ensure that the `reactor.callLater` callsites aren't used.
@@ -347,44 +368,6 @@ def check_looping_call(ctx: FunctionSigContext) -> CallableType:
         "server shutdown",
         ctx.context,
         code=PREFER_SYNAPSE_CLOCK_LOOPING_CALL,
-    )
-
-    return signature
-
-
-def check_clock_creation(ctx: FunctionSigContext) -> CallableType:
-    """
-    Ensure that the only `clock.Clock` is the one used by the `HomeServer`.
-
-    Args:
-        ctx: The `FunctionSigContext` from mypy.
-    """
-    signature: CallableType = ctx.default_signature
-    ctx.api.fail(
-        "Expected the only `clock.Clock` instance to be the one used by the `HomeServer`. "
-        "This is so that the `HomeServer` can cancel any tracked delayed or looping calls "
-        "during server shutdown",
-        ctx.context,
-        code=MULTIPLE_INTERNAL_CLOCKS_CREATED,
-    )
-
-    return signature
-
-
-def check_background_process(ctx: FunctionSigContext) -> CallableType:
-    """
-    Ensure that calls to `run_as_background_process` use the `HomeServer` method.
-
-    Args:
-        ctx: The `FunctionSigContext` from mypy.
-    """
-    signature: CallableType = ctx.default_signature
-    ctx.api.fail(
-        "Expected all calls to `run_as_background_process` to use the `HomeServer` method. "
-        "This is so that the `HomeServer` can cancel any background processes "
-        "during server shutdown",
-        ctx.context,
-        code=UNTRACKED_BACKGROUND_PROCESS,
     )
 
     return signature
@@ -439,6 +422,27 @@ def check_add_system_event_trigger(ctx: MethodSigContext) -> CallableType:
         ),
         ctx.context,
         code=PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER,
+    )
+
+    return signature
+
+
+def check_background_process(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that calls to `run_as_background_process` use the `HomeServer` method.
+    This is so that the `HomeServer` can cancel any running background processes during
+    server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Prefer using `HomeServer.run_as_background_process` method over the bare "
+        "`run_as_background_process`. This is so that the `HomeServer` can cancel "
+        "any background processes during server shutdown",
+        ctx.context,
+        code=UNTRACKED_BACKGROUND_PROCESS,
     )
 
     return signature
