@@ -31,8 +31,6 @@ See doc/log_contexts.rst for details on how this works.
 """
 
 import logging
-import secrets
-import string
 import threading
 import typing
 import warnings
@@ -56,6 +54,8 @@ from typing_extensions import ParamSpec
 
 from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
+
+from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
     from synapse.types import ISynapseReactor
@@ -85,15 +85,6 @@ except Exception:
 
     def get_thread_resource_usage() -> "Optional[resource.struct_rusage]":
         return None
-
-
-# This is copied from synapse.util.stringutils to avoid a circular import issues
-def random_string(length: int) -> str:
-    """Generate a cryptographically secure string of random letters.
-
-    Drawn from the characters: `a-z` and `A-Z`
-    """
-    return "".join(secrets.choice(string.ascii_letters) for _ in range(length))
 
 
 # a hook which can be set during testing to assert that we aren't abusing logcontexts.
