@@ -1021,7 +1021,7 @@ class TestHomeServer(HomeServer):
 
 def setup_test_homeserver(
     cleanup_func: Callable[[Callable[[], None]], None],
-    name: str = "test",
+    server_name: str = "test",
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
     homeserver_to_use: Type[HomeServer] = TestHomeServer,
@@ -1036,6 +1036,10 @@ def setup_test_homeserver(
     Args:
         cleanup_func : The function used to register a cleanup routine for
                        after the test.
+        server_name: homeserver name
+        config: TODO
+        reactor: TODO
+        homeserver_to_use: TODO
 
     Calling this method directly is deprecated: you should instead derive from
     HomeserverTestCase.
@@ -1046,7 +1050,11 @@ def setup_test_homeserver(
         reactor = cast(ISynapseReactor, _reactor)
 
     if config is None:
-        config = default_config(name, parse=True)
+        config = default_config(server_name, parse=True)
+
+    server_name = config.server.server_name
+    if not isinstance(server_name, str):
+        raise ConfigError("Must be a string", ("server_name",))
 
     config.caches.resize_all_caches()
 
@@ -1087,10 +1095,6 @@ def setup_test_homeserver(
             "name": "sqlite3",
             "args": {"database": test_db_location, "cp_min": 1, "cp_max": 1},
         }
-
-        server_name = config.server.server_name
-        if not isinstance(server_name, str):
-            raise ConfigError("Must be a string", ("server_name",))
 
         # Check if we have set up a DB that we can use as a template.
         global PREPPED_SQLITE_DB_CONN
@@ -1139,7 +1143,7 @@ def setup_test_homeserver(
         db_conn.close()
 
     hs = homeserver_to_use(
-        name,
+        server_name,
         config=config,
         version_string="Synapse/tests",
         reactor=reactor,

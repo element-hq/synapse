@@ -140,21 +140,27 @@ def setupdb() -> None:
 
 
 @overload
-def default_config(name: str, parse: Literal[False] = ...) -> Dict[str, object]: ...
+def default_config(
+    server_name: str, parse: Literal[False] = ...
+) -> Dict[str, object]: ...
 
 
 @overload
-def default_config(name: str, parse: Literal[True]) -> HomeServerConfig: ...
+def default_config(server_name: str, parse: Literal[True]) -> HomeServerConfig: ...
 
 
 def default_config(
-    name: str, parse: bool = False
+    server_name: str, parse: bool = False
 ) -> Union[Dict[str, object], HomeServerConfig]:
     """
     Create a reasonable test config.
+
+    Args:
+        server_name: homeserver name
+        parse: TODO
     """
     config_dict = {
-        "server_name": name,
+        "server_name": server_name,
         # Setting this to an empty list turns off federation sending.
         "federation_sender_instances": [],
         "media_store_path": "media",
