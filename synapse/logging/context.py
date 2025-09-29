@@ -33,7 +33,6 @@ See doc/log_contexts.rst for details on how this works.
 import logging
 import threading
 import typing
-import warnings
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
