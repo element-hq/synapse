@@ -55,12 +55,27 @@ from typing_extensions import ParamSpec
 from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
     from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
+
+original_logger_class = logging.getLoggerClass()
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+logcontext_debug_logger = logging.getLogger("synapse.logging.context.debug")
+"""
+A logger for debugging when the logcontext switches.
+
+Because this is very noisy and probably something only developers want to see when
+debugging logcontext problems, we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitly setting `synapse.logging.context.debug` in the logging
+configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 try:
     import resource
@@ -392,7 +407,7 @@ class LoggingContext:
 
     def __enter__(self) -> "LoggingContext":
         """Enters this logging context into thread local storage"""
-        logger.debug("LoggingContext(%s).__enter__", self.name)
+        logcontext_debug_logger.debug("LoggingContext(%s).__enter__", self.name)
         old_context = set_current_context(self)
         if self.previous_context != old_context:
             logcontext_error(
@@ -415,7 +430,7 @@ class LoggingContext:
         Returns:
             None to avoid suppressing any exceptions that were thrown.
         """
-        logger.debug(
+        logcontext_debug_logger.debug(
             "LoggingContext(%s).__exit__ --> %s", self.name, self.previous_context
         )
         current = set_current_context(self.previous_context)
@@ -675,7 +690,7 @@ class PreserveLoggingContext:
         self._instance_id = random_string(5)
 
     def __enter__(self) -> None:
-        logger.debug(
+        logcontext_debug_logger.debug(
             "PreserveLoggingContext(%s).__enter__ %s --> %s",
             self._instance_id,
             current_context(),
@@ -689,7 +704,7 @@ class PreserveLoggingContext:
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
-        logger.debug(
+        logcontext_debug_logger.debug(
             "PreserveLoggingContext(%s).__exit %s --> %s",
             self._instance_id,
             current_context(),
@@ -876,7 +891,7 @@ def run_in_background(
     """
     instance_id = random_string(5)
     calling_context = current_context()
-    logger.debug(
+    logcontext_debug_logger.debug(
         "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
     )
     try:
@@ -920,7 +935,7 @@ def run_in_background(
         # to reset the logcontext to the sentinel logcontext as that would run
         # immediately (remember our goal is to maintain the calling logcontext when we
         # return).
-        logger.debug(
+        logcontext_debug_logger.debug(
             "run_in_background(%s): deferred already completed and the function should have maintained the logcontext %s",
             instance_id,
             calling_context,
@@ -935,7 +950,7 @@ def run_in_background(
     #
     # Our goal is to have the caller logcontext unchanged after firing off the
     # background task and returning.
-    logger.debug(
+    logcontext_debug_logger.debug(
         "run_in_background(%s): restoring calling logcontext %s",
         instance_id,
         calling_context,
@@ -955,12 +970,12 @@ def run_in_background(
     # which is supposed to have a single entry and exit point. But
     # by spawning off another deferred, we are effectively
     # adding a new exit point.)
-    if logger.isEnabledFor(logging.DEBUG):
+    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
 
         def _log_set_context_cb(
             result: ResultT, context: LoggingContextOrSentinel
         ) -> ResultT:
-            logger.debug(
+            logcontext_debug_logger.debug(
                 "run_in_background(%s): resetting logcontext to %s",
                 instance_id,
                 context,
@@ -1028,7 +1043,7 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     reactor back to the code).
     """
     instance_id = random_string(5)
-    logger.debug(
+    logcontext_debug_logger.debug(
         "make_deferred_yieldable(%s): called with logcontext=%s",
         instance_id,
         current_context(),
@@ -1038,7 +1053,7 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     if deferred.called and not deferred.paused:
         # it looks like this deferred is ready to run any callbacks we give it
         # immediately. We may as well optimise out the logcontext faffery.
-        logger.debug(
+        logcontext_debug_logger.debug(
             "make_deferred_yieldable(%s): deferred already completed and the function should have maintained the logcontext",
             instance_id,
         )
@@ -1054,19 +1069,19 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     # and add a callback to the deferred to restore it so the caller's logcontext is
     # active when the deferred completes.
 
-    logger.debug(
+    logcontext_debug_logger.debug(
         "make_deferred_yieldable(%s): resetting logcontext to %s",
         instance_id,
         SENTINEL_CONTEXT,
     )
     calling_context = set_current_context(SENTINEL_CONTEXT)
 
-    if logger.isEnabledFor(logging.DEBUG):
+    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
 
         def _log_set_context_cb(
             result: ResultT, context: LoggingContextOrSentinel
         ) -> ResultT:
-            logger.debug(
+            logcontext_debug_logger.debug(
                 "make_deferred_yieldable(%s): restoring calling logcontext to %s",
                 instance_id,
                 context,
