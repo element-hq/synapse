@@ -279,6 +279,8 @@ class EventUnsignedContentFields:
     # Requesting user's membership, per MSC4115
     MEMBERSHIP: Final = "membership"
 
+    STICKY_TTL: Final = "msc4354_sticky_duration_ttl_ms"
+
 
 class MTextFields:
     """Fields found inside m.text content blocks."""
@@ -369,3 +371,4 @@ class StickyEventField(TypedDict):
 class StickyEvent:
     QUERY_PARAM_NAME: Final = "msc4354_stick_duration_ms"
     FIELD_NAME: Final = "msc4354_sticky"
+    MAX_DURATION_MS: Final = 3600000  # 1 hour

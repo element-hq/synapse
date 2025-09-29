@@ -41,7 +41,12 @@ from typing import (
 import attr
 from unpaddedbase64 import encode_base64
 
-from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    RelationTypes,
+    StickyEvent,
+)
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
 from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import (
@@ -322,6 +327,20 @@ class EventBase(metaclass=abc.ABCMeta):
 
         # this will be a no-op if the event dict is already frozen.
         self._dict = freeze(self._dict)
+
+    def sticky_duration(self) -> Optional[int]:
+        sticky_obj = self.get_dict().get(StickyEvent.FIELD_NAME, None)
+        if type(sticky_obj) is not dict:
+            return None
+        sticky_duration_ms = sticky_obj.get("duration_ms", None)
+        # MSC: Valid values are the integer range 0-MAX_DURATION_MS
+        if (
+            type(sticky_duration_ms) is int
+            and sticky_duration_ms >= 0
+            and sticky_duration_ms <= StickyEvent.MAX_DURATION_MS
+        ):
+            return sticky_duration_ms
+        return None
 
     def __str__(self) -> str:
         return self.__repr__()

@@ -57,7 +57,6 @@ logger = logging.getLogger(__name__)
 # Consumers call 'get_sticky_events_in_rooms' which has `WHERE expires_at > ?`
 # to filter out expired sticky events that have yet to be deleted.
 DELETE_EXPIRED_STICKY_EVENTS_MS = 60 * 1000 * 60  # 1 hour
-MAX_STICKY_DURATION_MS = 3600000  # 1 hour
 
 
 class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
@@ -297,22 +296,14 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             if ev.rejected_reason is not None:
                 continue
             # MSC: The presence of sticky.duration_ms with a valid value makes the event “sticky”
-            sticky_obj = ev.get_dict().get(StickyEvent.FIELD_NAME, None)
-            if type(sticky_obj) is not dict:
-                continue
-            sticky_duration_ms = sticky_obj.get("duration_ms", None)
-            # MSC: Valid values are the integer range 0-MAX_STICKY_DURATION_MS
-            if (
-                type(sticky_duration_ms) is int
-                and sticky_duration_ms >= 0
-                and sticky_duration_ms <= MAX_STICKY_DURATION_MS
-            ):
+            sticky_duration = ev.sticky_duration()
+            if sticky_duration:
                 # MSC: The start time is min(now, origin_server_ts).
                 # This ensures that malicious origin timestamps cannot specify start times in the future.
-                # Calculate the end time as start_time + min(sticky.duration_ms, MAX_STICKY_DURATION_MS).
+                # Calculate the end time as start_time + min(sticky.duration_ms, MAX_DURATION_MS).
                 expires_at = min(ev.origin_server_ts, now_ms) + min(
                     ev.get_dict()[StickyEvent.FIELD_NAME]["duration_ms"],
-                    MAX_STICKY_DURATION_MS,
+                    StickyEvent.MAX_DURATION_MS,
                 )
                 # filter out already expired sticky events
                 if expires_at > now_ms:
