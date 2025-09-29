@@ -114,7 +114,6 @@ from tests.utils import (
     POSTGRES_USER,
     SQLITE_PERSIST_DB,
     USE_POSTGRES_FOR_TESTS,
-    MockClock,
     default_config,
 )
 
@@ -1026,7 +1025,8 @@ def setup_test_homeserver(
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
     homeserver_to_use: Type[HomeServer] = TestHomeServer,
-    **kwargs: Any,
+    db_txn_limit: Optional[int] = None,
+    **extra_homeserver_attributes: Any,
 ) -> HomeServer:
     """
     Setup a homeserver suitable for running tests against.  Keyword arguments
@@ -1041,16 +1041,18 @@ def setup_test_homeserver(
         config: TODO
         reactor: TODO
         homeserver_to_use: TODO
-        **kwargs: Additional keyword arguments to install as `@cache_in_self` attributes
-            on the homeserver. For example, `clock` will be installed as `hs._clock`.
+        db_txn_limit: Gives the maximum number of database transactions to run per
+            connection before reconnecting. 0 means no limit. If unset, defaults to None
+            here which will default upstream to `0`.
+        **extra_homeserver_attributes: Additional keyword arguments to install as
+            `@cache_in_self` attributes on the homeserver. For example, `clock` will be
+            installed as `hs._clock`.
 
     Calling this method directly is deprecated: you should instead derive from
     HomeserverTestCase.
     """
     if reactor is None:
-        from twisted.internet import reactor as _reactor
-
-        reactor = cast(ISynapseReactor, _reactor)
+        reactor = ThreadedMemoryReactorClock()
 
     if config is None:
         config = default_config(server_name, parse=True)
@@ -1059,15 +1061,15 @@ def setup_test_homeserver(
     if not isinstance(server_name, str):
         raise ConfigError("Must be a string", ("server_name",))
 
-    config.caches.resize_all_caches()
+    if "clock" not in extra_homeserver_attributes:
+        extra_homeserver_attributes["clock"] = Clock(reactor, server_name=server_name)
 
-    if "clock" not in kwargs:
-        kwargs["clock"] = MockClock()
+    config.caches.resize_all_caches()
 
     if USE_POSTGRES_FOR_TESTS:
         test_db = "synapse_test_%s" % uuid.uuid4().hex
 
-        database_config = {
+        database_config: JsonDict = {
             "name": "psycopg2",
             "args": {
                 "dbname": test_db,
@@ -1118,8 +1120,8 @@ def setup_test_homeserver(
 
         database_config["_TEST_PREPPED_CONN"] = PREPPED_SQLITE_DB_CONN
 
-    if "db_txn_limit" in kwargs:
-        database_config["txn_limit"] = kwargs["db_txn_limit"]
+    if db_txn_limit is not None:
+        database_config["txn_limit"] = db_txn_limit
 
     database = DatabaseConnectionConfig("master", database_config)
     config.database.databases = [database]
@@ -1156,7 +1158,7 @@ def setup_test_homeserver(
     cleanup_func(hs.cleanup)
 
     # Install @cache_in_self attributes
-    for key, val in kwargs.items():
+    for key, val in extra_homeserver_attributes.items():
         setattr(hs, "_" + key, val)
 
     # Mock TLS

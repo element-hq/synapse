@@ -393,7 +393,6 @@ class HomeserverTestCase(TestCase):
         calling the prepare function.
         """
         self.reactor, self.clock = get_clock()
-        self._hs_args = {"clock": self.clock, "reactor": self.reactor}
         self.hs = self.make_homeserver(self.reactor, self.clock)
 
         self.hs.get_datastores().main.tests_allow_no_chain_cover_index = False
@@ -511,7 +510,7 @@ class HomeserverTestCase(TestCase):
 
         Function to be overridden in subclasses.
         """
-        hs = self.setup_test_homeserver()
+        hs = self.setup_test_homeserver(reactor=reactor, clock=clock)
         return hs
 
     def create_test_resource(self) -> Resource:
@@ -648,7 +647,6 @@ class HomeserverTestCase(TestCase):
             synapse.server.HomeServer
         """
         kwargs = dict(kwargs)
-        kwargs.update(self._hs_args)
         if "config" not in kwargs:
             config = self.default_config()
         else:
@@ -667,13 +665,14 @@ class HomeserverTestCase(TestCase):
         # from a config override, or the default of "test". Whichever it is, we
         # construct a homeserver with a matching name.
         server_name = config_obj.server.server_name
-        kwargs["name"] = server_name
 
         async def run_bg_updates() -> None:
             with LoggingContext(name="run_bg_updates", server_name=server_name):
                 self.get_success(stor.db_pool.updates.run_background_updates(False))
 
-        hs = setup_test_homeserver(cleanup_func=self.addCleanup, **kwargs)
+        hs = setup_test_homeserver(
+            cleanup_func=self.addCleanup, server_name=server_name, **kwargs
+        )
         stor = hs.get_datastores().main
 
         # Run the database background updates, when running against "master".
