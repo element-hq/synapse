@@ -85,7 +85,7 @@ class AppServiceHandlerTestCase(unittest.TestCase):
             *args: Any,
             **kwargs: Any,
         ) -> "defer.Deferred[Optional[R]]":
-            # Ignore linter error as this is used only for testing purposes.
+            # Ignore linter error as this is used only for testing purposes (i.e. outside of Synapse).
             return run_as_background_process(desc, "test_server", func, *args, **kwargs)  # type: ignore[untracked-background-process]
 
         hs.run_as_background_process = test_run_as_background_process
