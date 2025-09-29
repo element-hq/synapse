@@ -40,7 +40,7 @@ class ParseModel(BaseModel):
         # By default, ignore fields that we don't recognise.
         extra = Extra.ignore
         # By default, don't allow fields to be reassigned after parsing.
-        allow_mutation = False
+        frozen = True
 
 
 class AnyEventId(StrictStr):

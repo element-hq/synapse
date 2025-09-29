@@ -18,8 +18,24 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from pydantic import ConfigDict
+
 from synapse.util.pydantic_models import ParseModel
 
 
 class RequestBodyModel(ParseModel):
-    pass
+    model_config = ConfigDict(
+        # Allow custom types like `UserIDType` to be used in the model
+        arbitrary_types_allowed=True,
+        # By default, do not allow coercing field types.
+        #
+        # This saves subclassing models from needing to write i.e. "StrictStr"
+        # instead of "str" in their fields.
+        #
+        # To revert to "lax" mode for a given field, use:
+        #
+        # ```
+        # my_field: Annotated[str, Field(strict=False)]
+        # ````
+        strict=True,
+    )

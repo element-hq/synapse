@@ -552,6 +552,105 @@ class SigningKeyUploadServlet(RestServlet):
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.auth_handler = hs.get_auth_handler()
 
+    class SigningKeyUploadRequestBody(RequestBodyModel):
+        """
+        The body of a `POST /_matrix/client/v3/keys/device_signing/upload` request.
+
+        Based on https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysdevice_signingupload.
+        """
+
+        class AuthenticationData(RequestBodyModel):
+            session: StrictStr
+            """The value of the session key given by the homeserver."""
+
+            type: StrictStr
+            """
+            The authentication type that the client is attempting to
+            complete.
+
+            May be omitted if session is given, and the client is reissuing a
+            request which it believes has been completed out-of-band (for
+            example, via the fallback mechanism; see
+            https://spec.matrix.org/v1.16/client-server-api/#fallback).
+            """
+
+            # TODO: Other types...
+
+        # TODO: Make this a before type so that we can transform it into a single PublicKey?
+        @staticmethod
+        def validate_public_key(
+            public_key_object: Mapping[str, str],
+        ) -> Mapping[str, str]:
+            """Validates that the given mapping contains:
+            * Exactly one property.
+            * The name is in the form "x:y" and the value is in the form "y".
+            """
+            if len(public_key_object) != 1:
+                raise ValueError("Exactly one public key may be provided")
+
+            algorithm_and_ub64_pk, unpadded_base64_public_key = next(
+                iter(public_key_object.items())
+            )
+            if (
+                ":" not in algorithm_and_ub64_pk
+                or len(algorithm_and_ub64_pk.split(":")) != 2
+            ):
+                raise ValueError(
+                    "Property of public key is not in the form `<algorithm>:<unpadded_base64_public_key>`"
+                )
+            _algorithm, ub64_pk = algorithm_and_ub64_pk.split(":")
+
+            if ub64_pk != unpadded_base64_public_key:
+                raise ValueError(
+                    "Unpadded base64 public key in property and value portions of public key object do not match"
+                )
+
+            return public_key_object
+
+        PublicKey = Annotated[
+            Mapping[StrictStr, StrictStr], AfterValidator(validate_public_key)
+        ]
+        """A public key.
+
+        The object must have exactly one property, whose name is in the form
+        `<algorithm>:<unpadded_base64_public_key>`, and whose value is the
+        unpadded base64 public key.
+        """
+
+        class CrossSigningKey(RequestBodyModel):
+            keys: Mapping[StrictStr, StrictStr]
+            """The public key."""
+
+            signatures: Optional[Mapping[UserIDType, Mapping[StrictStr, StrictStr]]]
+            # TODO: Optional for the master key, required for other keys. Subclass for master crosssigningkey?
+            """Signatures of the key. Optional for the master key. Other keys must be signed by the user's master key."""
+
+            usage: List[StrictStr]
+            """What the key is used for."""
+
+            user_id: UserIDType
+            """The ID of the user the key belongs to."""
+
+        auth: AuthenticationData
+        """Additional authentication information for the user-interactive authentication API."""
+
+        master_key: Optional[CrossSigningKey]
+        """The user's master key."""
+
+        self_signing_key: Optional[CrossSigningKey]
+        """
+        The user's self-signing key. Must be signed by the accompanying
+        master key, or by the user's most recently uploaded master key if no
+        master key is included in the request.
+        """
+
+        user_signing_key: Optional[CrossSigningKey]
+        """
+        The user's user-signing key. Must be signed by the accompanying master
+        key, or by the user's most recently uploaded master key if no master key
+        is included in the request.
+        """
+
     @interactive_auth_handler
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)

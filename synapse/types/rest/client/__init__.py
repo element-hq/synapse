@@ -20,6 +20,8 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
+from pydantic import ConfigDict
+
 from synapse._pydantic_compat import (
     Extra,
     Field,
@@ -122,6 +124,10 @@ class SlidingSyncBody(RequestBodyModel):
             no way to say "please track this room explicitly".
         extensions: Extensions API. A map of extension key to extension config.
     """
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True
+    )
 
     class CommonRoomParameters(RequestBodyModel):
         """
