@@ -393,7 +393,6 @@ class LoggingContext:
     def __enter__(self) -> "LoggingContext":
         """Enters this logging context into thread local storage"""
         logger.debug("LoggingContext(%s).__enter__", self.name)
-
         old_context = set_current_context(self)
         if self.previous_context != old_context:
             logcontext_error(
