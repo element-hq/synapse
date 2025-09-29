@@ -1034,12 +1034,14 @@ def setup_test_homeserver(
     If no datastore is supplied, one is created and given to the homeserver.
 
     Args:
-        cleanup_func : The function used to register a cleanup routine for
-                       after the test.
+        cleanup_func: The function used to register a cleanup routine for after the
+            test.
         server_name: homeserver name
         config: TODO
         reactor: TODO
         homeserver_to_use: TODO
+        **kwargs: Additional keyword arguments to install as `@cache_in_self` attributes
+            on the homeserver. For example, `clock` will be installed as `hs._clock`.
 
     Calling this method directly is deprecated: you should instead derive from
     HomeserverTestCase.
