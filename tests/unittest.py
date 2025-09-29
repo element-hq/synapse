@@ -137,7 +137,7 @@ def around(target: TV) -> Callable[[Callable[Concatenate[S, P], R]], None]:
     return _around
 
 
-_TConfig = TypeVar("_TConfig", Config, RootConfig)
+_TConfig = TypeVar("_TConfig", Config, HomeServerConfig)
 
 
 def deepcopy_config(config: _TConfig) -> _TConfig:
@@ -163,7 +163,7 @@ def deepcopy_config(config: _TConfig) -> _TConfig:
 
 
 @functools.lru_cache(maxsize=8)
-def _parse_config_dict(config: str) -> RootConfig:
+def _parse_config_dict(config: str) -> HomeServerConfig:
     config_obj = HomeServerConfig()
     config_obj.parse_config_dict(json.loads(config), "", "")
     return config_obj
