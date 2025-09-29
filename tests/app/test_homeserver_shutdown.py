@@ -60,8 +60,8 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # Cleanup the registered system event triggers since the `MemoryReactor` doesn't
-        # do this on it's own.
+        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
+        # we use in tests doesn't handle this properly (see doc comment)
         cleanup_test_reactor_system_event_triggers(self.reactor)
 
         # Cleanup the homeserver.
@@ -139,8 +139,8 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
 
         # Run the reactor so any `callWhenRunning` functions can be cleared out.
         self.reactor.run()
-        # Cleanup the registered system event triggers since the `MemoryReactor` doesn't
-        # do this on it's own.
+        # This would normally happen as part of `HomeServer.shutdown` but the `MemoryReactor`
+        # we use in tests doesn't handle this properly (see doc comment)
         cleanup_test_reactor_system_event_triggers(self.reactor)
 
         # Also advance the reactor by the delay tracking threshold to ensure all
