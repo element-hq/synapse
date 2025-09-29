@@ -656,8 +656,6 @@ class HomeserverTestCase(TestCase):
         """
         if config is None:
             config = self.default_config()
-        else:
-            config = extra_homeserver_attributes["config"]
 
         # The sane default is to use the same reactor and clock as our other test utils
         if reactor is None:
