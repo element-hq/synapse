@@ -448,10 +448,6 @@ def wrap_as_background_process(
                 func,
                 self,
                 *args,
-                # type-ignore: mypy is confusing kwargs with the bg_start_span kwarg.
-                #     Argument 4 to "run_as_background_process" has incompatible type
-                #     "**P.kwargs"; expected "bool"
-                # See https://github.com/python/mypy/issues/8862
                 **kwargs,
             )
 
