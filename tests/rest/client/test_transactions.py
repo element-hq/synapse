@@ -90,12 +90,14 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[Any]", object, None]:
         @defer.inlineCallbacks
         def cb() -> Generator["defer.Deferred[object]", object, Tuple[int, JsonDict]]:
-            yield defer.ensureDeferred(Clock(reactor).sleep(0))
+            yield defer.ensureDeferred(
+                Clock(reactor, server_name="test_server").sleep(0)
+            )
             return 1, {}
 
         @defer.inlineCallbacks
         def test() -> Generator["defer.Deferred[Any]", object, None]:
-            with LoggingContext("c") as c1:
+            with LoggingContext(name="c", server_name="test_server") as c1:
                 res = yield self.cache.fetch_or_execute_request(
                     self.mock_request, self.mock_requester, cb
                 )
@@ -125,7 +127,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
             called[0] = True
             raise Exception("boo")
 
-        with LoggingContext("test") as test_context:
+        with LoggingContext(name="test", server_name="test_server") as test_context:
             try:
                 yield self.cache.fetch_or_execute_request(
                     self.mock_request, self.mock_requester, cb
@@ -157,7 +159,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
             called[0] = True
             return defer.fail(Exception("boo"))
 
-        with LoggingContext("test") as test_context:
+        with LoggingContext(name="test", server_name="test_server") as test_context:
             try:
                 yield self.cache.fetch_or_execute_request(
                     self.mock_request, self.mock_requester, cb

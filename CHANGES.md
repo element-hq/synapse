@@ -1,9 +1,17 @@
+# Synapse 1.139.0rc3 (2025-09-25)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.139.0rc1 where `run_coroutine_in_background(...)` incorrectly handled logcontexts, resulting in partially broken logging. ([\#18964](https://github.com/element-hq/synapse/issues/18964))
+
+
+
+
 # Synapse 1.139.0rc2 (2025-09-23)
 
 ## Internal Changes
 
-- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
-
+- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. This change was applied on top of 1.139.0rc1. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
 
 
 
@@ -73,6 +81,23 @@
 * Bump types-psycopg2 from 2.9.21.20250809 to 2.9.21.20250915. ([\#18918](https://github.com/element-hq/synapse/issues/18918))
 * Bump types-requests from 2.32.4.20250611 to 2.32.4.20250809. ([\#18895](https://github.com/element-hq/synapse/issues/18895))
 * Bump types-setuptools from 80.9.0.20250809 to 80.9.0.20250822. ([\#18924](https://github.com/element-hq/synapse/issues/18924))
+
+# Synapse 1.138.2 (2025-09-24)
+
+## Internal Changes
+
+- Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin. This change was applied on top of 1.138.1. ([\#18962](https://github.com/element-hq/synapse/issues/18962))
+
+
+
+# Synapse 1.138.1 (2025-09-24)
+
+## Bugfixes
+
+- Fix a performance regression related to the experimental Delayed Events ([MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140)) feature. ([\#18926](https://github.com/element-hq/synapse/issues/18926))
+
+
+
 
 # Synapse 1.138.0 (2025-09-09)
 

@@ -502,7 +502,7 @@ def _log_for_request(request_number: int, message: str) -> None:
     """Logs a message for an iteration of `make_request_with_cancellation_test`."""
     # We want consistent alignment when logging stack traces, so ensure the logging
     # context has a fixed width name.
-    with LoggingContext(name=f"request-{request_number:<2}"):
+    with LoggingContext(name=f"request-{request_number:<2}", server_name="test_server"):
         logger.info(message)
 
 
