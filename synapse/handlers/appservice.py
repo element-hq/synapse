@@ -75,9 +75,7 @@ events_processed_counter = Counter(
 
 class ApplicationServicesHandler:
     def __init__(self, hs: "HomeServer"):
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
         self.is_mine_id = hs.is_mine_id

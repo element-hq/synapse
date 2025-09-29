@@ -67,7 +67,6 @@ class WorkerLocksHandler:
 
     def __init__(self, hs: "HomeServer") -> None:
         self.hs = hs  # nb must be called this for @wrap_as_background_process
-        self.server_name = hs.hostname
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._clock = hs.get_clock()

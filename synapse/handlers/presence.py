@@ -774,9 +774,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
 class PresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.wheel_timer: WheelTimer[str] = WheelTimer()
         self.notifier = hs.get_notifier()
 

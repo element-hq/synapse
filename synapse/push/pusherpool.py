@@ -69,10 +69,8 @@ class PusherPool:
     """
 
     def __init__(self, hs: "HomeServer"):
-        self.hs = hs
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.pusher_factory = PusherFactory(hs)
         self.store = self.hs.get_datastores().main
         self.clock = self.hs.get_clock()

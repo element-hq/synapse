@@ -80,9 +80,7 @@ class FollowerTypingHandler:
         self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.is_mine_id = hs.is_mine_id
         self.is_mine_server_name = hs.is_mine_server_name

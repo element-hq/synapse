@@ -47,9 +47,7 @@ class PurgeEventsStorageController:
 
     def __init__(self, hs: "HomeServer", stores: Databases):
         self.hs = hs  # nb must be called this for @wrap_as_background_process
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.stores = stores
 
         if hs.config.worker.run_background_tasks:
