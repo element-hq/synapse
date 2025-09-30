@@ -188,14 +188,11 @@ class HttpClientTestCase(HomeserverTestCase):
                 self._check_current_logcontext("foo")
 
                 with LoggingContext(name="competing", server_name="test_server"):
-                    logger.info("asdf3")
-                    # with PreserveLoggingContext():
                     # Make the actual request
                     await self._rust_http_client.get(
                         url=self.server.endpoint,
                         response_limit=1 * 1024 * 1024,
                     )
-                    logger.info("asdf4")
                     self._check_current_logcontext("competing")
 
                 # Back to the caller's context outside of the `LoggingContext` block
@@ -205,11 +202,9 @@ class HttpClientTestCase(HomeserverTestCase):
                 # so that the test can complete and we see the underlying error.
                 callback_finished = True
 
-        logger.info("asdf1")
         with LoggingContext(name="foo", server_name="test_server"):
             # Fire off the function, but don't wait on it.
             run_in_background(do_request)
-            logger.info("asdf2")
 
             # Now wait for the function under test to have run
             with PreserveLoggingContext():
@@ -218,7 +213,6 @@ class HttpClientTestCase(HomeserverTestCase):
                     time.sleep(0.1)
                     self.reactor.advance(0)
 
-            logger.info("asdf5")
             # check that the logcontext is left in a sane state.
             self._check_current_logcontext("foo")
 
