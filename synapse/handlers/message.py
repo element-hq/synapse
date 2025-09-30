@@ -513,7 +513,9 @@ class EventCreationHandler:
 
         # We limit concurrent event creation for a room to 1. This prevents state resolution
         # from occurring when sending bursts of events to a local room
-        self.limiter = Linearizer(max_count=1, name="room_event_creation_limit")
+        self.limiter = Linearizer(
+            max_count=1, name="room_event_creation_limit", clock=self.clock
+        )
 
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
 
@@ -1137,6 +1139,12 @@ class EventCreationHandler:
 
                 assert self.hs.is_mine_id(event.sender), "User must be our own: %s" % (
                     event.sender,
+                )
+                # if this room uses a policy server, try to get a signature now.
+                # We use verify=False here as we are about to call is_event_allowed on the same event
+                # which will do sig checks.
+                await self._policy_handler.ask_policy_server_to_sign_event(
+                    event, verify=False
                 )
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)

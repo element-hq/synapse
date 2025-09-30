@@ -185,46 +185,6 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
         return 200, multi_user_devices
 
 
-# FIXME(2025-07-22): Remove this on the next release, this will only get used
-# during rollout to Synapse 1.135 and can be removed after that release.
-class ReplicationUploadKeysForUserRestServlet(ReplicationEndpoint):
-    """Unused endpoint, kept for backwards compatibility during rollout."""
-
-    NAME = "upload_keys_for_user"
-    PATH_ARGS = ()
-    CACHE = False
-
-    def __init__(self, hs: "HomeServer"):
-        super().__init__(hs)
-
-        self.e2e_keys_handler = hs.get_e2e_keys_handler()
-        self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
-
-    @staticmethod
-    async def _serialize_payload(  # type: ignore[override]
-        user_id: str, device_id: str, keys: JsonDict
-    ) -> JsonDict:
-        return {
-            "user_id": user_id,
-            "device_id": device_id,
-            "keys": keys,
-        }
-
-    async def _handle_request(  # type: ignore[override]
-        self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
-        user_id = content["user_id"]
-        device_id = content["device_id"]
-        keys = content["keys"]
-
-        results = await self.e2e_keys_handler.upload_keys_for_user(
-            user_id, device_id, keys
-        )
-
-        return 200, results
-
-
 class ReplicationHandleNewDeviceUpdateRestServlet(ReplicationEndpoint):
     """Wake up a device writer to send local device list changes as federation outbound pokes.
 
@@ -291,5 +251,4 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationNotifyUserSignatureUpdateRestServlet(hs).register(http_server)
     ReplicationMultiUserDevicesResyncRestServlet(hs).register(http_server)
     ReplicationHandleNewDeviceUpdateRestServlet(hs).register(http_server)
-    ReplicationUploadKeysForUserRestServlet(hs).register(http_server)
     ReplicationDeviceHandleRoomUnPartialStated(hs).register(http_server)

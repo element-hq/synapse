@@ -114,8 +114,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if self.hs.config.server.include_profile_data_on_invite:
             self._membership_types_to_include_profile_data_in.add(Membership.INVITE)
 
-        self.member_linearizer: Linearizer = Linearizer(name="member")
-        self.member_as_limiter = Linearizer(max_count=10, name="member_as_limiter")
+        self.member_linearizer: Linearizer = Linearizer(
+            name="member", clock=hs.get_clock()
+        )
+        self.member_as_limiter = Linearizer(
+            max_count=10, name="member_as_limiter", clock=hs.get_clock()
+        )
 
         self.clock = hs.get_clock()
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker

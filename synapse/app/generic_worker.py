@@ -49,6 +49,7 @@ from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.server import JsonResource, OptionsResource
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -359,6 +360,9 @@ def start(config: HomeServerConfig) -> None:
 
     setup_logging(hs, config, use_worker_options=True)
 
+    # Start the tracer
+    init_tracer(hs)  # noqa
+
     try:
         hs.setup()
 
@@ -382,7 +386,7 @@ def start(config: HomeServerConfig) -> None:
 
 def main() -> None:
     homeserver_config = load_config(sys.argv[1:])
-    with LoggingContext(name="main"):
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         start(homeserver_config)
 
 

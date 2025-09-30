@@ -29,16 +29,19 @@ from synapse.logging.context import SENTINEL_CONTEXT, LoggingContext, current_co
 from synapse.rest.client.transactions import CLEANUP_PERIOD_MS, HttpTransactionCache
 from synapse.types import ISynapseReactor, JsonDict
 from synapse.util.clock import Clock
+from synapse.util.constants import (
+    MILLISECONDS_PER_SECOND,
+)
 
 from tests import unittest
-from tests.utils import MockClock
+from tests.server import get_clock
 
 reactor = cast(ISynapseReactor, _reactor)
 
 
 class HttpTransactionCacheTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.clock = MockClock()
+        self.reactor, self.clock = get_clock()
         self.hs = Mock()
         self.hs.get_clock = Mock(return_value=self.clock)
         self.hs.get_auth = Mock()
@@ -90,12 +93,14 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
     ) -> Generator["defer.Deferred[Any]", object, None]:
         @defer.inlineCallbacks
         def cb() -> Generator["defer.Deferred[object]", object, Tuple[int, JsonDict]]:
-            yield defer.ensureDeferred(Clock(reactor).sleep(0))
+            yield defer.ensureDeferred(
+                Clock(reactor, server_name="test_server").sleep(0)
+            )
             return 1, {}
 
         @defer.inlineCallbacks
         def test() -> Generator["defer.Deferred[Any]", object, None]:
-            with LoggingContext("c") as c1:
+            with LoggingContext(name="c", server_name="test_server") as c1:
                 res = yield self.cache.fetch_or_execute_request(
                     self.mock_request, self.mock_requester, cb
                 )
@@ -125,7 +130,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
             called[0] = True
             raise Exception("boo")
 
-        with LoggingContext("test") as test_context:
+        with LoggingContext(name="test", server_name="test_server") as test_context:
             try:
                 yield self.cache.fetch_or_execute_request(
                     self.mock_request, self.mock_requester, cb
@@ -157,7 +162,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
             called[0] = True
             return defer.fail(Exception("boo"))
 
-        with LoggingContext("test") as test_context:
+        with LoggingContext(name="test", server_name="test_server") as test_context:
             try:
                 yield self.cache.fetch_or_execute_request(
                     self.mock_request, self.mock_requester, cb
@@ -178,8 +183,9 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"
         )
-        # should NOT have cleaned up yet
-        self.clock.advance_time_msec(CLEANUP_PERIOD_MS / 2)
+        # Advance time just under the cleanup period.
+        # Should NOT have cleaned up yet
+        self.reactor.advance((CLEANUP_PERIOD_MS - 1) / MILLISECONDS_PER_SECOND)
 
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"
@@ -187,7 +193,8 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         # still using cache
         cb.assert_called_once_with("an arg")
 
-        self.clock.advance_time_msec(CLEANUP_PERIOD_MS)
+        # Advance time just after the cleanup period.
+        self.reactor.advance(2 / MILLISECONDS_PER_SECOND)
 
         yield self.cache.fetch_or_execute_request(
             self.mock_request, self.mock_requester, cb, "an arg"

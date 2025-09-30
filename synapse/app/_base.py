@@ -73,7 +73,6 @@ from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
-from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
@@ -574,9 +573,6 @@ async def start(hs: "HomeServer") -> None:
     # Load the certificate from disk.
     refresh_certificate(hs)
 
-    # Start the tracer
-    init_tracer(hs)  # noqa
-
     # Instantiate the modules so they can register their web resources to the module API
     # before we start the listeners.
     module_api = hs.get_module_api()
@@ -603,7 +599,7 @@ async def start(hs: "HomeServer") -> None:
     hs.get_pusherpool().start()
 
     def log_shutdown() -> None:
-        with LoggingContext("log_shutdown"):
+        with LoggingContext(name="log_shutdown", server_name=server_name):
             logger.info("Shutting down...")
 
     # Log when we start the shut down process.
