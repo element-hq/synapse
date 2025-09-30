@@ -40,6 +40,7 @@ from twisted.web.resource import Resource
 
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
@@ -128,7 +129,10 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
-from synapse.metrics import register_threadpool
+from synapse.metrics import (
+    all_later_gauges_to_clean_up_on_shutdown,
+    register_threadpool,
+)
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -152,7 +156,7 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
 from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -362,11 +366,36 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.datastores = Databases(self.DATASTORE_CLASS, self)
         logger.info("Finished setting up.")
 
-        # Register background tasks required by this server. This must be done
-        # somewhat manually due to the background tasks not being registered
-        # unless handlers are instantiated.
-        if self.config.worker.run_background_tasks:
-            self.setup_background_tasks()
+    def __del__(self) -> None:
+        """
+        Called when an the homeserver is garbage collected.
+
+        Make sure we actually do some clean-up, rather than leak data.
+        """
+        self.cleanup()
+
+    def cleanup(self) -> None:
+        """
+        WIP: Clean-up any references to the homeserver and stop any running related
+        processes, timers, loops, replication stream, etc.
+
+        This should be called wherever you care about the HomeServer being completely
+        garbage collected like in tests. It's not necessary to call if you plan to just
+        shut down the whole Python process anyway.
+
+        Can be called multiple times.
+        """
+        logger.info("Received cleanup request for %s.", self.hostname)
+
+        # TODO: Stop background processes, timers, loops, replication stream, etc.
+
+        # Cleanup metrics associated with the homeserver
+        for later_gauge in all_later_gauges_to_clean_up_on_shutdown.values():
+            later_gauge.unregister_hooks_for_homeserver_instance_id(
+                self.get_instance_id()
+            )
+
+        logger.info("Cleanup complete for %s.", self.hostname)
 
     def start_listening(self) -> None:  # noqa: B027 (no-op by design)
         """Start the HTTP, manhole, metrics, etc listeners
@@ -375,7 +404,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         appropriate listeners.
         """
 
-    def setup_background_tasks(self) -> None:
+    def start_background_tasks(self) -> None:
         """
         Some handlers have side effects on instantiation (like registering
         background updates). This function causes them to be fetched, and
@@ -413,7 +442,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_clock(self) -> Clock:
-        return Clock(self._reactor)
+        return Clock(self._reactor, server_name=self.hostname)
 
     def get_datastores(self) -> Databases:
         if not self.datastores:
@@ -423,7 +452,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_distributor(self) -> Distributor:
-        return Distributor()
+        return Distributor(server_name=self.hostname)
 
     @cache_in_self
     def get_registration_ratelimiter(self) -> Ratelimiter:
@@ -451,6 +480,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     @cache_in_self
     def get_auth(self) -> Auth:
+        if self.config.mas.enabled:
+            return MasDelegatedAuth(self)
         if self.config.experimental.msc3861.enabled:
             from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
@@ -849,7 +880,8 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_federation_ratelimiter(self) -> FederationRateLimiter:
         return FederationRateLimiter(
-            self.get_clock(),
+            our_server_name=self.hostname,
+            clock=self.get_clock(),
             config=self.config.ratelimiting.rc_federation,
             metrics_name="federation_servlets",
         )
@@ -975,12 +1007,15 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
         media_threadpool.start()
-        self.get_reactor().addSystemEventTrigger(
+        self.get_clock().add_system_event_trigger(
             "during", "shutdown", media_threadpool.stop
         )
 
         # Register the threadpool with our metrics.
-        register_threadpool("media", media_threadpool)
+        server_name = self.hostname
+        register_threadpool(
+            name="media", server_name=server_name, threadpool=media_threadpool
+        )
 
         return media_threadpool
 

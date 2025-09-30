@@ -55,10 +55,10 @@ from synapse.types import (
     PersistedPosition,
     StrCollection,
 )
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -124,6 +124,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
     ):
+        super().__init__(database, db_conn, hs)
         self._instance_name = hs.get_instance_name()
 
         # In the worker store this is an ID tracker which we overwrite in the non-worker
@@ -138,14 +139,13 @@ class ReceiptsWorkerStore(SQLBaseStore):
             db_conn=db_conn,
             db=database,
             notifier=hs.get_replication_notifier(),
+            server_name=self.server_name,
             stream_name="receipts",
             instance_name=self._instance_name,
             tables=[("receipts_linearized", "instance_name", "stream_id")],
             sequence_name="receipts_sequence",
             writers=hs.config.worker.writers.receipts,
         )
-
-        super().__init__(database, db_conn, hs)
 
         max_receipts_stream_id = self.get_max_receipt_stream_id()
         receipts_stream_prefill, min_receipts_stream_id = self.db_pool.get_cache_dict(

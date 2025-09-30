@@ -16,14 +16,14 @@ from typing import List, Optional
 
 from parameterized import parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import StrSequence
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 

@@ -116,7 +116,12 @@ def setupdb() -> None:
             port=POSTGRES_PORT,
             password=POSTGRES_PASSWORD,
         )
-        logging_conn = LoggingDatabaseConnection(db_conn, db_engine, "tests")
+        logging_conn = LoggingDatabaseConnection(
+            conn=db_conn,
+            engine=db_engine,
+            default_txn_name="tests",
+            server_name="test_server",
+        )
         prepare_database(logging_conn, db_engine, None)
         logging_conn.close()
 

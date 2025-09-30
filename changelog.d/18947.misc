@@ -1,0 +1,1 @@
+Update error code used when an appservice tries to masquerade as an unknown device using [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326). Contributed by @tulir @ Beeper.

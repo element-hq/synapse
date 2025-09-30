@@ -45,7 +45,8 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Clock, json_encoder
+from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from . import engines
 
@@ -249,6 +250,7 @@ class BackgroundUpdater:
         self._clock = hs.get_clock()
         self.db_pool = database
         self.hs = hs
+        self.server_name = hs.hostname
 
         self._database_name = database.name()
 
@@ -395,7 +397,10 @@ class BackgroundUpdater:
             self._all_done = False
             sleep = self.sleep_enabled
             run_as_background_process(
-                "background_updates", self.run_background_updates, sleep
+                "background_updates",
+                self.server_name,
+                self.run_background_updates,
+                sleep,
             )
 
     async def run_background_updates(self, sleep: bool) -> None:

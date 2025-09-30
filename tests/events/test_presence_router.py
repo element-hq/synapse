@@ -23,7 +23,7 @@ from unittest.mock import AsyncMock, Mock
 
 import attr
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes
 from synapse.events.presence_router import PresenceRouter, load_legacy_presence_router
@@ -34,9 +34,9 @@ from synapse.rest import admin
 from synapse.rest.client import login, presence, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, StreamToken, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
-from tests.handlers.test_sync import SyncRequestKey, SyncVersion, generate_sync_config
+from tests.handlers.test_sync import SyncRequestKey, generate_sync_config
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -532,7 +532,6 @@ def sync_presence(
         testcase.hs.get_sync_handler().wait_for_sync_for_user(
             requester,
             sync_config,
-            SyncVersion.SYNC_V2,
             generate_request_key(),
             since_token,
         )

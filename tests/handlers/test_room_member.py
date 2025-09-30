@@ -1,6 +1,6 @@
 from unittest.mock import AsyncMock, patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.login
@@ -15,7 +15,7 @@ from synapse.federation.federation_base import (
 from synapse.federation.federation_client import SendJoinResult
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import make_request

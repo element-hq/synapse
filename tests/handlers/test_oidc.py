@@ -25,13 +25,13 @@ from urllib.parse import parse_qs, urlparse
 
 import pymacaroons
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.sso import MappingException
 from synapse.http.site import SynapseRequest
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.macaroons import get_value_from_macaroon
 from synapse.util.stringutils import random_string
 

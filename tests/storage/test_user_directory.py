@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, cast
 from unittest import mock
 from unittest.mock import Mock, patch
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, UserTypes
 from synapse.appservice import ApplicationService
@@ -37,7 +37,7 @@ from synapse.storage.databases.main.user_directory import (
 )
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import ThreadedMemoryReactorClock
 from tests.test_utils.event_injection import inject_member_event

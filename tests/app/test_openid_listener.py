@@ -22,14 +22,14 @@ from unittest.mock import Mock, patch
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.app.generic_worker import GenericWorkerServer
 from synapse.app.homeserver import SynapseHomeServer
 from synapse.config.server import parse_listener_def
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import make_request
 from tests.unittest import HomeserverTestCase

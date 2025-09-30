@@ -30,7 +30,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from twisted.web import http
 
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if typing.TYPE_CHECKING:
     from synapse.config.homeserver import HomeServerConfig
@@ -139,6 +139,18 @@ class Codes(str, Enum):
 
     # Part of MSC4155
     INVITE_BLOCKED = "ORG.MATRIX.MSC4155.M_INVITE_BLOCKED"
+
+    # Part of MSC4190
+    APPSERVICE_LOGIN_UNSUPPORTED = "IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED"
+
+    # Part of MSC4306: Thread Subscriptions
+    MSC4306_CONFLICTING_UNSUBSCRIPTION = (
+        "IO.ELEMENT.MSC4306.M_CONFLICTING_UNSUBSCRIPTION"
+    )
+    MSC4306_NOT_IN_THREAD = "IO.ELEMENT.MSC4306.M_NOT_IN_THREAD"
+
+    # Part of MSC4326
+    UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
 
 
 class CodeMessageException(RuntimeError):

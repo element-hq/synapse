@@ -24,7 +24,7 @@ from signedjson import key, sign
 from signedjson.types import BaseKey, SigningKey
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
 from synapse.api.presence import UserPresenceState
@@ -36,7 +36,7 @@ from synapse.rest.client import login
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventMetadata
 from synapse.types import JsonDict, ReadReceipt
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

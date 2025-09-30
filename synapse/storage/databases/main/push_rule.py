@@ -56,10 +56,11 @@ from synapse.storage.push_rule import InconsistentRuleException, RuleNotFoundExc
 from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.synapse_rust.push import FilteredPushRules, PushRule, PushRules
 from synapse.types import JsonDict
-from synapse.util import json_encoder, unwrapFirstError
+from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -110,6 +111,7 @@ def _load_rules(
         msc3381_polls_enabled=experimental_config.msc3381_polls_enabled,
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
         msc4210_enabled=experimental_config.msc4210_enabled,
+        msc4306_enabled=experimental_config.msc4306_enabled,
     )
 
     return filtered_rules
@@ -146,6 +148,7 @@ class PushRulesWorkerStore(
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="push_rules_stream",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("push_rules_stream", "instance_name", "stream_id"),

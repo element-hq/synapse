@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, patch
 
 from immutabledict import immutabledict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     Direction,
@@ -49,7 +49,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
 from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase

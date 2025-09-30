@@ -23,14 +23,14 @@ from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.types
 from synapse.api.errors import AuthError, SynapseError
 from synapse.rest import admin
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

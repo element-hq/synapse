@@ -8,7 +8,7 @@
 Synapse is an open source `Matrix <https://matrix.org>`__ homeserver
 implementation, written and maintained by `Element <https://element.io>`_.
 `Matrix <https://github.com/matrix-org>`__ is the open standard for
-secure and interoperable real time communications. You can directly run
+secure and interoperable real-time communications. You can directly run
 and manage the source code in this repository, available under an AGPL
 license (or alternatively under a commercial license from Element).
 There is no support provided by Element unless you have a
@@ -23,13 +23,13 @@ ESS builds on Synapse to offer a complete Matrix-based backend including the ful
 `Admin Console product <https://element.io/enterprise-functionality/admin-console>`_,
 giving admins the power to easily manage an organization-wide
 deployment. It includes advanced identity management, auditing,
-moderation and data retention options as well as Long Term Support and
-SLAs. ESS can be used to support any Matrix-based frontend client.
+moderation and data retention options as well as Long-Term Support and
+SLAs. ESS supports any Matrix-compatible client.
 
 .. contents::
 
-🛠️ Installing and configuration
-===============================
+🛠️ Installation and configuration
+==================================
 
 The Synapse documentation describes `how to install Synapse <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. We recommend using
 `Docker images <https://element-hq.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
@@ -133,7 +133,7 @@ connect from a client: see
 An easy way to get started is to login or register via Element at
 https://app.element.io/#/login or https://app.element.io/#/register respectively.
 You will need to change the server you are logging into from ``matrix.org``
-and instead specify a Homeserver URL of ``https://<server_name>:8448``
+and instead specify a homeserver URL of ``https://<server_name>:8448``
 (or just ``https://<server_name>`` if you are using a reverse proxy).
 If you prefer to use another client, refer to our
 `client breakdown <https://matrix.org/ecosystem/clients/>`_.
@@ -162,16 +162,15 @@ the public internet. Without it, anyone can freely register accounts on your hom
 This can be exploited by attackers to create spambots targeting the rest of the Matrix
 federation.
 
-Your new user name will be formed partly from the ``server_name``, and partly
-from a localpart you specify when you create the account. Your name will take
-the form of::
+Your new Matrix ID will be formed partly from the ``server_name``, and partly
+from a localpart you specify when you create the account in the form of::
 
     @localpart:my.domain.name
 
 (pronounced "at localpart on my dot domain dot name").
 
 As when logging in, you will need to specify a "Custom server".  Specify your
-desired ``localpart`` in the 'User name' box.
+desired ``localpart`` in the 'Username' box.
 
 🎯 Troubleshooting and support
 ==============================
@@ -209,10 +208,10 @@ Identity servers have the job of mapping email addresses and other 3rd Party
 IDs (3PIDs) to Matrix user IDs, as well as verifying the ownership of 3PIDs
 before creating that mapping.
 
-**They are not where accounts or credentials are stored - these live on home
-servers. Identity Servers are just for mapping 3rd party IDs to matrix IDs.**
+**Identity servers do not store accounts or credentials - these are stored and managed on homeservers.
+Identity Servers are just for mapping 3rd Party IDs to Matrix IDs.**
 
-This process is very security-sensitive, as there is obvious risk of spam if it
+This process is highly security-sensitive, as there is an obvious risk of spam if it
 is too easy to sign up for Matrix accounts or harvest 3PID data. In the longer
 term, we hope to create a decentralised system to manage it (`matrix-doc #712
 <https://github.com/matrix-org/matrix-doc/issues/712>`_), but in the meantime,
@@ -238,9 +237,9 @@ email address.
 We welcome contributions to Synapse from the community!
 The best place to get started is our
 `guide for contributors <https://element-hq.github.io/synapse/latest/development/contributing_guide.html>`_.
-This is part of our larger `documentation <https://element-hq.github.io/synapse/latest>`_, which includes
-
+This is part of our broader `documentation <https://element-hq.github.io/synapse/latest>`_, which includes
 information for Synapse developers as well as Synapse administrators.
+
 Developers might be particularly interested in:
 
 * `Synapse's database schema <https://element-hq.github.io/synapse/latest/development/database_schema.html>`_,
@@ -265,6 +264,8 @@ This software is dual-licensed by New Vector Ltd (Element). It can be used eithe
 (2) under the terms of a paid-for Element Commercial License agreement between you and Element (the terms of which may vary depending on what you and Element have agreed to).
 
 Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
+
+Please contact `licensing@element.io <mailto:licensing@element.io>`_ to purchase an Element commercial license for this software.
 
 
 .. |support| image:: https://img.shields.io/badge/matrix-community%20support-success

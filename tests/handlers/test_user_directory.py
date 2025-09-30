@@ -21,7 +21,7 @@ from typing import Any, Tuple
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import quote
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import UserTypes
@@ -32,7 +32,7 @@ from synapse.rest.client import login, register, room, user_directory
 from synapse.server import HomeServer
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import JsonDict, UserID, UserProfile, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.storage.test_user_directory import GetUserDirectoryTables

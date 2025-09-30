@@ -55,7 +55,7 @@ from synapse.api.errors import NotFoundError
 from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
 from synapse.media._base import ThreadedFileSender
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
 from ..types import JsonDict

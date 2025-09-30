@@ -19,13 +19,13 @@
 #
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.rest.client import capabilities, login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

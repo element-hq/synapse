@@ -20,14 +20,14 @@
 #
 from typing import List
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.errors import Codes
 from synapse.rest.client import login, reporting, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

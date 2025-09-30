@@ -45,6 +45,7 @@ from synapse.api.errors import StoreError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion
 from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.opentracing import tag_args, trace
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.background_updates import ForeignKeyConstraint
@@ -58,11 +59,11 @@ from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.signatures import SignatureWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict, StrCollection
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -70,17 +71,20 @@ if TYPE_CHECKING:
 oldest_pdu_in_federation_staging = Gauge(
     "synapse_federation_server_oldest_inbound_pdu_in_staging",
     "The age in seconds since we received the oldest pdu in the federation staging area",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 number_pdus_in_federation_queue = Gauge(
     "synapse_federation_server_number_inbound_pdu_in_staging",
     "The total number of events in the inbound federation staging",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 pdus_pruned_from_federation_queue = Counter(
     "synapse_federation_server_number_inbound_pdu_pruned",
     "The number of events in the inbound federation staging that have been "
     "pruned due to the queue getting too long",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 logger = logging.getLogger(__name__)
@@ -110,6 +114,12 @@ _LONGEST_BACKOFF_PERIOD_MILLISECONDS = (
 assert 0 < _LONGEST_BACKOFF_PERIOD_MILLISECONDS <= ((2**31) - 1)
 
 
+# We use 2^53-1 as a "very large number", it has no particular
+# importance other than knowing synapse can support it (given canonical json
+# requires it).
+MAX_CHAIN_LENGTH = (2**53) - 1
+
+
 # All the info we need while iterating the DAG while backfilling
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class BackfillQueueNavigationItem:
@@ -117,6 +127,14 @@ class BackfillQueueNavigationItem:
     stream_ordering: int
     event_id: str
     type: str
+
+
+@attr.s(frozen=True, slots=True, auto_attribs=True)
+class StateDifference:
+    # The event IDs in the auth difference.
+    auth_difference: Set[str]
+    # The event IDs in the conflicted state subgraph. Used in v2.1 only.
+    conflicted_subgraph: Optional[Set[str]]
 
 
 class _NoChainCoverIndex(Exception):
@@ -467,17 +485,41 @@ class EventFederationWorkerStore(
         return results
 
     async def get_auth_chain_difference(
-        self, room_id: str, state_sets: List[Set[str]]
+        self,
+        room_id: str,
+        state_sets: List[Set[str]],
     ) -> Set[str]:
-        """Given sets of state events figure out the auth chain difference (as
+        state_diff = await self.get_auth_chain_difference_extended(
+            room_id, state_sets, None, None
+        )
+        return state_diff.auth_difference
+
+    async def get_auth_chain_difference_extended(
+        self,
+        room_id: str,
+        state_sets: List[Set[str]],
+        conflicted_set: Optional[Set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+    ) -> StateDifference:
+        """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).
 
-        This equivalent to fetching the full auth chain for each set of state
+        This is equivalent to fetching the full auth chain for each set of state
         and returning the events that don't appear in each and every auth
         chain.
 
+        If conflicted_set is not None, calculate and return the conflicted sub-graph as per
+        state res v2.1. The event IDs in the conflicted set MUST be a subset of the event IDs in
+        state_sets.
+
+        If additional_backwards_reachable_conflicted_events is set, the provided events are included
+        when calculating the conflicted subgraph. This is primarily useful for calculating the
+        subgraph across a combination of persisted and unpersisted events. The event IDs in this set
+        MUST be a subset of the event IDs in state_sets.
+
         Returns:
-            The set of the difference in auth chains.
+            information on the auth chain difference, and also the conflicted subgraph if
+            conflicted_set is not None
         """
 
         # Check if we have indexed the room so we can use the chain cover
@@ -491,6 +533,8 @@ class EventFederationWorkerStore(
                     self._get_auth_chain_difference_using_cover_index_txn,
                     room_id,
                     state_sets,
+                    conflicted_set,
+                    additional_backwards_reachable_conflicted_events,
                 )
             except _NoChainCoverIndex:
                 # For whatever reason we don't actually have a chain cover index
@@ -499,24 +543,47 @@ class EventFederationWorkerStore(
                 if not self.tests_allow_no_chain_cover_index:
                     raise
 
-        return await self.db_pool.runInteraction(
+        # It's been 4 years since we added chain cover, so we expect all rooms to have it.
+        # If they don't, we will error out when trying to do state res v2.1
+        if conflicted_set is not None:
+            raise _NoChainCoverIndex(room_id)
+
+        auth_diff = await self.db_pool.runInteraction(
             "get_auth_chain_difference",
             self._get_auth_chain_difference_txn,
             state_sets,
         )
+        return StateDifference(auth_difference=auth_diff, conflicted_subgraph=None)
 
     def _get_auth_chain_difference_using_cover_index_txn(
-        self, txn: LoggingTransaction, room_id: str, state_sets: List[Set[str]]
-    ) -> Set[str]:
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+        state_sets: List[Set[str]],
+        conflicted_set: Optional[Set[str]] = None,
+        additional_backwards_reachable_conflicted_events: Optional[Set[str]] = None,
+    ) -> StateDifference:
         """Calculates the auth chain difference using the chain index.
 
         See docs/auth_chain_difference_algorithm.md for details
         """
+        is_state_res_v21 = conflicted_set is not None
 
         # First we look up the chain ID/sequence numbers for all the events, and
         # work out the chain/sequence numbers reachable from each state set.
 
         initial_events = set(state_sets[0]).union(*state_sets[1:])
+
+        if is_state_res_v21:
+            # Sanity check v2.1 fields
+            assert conflicted_set is not None
+            assert conflicted_set.issubset(initial_events)
+            # It's possible for the conflicted_set to be empty if all the conflicts are in
+            # unpersisted events, so we don't assert that conflicted_set has len > 0
+            if additional_backwards_reachable_conflicted_events:
+                assert additional_backwards_reachable_conflicted_events.issubset(
+                    initial_events
+                )
 
         # Map from event_id -> (chain ID, seq no)
         chain_info: Dict[str, Tuple[int, int]] = {}
@@ -553,14 +620,14 @@ class EventFederationWorkerStore(
         events_missing_chain_info = initial_events.difference(chain_info)
 
         # The result set to return, i.e. the auth chain difference.
-        result: Set[str] = set()
+        auth_difference_result: Set[str] = set()
 
         if events_missing_chain_info:
             # For some reason we have events we haven't calculated the chain
             # index for, so we need to handle those separately. This should only
             # happen for older rooms where the server doesn't have all the auth
             # events.
-            result = self._fixup_auth_chain_difference_sets(
+            auth_difference_result = self._fixup_auth_chain_difference_sets(
                 txn,
                 room_id,
                 state_sets=state_sets,
@@ -579,6 +646,45 @@ class EventFederationWorkerStore(
 
             fetch_chain_info(new_events_to_fetch)
 
+        # State Res v2.1 needs extra data structures to calculate the conflicted subgraph which
+        # are outlined below.
+
+        # A subset of chain_info for conflicted events only, as we need to
+        # loop all conflicted chain positions. Map from event_id -> (chain ID, seq no)
+        conflicted_chain_positions: Dict[str, Tuple[int, int]] = {}
+        # For each chain, remember the positions where conflicted events are.
+        # We need this for calculating the forward reachable events.
+        conflicted_chain_to_seq: Dict[int, Set[int]] = {}  # chain_id => {seq_num}
+        #  A subset of chain_info for additional backwards reachable events only, as we need to
+        # loop all additional backwards reachable events for calculating backwards reachable events.
+        additional_backwards_reachable_positions: Dict[
+            str, Tuple[int, int]
+        ] = {}  # event_id => (chain_id, seq_num)
+        # These next two fields are critical as the intersection of them is the conflicted subgraph.
+        # We'll populate them when we walk the chain links.
+        # chain_id => max(seq_num) backwards reachable (e.g 4 means 1,2,3,4 are backwards reachable)
+        conflicted_backwards_reachable: Dict[int, int] = {}
+        # chain_id => min(seq_num) forwards reachable (e.g 4 means 4,5,6..n are forwards reachable)
+        conflicted_forwards_reachable: Dict[int, int] = {}
+
+        # populate the v2.1 data structures
+        if is_state_res_v21:
+            assert conflicted_set is not None
+            # provide chain positions for each conflicted event
+            for conflicted_event_id in conflicted_set:
+                (chain_id, seq_num) = chain_info[conflicted_event_id]
+                conflicted_chain_positions[conflicted_event_id] = (chain_id, seq_num)
+                conflicted_chain_to_seq.setdefault(chain_id, set()).add(seq_num)
+            if additional_backwards_reachable_conflicted_events:
+                for (
+                    additional_event_id
+                ) in additional_backwards_reachable_conflicted_events:
+                    (chain_id, seq_num) = chain_info[additional_event_id]
+                    additional_backwards_reachable_positions[additional_event_id] = (
+                        chain_id,
+                        seq_num,
+                    )
+
         # Corresponds to `state_sets`, except as a map from chain ID to max
         # sequence number reachable from the state set.
         set_to_chain: List[Dict[int, int]] = []
@@ -596,6 +702,8 @@ class EventFederationWorkerStore(
 
         # (We need to take a copy of `seen_chains` as the function mutates it)
         for links in self._get_chain_links(txn, set(seen_chains)):
+            # `links` encodes the backwards reachable events _from a single chain_ all the way to
+            # the root of the graph.
             for chains in set_to_chain:
                 for chain_id in links:
                     if chain_id not in chains:
@@ -604,6 +712,87 @@ class EventFederationWorkerStore(
                     _materialize(chain_id, chains[chain_id], links, chains)
 
                 seen_chains.update(chains)
+            if is_state_res_v21:
+                # Apply v2.1 conflicted event reachability checks.
+                #
+                #  A <-- B <-- C <-- D <-- E
+                #
+                # Backwards reachable from C = {A,B}
+                # Forwards reachable from C = {D,E}
+
+                # this handles calculating forwards reachable information and updates
+                # conflicted_forwards_reachable.
+                accumulate_forwards_reachable_events(
+                    conflicted_forwards_reachable,
+                    links,
+                    conflicted_chain_positions,
+                )
+
+                # handle backwards reachable information
+                for (
+                    conflicted_chain_id,
+                    conflicted_chain_seq,
+                ) in conflicted_chain_positions.values():
+                    if conflicted_chain_id not in links:
+                        # This conflicted event does not lie on the path to the root.
+                        continue
+
+                    # The conflicted chain position itself encodes reachability information
+                    # _within_ the chain. Set it now before walking to other links.
+                    conflicted_backwards_reachable[conflicted_chain_id] = max(
+                        conflicted_chain_seq,
+                        conflicted_backwards_reachable.get(conflicted_chain_id, 0),
+                    )
+
+                    # Build backwards reachability paths. This is the same as what the auth difference
+                    # code does. We find which chain the conflicted event
+                    # belongs to then walk it backwards to the root. We store reachability info
+                    # for all conflicted events in the same map 'conflicted_backwards_reachable'
+                    # as we don't care about the paths themselves.
+                    _materialize(
+                        conflicted_chain_id,
+                        conflicted_chain_seq,
+                        links,
+                        conflicted_backwards_reachable,
+                    )
+                # Mark some extra events as backwards reachable. This is used when we have some
+                # unpersisted events and want to know the subgraph across the persisted/unpersisted
+                # boundary:
+                #                  |
+                #  A <-- B <-- C <-|- D <-- E <-- F
+                #     persisted    |   unpersisted
+                #
+                # Assume {B,E} are conflicted, we want to return {B,C,D,E}
+                #
+                # The unpersisted code ensures it passes C as an additional backwards reachable
+                # event. C is NOT a conflicted event, but we do need to consider it as part of
+                # the backwards reachable set. When we then calculate the forwards reachable set
+                # from B, C will be in both the backwards and forwards reachable sets and hence
+                # will be included in the conflicted subgraph.
+                for (
+                    additional_chain_id,
+                    additional_chain_seq,
+                ) in additional_backwards_reachable_positions.values():
+                    if additional_chain_id not in links:
+                        # The additional backwards reachable event does not lie on the path to the root.
+                        continue
+
+                    # the additional event chain position itself encodes reachability information.
+                    # It means that position and all positions earlier in that chain are backwards reachable
+                    # by some unpersisted conflicted event.
+                    conflicted_backwards_reachable[additional_chain_id] = max(
+                        additional_chain_seq,
+                        conflicted_backwards_reachable.get(additional_chain_id, 0),
+                    )
+
+                    # Now walk the chains back, marking backwards reachable events.
+                    # This is the same thing we do for auth difference / conflicted events.
+                    _materialize(
+                        additional_chain_id,  # walk all links back, marking them as backwards reachable
+                        additional_chain_seq,
+                        links,
+                        conflicted_backwards_reachable,
+                    )
 
         # Now for each chain we figure out the maximum sequence number reachable
         # from *any* state set and the minimum sequence number reachable from
@@ -612,7 +801,7 @@ class EventFederationWorkerStore(
 
         # Mapping from chain ID to the range of sequence numbers that should be
         # pulled from the database.
-        chain_to_gap: Dict[int, Tuple[int, int]] = {}
+        auth_diff_chain_to_gap: Dict[int, Tuple[int, int]] = {}
 
         for chain_id in seen_chains:
             min_seq_no = min(chains.get(chain_id, 0) for chains in set_to_chain)
@@ -625,15 +814,76 @@ class EventFederationWorkerStore(
                 for seq_no in range(min_seq_no + 1, max_seq_no + 1):
                     event_id = chain_to_event.get(chain_id, {}).get(seq_no)
                     if event_id:
-                        result.add(event_id)
+                        auth_difference_result.add(event_id)
                     else:
-                        chain_to_gap[chain_id] = (min_seq_no, max_seq_no)
+                        auth_diff_chain_to_gap[chain_id] = (min_seq_no, max_seq_no)
                         break
 
-        if not chain_to_gap:
-            # If there are no gaps to fetch, we're done!
-            return result
+        conflicted_subgraph_result: Set[str] = set()
+        # Mapping from chain ID to the range of sequence numbers that should be
+        # pulled from the database.
+        conflicted_subgraph_chain_to_gap: Dict[int, Tuple[int, int]] = {}
+        if is_state_res_v21:
+            # also include the conflicted subgraph using backward/forward reachability info from all
+            # the conflicted events. To calculate this, we want to extract the intersection between
+            # the backwards and forwards reachability sets, e.g:
+            #     A <- B <- C <- D <- E
+            #    Assume B and D are conflicted so we want {C} as the conflicted subgraph.
+            #    B_backwards={A}, B_forwards={C,D,E}
+            #    D_backwards={A,B,C} D_forwards={E}
+            #    ALL_backwards={A,B,C} ALL_forwards={C,D,E}
+            #    Intersection(ALL_backwards, ALL_forwards) = {C}
+            #
+            # It's worth noting that once we have the ALL_ sets, we no longer care about the paths.
+            # We're dealing with chains and not singular events, but we've already got the ALL_ sets.
+            # As such, we can inspect each chain in isolation and check for overlapping sequence
+            # numbers:
+            #             1,2,3,4,5 Seq Num
+            #    Chain N [A,B,C,D,E]
+            #
+            # if (N,4) is in the backwards set and (N,2) is in the forwards set, then the
+            # intersection is events between 2 < 4. We will include the conflicted events themselves
+            # in the subgraph, but they will already be, hence the full set of events is {B,C,D}.
+            for chain_id, backwards_seq_num in conflicted_backwards_reachable.items():
+                forwards_seq_num = conflicted_forwards_reachable.get(chain_id)
+                if forwards_seq_num is None:
+                    continue  # this chain isn't in both sets so can't intersect
+                if forwards_seq_num > backwards_seq_num:
+                    continue  # this chain is in both sets but they don't overap
+                for seq_no in range(
+                    forwards_seq_num, backwards_seq_num + 1
+                ):  # inclusive of both
+                    event_id = chain_to_event.get(chain_id, {}).get(seq_no)
+                    if event_id:
+                        conflicted_subgraph_result.add(event_id)
+                    else:
+                        conflicted_subgraph_chain_to_gap[chain_id] = (
+                            # _fetch_event_ids_from_chains_txn is exclusive of the min value
+                            forwards_seq_num - 1,
+                            backwards_seq_num,
+                        )
+                        break
 
+        if auth_diff_chain_to_gap:
+            auth_difference_result.update(
+                self._fetch_event_ids_from_chains_txn(txn, auth_diff_chain_to_gap)
+            )
+        if conflicted_subgraph_chain_to_gap:
+            conflicted_subgraph_result.update(
+                self._fetch_event_ids_from_chains_txn(
+                    txn, conflicted_subgraph_chain_to_gap
+                )
+            )
+
+        return StateDifference(
+            auth_difference=auth_difference_result,
+            conflicted_subgraph=conflicted_subgraph_result,
+        )
+
+    def _fetch_event_ids_from_chains_txn(
+        self, txn: LoggingTransaction, chains: Dict[int, Tuple[int, int]]
+    ) -> Set[str]:
+        result: Set[str] = set()
         if isinstance(self.database_engine, PostgresEngine):
             # We can use `execute_values` to efficiently fetch the gaps when
             # using postgres.
@@ -647,7 +897,7 @@ class EventFederationWorkerStore(
 
             args = [
                 (chain_id, min_no, max_no)
-                for chain_id, (min_no, max_no) in chain_to_gap.items()
+                for chain_id, (min_no, max_no) in chains.items()
             ]
 
             rows = txn.execute_values(sql, args)
@@ -658,10 +908,9 @@ class EventFederationWorkerStore(
                 SELECT event_id FROM event_auth_chains
                 WHERE chain_id = ? AND ? < sequence_number AND sequence_number <= ?
             """
-            for chain_id, (min_no, max_no) in chain_to_gap.items():
+            for chain_id, (min_no, max_no) in chains.items():
                 txn.execute(sql, (chain_id, min_no, max_no))
                 result.update(r for (r,) in txn)
-
         return result
 
     def _fixup_auth_chain_difference_sets(
@@ -2003,7 +2252,9 @@ class EventFederationWorkerStore(
         if not to_delete:
             return False
 
-        pdus_pruned_from_federation_queue.inc(len(to_delete))
+        pdus_pruned_from_federation_queue.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(len(to_delete))
         logger.info(
             "Pruning %d events in room %s from federation queue",
             len(to_delete),
@@ -2056,8 +2307,12 @@ class EventFederationWorkerStore(
             "_get_stats_for_federation_staging", _get_stats_for_federation_staging_txn
         )
 
-        number_pdus_in_federation_queue.set(count)
-        oldest_pdu_in_federation_staging.set(age)
+        number_pdus_in_federation_queue.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(count)
+        oldest_pdu_in_federation_staging.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).set(age)
 
     async def clean_room_for_join(self, room_id: str) -> None:
         await self.db_pool.runInteraction(
@@ -2155,6 +2410,7 @@ def _materialize(
     origin_sequence_number: int,
     links: Dict[int, List[Tuple[int, int, int]]],
     materialized: Dict[int, int],
+    backwards: bool = True,
 ) -> None:
     """Helper function for fetching auth chain links. For a given origin chain
     ID / sequence number and a dictionary of links, updates the materialized
@@ -2171,6 +2427,7 @@ def _materialize(
             target sequence number.
         materialized: dict to update with new reachability information, as a
             map from chain ID to max sequence number reachable.
+        backwards: If True, walks backwards down the chains. If False, walks forwards from the chains.
     """
 
     # Do a standard graph traversal.
@@ -2185,12 +2442,104 @@ def _materialize(
             target_chain_id,
             target_sequence_number,
         ) in chain_links:
-            # Ignore any links that are higher up the chain
-            if sequence_number > s:
-                continue
+            if backwards:
+                # Ignore any links that are higher up the chain
+                if sequence_number > s:
+                    continue
 
-            # Check if we have already visited the target chain before, if so we
-            # can skip it.
-            if materialized.get(target_chain_id, 0) < target_sequence_number:
-                stack.append((target_chain_id, target_sequence_number))
-                materialized[target_chain_id] = target_sequence_number
+                # Check if we have already visited the target chain before, if so we
+                # can skip it.
+                if materialized.get(target_chain_id, 0) < target_sequence_number:
+                    stack.append((target_chain_id, target_sequence_number))
+                    materialized[target_chain_id] = target_sequence_number
+            else:
+                # Ignore any links that are lower down the chain.
+                if sequence_number < s:
+                    continue
+                # Check if we have already visited the target chain before, if so we
+                # can skip it.
+                if (
+                    materialized.get(target_chain_id, MAX_CHAIN_LENGTH)
+                    > target_sequence_number
+                ):
+                    stack.append((target_chain_id, target_sequence_number))
+                    materialized[target_chain_id] = target_sequence_number
+
+
+def _generate_forward_links(
+    links: Dict[int, List[Tuple[int, int, int]]],
+) -> Dict[int, List[Tuple[int, int, int]]]:
+    """Reverse the input links from the given backwards links"""
+    new_links: Dict[int, List[Tuple[int, int, int]]] = {}
+    for origin_chain_id, chain_links in links.items():
+        for origin_seq_num, target_chain_id, target_seq_num in chain_links:
+            new_links.setdefault(target_chain_id, []).append(
+                (target_seq_num, origin_chain_id, origin_seq_num)
+            )
+    return new_links
+
+
+def accumulate_forwards_reachable_events(
+    conflicted_forwards_reachable: Dict[int, int],
+    back_links: Dict[int, List[Tuple[int, int, int]]],
+    conflicted_chain_positions: Dict[str, Tuple[int, int]],
+) -> None:
+    """Accumulate new forwards reachable events using the back_links provided.
+
+    Accumulating forwards reachable information is quite different from backwards reachable information
+    because _get_chain_links returns the entire linkage information for backwards reachable events,
+    but not _forwards_ reachable events. We are only interested in the forwards reachable information
+    that is encoded in the backwards reachable links, so we can just invert all the operations we do
+    for backwards reachable events to calculate a subset of forwards reachable information. The
+    caveat with this approach is that it is a _subset_. This means new back_links may encode new
+    forwards reachable information which we also need. Consider this scenario:
+
+    A <-- B <-- C <--- D <-- E <-- F         Chain 1
+                |
+                `----- G <-- H <-- I         Chain 2
+                             |
+                             `---- J <-- K   Chain 3
+
+    Now consider what happens when B is a conflicted event. _get_chain_links returns the conflicted
+    chain and ALL links heading towards the root of the graph. This means we will know the
+    Chain 1 to Chain 2 link via C (as all links for the chain are returned, not strictly ones with
+    a lower sequence number), but we will NOT know the Chain 2 to Chain 3 link via H. We can be
+    blissfully unaware of Chain 3 entirely, if and only if there isn't some other conflicted event
+    on that chain. Consider what happens when K is /also/ conflicted. _get_chain_links will generate
+    two iterations: one for B and one for K. It's important that we re-evaluate the forwards reachable
+    information for B to include Chain 3 when we process the K iteration, hence we are "accumulating"
+    forwards reachability information.
+
+    NB: We don't consider 'additional backwards reachable events' here because they have no effect
+    on forwards reachability calculations, only backwards.
+
+    Args:
+      conflicted_forwards_reachable: The materialised dict of forwards reachable information.
+      The output to this function are stored here.
+      back_links: One iteration of _get_chain_links which encodes backwards reachable information.
+      conflicted_chain_positions: The conflicted events.
+    """
+    # links go backwards but we want them to go forwards as well for v2.1
+    fwd_links = _generate_forward_links(back_links)
+
+    # for each conflicted event, accumulate forwards reachability information
+    for (
+        conflicted_chain_id,
+        conflicted_chain_seq,
+    ) in conflicted_chain_positions.values():
+        # the conflicted event itself encodes reachability information
+        # e.g if D was conflicted, it encodes E,F as forwards reachable.
+        conflicted_forwards_reachable[conflicted_chain_id] = min(
+            conflicted_chain_seq,
+            conflicted_forwards_reachable.get(conflicted_chain_id, MAX_CHAIN_LENGTH),
+        )
+        # Walk from the conflicted event forwards to explore the links.
+        # This function checks if we've visited the chain before and skips reprocessing, so this
+        # does not repeatedly traverse the graph.
+        _materialize(
+            conflicted_chain_id,
+            conflicted_chain_seq,
+            fwd_links,
+            conflicted_forwards_reachable,
+            backwards=False,
+        )

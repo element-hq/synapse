@@ -19,9 +19,11 @@
 #
 #
 
+from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Tuple, Union
 
 from synapse.api.errors import (
+    Codes,
     NotFoundError,
     StoreError,
     SynapseError,
@@ -63,7 +65,7 @@ class PushRuleRestServlet(RestServlet):
             hs.get_instance_name() in hs.config.worker.writers.push_rules
         )
         self._push_rules_handler = hs.get_push_rules_handler()
-        self._push_rule_linearizer = Linearizer(name="push_rules")
+        self._push_rule_linearizer = Linearizer(name="push_rules", clock=hs.get_clock())
 
     async def on_PUT(self, request: SynapseRequest, path: str) -> Tuple[int, JsonDict]:
         if not self._is_push_worker:
@@ -239,6 +241,15 @@ def _rule_spec_from_path(path: List[str]) -> RuleSpec:
 def _rule_tuple_from_request_object(
     rule_template: str, rule_id: str, req_obj: JsonDict
 ) -> Tuple[List[JsonDict], List[Union[str, JsonDict]]]:
+    if rule_template == "postcontent":
+        # postcontent is from MSC4306, which says that clients
+        # cannot create their own postcontent rules right now.
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            "user-defined rules using `postcontent` are not accepted",
+            errcode=Codes.INVALID_PARAM,
+        )
+
     if rule_template in ["override", "underride"]:
         if "conditions" not in req_obj:
             raise InvalidRuleException("Missing 'conditions'")

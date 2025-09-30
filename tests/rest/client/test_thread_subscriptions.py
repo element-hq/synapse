@@ -13,13 +13,14 @@
 
 from http import HTTPStatus
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
+from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, profile, room, thread_subscriptions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 
@@ -49,15 +50,16 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         # Create a room and send a message to use as a thread root
         self.room_id = self.helper.create_room_as(self.user_id, tok=self.token)
         self.helper.join(self.room_id, self.other_user_id, tok=self.other_token)
-        response = self.helper.send(self.room_id, body="Root message", tok=self.token)
-        self.root_event_id = response["event_id"]
+        (self.root_event_id,) = self.helper.send_messages(
+            self.room_id, 1, tok=self.token
+        )
 
         # Send a message in the thread
-        self.helper.send_event(
-            room_id=self.room_id,
-            type="m.room.message",
-            content={
-                "body": "Thread message",
+        self.threaded_events = self.helper.send_messages(
+            self.room_id,
+            2,
+            content_fn=lambda idx: {
+                "body": f"Thread message {idx}",
                 "msgtype": "m.text",
                 "m.relates_to": {
                     "rel_type": "m.thread",
@@ -106,9 +108,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
-            {
-                "automatic": False,
-            },
+            {},
             access_token=self.token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -127,7 +127,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
-            {"automatic": True},
+            {"automatic": self.threaded_events[0]},
             access_token=self.token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -148,11 +148,11 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             {
-                "automatic": True,
+                "automatic": self.threaded_events[0],
             },
             access_token=self.token,
         )
-        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.text_body)
 
         # Assert the subscription was saved
         channel = self.make_request(
@@ -167,7 +167,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
-            {"automatic": False},
+            {},
             access_token=self.token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK)
@@ -187,7 +187,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
             {
-                "automatic": True,
+                "automatic": self.threaded_events[0],
             },
             access_token=self.token,
         )
@@ -202,7 +202,6 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(channel.json_body, {"automatic": True})
 
-        # Now also register a manual subscription
         channel = self.make_request(
             "DELETE",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
@@ -210,7 +209,6 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK)
 
-        # Assert the manual subscription was not overridden
         channel = self.make_request(
             "GET",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
@@ -224,7 +222,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/$nonexistent:example.org/subscription",
-            {"automatic": True},
+            {},
             access_token=self.token,
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
@@ -238,7 +236,7 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
-            {"automatic": True},
+            {},
             access_token=no_access_token,
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
@@ -249,8 +247,105 @@ class ThreadSubscriptionsTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
-            # non-boolean `automatic`
-            {"automatic": "true"},
+            # non-Event ID `automatic`
+            {"automatic": True},
             access_token=self.token,
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
+
+        channel = self.make_request(
+            "PUT",
+            f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
+            # non-Event ID `automatic`
+            {"automatic": "$malformedEventId"},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST)
+
+    def test_auto_subscribe_cause_event_not_in_thread(self) -> None:
+        """
+        Test making an automatic subscription, where the cause event is not
+        actually in the thread.
+        This is an error.
+        """
+        (unrelated_event_id,) = self.helper.send_messages(
+            self.room_id, 1, tok=self.token
+        )
+        channel = self.make_request(
+            "PUT",
+            f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
+            {"automatic": unrelated_event_id},
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.text_body)
+        self.assertEqual(channel.json_body["errcode"], Codes.MSC4306_NOT_IN_THREAD)
+
+    def test_auto_resubscription_conflict(self) -> None:
+        """
+        Test that an automatic subscription that conflicts with an unsubscription
+        is skipped.
+        """
+        # Reuse the test that subscribes and unsubscribes
+        self.test_unsubscribe()
+
+        # Now no matter which event we present as the cause of an automatic subscription,
+        # the automatic subscription is skipped.
+        # This is because the unsubscription happened after all of the events.
+        for event in self.threaded_events:
+            channel = self.make_request(
+                "PUT",
+                f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
+                {
+                    "automatic": event,
+                },
+                access_token=self.token,
+            )
+            self.assertEqual(channel.code, HTTPStatus.CONFLICT, channel.text_body)
+            self.assertEqual(
+                channel.json_body["errcode"],
+                Codes.MSC4306_CONFLICTING_UNSUBSCRIPTION,
+                channel.text_body,
+            )
+
+            # Check the subscription was not made
+            channel = self.make_request(
+                "GET",
+                f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
+                access_token=self.token,
+            )
+            self.assertEqual(channel.code, HTTPStatus.NOT_FOUND)
+
+        # But if a new event is sent after the unsubscription took place,
+        # that one can be used for an automatic subscription
+        (later_event_id,) = self.helper.send_messages(
+            self.room_id,
+            1,
+            content_fn=lambda _: {
+                "body": "Thread message after unsubscription",
+                "msgtype": "m.text",
+                "m.relates_to": {
+                    "rel_type": "m.thread",
+                    "event_id": self.root_event_id,
+                },
+            },
+            tok=self.token,
+        )
+
+        channel = self.make_request(
+            "PUT",
+            f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
+            {
+                "automatic": later_event_id,
+            },
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.text_body)
+
+        # Check the subscription was made
+        channel = self.make_request(
+            "GET",
+            f"{PREFIX}/{self.room_id}/thread/{self.root_event_id}/subscription",
+            access_token=self.token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.json_body, {"automatic": True})

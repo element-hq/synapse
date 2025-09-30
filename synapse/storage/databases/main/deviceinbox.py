@@ -53,10 +53,11 @@ from synapse.storage.database import (
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Duration, json_encoder
+from synapse.util import Duration
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
@@ -109,6 +110,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="to_device",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("device_inbox", "instance_name", "stream_id"),
@@ -156,6 +158,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 run_as_background_process,
                 DEVICE_FEDERATION_INBOX_CLEANUP_INTERVAL_MS,
                 "_delete_old_federation_inbox_rows",
+                self.server_name,
                 self._delete_old_federation_inbox_rows,
             )
 
@@ -1029,7 +1032,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # We sleep a bit so that we don't hammer the database in a tight
             # loop first time we run this.
-            self._clock.sleep(1)
+            await self._clock.sleep(1)
 
     async def get_devices_with_messages(
         self, user_id: str, device_ids: StrCollection

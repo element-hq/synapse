@@ -52,9 +52,10 @@ from zope.interface import implementer
 
 from twisted.internet import defer, interfaces, reactor
 from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import IReactorTime
 from twisted.python import failure
 from twisted.web import resource
+
+from synapse.types import ISynapseThreadlessReactor
 
 try:
     from twisted.web.pages import notFound
@@ -77,10 +78,11 @@ from synapse.api.errors import (
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
-from synapse.util import Clock, json_encoder
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.clock import Clock
 from synapse.util.iterutils import chunk_seq
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     import opentracing
@@ -337,7 +339,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
                     callback_return = await self._async_render(request)
                 except LimitExceededError as e:
                     if e.pause:
-                        self._clock.sleep(e.pause)
+                        await self._clock.sleep(e.pause)
                     raise
 
                 if callback_return is not None:
@@ -409,8 +411,19 @@ class DirectServeJsonResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            canonical_json: TODO
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
+
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
@@ -588,8 +601,17 @@ class DirectServeHtmlResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            clock = Clock(
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
 
@@ -702,6 +724,10 @@ class _ByteProducer:
         self._request: Optional[Request] = request
         self._iterator = iterator
         self._paused = False
+        self.tracing_scope = start_active_span(
+            "write_bytes_to_request",
+        )
+        self.tracing_scope.__enter__()
 
         try:
             self._request.registerProducer(self, True)
@@ -712,8 +738,8 @@ class _ByteProducer:
             logger.info("Connection disconnected before response was written: %r", e)
 
             # We drop our references to data we'll not use.
-            self._request = None
             self._iterator = iter(())
+            self.tracing_scope.__exit__(type(e), None, e.__traceback__)
         else:
             # Start producing if `registerProducer` was successful
             self.resumeProducing()
@@ -727,6 +753,9 @@ class _ByteProducer:
         self._request.write(b"".join(data))
 
     def pauseProducing(self) -> None:
+        opentracing_span = active_span()
+        if opentracing_span is not None:
+            opentracing_span.log_kv({"event": "producer_paused"})
         self._paused = True
 
     def resumeProducing(self) -> None:
@@ -736,6 +765,10 @@ class _ByteProducer:
             return
 
         self._paused = False
+
+        opentracing_span = active_span()
+        if opentracing_span is not None:
+            opentracing_span.log_kv({"event": "producer_resumed"})
 
         # Write until there's backpressure telling us to stop.
         while not self._paused:
@@ -771,6 +804,7 @@ class _ByteProducer:
     def stopProducing(self) -> None:
         # Clear a circular reference.
         self._request = None
+        self.tracing_scope.__exit__(None, None, None)
 
 
 def _encode_json_bytes(json_object: object) -> bytes:
@@ -913,8 +947,9 @@ def _write_bytes_to_request(request: Request, bytes_to_write: bytes) -> None:
     # once (via `Request.write`) is that doing so starts the timeout for the
     # next request to be received: so if it takes longer than 60s to stream back
     # the response to the client, the client never gets it.
+    # c.f https://github.com/twisted/twisted/issues/12498
     #
-    # The correct solution is to use a Producer; then the timeout is only
+    # One workaround is to use a `Producer`; then the timeout is only
     # started once all of the content is sent over the TCP connection.
 
     # To make sure we don't write all of the bytes at once we split it up into

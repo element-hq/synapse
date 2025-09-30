@@ -739,7 +739,7 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
     NAME = "thread_subscriptions"
     ROW_TYPE = ThreadSubscriptionsStreamRow
 
-    def __init__(self, hs: Any):
+    def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         super().__init__(
             hs.get_instance_name(),
@@ -751,7 +751,7 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
         self, instance_name: str, from_token: int, to_token: int, limit: int
     ) -> StreamUpdateResult:
         updates = await self.store.get_updated_thread_subscriptions(
-            from_token, to_token, limit
+            from_id=from_token, to_id=to_token, limit=limit
         )
         rows = [
             (
@@ -762,7 +762,6 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
             for stream_id, user_id, room_id, event_id in updates
         ]
 
-        logger.error("TS %d->%d %r", from_token, to_token, rows)
         if not rows:
             return [], to_token, False
 

@@ -22,7 +22,7 @@
 import logging
 from typing import List, Optional, Tuple, cast
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
@@ -33,7 +33,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.roommember import MemberSummary
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import TestHomeServer

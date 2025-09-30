@@ -610,6 +610,61 @@ manhole_settings:
   ssh_pub_key_path: CONFDIR/id_rsa.pub
 ```
 ---
+### `http_proxy`
+
+*(string|null)* Proxy server to use for HTTP requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+http_proxy: http://USERNAME:PASSWORD@10.0.1.1:8080/
+```
+---
+### `https_proxy`
+
+*(string|null)* Proxy server to use for HTTPS requests.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+https_proxy: http://USERNAME:PASSWORD@proxy.example.com:8080/
+```
+---
+### `no_proxy_hosts`
+
+*(array)* List of hosts, IP addresses, or IP ranges in CIDR format which should not use the proxy. Synapse will directly connect to these hosts.
+For more details, see the [forward proxy documentation](../../setup/forward_proxy.md). There is no default for this option.
+
+Example configuration:
+```yaml
+no_proxy_hosts:
+- master.hostname.example.com
+- 10.1.0.0/16
+- 172.30.0.0/16
+```
+---
+### `matrix_authentication_service`
+
+*(object)* The `matrix_authentication_service` setting configures integration with [Matrix Authentication Service (MAS)](https://github.com/element-hq/matrix-authentication-service).
+
+This setting has the following sub-options:
+
+* `enabled` (boolean): Whether or not to enable the MAS integration. If this is set to `false`, Synapse will use its legacy internal authentication API. Defaults to `false`.
+
+* `endpoint` (string): The URL where Synapse can reach MAS. This *must* have the `discovery` and `oauth` resources mounted. Defaults to `"http://localhost:8080"`.
+
+* `secret` (string|null): A shared secret that will be used to authenticate requests from and to MAS.
+
+* `secret_path` (string|null): Alternative to `secret`, reading the shared secret from a file. The file should be a plain text file, containing only the secret. Synapse reads the secret from the given file once at startup.
+
+Example configuration:
+```yaml
+matrix_authentication_service:
+  enabled: true
+  secret: someverysecuresecret
+  endpoint: http://localhost:8080
+```
+---
 ### `dummy_events_threshold`
 
 *(integer)* Forward extremities can build up in a room due to networking delays between homeservers. Once this happens in a large room, calculation of the state of that room can become quite expensive. To mitigate this, once the number of forward extremities reaches a given threshold, Synapse will send an `org.matrix.dummy_event` event, which will reduce the forward extremities in the room.
@@ -1963,6 +2018,31 @@ rc_reports:
   burst_count: 20.0
 ```
 ---
+### `rc_room_creation`
+
+*(object)* Sets rate limits for how often users are able to create rooms.
+
+This setting has the following sub-options:
+
+* `per_second` (number): Maximum number of requests a client can send per second.
+
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_room_creation:
+  per_user:
+    per_second: 0.016
+    burst_count: 10.0
+```
+
+Example configuration:
+```yaml
+rc_room_creation:
+  per_second: 1.0
+  burst_count: 5.0
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
@@ -2088,8 +2168,11 @@ max_upload_size: 60M
 ### `media_upload_limits`
 
 *(array)* A list of media upload limits defining how much data a given user can upload in a given time period.
+These limits are applied in addition to the `max_upload_size` limit above (which applies to individual uploads).
 
 An empty list means no limits are applied.
+
+These settings can be overridden using the `get_media_upload_limits_for_user` module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
 
 Defaults to `[]`.
 
@@ -4094,7 +4177,7 @@ The default power levels for each preset are:
 "m.room.history_visibility": 100
 "m.room.canonical_alias": 50
 "m.room.avatar": 50
-"m.room.tombstone": 100
+"m.room.tombstone": 100 (150 if MSC4289 is used)
 "m.room.server_acl": 100
 "m.room.encryption": 100
 ```

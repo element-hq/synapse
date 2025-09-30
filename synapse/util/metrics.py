@@ -42,7 +42,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +217,11 @@ class Measure:
         else:
             assert isinstance(curr_context, LoggingContext)
             parent_context = curr_context
-        self._logging_context = LoggingContext(str(curr_context), parent_context)
+        self._logging_context = LoggingContext(
+            name=str(curr_context),
+            server_name=self.server_name,
+            parent_context=parent_context,
+        )
         self.start: Optional[float] = None
 
     def __enter__(self) -> "Measure":

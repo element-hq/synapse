@@ -21,7 +21,7 @@
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -31,7 +31,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import RoomAlias
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils import event_injection
 from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase

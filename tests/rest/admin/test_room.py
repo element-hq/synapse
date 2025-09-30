@@ -28,19 +28,24 @@ from unittest.mock import AsyncMock, Mock
 from parameterized import parameterized
 
 from twisted.internet.task import deferLater
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes, Membership, RoomTypes
 from synapse.api.errors import Codes
+from synapse.api.room_versions import RoomVersions
 from synapse.handlers.pagination import (
     PURGE_ROOM_ACTION_NAME,
     SHUTDOWN_AND_PURGE_ROOM_ACTION_NAME,
 )
 from synapse.rest.client import directory, events, knock, login, room, sync
 from synapse.server import HomeServer
+from synapse.storage.databases.main.purge_events import (
+    purge_room_tables_with_event_id_index,
+    purge_room_tables_with_room_id_column,
+)
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest
@@ -546,7 +551,7 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in PURGE_TABLES:
+        for table in purge_room_tables_with_room_id_column:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -555,7 +560,21 @@ class DeleteRoomTestCase(unittest.HomeserverTestCase):
                     desc="test_purge_room",
                 )
             )
+            self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
+        for table in purge_room_tables_with_event_id_index:
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "find_event_count_for_table",
+                    f"""
+                    SELECT COUNT(*) FROM {table} WHERE event_id IN (
+                        SELECT event_id FROM events WHERE room_id=?
+                    )
+                    """,
+                    room_id,
+                )
+            )
+            count = rows[0][0]
             self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
     def _assert_peek(self, room_id: str, expect_code: int) -> None:
@@ -1228,7 +1247,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
 
     def _is_purged(self, room_id: str) -> None:
         """Test that the following tables have been purged of all rows related to the room."""
-        for table in PURGE_TABLES:
+        for table in purge_room_tables_with_room_id_column:
             count = self.get_success(
                 self.store.db_pool.simple_select_one_onecol(
                     table=table,
@@ -1237,7 +1256,21 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
                     desc="test_purge_room",
                 )
             )
+            self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
+        for table in purge_room_tables_with_event_id_index:
+            rows = self.get_success(
+                self.store.db_pool.execute(
+                    "find_event_count_for_table",
+                    f"""
+                    SELECT COUNT(*) FROM {table} WHERE event_id IN (
+                        SELECT event_id FROM events WHERE room_id=?
+                    )
+                    """,
+                    room_id,
+                )
+            )
+            count = rows[0][0]
             self.assertEqual(count, 0, msg=f"Rows not purged in {table}")
 
     def _assert_peek(self, room_id: str, expect_code: int) -> None:
@@ -2211,7 +2244,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_topo_token_is_accepted(self) -> None:
         """Test Topo Token is accepted."""
-        token = "t1-0_0_0_0_0_0_0_0_0_0"
+        token = "t1-0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2225,7 +2258,7 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
 
     def test_stream_token_is_accepted_for_fwd_pagianation(self) -> None:
         """Test that stream token is accepted for forward pagination."""
-        token = "s0_0_0_0_0_0_0_0_0_0"
+        token = "s0_0_0_0_0_0_0_0_0_0_0"
         channel = self.make_request(
             "GET",
             "/_synapse/admin/v1/rooms/%s/messages?from=%s" % (self.room_id, token),
@@ -2892,6 +2925,63 @@ class MakeRoomAdminTestCase(unittest.HomeserverTestCase):
             "No local admin user in room with power to update power levels.",
         )
 
+    def test_v12_room(self) -> None:
+        """Test that you can be promoted to admin in v12 rooms which won't have the admin the PL event."""
+        room_id = self.helper.create_room_as(
+            self.creator,
+            tok=self.creator_tok,
+            room_version=RoomVersions.V12.identifier,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Now we test that we can join the room and that the admin user has PL 100.
+        self.helper.join(room_id, self.admin_user, tok=self.admin_user_tok)
+        pl = self.helper.get_state(
+            room_id, EventTypes.PowerLevels, tok=self.creator_tok
+        )
+        self.assertEquals(pl["users"][self.admin_user], 100)
+
+    def test_v12_room_with_many_user_pls(self) -> None:
+        """Test that you can be promoted to the admin user's PL in v12 rooms that contain a range of user PLs."""
+        room_id = self.helper.create_room_as(
+            self.creator,
+            tok=self.creator_tok,
+            room_version=RoomVersions.V12.identifier,
+            is_public=True,
+            extra_content={
+                "power_level_content_override": {
+                    "users": {
+                        self.second_user_id: 50,
+                    },
+                },
+            },
+        )
+
+        self.helper.join(room_id, self.admin_user, tok=self.admin_user_tok)
+        self.helper.join(room_id, self.second_user_id, tok=self.second_tok)
+
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/rooms/{room_id}/make_room_admin",
+            content={},
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        pl = self.helper.get_state(
+            room_id, EventTypes.PowerLevels, tok=self.creator_tok
+        )
+        self.assertEquals(pl["users"][self.admin_user], 100)
+
 
 class BlockRoomTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -3119,35 +3209,3 @@ class BlockRoomTestCase(unittest.HomeserverTestCase):
         """Block a room in database"""
         self.get_success(self._store.block_room(room_id, self.other_user))
         self._is_blocked(room_id, expect=True)
-
-
-PURGE_TABLES = [
-    "current_state_events",
-    "event_backward_extremities",
-    "event_forward_extremities",
-    "event_json",
-    "event_push_actions",
-    "event_search",
-    "events",
-    "receipts_graph",
-    "receipts_linearized",
-    "room_aliases",
-    "room_depth",
-    "room_memberships",
-    "room_stats_state",
-    "room_stats_current",
-    "room_stats_earliest_token",
-    "rooms",
-    "stream_ordering_to_exterm",
-    "users_in_public_rooms",
-    "users_who_share_private_rooms",
-    "appservice_room_list",
-    "e2e_room_keys",
-    "event_push_summary",
-    "pusher_throttle",
-    "room_account_data",
-    "room_tags",
-    "state_groups",
-    "state_groups_state",
-    "federation_inbound_events_staging",
-]

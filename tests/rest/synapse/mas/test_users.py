@@ -13,12 +13,12 @@
 
 from urllib.parse import urlencode
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import skip_unless
 from tests.utils import HAS_AUTHLIB

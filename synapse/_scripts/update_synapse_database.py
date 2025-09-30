@@ -53,6 +53,7 @@ class MockHomeserver(HomeServer):
 
 
 def run_background_updates(hs: HomeServer) -> None:
+    server_name = hs.hostname
     main = hs.get_datastores().main
     state = hs.get_datastores().state
 
@@ -66,10 +67,14 @@ def run_background_updates(hs: HomeServer) -> None:
     def run() -> None:
         # Apply all background updates on the database.
         defer.ensureDeferred(
-            run_as_background_process("background_updates", run_background_updates)
+            run_as_background_process(
+                "background_updates",
+                server_name,
+                run_background_updates,
+            )
         )
 
-    reactor.callWhenRunning(run)
+    hs.get_clock().call_when_running(run)
 
     reactor.run()
 
@@ -114,6 +119,13 @@ def main() -> None:
     # Setup instantiates the store within the homeserver object and updates the
     # DB.
     hs.setup()
+
+    # This will cause all of the relevant storage classes to be instantiated and call
+    # `register_background_update_handler(...)`,
+    # `register_background_index_update(...)`,
+    # `register_background_validate_constraint(...)`, etc so they are available to use
+    # if we are asked to run those background updates.
+    hs.get_storage_controllers()
 
     if args.run_background_updates:
         run_background_updates(hs)

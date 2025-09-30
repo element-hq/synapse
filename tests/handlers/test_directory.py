@@ -22,7 +22,7 @@
 from typing import Any, Awaitable, Callable, Dict
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.api.errors
 import synapse.rest.admin
@@ -31,7 +31,7 @@ from synapse.events import EventBase
 from synapse.rest.client import directory, login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

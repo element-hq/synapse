@@ -64,11 +64,11 @@ from synapse.types import (
     StrCollection,
     get_verify_key_from_cross_signing_key,
 )
-from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_decoder, json_encoder
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
@@ -103,6 +103,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="device_lists_stream",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("device_lists_stream", "instance_name", "stream_id"),

@@ -15,12 +15,12 @@
 
 from typing import Dict
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import MAX_DEPTH
 from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

@@ -25,7 +25,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Type, Union
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse
 from synapse.api.constants import LoginType
@@ -35,7 +35,7 @@ from synapse.module_api import ModuleApi
 from synapse.rest.client import account, devices, login, logout, register
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeChannel

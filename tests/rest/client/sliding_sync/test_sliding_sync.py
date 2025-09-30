@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 from parameterized import parameterized, parameterized_class
 from typing_extensions import assert_never
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
@@ -42,7 +42,7 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest

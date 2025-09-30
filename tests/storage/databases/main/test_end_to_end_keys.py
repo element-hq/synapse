@@ -20,13 +20,13 @@
 #
 from typing import List, Optional, Tuple
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
 from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

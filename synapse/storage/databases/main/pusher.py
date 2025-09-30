@@ -42,8 +42,8 @@ from synapse.storage.database import (
 )
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -88,6 +88,7 @@ class PusherWorkerStore(SQLBaseStore):
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="pushers",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("pushers", "instance_name", "id"),

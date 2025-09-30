@@ -28,7 +28,7 @@ from signedjson.key import (
     get_verify_key,
 )
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersion
@@ -41,7 +41,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.server import get_clock
@@ -74,6 +74,7 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            proxy_config=None,
         )
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

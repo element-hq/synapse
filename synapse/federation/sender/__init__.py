@@ -150,6 +150,7 @@ from prometheus_client import Counter
 from twisted.internet import defer
 
 import synapse.metrics
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.presence import UserPresenceState
 from synapse.events import EventBase
 from synapse.federation.sender.per_destination_queue import (
@@ -160,6 +161,7 @@ from synapse.federation.sender.transaction_manager import TransactionManager
 from synapse.federation.units import Edu
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.metrics import (
+    SERVER_NAME_LABEL,
     LaterGauge,
     event_processing_loop_counter,
     event_processing_loop_room_count,
@@ -176,7 +178,7 @@ from synapse.types import (
     StrCollection,
     get_domain_from_id,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
 
@@ -189,11 +191,31 @@ logger = logging.getLogger(__name__)
 sent_pdus_destination_dist_count = Counter(
     "synapse_federation_client_sent_pdu_destinations_count",
     "Number of PDUs queued for sending to one or more destinations",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 sent_pdus_destination_dist_total = Counter(
     "synapse_federation_client_sent_pdu_destinations",
     "Total number of PDUs queued for sending across all destinations",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_destinations_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_destinations",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_pdus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_pdus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_edus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_edus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
 )
 
 # Time (in s) to wait before trying to wake up destinations that have
@@ -296,6 +318,7 @@ class _DestinationWakeupQueue:
 
     Staggers waking up of per destination queues to ensure that we don't attempt
     to start TLS connections with many hosts all at once, leading to pinned CPU.
+
     """
 
     # The maximum duration in seconds between queuing up a destination and it
@@ -303,6 +326,10 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    server_name: str = attr.ib()
+    """
+    Our homeserver name (used to label metrics) (`hs.hostname`).
+    """
     clock: Clock = attr.ib()
     max_delay_s: int = attr.ib()
 
@@ -390,32 +417,31 @@ class FederationSender(AbstractFederationSender):
         # map from destination to PerDestinationQueue
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
-        LaterGauge(
-            "synapse_federation_transaction_queue_pending_destinations",
-            "",
-            [],
-            lambda: sum(
-                1
-                for d in self._per_destination_queues.values()
-                if d.transmission_loop_running
-            ),
+        transaction_queue_pending_destinations_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): sum(
+                    1
+                    for d in self._per_destination_queues.values()
+                    if d.transmission_loop_running
+                )
+            },
         )
-
-        LaterGauge(
-            "synapse_federation_transaction_queue_pending_pdus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_pdu_count() for d in self._per_destination_queues.values()
-            ),
+        transaction_queue_pending_pdus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): sum(
+                    d.pending_pdu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
-        LaterGauge(
-            "synapse_federation_transaction_queue_pending_edus",
-            "",
-            [],
-            lambda: sum(
-                d.pending_edu_count() for d in self._per_destination_queues.values()
-            ),
+        transaction_queue_pending_edus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
+                (self.server_name,): sum(
+                    d.pending_edu_count() for d in self._per_destination_queues.values()
+                )
+            },
         )
 
         self._is_processing = False
@@ -427,7 +453,7 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
         )
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
@@ -435,6 +461,7 @@ class FederationSender(AbstractFederationSender):
             run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
+            self.server_name,
             self._wake_destinations_needing_catchup,
         )
 
@@ -477,7 +504,9 @@ class FederationSender(AbstractFederationSender):
 
         # fire off a processing loop in the background
         run_as_background_process(
-            "process_event_queue_for_federation", self._process_event_queue_loop
+            "process_event_queue_for_federation",
+            self.server_name,
+            self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:
@@ -627,6 +656,31 @@ class FederationSender(AbstractFederationSender):
                             )
                             return
 
+                    # If we've rescinded an invite then we want to tell the
+                    # other server.
+                    if (
+                        event.type == EventTypes.Member
+                        and event.membership == Membership.LEAVE
+                        and event.sender != event.state_key
+                    ):
+                        # We check if this leave event is rescinding an invite
+                        # by looking if there is an invite event for the user in
+                        # the auth events. It could otherwise be a kick or
+                        # unban, which we don't want to send (if the user wasn't
+                        # already in the room).
+                        auth_events = await self.store.get_events_as_list(
+                            event.auth_event_ids()
+                        )
+                        for auth_event in auth_events:
+                            if (
+                                auth_event.type == EventTypes.Member
+                                and auth_event.state_key == event.state_key
+                                and auth_event.membership == Membership.INVITE
+                            ):
+                                destinations = set(destinations)
+                                destinations.add(get_domain_from_id(event.state_key))
+                                break
+
                     sharded_destinations = {
                         d
                         for d in destinations
@@ -650,7 +704,8 @@ class FederationSender(AbstractFederationSender):
                         ts = event_to_received_ts[event.event_id]
                         assert ts is not None
                         synapse.metrics.event_processing_lag_by_event.labels(
-                            "federation_sender"
+                            name="federation_sender",
+                            **{SERVER_NAME_LABEL: self.server_name},
                         ).observe((now - ts) / 1000)
 
                 async def handle_room_events(events: List[EventBase]) -> None:
@@ -694,22 +749,30 @@ class FederationSender(AbstractFederationSender):
                     assert ts is not None
 
                     synapse.metrics.event_processing_lag.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(now - ts)
                     synapse.metrics.event_processing_last_ts.labels(
-                        "federation_sender"
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
                     ).set(ts)
 
-                    events_processed_counter.inc(len(event_entries))
+                    events_processed_counter.labels(
+                        **{SERVER_NAME_LABEL: self.server_name}
+                    ).inc(len(event_entries))
 
-                    event_processing_loop_room_count.labels("federation_sender").inc(
-                        len(events_by_room)
-                    )
+                    event_processing_loop_room_count.labels(
+                        name="federation_sender",
+                        **{SERVER_NAME_LABEL: self.server_name},
+                    ).inc(len(events_by_room))
 
-                event_processing_loop_counter.labels("federation_sender").inc()
+                event_processing_loop_counter.labels(
+                    name="federation_sender",
+                    **{SERVER_NAME_LABEL: self.server_name},
+                ).inc()
 
                 synapse.metrics.event_processing_positions.labels(
-                    "federation_sender"
+                    name="federation_sender", **{SERVER_NAME_LABEL: self.server_name}
                 ).set(next_token)
 
         finally:
@@ -727,8 +790,12 @@ class FederationSender(AbstractFederationSender):
         if not destinations:
             return
 
-        sent_pdus_destination_dist_total.inc(len(destinations))
-        sent_pdus_destination_dist_count.inc()
+        sent_pdus_destination_dist_total.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(len(destinations))
+        sent_pdus_destination_dist_count.labels(
+            **{SERVER_NAME_LABEL: self.server_name}
+        ).inc()
 
         assert pdu.internal_metadata.stream_ordering
 

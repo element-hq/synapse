@@ -20,7 +20,7 @@
 #
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -28,14 +28,12 @@ from authlib.oauth2.auth import encode_client_secret_basic, encode_client_secret
 from authlib.oauth2.rfc7523 import ClientSecretJWT, PrivateKeyJWT, private_key_jwt_sign
 from authlib.oauth2.rfc7662 import IntrospectionToken
 from authlib.oidc.discovery import OpenIDProviderMetadata, get_well_known_url
-from prometheus_client import Histogram
 
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,
     HttpResponseException,
     InvalidClientTokenError,
-    OAuthInsufficientScopeError,
     SynapseError,
     UnrecognizedRequestError,
 )
@@ -47,11 +45,14 @@ from synapse.logging.opentracing import (
     inject_request_headers,
     start_active_span,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import Requester, UserID, create_requester
-from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
+from synapse.util.json import json_decoder
+
+from . import introspection_response_timer
 
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
@@ -59,18 +60,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-introspection_response_timer = Histogram(
-    "synapse_api_auth_delegated_introspection_response",
-    "Time taken to get a response for an introspection request",
-    ["code"],
-)
-
-
 # Scope as defined by MSC2967
 # https://github.com/matrix-org/matrix-spec-proposals/pull/2967
-SCOPE_MATRIX_API = "urn:matrix:org.matrix.msc2967.client:api:*"
-SCOPE_MATRIX_GUEST = "urn:matrix:org.matrix.msc2967.client:api:guest"
-SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
+UNSTABLE_SCOPE_MATRIX_API = "urn:matrix:org.matrix.msc2967.client:api:*"
+UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
+STABLE_SCOPE_MATRIX_API = "urn:matrix:client:api:*"
+STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 
 # Scope which allows access to the Synapse admin API
 SCOPE_SYNAPSE_ADMIN = "urn:synapse:admin:*"
@@ -341,17 +336,23 @@ class MSC3861DelegatedAuth(BaseAuth):
                     )
         except HttpResponseException as e:
             end_time = self._clock.time()
-            introspection_response_timer.labels(e.code).observe(end_time - start_time)
+            introspection_response_timer.labels(
+                code=e.code, **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(end_time - start_time)
             raise
         except Exception:
             end_time = self._clock.time()
-            introspection_response_timer.labels("ERR").observe(end_time - start_time)
+            introspection_response_timer.labels(
+                code="ERR", **{SERVER_NAME_LABEL: self.server_name}
+            ).observe(end_time - start_time)
             raise
 
         logger.debug("Fetched token from MAS")
 
         end_time = self._clock.time()
-        introspection_response_timer.labels(200).observe(end_time - start_time)
+        introspection_response_timer.labels(
+            code=200, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time - start_time)
 
         resp = json_decoder.decode(resp_body.decode("utf-8"))
 
@@ -443,9 +444,6 @@ class MSC3861DelegatedAuth(BaseAuth):
         if not self._is_access_token_the_admin_token(access_token):
             await self._record_request(request, requester)
 
-        if not allow_guest and requester.is_guest:
-            raise OAuthInsufficientScopeError([SCOPE_MATRIX_API])
-
         request.requester = requester
 
         return requester
@@ -527,10 +525,11 @@ class MSC3861DelegatedAuth(BaseAuth):
         scope: List[str] = introspection_result.get_scope_list()
 
         # Determine type of user based on presence of particular scopes
-        has_user_scope = SCOPE_MATRIX_API in scope
-        has_guest_scope = SCOPE_MATRIX_GUEST in scope
+        has_user_scope = (
+            UNSTABLE_SCOPE_MATRIX_API in scope or STABLE_SCOPE_MATRIX_API in scope
+        )
 
-        if not has_user_scope and not has_guest_scope:
+        if not has_user_scope:
             raise InvalidClientTokenError("No scope in token granting user rights")
 
         # Match via the sub claim
@@ -578,11 +577,12 @@ class MSC3861DelegatedAuth(BaseAuth):
             # We only allow a single device_id in the scope, so we find them all in the
             # scope list, and raise if there are more than one. The OIDC server should be
             # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-            device_ids = [
-                tok[len(SCOPE_MATRIX_DEVICE_PREFIX) :]
-                for tok in scope
-                if tok.startswith(SCOPE_MATRIX_DEVICE_PREFIX)
-            ]
+            device_ids: Set[str] = set()
+            for tok in scope:
+                if tok.startswith(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX):
+                    device_ids.add(tok[len(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])
+                elif tok.startswith(STABLE_SCOPE_MATRIX_DEVICE_PREFIX):
+                    device_ids.add(tok[len(STABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])
 
             if len(device_ids) > 1:
                 raise AuthError(
@@ -590,7 +590,7 @@ class MSC3861DelegatedAuth(BaseAuth):
                     "Multiple device IDs in scope",
                 )
 
-            device_id = device_ids[0] if device_ids else None
+            device_id = next(iter(device_ids), None)
 
         if device_id is not None:
             # Sanity check the device_id
@@ -616,5 +616,4 @@ class MSC3861DelegatedAuth(BaseAuth):
             user_id=user_id,
             device_id=device_id,
             scope=scope,
-            is_guest=(has_guest_scope and not has_user_scope),
         )

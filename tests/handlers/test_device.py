@@ -24,7 +24,7 @@ from typing import Optional
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomEncryptionAlgorithms
 from synapse.api.errors import NotFoundError, SynapseError
@@ -35,7 +35,7 @@ from synapse.rest.client import devices, login, register
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests import unittest

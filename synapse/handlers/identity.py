@@ -39,8 +39,8 @@ from synapse.http import RequestTimedOutError
 from synapse.http.client import SimpleHttpClient
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict, Requester
-from synapse.util import json_decoder
 from synapse.util.hash import sha256_and_url_safe_base64
+from synapse.util.json import json_decoder
 from synapse.util.stringutils import (
     assert_valid_client_secret,
     random_string,

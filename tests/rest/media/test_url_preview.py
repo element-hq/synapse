@@ -29,14 +29,14 @@ from twisted.internet._resolver import HostResolution
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.error import DNSLookupError
 from twisted.internet.interfaces import IAddress, IResolutionReceiver
-from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactor
+from twisted.internet.testing import AccumulatingProtocol, MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
 from tests import unittest

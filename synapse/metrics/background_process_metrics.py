@@ -20,7 +20,7 @@
 
 import logging
 import threading
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import wraps
 from types import TracebackType
 from typing import (
@@ -28,9 +28,12 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    ContextManager,
     Dict,
+    Generator,
     Iterable,
     Optional,
+    Protocol,
     Set,
     Type,
     TypeVar,
@@ -39,7 +42,7 @@ from typing import (
 
 from prometheus_client import Metric
 from prometheus_client.core import REGISTRY, Counter, Gauge
-from typing_extensions import ParamSpec
+from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 
@@ -48,7 +51,13 @@ from synapse.logging.context import (
     LoggingContext,
     PreserveLoggingContext,
 )
-from synapse.logging.opentracing import SynapseTags, start_active_span
+from synapse.logging.opentracing import (
+    SynapseTags,
+    active_span,
+    start_active_span,
+    start_active_span_follows_from,
+)
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics._types import Collector
 
 if TYPE_CHECKING:
@@ -64,13 +73,13 @@ logger = logging.getLogger(__name__)
 _background_process_start_count = Counter(
     "synapse_background_process_start_count",
     "Number of background processes started",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 _background_process_in_flight_count = Gauge(
     "synapse_background_process_in_flight_count",
     "Number of background processes in flight",
-    labelnames=["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 # we set registry=None in all of these to stop them getting registered with
@@ -80,21 +89,21 @@ _background_process_in_flight_count = Gauge(
 _background_process_ru_utime = Counter(
     "synapse_background_process_ru_utime_seconds",
     "User CPU time used by background processes, in seconds",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
 _background_process_ru_stime = Counter(
     "synapse_background_process_ru_stime_seconds",
     "System CPU time used by background processes, in seconds",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
 _background_process_db_txn_count = Counter(
     "synapse_background_process_db_txn_count",
     "Number of database transactions done by background processes",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
@@ -104,14 +113,14 @@ _background_process_db_txn_duration = Counter(
         "Seconds spent by background processes waiting for database "
         "transactions, excluding scheduling time"
     ),
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
 _background_process_db_sched_duration = Counter(
     "synapse_background_process_db_sched_duration_seconds",
     "Seconds spent by background processes waiting for database connections",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
     registry=None,
 )
 
@@ -165,12 +174,15 @@ class _Collector(Collector):
             yield from m.collect()
 
 
-REGISTRY.register(_Collector())
+# The `SERVER_NAME_LABEL` is included in the individual metrics added to this registry,
+# so we don't need to worry about it on the collector itself.
+REGISTRY.register(_Collector())  # type: ignore[missing-server-name-label]
 
 
 class _BackgroundProcess:
-    def __init__(self, desc: str, ctx: LoggingContext):
+    def __init__(self, *, desc: str, server_name: str, ctx: LoggingContext):
         self.desc = desc
+        self.server_name = server_name
         self._context = ctx
         self._reported_stats: Optional[ContextResourceUsage] = None
 
@@ -185,15 +197,21 @@ class _BackgroundProcess:
 
         # For unknown reasons, the difference in times can be negative. See comment in
         # synapse.http.request_metrics.RequestMetrics.update_metrics.
-        _background_process_ru_utime.labels(self.desc).inc(max(diff.ru_utime, 0))
-        _background_process_ru_stime.labels(self.desc).inc(max(diff.ru_stime, 0))
-        _background_process_db_txn_count.labels(self.desc).inc(diff.db_txn_count)
-        _background_process_db_txn_duration.labels(self.desc).inc(
-            diff.db_txn_duration_sec
-        )
-        _background_process_db_sched_duration.labels(self.desc).inc(
-            diff.db_sched_duration_sec
-        )
+        _background_process_ru_utime.labels(
+            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(max(diff.ru_utime, 0))
+        _background_process_ru_stime.labels(
+            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(max(diff.ru_stime, 0))
+        _background_process_db_txn_count.labels(
+            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(diff.db_txn_count)
+        _background_process_db_txn_duration.labels(
+            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(diff.db_txn_duration_sec)
+        _background_process_db_sched_duration.labels(
+            name=self.desc, **{SERVER_NAME_LABEL: self.server_name}
+        ).inc(diff.db_sched_duration_sec)
 
 
 R = TypeVar("R")
@@ -201,6 +219,7 @@ R = TypeVar("R")
 
 def run_as_background_process(
     desc: "LiteralString",
+    server_name: str,
     func: Callable[..., Awaitable[Optional[R]]],
     *args: Any,
     bg_start_span: bool = True,
@@ -216,8 +235,15 @@ def run_as_background_process(
     clock.looping_call and friends (or for firing-and-forgetting in the middle of a
     normal synapse async function).
 
+    Because the returned Deferred does not follow the synapse logcontext rules, awaiting
+    the result of this function will result in the log context being cleared (bad). In
+    order to properly await the result of this function and maintain the current log
+    context, use `make_deferred_yieldable`.
+
     Args:
         desc: a description for this background process type
+        server_name: The homeserver name that this background process is being run for
+            (this should be `hs.hostname`).
         func: a function, which may return a Deferred or a coroutine
         bg_start_span: Whether to start an opentracing span. Defaults to True.
             Should only be disabled for processes that will not log to or tag
@@ -236,18 +262,106 @@ def run_as_background_process(
             count = _background_process_counts.get(desc, 0)
             _background_process_counts[desc] = count + 1
 
-        _background_process_start_count.labels(desc).inc()
-        _background_process_in_flight_count.labels(desc).inc()
+        _background_process_start_count.labels(
+            name=desc, **{SERVER_NAME_LABEL: server_name}
+        ).inc()
+        _background_process_in_flight_count.labels(
+            name=desc, **{SERVER_NAME_LABEL: server_name}
+        ).inc()
 
-        with BackgroundProcessLoggingContext(desc, count) as context:
+        with BackgroundProcessLoggingContext(
+            name=desc, server_name=server_name, instance_id=count
+        ) as logging_context:
             try:
                 if bg_start_span:
-                    ctx = start_active_span(
-                        f"bgproc.{desc}", tags={SynapseTags.REQUEST_ID: str(context)}
-                    )
+                    original_active_tracing_span = active_span()
+
+                    # If there is already an active span (e.g. because this background
+                    # process was started as part of handling a request for example),
+                    # because this is a long-running background task that may serve a
+                    # broader purpose than the request that kicked it off, we don't want
+                    # it to be a direct child of the currently active trace connected to
+                    # the request. We only want a loose reference to jump between the
+                    # traces.
+                    #
+                    # For example, when making a `/messages` request, when approaching a
+                    # gap, we may kick off a background process to fetch missing events
+                    # from federation. The `/messages` request trace should't include
+                    # the entire time taken and details around fetching the missing
+                    # events since the request doesn't rely on the result, it was just
+                    # part of the heuristic to initiate things.
+                    #
+                    # We don't care about the value from the context manager as it's not
+                    # used (so we just use `Any` for the type). Ideally, we'd be able to
+                    # mark this as unused like an `assert_never` of sorts.
+                    tracing_scope: ContextManager[Any]
+                    if original_active_tracing_span is not None:
+                        # With the OpenTracing client that we're using, it's impossible to
+                        # create a disconnected root span while also providing `references`
+                        # so we first create a bare root span, then create a child span that
+                        # includes the references that we want.
+                        root_tracing_scope = start_active_span(
+                            f"bgproc.{desc}",
+                            tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                            # Create a root span for the background process (disconnected
+                            # from other spans)
+                            ignore_active_span=True,
+                        )
+
+                        # Also add a span in the original request trace that cross-links
+                        # to background process trace. We immediately finish the span as
+                        # this is just a marker to follow where the real work is being
+                        # done.
+                        #
+                        # In OpenTracing, `FOLLOWS_FROM` indicates parent-child
+                        # relationship whereas we just want a cross-link to the
+                        # downstream trace. This is a bit hacky, but the closest we
+                        # can get to in OpenTracing land. If we ever migrate to
+                        # OpenTelemetry, we should use a normal `Link` for this.
+                        with start_active_span_follows_from(
+                            f"start_bgproc.{desc}",
+                            child_of=original_active_tracing_span,
+                            ignore_active_span=True,
+                            # Points to the background process span.
+                            contexts=[root_tracing_scope.span.context],
+                        ):
+                            pass
+
+                        # Then start the tracing scope that we're going to use for
+                        # the duration of the background process within the root
+                        # span we just created.
+                        child_tracing_scope = start_active_span_follows_from(
+                            f"bgproc_child.{desc}",
+                            child_of=root_tracing_scope.span,
+                            ignore_active_span=True,
+                            tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                            # Create the `FOLLOWS_FROM` reference to the request's
+                            # span so there is a loose coupling between the two
+                            # traces and it's easy to jump between.
+                            contexts=[original_active_tracing_span.context],
+                        )
+
+                        # For easy usage down below, we create a context manager that
+                        # combines both scopes.
+                        @contextmanager
+                        def combined_context_manager() -> Generator[None, None, None]:
+                            with root_tracing_scope, child_tracing_scope:
+                                yield
+
+                        tracing_scope = combined_context_manager()
+
+                    else:
+                        # Otherwise, when there is no active span, we will be creating
+                        # a disconnected root span already and we don't have to
+                        # worry about cross-linking to anything.
+                        tracing_scope = start_active_span(
+                            f"bgproc.{desc}",
+                            tags={SynapseTags.REQUEST_ID: str(logging_context)},
+                        )
                 else:
-                    ctx = nullcontext()  # type: ignore[assignment]
-                with ctx:
+                    tracing_scope = nullcontext()
+
+                with tracing_scope:
                     return await func(*args, **kwargs)
             except Exception:
                 logger.exception(
@@ -256,8 +370,24 @@ def run_as_background_process(
                 )
                 return None
             finally:
-                _background_process_in_flight_count.labels(desc).dec()
+                _background_process_in_flight_count.labels(
+                    name=desc, **{SERVER_NAME_LABEL: server_name}
+                ).dec()
 
+    # To explain how the log contexts work here:
+    #  - When `run_as_background_process` is called, the current context is stored
+    #    (using `PreserveLoggingContext`), we kick off the background task, and we
+    #    restore the original context before returning (also part of
+    #    `PreserveLoggingContext`).
+    #  - The background task runs in its own new logcontext named after `desc`
+    #  - When the background task finishes, we don't want to leak our background context
+    #    into the reactor which would erroneously get attached to the next operation
+    #    picked up by the event loop. We use `PreserveLoggingContext` to set the
+    #    `sentinel` context and means the new `BackgroundProcessLoggingContext` will
+    #    remember the `sentinel` context as its previous context to return to when it
+    #    exits and yields control back to the reactor.
+    #
+    # TODO: Why can't we simplify to using `return run_in_background(run)`?
     with PreserveLoggingContext():
         # Note that we return a Deferred here so that it can be used in a
         # looping_call and other places that expect a Deferred.
@@ -265,6 +395,14 @@ def run_as_background_process(
 
 
 P = ParamSpec("P")
+
+
+class HasServerName(Protocol):
+    server_name: str
+    """
+    The homeserver name that this cache is associated with (used to label the metric)
+    (`hs.hostname`).
+    """
 
 
 def wrap_as_background_process(
@@ -292,22 +430,37 @@ def wrap_as_background_process(
     multiple places.
     """
 
-    def wrap_as_background_process_inner(
-        func: Callable[P, Awaitable[Optional[R]]],
+    def wrapper(
+        func: Callable[Concatenate[HasServerName, P], Awaitable[Optional[R]]],
     ) -> Callable[P, "defer.Deferred[Optional[R]]"]:
         @wraps(func)
-        def wrap_as_background_process_inner_2(
-            *args: P.args, **kwargs: P.kwargs
+        def wrapped_func(
+            self: HasServerName, *args: P.args, **kwargs: P.kwargs
         ) -> "defer.Deferred[Optional[R]]":
-            # type-ignore: mypy is confusing kwargs with the bg_start_span kwarg.
-            #     Argument 4 to "run_as_background_process" has incompatible type
-            #     "**P.kwargs"; expected "bool"
-            # See https://github.com/python/mypy/issues/8862
-            return run_as_background_process(desc, func, *args, **kwargs)  # type: ignore[arg-type]
+            assert self.server_name is not None, (
+                "The `server_name` attribute must be set on the object where `@wrap_as_background_process` decorator is used."
+            )
 
-        return wrap_as_background_process_inner_2
+            return run_as_background_process(
+                desc,
+                self.server_name,
+                func,
+                self,
+                *args,
+                # type-ignore: mypy is confusing kwargs with the bg_start_span kwarg.
+                #     Argument 4 to "run_as_background_process" has incompatible type
+                #     "**P.kwargs"; expected "bool"
+                # See https://github.com/python/mypy/issues/8862
+                **kwargs,  # type: ignore[arg-type]
+            )
 
-    return wrap_as_background_process_inner
+        # There are some shenanigans here, because we're decorating a method but
+        # explicitly making use of the `self` parameter. The key thing here is that the
+        # return type within the return type for `measure_func` itself describes how the
+        # decorated function will be called.
+        return wrapped_func  # type: ignore[return-value]
+
+    return wrapper  # type: ignore[return-value]
 
 
 class BackgroundProcessLoggingContext(LoggingContext):
@@ -317,21 +470,30 @@ class BackgroundProcessLoggingContext(LoggingContext):
 
     __slots__ = ["_proc"]
 
-    def __init__(self, name: str, instance_id: Optional[Union[int, str]] = None):
+    def __init__(
+        self,
+        *,
+        name: str,
+        server_name: str,
+        instance_id: Optional[Union[int, str]] = None,
+    ):
         """
 
         Args:
             name: The name of the background process. Each distinct `name` gets a
                 separate prometheus time series.
-
+            server_name: The homeserver name that this background process is being run for
+                (this should be `hs.hostname`).
             instance_id: an identifer to add to `name` to distinguish this instance of
                 the named background process in the logs. If this is `None`, one is
                 made up based on id(self).
         """
         if instance_id is None:
             instance_id = id(self)
-        super().__init__("%s-%s" % (name, instance_id))
-        self._proc: Optional[_BackgroundProcess] = _BackgroundProcess(name, self)
+        super().__init__(name="%s-%s" % (name, instance_id), server_name=server_name)
+        self._proc: Optional[_BackgroundProcess] = _BackgroundProcess(
+            desc=name, server_name=server_name, ctx=self
+        )
 
     def start(self, rusage: "Optional[resource.struct_rusage]") -> None:
         """Log context has started running (again)."""

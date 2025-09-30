@@ -23,7 +23,7 @@ from unittest.mock import Mock
 from parameterized import parameterized
 
 from twisted.internet.defer import Deferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.logging.context import make_deferred_yieldable
@@ -32,7 +32,7 @@ from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client import login, push_rule, pusher, receipts, room, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 

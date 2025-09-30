@@ -48,9 +48,9 @@ from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
 from synapse.storage.invite_rule import InviteRulesConfig
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -78,6 +78,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             db=database,
             notifier=hs.get_replication_notifier(),
             stream_name="account_data",
+            server_name=self.server_name,
             instance_name=self._instance_name,
             tables=[
                 ("room_account_data", "instance_name", "stream_id"),

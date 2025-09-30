@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 import jsonschema
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EduTypes, EventContentFields
 from synapse.api.errors import SynapseError
@@ -33,7 +33,7 @@ from synapse.api.filtering import Filter
 from synapse.api.presence import UserPresenceState
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 from tests import unittest

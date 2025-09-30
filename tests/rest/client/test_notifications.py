@@ -21,12 +21,12 @@
 from typing import List, Optional, Tuple
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.rest.client import login, notifications, receipts, room
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

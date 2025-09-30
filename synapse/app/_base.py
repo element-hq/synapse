@@ -72,10 +72,9 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
-from synapse.logging.context import PreserveLoggingContext
-from synapse.logging.opentracing import init_tracer
+from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics.background_process_metrics import wrap_as_background_process
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -183,25 +182,23 @@ def start_reactor(
         if gc_thresholds:
             gc.set_threshold(*gc_thresholds)
         install_gc_manager()
-        run_command()
 
-    # make sure that we run the reactor with the sentinel log context,
-    # otherwise other PreserveLoggingContext instances will get confused
-    # and complain when they see the logcontext arbitrarily swapping
-    # between the sentinel and `run` logcontexts.
-    #
-    # We also need to drop the logcontext before forking if we're daemonizing,
-    # otherwise the cputime metrics get confused about the per-thread resource usage
-    # appearing to go backwards.
-    with PreserveLoggingContext():
-        if daemonize:
-            assert pid_file is not None
+        # Reset the logging context when we start the reactor (whenever we yield control
+        # to the reactor, the `sentinel` logging context needs to be set so we don't
+        # leak the current logging context and erroneously apply it to the next task the
+        # reactor event loop picks up)
+        with PreserveLoggingContext():
+            run_command()
 
-            if print_pidfile:
-                print(pid_file)
+    if daemonize:
+        assert pid_file is not None
 
-            daemonize_process(pid_file, logger)
-        run()
+        if print_pidfile:
+            print(pid_file)
+
+        daemonize_process(pid_file, logger)
+
+    run()
 
 
 def quit_with_error(error_string: str) -> NoReturn:
@@ -243,7 +240,7 @@ def redirect_stdio_to_logs() -> None:
 
 
 def register_start(
-    cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
+    hs: "HomeServer", cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
 ) -> None:
     """Register a callback with the reactor, to be called once it is running
 
@@ -280,7 +277,8 @@ def register_start(
             # on as normal.
             os._exit(1)
 
-    reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
+    clock = hs.get_clock()
+    clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
 
 
 def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
@@ -512,34 +510,49 @@ async def start(hs: "HomeServer") -> None:
     Args:
         hs: homeserver instance
     """
+    server_name = hs.hostname
     reactor = hs.get_reactor()
 
     # We want to use a separate thread pool for the resolver so that large
     # numbers of DNS requests don't starve out other users of the threadpool.
     resolver_threadpool = ThreadPool(name="gai_resolver")
     resolver_threadpool.start()
-    reactor.addSystemEventTrigger("during", "shutdown", resolver_threadpool.stop)
+    hs.get_clock().add_system_event_trigger(
+        "during", "shutdown", resolver_threadpool.stop
+    )
     reactor.installNameResolver(
         GAIResolver(reactor, getThreadPool=lambda: resolver_threadpool)
     )
 
     # Register the threadpools with our metrics.
-    register_threadpool("default", reactor.getThreadPool())
-    register_threadpool("gai_resolver", resolver_threadpool)
+    register_threadpool(
+        name="default", server_name=server_name, threadpool=reactor.getThreadPool()
+    )
+    register_threadpool(
+        name="gai_resolver", server_name=server_name, threadpool=resolver_threadpool
+    )
 
     # Set up the SIGHUP machinery.
     if hasattr(signal, "SIGHUP"):
 
-        @wrap_as_background_process("sighup")
-        async def handle_sighup(*args: Any, **kwargs: Any) -> None:
-            # Tell systemd our state, if we're using it. This will silently fail if
-            # we're not using systemd.
-            sdnotify(b"RELOADING=1")
+        def handle_sighup(*args: Any, **kwargs: Any) -> "defer.Deferred[None]":
+            async def _handle_sighup(*args: Any, **kwargs: Any) -> None:
+                # Tell systemd our state, if we're using it. This will silently fail if
+                # we're not using systemd.
+                sdnotify(b"RELOADING=1")
 
-            for i, args, kwargs in _sighup_callbacks:
-                i(*args, **kwargs)
+                for i, args, kwargs in _sighup_callbacks:
+                    i(*args, **kwargs)
 
-            sdnotify(b"READY=1")
+                sdnotify(b"READY=1")
+
+            return run_as_background_process(
+                "sighup",
+                server_name,
+                _handle_sighup,
+                *args,
+                **kwargs,
+            )
 
         # We defer running the sighup handlers until next reactor tick. This
         # is so that we're in a sane state, e.g. flushing the logs may fail
@@ -559,9 +572,6 @@ async def start(hs: "HomeServer") -> None:
 
     # Load the certificate from disk.
     refresh_certificate(hs)
-
-    # Start the tracer
-    init_tracer(hs)  # noqa
 
     # Instantiate the modules so they can register their web resources to the module API
     # before we start the listeners.
@@ -588,18 +598,38 @@ async def start(hs: "HomeServer") -> None:
     hs.get_datastores().main.db_pool.start_profiling()
     hs.get_pusherpool().start()
 
+    def log_shutdown() -> None:
+        with LoggingContext(name="log_shutdown", server_name=server_name):
+            logger.info("Shutting down...")
+
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger(
-        "before", "shutdown", logger.info, "Shutting down..."
-    )
+    hs.get_clock().add_system_event_trigger("before", "shutdown", log_shutdown)
 
     setup_sentry(hs)
     setup_sdnotify(hs)
 
-    # If background tasks are running on the main process or this is the worker in
-    # charge of them, start collecting the phone home stats and shared usage metrics.
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # While we could "start" these before the reactor runs, nothing will happen until
+    # the reactor is running, so we may as well do it here in `start`.
+    #
+    # Additionally, this means we also start them after we daemonize and fork the
+    # process which means we can avoid any potential problems with cputime metrics
+    # getting confused about the per-thread resource usage appearing to go backwards
+    # because we're comparing the resource usage (`rusage`) from the original process to
+    # the forked process.
     if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
+
+        # TODO: This should be moved to same pattern we use for other background tasks:
+        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
+        # `start_background_tasks` to start it.
         await hs.get_common_usage_metrics_manager().setup()
+
+        # TODO: This feels like another pattern that should refactored as one of the
+        # `REQUIRED_ON_BACKGROUND_TASK_STARTUP`
         start_phone_stats_home(hs)
 
     # We now freeze all allocated objects in the hopes that (almost)
@@ -688,7 +718,7 @@ def setup_sdnotify(hs: "HomeServer") -> None:
     # we're not using systemd.
     sdnotify(b"READY=1\nMAINPID=%i" % (os.getpid(),))
 
-    hs.get_reactor().addSystemEventTrigger(
+    hs.get_clock().add_system_event_trigger(
         "before", "shutdown", sdnotify, b"STOPPING=1"
     )
 

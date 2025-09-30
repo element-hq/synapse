@@ -22,7 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from unittest import mock
 
 from twisted.internet.defer import ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import (
     EventContentFields,
@@ -42,9 +42,10 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 def _create_event(
@@ -245,6 +246,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_large_space(self) -> None:
         """Test a space with a large number of rooms."""
         rooms = [self.room]
@@ -527,6 +529,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         )
         self._assert_hierarchy(result, expected)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_pagination(self) -> None:
         """Test simple pagination works."""
         room_ids = []
@@ -564,6 +567,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         self._assert_hierarchy(result, expected)
         self.assertNotIn("next_batch", result)
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_invalid_pagination_token(self) -> None:
         """An invalid pagination token, or changing other parameters, shoudl be rejected."""
         room_ids = []
@@ -615,6 +619,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
             SynapseError,
         )
 
+    @override_config({"rc_room_creation": {"burst_count": 1000, "per_second": 1}})
     def test_max_depth(self) -> None:
         """Create a deep tree to test the max depth against."""
         spaces = [self.space]

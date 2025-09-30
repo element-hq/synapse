@@ -22,7 +22,7 @@
 from typing import Any, Collection, List, Optional, Tuple
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.constants import UserTypes
@@ -43,7 +43,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import override_config
 from tests.utils import mock_getRawHeaders

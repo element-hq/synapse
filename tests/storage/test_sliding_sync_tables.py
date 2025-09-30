@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Tuple, cast
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions
@@ -39,7 +39,7 @@ from synapse.storage.databases.main.events_bg_updates import (
 )
 from synapse.types import create_requester
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.test_utils.event_injection import create_event
 from tests.unittest import HomeserverTestCase

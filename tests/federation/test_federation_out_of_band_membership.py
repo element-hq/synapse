@@ -29,7 +29,7 @@ from unittest.mock import Mock
 import attr
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -50,7 +50,7 @@ from synapse.types import JsonDict, MutableStateMap, StateMap
 from synapse.types.handlers.sliding_sync import (
     StateValues,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.utils import test_timeout

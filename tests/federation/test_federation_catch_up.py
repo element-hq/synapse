@@ -2,7 +2,7 @@ from typing import Callable, Collection, List, Optional, Tuple
 from unittest import mock
 from unittest.mock import AsyncMock, Mock
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
@@ -16,7 +16,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.retryutils import NotRetryingDestination
 
 from tests.test_utils import event_injection

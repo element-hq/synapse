@@ -24,7 +24,7 @@ from unittest.mock import Mock, call
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.database import (
@@ -33,7 +33,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_comparison_clause,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

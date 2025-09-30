@@ -25,7 +25,7 @@ from unittest.mock import AsyncMock, Mock
 import yaml
 
 from twisted.internet.defer import Deferred, ensureDeferred
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.storage.background_updates import (
@@ -37,7 +37,7 @@ from synapse.storage.background_updates import (
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

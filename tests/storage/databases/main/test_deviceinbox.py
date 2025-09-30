@@ -22,7 +22,7 @@
 from unittest.mock import patch
 
 from twisted.internet import defer
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.rest import admin
 from synapse.rest.client import devices
@@ -30,7 +30,7 @@ from synapse.server import HomeServer
 from synapse.storage.databases.main.deviceinbox import (
     DEVICE_FEDERATION_INBOX_CLEANUP_DELAY_MS,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

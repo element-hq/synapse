@@ -101,10 +101,10 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.134.0"
+version = "1.139.0rc3"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
-license = "AGPL-3.0-or-later"
+license = "AGPL-3.0-or-later OR LicenseRef-Element-Commercial"
 readme = "README.rst"
 repository = "https://github.com/element-hq/synapse"
 packages = [
@@ -178,8 +178,13 @@ signedjson = "^1.1.0"
 service-identity = ">=18.1.0"
 # Twisted 18.9 introduces some logger improvements that the structured
 # logger utilises
-Twisted = {extras = ["tls"], version = ">=18.9.0"}
-treq = ">=15.1"
+# Twisted 19.7.0 moves test helpers to a new module and deprecates the old location.
+# Twisted 21.2.0 introduces contextvar support.
+# We could likely bump this to 22.1 without making distro packagers'
+# lives hard (as of 2025-07, distro support is Ubuntu LTS: 22.1, Debian stable: 22.4,
+# RHEL 9: 22.10)
+Twisted = {extras = ["tls"], version = ">=21.2.0"}
+treq = ">=21.5.0"
 # Twisted has required pyopenssl 16.0 since about Twisted 16.6.
 pyOpenSSL = ">=16.0.0"
 PyYAML = ">=5.3"
@@ -321,7 +326,7 @@ all = [
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
 # This helps prevents merge conflicts when running a batch of dependabot updates.
-ruff = "0.12.3"
+ruff = "0.12.10"
 # Type checking only works with the pydantic.v1 compat module from pydantic v2
 pydantic = "^2"
 

@@ -16,14 +16,14 @@ import logging
 
 from parameterized import parameterized, parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import knock, login, room, sync
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.test_utils.event_injection import mark_event_as_partial_state

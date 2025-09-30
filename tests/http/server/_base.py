@@ -40,8 +40,8 @@ from unittest.mock import Mock
 
 from twisted.internet.defer import Deferred
 from twisted.internet.error import ConnectionDone
+from twisted.internet.testing import MemoryReactorClock
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import MemoryReactorClock
 from twisted.web.server import Site
 
 from synapse.http.server import (
@@ -502,7 +502,7 @@ def _log_for_request(request_number: int, message: str) -> None:
     """Logs a message for an iteration of `make_request_with_cancellation_test`."""
     # We want consistent alignment when logging stack traces, so ensure the logging
     # context has a fixed width name.
-    with LoggingContext(name=f"request-{request_number:<2}"):
+    with LoggingContext(name=f"request-{request_number:<2}", server_name="test_server"):
         logger.info(message)
 
 

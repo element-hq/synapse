@@ -54,9 +54,9 @@ import unpaddedbase64
 from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet.defer import Deferred, ensureDeferred
+from twisted.internet.testing import MemoryReactor, MemoryReactorClock
 from twisted.python.failure import Failure
 from twisted.python.threadpool import ThreadPool
-from twisted.test.proto_helpers import MemoryReactor, MemoryReactorClock
 from twisted.trial import unittest
 from twisted.web.resource import Resource
 from twisted.web.server import Request
@@ -81,7 +81,7 @@ from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, Requester, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
 from tests.server import (
@@ -634,7 +634,7 @@ class HomeserverTestCase(TestCase):
         )
 
     def setup_test_homeserver(
-        self, name: Optional[str] = None, **kwargs: Any
+        self, server_name: Optional[str] = None, **kwargs: Any
     ) -> HomeServer:
         """
         Set up the test homeserver, meant to be called by the overridable
@@ -656,8 +656,8 @@ class HomeserverTestCase(TestCase):
 
         # The server name can be specified using either the `name` argument or a config
         # override. The `name` argument takes precedence over any config overrides.
-        if name is not None:
-            config["server_name"] = name
+        if server_name is not None:
+            config["server_name"] = server_name
 
         # Parse the config from a config dict into a HomeServerConfig
         config_obj = make_homeserver_config_obj(config)
@@ -666,10 +666,11 @@ class HomeserverTestCase(TestCase):
         # The server name in the config is now `name`, if provided, or the `server_name`
         # from a config override, or the default of "test". Whichever it is, we
         # construct a homeserver with a matching name.
-        kwargs["name"] = config_obj.server.server_name
+        server_name = config_obj.server.server_name
+        kwargs["name"] = server_name
 
         async def run_bg_updates() -> None:
-            with LoggingContext("run_bg_updates"):
+            with LoggingContext(name="run_bg_updates", server_name=server_name):
                 self.get_success(stor.db_pool.updates.run_background_updates(False))
 
         hs = setup_test_homeserver(self.addCleanup, **kwargs)
@@ -782,6 +783,7 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         appservice_token: str,
+        inhibit_login: bool = False,
     ) -> Tuple[str, Optional[str]]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
@@ -802,6 +804,7 @@ class HomeserverTestCase(TestCase):
             {
                 "username": username,
                 "type": "m.login.application_service",
+                "inhibit_login": inhibit_login,
             },
             access_token=appservice_token,
         )

@@ -51,7 +51,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer
 from synapse.types import JsonDict, RoomAlias, RoomID, StrCollection
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -128,6 +128,16 @@ def parse_integer(
     """
     args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
     return parse_integer_from_args(args, name, default, required, negative)
+
+
+@overload
+def parse_integer_from_args(
+    args: Mapping[bytes, Sequence[bytes]],
+    name: str,
+    default: int,
+    required: Literal[False] = False,
+    negative: bool = False,
+) -> int: ...
 
 
 @overload

@@ -26,7 +26,7 @@ from unittest import mock
 from parameterized import parameterized
 from signedjson import key as key, sign as sign
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import RoomEncryptionAlgorithms
 from synapse.api.errors import Codes, SynapseError
@@ -35,7 +35,7 @@ from synapse.handlers.device import DeviceWriterHandler
 from synapse.server import HomeServer
 from synapse.storage.databases.main.appservice import _make_exclusive_regex
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config

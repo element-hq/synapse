@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.http.site import XForwardedForRequest
@@ -35,7 +35,7 @@ from synapse.storage.databases.main.client_ips import (
     DeviceLastConnectionInfo,
 )
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import make_request

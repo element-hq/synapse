@@ -216,6 +216,13 @@ class LoginRestServlet(RestServlet):
                         "This login method is only valid for application services"
                     )
 
+                if appservice.msc4190_device_management:
+                    raise SynapseError(
+                        400,
+                        "This appservice has MSC4190 enabled, so appservice login cannot be used.",
+                        errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+                    )
+
                 if appservice.is_rate_limited():
                     await self._address_ratelimiter.ratelimit(
                         None, request.getClientAddress().host
@@ -715,7 +722,7 @@ class CasTicketServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc3861.enabled:
+    if hs.config.mas.enabled or hs.config.experimental.msc3861.enabled:
         return
 
     LoginRestServlet(hs).register(http_server)

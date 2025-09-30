@@ -24,7 +24,7 @@ from typing import Dict, cast
 
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -33,7 +33,7 @@ from synapse.rest.admin import VersionServlet
 from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG

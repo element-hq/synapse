@@ -108,7 +108,7 @@ class MediaRepository:
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
-        self.remote_media_linearizer = Linearizer(name="media_remote")
+        self.remote_media_linearizer = Linearizer(name="media_remote", clock=self.clock)
 
         self.recently_accessed_remotes: Set[Tuple[str, str]] = set()
         self.recently_accessed_locals: Set[str] = set()
@@ -179,19 +179,25 @@ class MediaRepository:
 
         # We get the media upload limits and sort them in descending order of
         # time period, so that we can apply some optimizations.
-        self.media_upload_limits = hs.config.media.media_upload_limits
-        self.media_upload_limits.sort(
+        self.default_media_upload_limits = hs.config.media.media_upload_limits
+        self.default_media_upload_limits.sort(
             key=lambda limit: limit.time_period_ms, reverse=True
         )
 
+        self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
+
     def _start_update_recently_accessed(self) -> Deferred:
         return run_as_background_process(
-            "update_recently_accessed_media", self._update_recently_accessed
+            "update_recently_accessed_media",
+            self.server_name,
+            self._update_recently_accessed,
         )
 
     def _start_apply_media_retention_rules(self) -> Deferred:
         return run_as_background_process(
-            "apply_media_retention_rules", self._apply_media_retention_rules
+            "apply_media_retention_rules",
+            self.server_name,
+            self._apply_media_retention_rules,
         )
 
     async def _update_recently_accessed(self) -> None:
@@ -336,16 +342,27 @@ class MediaRepository:
 
         # Check that the user has not exceeded any of the media upload limits.
 
+        # Use limits from module API if provided
+        media_upload_limits = (
+            await self.media_repository_callbacks.get_media_upload_limits_for_user(
+                auth_user.to_string()
+            )
+        )
+
+        # Otherwise use the default limits from config
+        if media_upload_limits is None:
+            # Note: the media upload limits are sorted so larger time periods are
+            # first.
+            media_upload_limits = self.default_media_upload_limits
+
         # This is the total size of media uploaded by the user in the last
         # `time_period_ms` milliseconds, or None if we haven't checked yet.
         uploaded_media_size: Optional[int] = None
 
-        # Note: the media upload limits are sorted so larger time periods are
-        # first.
-        for limit in self.media_upload_limits:
+        for limit in media_upload_limits:
             # We only need to check the amount of media uploaded by the user in
             # this latest (smaller) time period if the amount of media uploaded
-            # in a previous (larger) time period is above the limit.
+            # in a previous (larger) time period is below the limit.
             #
             # This optimization means that in the common case where the user
             # hasn't uploaded much media, we only need to query the database
@@ -359,6 +376,12 @@ class MediaRepository:
                 )
 
             if uploaded_media_size + content_length > limit.max_bytes:
+                await self.media_repository_callbacks.on_media_upload_limit_exceeded(
+                    user_id=auth_user.to_string(),
+                    limit=limit,
+                    sent_bytes=uploaded_media_size,
+                    attempted_bytes=content_length,
+                )
                 raise SynapseError(
                     400, "Media upload limit exceeded", Codes.RESOURCE_LIMIT_EXCEEDED
                 )
@@ -399,6 +422,23 @@ class MediaRepository:
             cs_error("Media has not been uploaded yet", code=Codes.NOT_YET_UPLOADED),
             send_cors=True,
         )
+
+    async def get_cached_remote_media_info(
+        self, origin: str, media_id: str
+    ) -> Optional[RemoteMedia]:
+        """
+        Get cached remote media info for a given origin/media ID combo. If the requested
+        media is not found locally, it will not be requested over federation and the
+        call will return None.
+
+        Args:
+            origin: The origin of the remote media
+            media_id: The media ID of the requested content
+
+        Returns:
+            The info for the cached remote media or None if it was not found
+        """
+        return await self.store.get_cached_remote_media(origin, media_id)
 
     async def get_local_media_info(
         self, request: SynapseRequest, media_id: str, max_timeout_ms: int

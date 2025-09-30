@@ -1,1 +1,0 @@
-Add an option to issue redactions as admin user on via the [admin redaction endpoint](https://element-hq.github.io/synapse/latest/admin_api/user_admin_api.html#redact-all-the-events-of-a-user).

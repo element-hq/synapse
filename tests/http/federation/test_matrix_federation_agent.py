@@ -45,6 +45,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import IPolicyForHTTPS, IResponse
 
 from synapse.config.homeserver import HomeServerConfig
+from synapse.config.server import parse_proxy_config
 from synapse.crypto.context_factory import FederationPolicyForHTTPS
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.http.federation.srv_resolver import Server, SrvResolver
@@ -199,7 +200,10 @@ class MatrixFederationAgentTests(unittest.TestCase):
         """
         Sends a simple GET request via the agent, and checks its logcontext management
         """
-        with LoggingContext("one") as context:
+        with LoggingContext(
+            name="one",
+            server_name="test_server",
+        ) as context:
             fetch_d: Deferred[IResponse] = self.agent.request(b"GET", uri)
 
             # Nothing happened yet
@@ -280,6 +284,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # Note that this is unused since _well_known_resolver is provided.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            proxy_config=parse_proxy_config({}),
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=self.well_known_resolver,
         )
@@ -1023,6 +1028,7 @@ class MatrixFederationAgentTests(unittest.TestCase):
             user_agent=b"test-agent",  # This is unused since _well_known_resolver is passed below.
             ip_allowlist=IPSet(),
             ip_blocklist=IPSet(),
+            proxy_config=None,
             _srv_resolver=self.mock_resolver,
             _well_known_resolver=WellKnownResolver(
                 server_name="OUR_STUB_HOMESERVER_NAME",

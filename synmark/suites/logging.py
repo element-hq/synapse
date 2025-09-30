@@ -37,7 +37,7 @@ from synapse.config.logger import _setup_stdlib_logging
 from synapse.logging import RemoteHandler
 from synapse.synapse_rust import reset_logging_config
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 
 class LineCounter(LineOnlyReceiver):
@@ -86,7 +86,7 @@ async def main(reactor: ISynapseReactor, loops: int) -> float:
     hs_config = Config()
 
     # To be able to sleep.
-    clock = Clock(reactor)
+    clock = Clock(reactor, server_name=hs_config.server.server_name)
 
     errors = StringIO()
     publisher = LogPublisher()

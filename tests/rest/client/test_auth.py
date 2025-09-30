@@ -23,7 +23,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from twisted.internet.defer import succeed
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 import synapse.rest.admin
@@ -35,7 +35,7 @@ from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.handlers.test_oidc import HAS_OIDC

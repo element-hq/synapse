@@ -23,8 +23,9 @@
 import logging
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
+from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
     InteractiveAuthIncompleteError,
     InvalidAPICallError,
@@ -398,25 +399,22 @@ class SigningKeyUploadServlet(RestServlet):
         if not keys_are_different:
             return 200, {}
 
+        # MSC4190 can skip UIA for replacing cross-signing keys as well.
+        is_appservice_with_msc4190 = (
+            requester.app_service and requester.app_service.msc4190_device_management
+        )
+
         # The keys are different; is x-signing set up? If no, then this is first-time
         # setup, and that is allowed without UIA, per MSC3967.
         # If yes, then we need to authenticate the change.
-        if is_cross_signing_setup:
+        if is_cross_signing_setup and not is_appservice_with_msc4190:
             # With MSC3861, UIA is not possible. Instead, the auth service has to
             # explicitly mark the master key as replaceable.
-            if self.hs.config.experimental.msc3861.enabled:
+            if self.hs.config.mas.enabled:
                 if not master_key_updatable_without_uia:
-                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
-                    # We import lazily here because of the authlib requirement
-                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
-
-                    auth = cast(MSC3861DelegatedAuth, self.auth)
-
-                    uri = await auth.account_management_url()
-                    if uri is not None:
-                        url = f"{uri}?action=org.matrix.cross_signing_reset"
-                    else:
-                        url = await auth.issuer()
+                    assert isinstance(self.auth, MasDelegatedAuth)
+                    url = await self.auth.account_management_url()
+                    url = f"{url}?action=org.matrix.cross_signing_reset"
 
                     # We use a dummy session ID as this isn't really a UIA flow, but we
                     # reuse the same API shape for better client compatibility.
@@ -437,6 +435,41 @@ class SigningKeyUploadServlet(RestServlet):
                             "then try again.",
                         },
                     )
+
+            elif self.hs.config.experimental.msc3861.enabled:
+                if not master_key_updatable_without_uia:
+                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
+                    # We import lazily here because of the authlib requirement
+                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+
+                    assert isinstance(self.auth, MSC3861DelegatedAuth)
+
+                    uri = await self.auth.account_management_url()
+                    if uri is not None:
+                        url = f"{uri}?action=org.matrix.cross_signing_reset"
+                    else:
+                        url = await self.auth.issuer()
+
+                    # We use a dummy session ID as this isn't really a UIA flow, but we
+                    # reuse the same API shape for better client compatibility.
+                    raise InteractiveAuthIncompleteError(
+                        "dummy",
+                        {
+                            "session": "dummy",
+                            "flows": [
+                                {"stages": ["org.matrix.cross_signing_reset"]},
+                            ],
+                            "params": {
+                                "org.matrix.cross_signing_reset": {
+                                    "url": url,
+                                },
+                            },
+                            "msg": "To reset your end-to-end encryption cross-signing "
+                            f"identity, you first need to approve it at {url} and "
+                            "then try again.",
+                        },
+                    )
+
             else:
                 # Without MSC3861, we require UIA.
                 await self.auth_handler.validate_user_via_ui_auth(

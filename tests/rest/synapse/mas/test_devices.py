@@ -11,11 +11,11 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import skip_unless
 from tests.utils import HAS_AUTHLIB

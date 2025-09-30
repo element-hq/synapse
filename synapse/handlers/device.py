@@ -193,8 +193,9 @@ class DeviceHandler:
             self.clock.looping_call(
                 run_as_background_process,
                 DELETE_STALE_DEVICES_INTERVAL_MS,
-                "delete_stale_devices",
-                self._delete_stale_devices,
+                desc="delete_stale_devices",
+                server_name=self.server_name,
+                func=self._delete_stale_devices,
             )
 
     async def _delete_stale_devices(self) -> None:
@@ -963,6 +964,9 @@ class DeviceWriterHandler(DeviceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
 
+        self.server_name = (
+            hs.hostname
+        )  # nb must be called this for @measure_func and @wrap_as_background_process
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by
         # `synapse.app.generic_worker.FederationSenderHandler` when it sees it
@@ -998,7 +1002,7 @@ class DeviceWriterHandler(DeviceHandler):
         # rolling-restarting Synapse.
         if self._is_main_device_list_writer:
             # On start up check if there are any updates pending.
-            hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
+            hs.get_clock().call_when_running(self._handle_new_device_update_async)
             self.device_list_updater = DeviceListUpdater(hs, self)
             hs.get_federation_registry().register_edu_handler(
                 EduTypes.DEVICE_LIST_UPDATE,
@@ -1440,13 +1444,18 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     def __init__(self, hs: "HomeServer", device_handler: DeviceWriterHandler):
         super().__init__(hs)
 
+        self.server_name = hs.hostname
         self.federation = hs.get_federation_client()
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_device_list")
-        self._resync_linearizer = Linearizer(name="remote_device_resync")
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_device_list", clock=self.clock
+        )
+        self._resync_linearizer = Linearizer(
+            name="remote_device_resync", clock=self.clock
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[
@@ -1470,6 +1479,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.clock.looping_call(
             run_as_background_process,
             30 * 1000,
+            server_name=self.server_name,
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
         )
@@ -1591,6 +1601,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
                 await self.store.mark_remote_users_device_caches_as_stale([user_id])
                 run_as_background_process(
                     "_maybe_retry_device_resync",
+                    self.server_name,
                     self.multi_user_device_resync,
                     [user_id],
                     False,

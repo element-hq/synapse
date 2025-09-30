@@ -22,7 +22,7 @@
 from typing import List, Tuple
 from unittest.case import SkipTest
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import EventTypes
@@ -33,7 +33,7 @@ from synapse.storage.databases.main import DataStore
 from synapse.storage.databases.main.search import Phrase, SearchToken, _tokenize_query
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.engines.sqlite import Sqlite3Engine
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, skip_unless
 from tests.utils import USE_POSTGRES_FOR_TESTS

@@ -33,6 +33,7 @@ from typing import (
     Iterable,
     Mapping,
     Optional,
+    Sequence,
     Set,
     Tuple,
     Type,
@@ -42,7 +43,7 @@ from typing import (
 )
 
 import attr
-from pkg_resources import parse_version
+from packaging.version import parse as parse_version
 from prometheus_client import (
     CollectorRegistry,
     Counter,
@@ -72,8 +73,6 @@ logger = logging.getLogger(__name__)
 
 METRICS_PREFIX = "/_synapse/metrics"
 
-all_gauges: Dict[str, Collector] = {}
-
 HAVE_PROC_SELF_STAT = os.path.exists("/proc/self/stat")
 
 SERVER_NAME_LABEL = "server_name"
@@ -90,6 +89,7 @@ We're purposely not using the `instance` label for this purpose as that should b
 terms, an endpoint you can scrape is called an *instance*, usually corresponding to a
 single process." (source: https://prometheus.io/docs/concepts/jobs_instances/)
 """
+
 
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 """
@@ -154,47 +154,117 @@ class _RegistryProxy:
 RegistryProxy = cast(CollectorRegistry, _RegistryProxy)
 
 
-@attr.s(slots=True, hash=True, auto_attribs=True)
+@attr.s(slots=True, hash=True, auto_attribs=True, kw_only=True)
 class LaterGauge(Collector):
     """A Gauge which periodically calls a user-provided callback to produce metrics."""
 
     name: str
     desc: str
-    labels: Optional[StrSequence] = attr.ib(hash=False)
-    # callback: should either return a value (if there are no labels for this metric),
-    # or dict mapping from a label tuple to a value
-    caller: Callable[
-        [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
-    ]
+    labelnames: Optional[StrSequence] = attr.ib(hash=False)
+    _instance_id_to_hook_map: Dict[
+        Optional[str],  # instance_id
+        Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ] = attr.ib(factory=dict, hash=False)
+    """
+    Map from homeserver instance_id to a callback. Each callback should either return a
+    value (if there are no labels for this metric), or dict mapping from a label tuple
+    to a value.
+
+    We use `instance_id` instead of `server_name` because it's possible to have multiple
+    workers running in the same process with the same `server_name`.
+    """
 
     def collect(self) -> Iterable[Metric]:
-        g = GaugeMetricFamily(self.name, self.desc, labels=self.labels)
+        # The decision to add `SERVER_NAME_LABEL` is from the `LaterGauge` usage itself
+        # (we don't enforce it here, one level up).
+        g = GaugeMetricFamily(self.name, self.desc, labels=self.labelnames)  # type: ignore[missing-server-name-label]
 
-        try:
-            calls = self.caller()
-        except Exception:
-            logger.exception("Exception running callback for LaterGauge(%s)", self.name)
-            yield g
-            return
+        for homeserver_instance_id, hook in self._instance_id_to_hook_map.items():
+            try:
+                hook_result = hook()
+            except Exception:
+                logger.exception(
+                    "Exception running callback for LaterGauge(%s) for homeserver_instance_id=%s",
+                    self.name,
+                    homeserver_instance_id,
+                )
+                # Continue to return the rest of the metrics that aren't broken
+                continue
 
-        if isinstance(calls, (int, float)):
-            g.add_metric([], calls)
-        else:
-            for k, v in calls.items():
-                g.add_metric(k, v)
+            if isinstance(hook_result, (int, float)):
+                g.add_metric([], hook_result)
+            else:
+                for k, v in hook_result.items():
+                    g.add_metric(k, v)
 
         yield g
 
+    def register_hook(
+        self,
+        *,
+        homeserver_instance_id: Optional[str],
+        hook: Callable[
+            [], Union[Mapping[Tuple[str, ...], Union[int, float]], Union[int, float]]
+        ],
+    ) -> None:
+        """
+        Register a callback/hook that will be called to generate a metric samples for
+        the gauge.
+
+        Args:
+            homeserver_instance_id: The unique ID for this Synapse process instance
+                (`hs.get_instance_id()`) that this hook is associated with. This can be used
+                later to lookup all hooks associated with a given server name in order to
+                unregister them. This should only be omitted for global hooks that work
+                across all homeservers.
+            hook: A callback that should either return a value (if there are no
+                labels for this metric), or dict mapping from a label tuple to a value
+        """
+        # We shouldn't have multiple hooks registered for the same homeserver `instance_id`.
+        existing_hook = self._instance_id_to_hook_map.get(homeserver_instance_id)
+        assert existing_hook is None, (
+            f"LaterGauge(name={self.name}) hook already registered for homeserver_instance_id={homeserver_instance_id}. "
+            "This is likely a Synapse bug and you forgot to unregister the previous hooks for "
+            "the server (especially in tests)."
+        )
+
+        self._instance_id_to_hook_map[homeserver_instance_id] = hook
+
+    def unregister_hooks_for_homeserver_instance_id(
+        self, homeserver_instance_id: str
+    ) -> None:
+        """
+        Unregister all hooks associated with the given homeserver `instance_id`. This should be
+        called when a homeserver is shutdown to avoid extra hooks sitting around.
+
+        Args:
+            homeserver_instance_id: The unique ID for this Synapse process instance to
+                unregister hooks for (`hs.get_instance_id()`).
+        """
+        self._instance_id_to_hook_map.pop(homeserver_instance_id, None)
+
     def __attrs_post_init__(self) -> None:
-        self._register()
-
-    def _register(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
-
         REGISTRY.register(self)
-        all_gauges[self.name] = self
+
+        # We shouldn't have multiple metrics with the same name. Typically, metrics
+        # should be created globally so you shouldn't be running into this and this will
+        # catch any stupid mistakes. The `REGISTRY.register(self)` call above will also
+        # raise an error if the metric already exists but to make things explicit, we'll
+        # also check here.
+        existing_gauge = all_later_gauges_to_clean_up_on_shutdown.get(self.name)
+        assert existing_gauge is None, f"LaterGauge(name={self.name}) already exists. "
+
+        # Keep track of the gauge so we can clean it up later.
+        all_later_gauges_to_clean_up_on_shutdown[self.name] = self
+
+
+all_later_gauges_to_clean_up_on_shutdown: Dict[str, LaterGauge] = {}
+"""
+Track all `LaterGauge` instances so we can remove any associated hooks during homeserver
+shutdown.
+"""
 
 
 # `MetricsEntry` only makes sense when it is a `Protocol`,
@@ -246,7 +316,7 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         # Protects access to _registrations
         self._lock = threading.Lock()
 
-        self._register_with_collector()
+        REGISTRY.register(self)
 
     def register(
         self,
@@ -302,7 +372,9 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
 
         Note: may be called by a separate thread.
         """
-        in_flight = GaugeMetricFamily(
+        # The decision to add `SERVER_NAME_LABEL` is from the `GaugeBucketCollector`
+        # usage itself (we don't enforce it here, one level up).
+        in_flight = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
             self.name + "_total", self.desc, labels=self.labels
         )
 
@@ -326,20 +398,59 @@ class InFlightGauge(Generic[MetricsEntry], Collector):
         yield in_flight
 
         for name in self.sub_metrics:
-            gauge = GaugeMetricFamily(
+            # The decision to add `SERVER_NAME_LABEL` is from the `InFlightGauge` usage
+            # itself (we don't enforce it here, one level up).
+            gauge = GaugeMetricFamily(  # type: ignore[missing-server-name-label]
                 "_".join([self.name, name]), "", labels=self.labels
             )
             for key, metrics in metrics_by_key.items():
                 gauge.add_metric(labels=key, value=getattr(metrics, name))
             yield gauge
 
-    def _register_with_collector(self) -> None:
-        if self.name in all_gauges.keys():
-            logger.warning("%s already registered, reregistering", self.name)
-            REGISTRY.unregister(all_gauges.pop(self.name))
 
-        REGISTRY.register(self)
-        all_gauges[self.name] = self
+class GaugeHistogramMetricFamilyWithLabels(GaugeHistogramMetricFamily):
+    """
+    Custom version of `GaugeHistogramMetricFamily` from `prometheus_client` that allows
+    specifying labels and label values.
+
+    A single gauge histogram and its samples.
+
+    For use by custom collectors.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        documentation: str,
+        gsum_value: float,
+        buckets: Optional[Sequence[Tuple[str, float]]] = None,
+        labelnames: StrSequence = (),
+        labelvalues: StrSequence = (),
+        unit: str = "",
+    ):
+        # Sanity check the number of label values matches the number of label names.
+        if len(labelvalues) != len(labelnames):
+            raise ValueError(
+                "The number of label values must match the number of label names"
+            )
+
+        # Call the super to validate and set the labelnames. We use this stable API
+        # instead of setting the internal `_labelnames` field directly.
+        super().__init__(
+            name=name,
+            documentation=documentation,
+            labels=labelnames,
+            # Since `GaugeHistogramMetricFamily` doesn't support supplying `labels` and
+            # `buckets` at the same time (artificial limitation), we will just set these
+            # as `None` and set up the buckets ourselves just below.
+            buckets=None,
+            gsum_value=None,
+        )
+
+        # Create a gauge for each bucket.
+        if buckets is not None:
+            self.add_metric(labels=labelvalues, buckets=buckets, gsum_value=gsum_value)
 
 
 class GaugeBucketCollector(Collector):
@@ -354,14 +465,17 @@ class GaugeBucketCollector(Collector):
     __slots__ = (
         "_name",
         "_documentation",
+        "_labelnames",
         "_bucket_bounds",
         "_metric",
     )
 
     def __init__(
         self,
+        *,
         name: str,
         documentation: str,
+        labelnames: Optional[StrSequence],
         buckets: Iterable[float],
         registry: CollectorRegistry = REGISTRY,
     ):
@@ -375,6 +489,7 @@ class GaugeBucketCollector(Collector):
         """
         self._name = name
         self._documentation = documentation
+        self._labelnames = labelnames if labelnames else ()
 
         # the tops of the buckets
         self._bucket_bounds = [float(b) for b in buckets]
@@ -386,7 +501,7 @@ class GaugeBucketCollector(Collector):
 
         # We initially set this to None. We won't report metrics until
         # this has been initialised after a successful data update
-        self._metric: Optional[GaugeHistogramMetricFamily] = None
+        self._metric: Optional[GaugeHistogramMetricFamilyWithLabels] = None
 
         registry.register(self)
 
@@ -395,15 +510,26 @@ class GaugeBucketCollector(Collector):
         if self._metric is not None:
             yield self._metric
 
-    def update_data(self, values: Iterable[float]) -> None:
+    def update_data(self, values: Iterable[float], labels: StrSequence = ()) -> None:
         """Update the data to be reported by the metric
 
         The existing data is cleared, and each measurement in the input is assigned
         to the relevant bucket.
-        """
-        self._metric = self._values_to_metric(values)
 
-    def _values_to_metric(self, values: Iterable[float]) -> GaugeHistogramMetricFamily:
+        Args:
+            values
+            labels
+        """
+        self._metric = self._values_to_metric(values, labels)
+
+    def _values_to_metric(
+        self, values: Iterable[float], labels: StrSequence = ()
+    ) -> GaugeHistogramMetricFamilyWithLabels:
+        """
+        Args:
+            values
+            labels
+        """
         total = 0.0
         bucket_values = [0 for _ in self._bucket_bounds]
 
@@ -421,9 +547,13 @@ class GaugeBucketCollector(Collector):
         # that bucket or below.
         accumulated_values = itertools.accumulate(bucket_values)
 
-        return GaugeHistogramMetricFamily(
-            self._name,
-            self._documentation,
+        # The decision to add `SERVER_NAME_LABEL` is from the `GaugeBucketCollector`
+        # usage itself (we don't enforce it here, one level up).
+        return GaugeHistogramMetricFamilyWithLabels(  # type: ignore[missing-server-name-label]
+            name=self._name,
+            documentation=self._documentation,
+            labelnames=self._labelnames,
+            labelvalues=labels,
             buckets=list(
                 zip((str(b) for b in self._bucket_bounds), accumulated_values)
             ),
@@ -455,61 +585,82 @@ class CPUMetrics(Collector):
             line = s.read()
             raw_stats = line.split(") ", 1)[1].split(" ")
 
-            user = GaugeMetricFamily("process_cpu_user_seconds_total", "")
+            # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+            user = GaugeMetricFamily("process_cpu_user_seconds_total", "")  # type: ignore[missing-server-name-label]
             user.add_metric([], float(raw_stats[11]) / self.ticks_per_sec)
             yield user
 
-            sys = GaugeMetricFamily("process_cpu_system_seconds_total", "")
+            # This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+            sys = GaugeMetricFamily("process_cpu_system_seconds_total", "")  # type: ignore[missing-server-name-label]
             sys.add_metric([], float(raw_stats[12]) / self.ticks_per_sec)
             yield sys
 
 
-REGISTRY.register(CPUMetrics())
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`.
+REGISTRY.register(CPUMetrics())  # type: ignore[missing-server-name-label]
 
 
 #
 # Federation Metrics
 #
 
-sent_transactions_counter = Counter("synapse_federation_client_sent_transactions", "")
+sent_transactions_counter = Counter(
+    "synapse_federation_client_sent_transactions", "", labelnames=[SERVER_NAME_LABEL]
+)
 
-events_processed_counter = Counter("synapse_federation_client_events_processed", "")
+events_processed_counter = Counter(
+    "synapse_federation_client_events_processed", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 event_processing_loop_counter = Counter(
-    "synapse_event_processing_loop_count", "Event processing loop iterations", ["name"]
+    "synapse_event_processing_loop_count",
+    "Event processing loop iterations",
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 event_processing_loop_room_count = Counter(
     "synapse_event_processing_loop_room_count",
     "Rooms seen per event processing loop iteration",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 
 # Used to track where various components have processed in the event stream,
 # e.g. federation sending, appservice sending, etc.
-event_processing_positions = Gauge("synapse_event_processing_positions", "", ["name"])
+event_processing_positions = Gauge(
+    "synapse_event_processing_positions", "", labelnames=["name", SERVER_NAME_LABEL]
+)
 
 # Used to track the current max events stream position
-event_persisted_position = Gauge("synapse_event_persisted_position", "")
+event_persisted_position = Gauge(
+    "synapse_event_persisted_position", "", labelnames=[SERVER_NAME_LABEL]
+)
 
 # Used to track the received_ts of the last event processed by various
 # components
-event_processing_last_ts = Gauge("synapse_event_processing_last_ts", "", ["name"])
+event_processing_last_ts = Gauge(
+    "synapse_event_processing_last_ts", "", labelnames=["name", SERVER_NAME_LABEL]
+)
 
 # Used to track the lag processing events. This is the time difference
 # between the last processed event's received_ts and the time it was
 # finished being processed.
-event_processing_lag = Gauge("synapse_event_processing_lag", "", ["name"])
+event_processing_lag = Gauge(
+    "synapse_event_processing_lag", "", labelnames=["name", SERVER_NAME_LABEL]
+)
 
 event_processing_lag_by_event = Histogram(
     "synapse_event_processing_lag_by_event",
     "Time between an event being persisted and it being queued up to be sent to the relevant remote servers",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 # Build info of the running server.
-build_info = Gauge(
+#
+# This is a process-level metric, so it does not have the `SERVER_NAME_LABEL`. We
+# consider this process-level because all Synapse homeservers running in the process
+# will use the same Synapse version.
+build_info = Gauge(  # type: ignore[missing-server-name-label]
     "synapse_build_info", "Build information", ["pythonversion", "version", "osversion"]
 )
 build_info.labels(
@@ -525,44 +676,57 @@ threepid_send_requests = Histogram(
     " there is a request with try count of 4, then there would have been one"
     " each for 1, 2 and 3",
     buckets=(1, 2, 3, 4, 5, 10),
-    labelnames=("type", "reason"),
+    labelnames=("type", "reason", SERVER_NAME_LABEL),
 )
 
 threadpool_total_threads = Gauge(
     "synapse_threadpool_total_threads",
     "Total number of threads currently in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 threadpool_total_working_threads = Gauge(
     "synapse_threadpool_working_threads",
     "Number of threads currently working in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 threadpool_total_min_threads = Gauge(
     "synapse_threadpool_min_threads",
     "Minimum number of threads configured in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 threadpool_total_max_threads = Gauge(
     "synapse_threadpool_max_threads",
     "Maximum number of threads configured in the threadpool",
-    ["name"],
+    labelnames=["name", SERVER_NAME_LABEL],
 )
 
 
-def register_threadpool(name: str, threadpool: ThreadPool) -> None:
-    """Add metrics for the threadpool."""
+def register_threadpool(*, name: str, server_name: str, threadpool: ThreadPool) -> None:
+    """
+    Add metrics for the threadpool.
 
-    threadpool_total_min_threads.labels(name).set(threadpool.min)
-    threadpool_total_max_threads.labels(name).set(threadpool.max)
+    Args:
+        name: The name of the threadpool, used to identify it in the metrics.
+        server_name: The homeserver name (used to label metrics) (this should be `hs.hostname`).
+        threadpool: The threadpool to register metrics for.
+    """
 
-    threadpool_total_threads.labels(name).set_function(lambda: len(threadpool.threads))
-    threadpool_total_working_threads.labels(name).set_function(
-        lambda: len(threadpool.working)
-    )
+    threadpool_total_min_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set(threadpool.min)
+    threadpool_total_max_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set(threadpool.max)
+
+    threadpool_total_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set_function(lambda: len(threadpool.threads))
+    threadpool_total_working_threads.labels(
+        name=name, **{SERVER_NAME_LABEL: server_name}
+    ).set_function(lambda: len(threadpool.working))
 
 
 class MetricsResource(Resource):

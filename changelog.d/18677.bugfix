@@ -1,1 +1,0 @@
-Fix sliding_sync_connections related errors when porting from SQLite to Postgres.

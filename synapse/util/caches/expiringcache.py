@@ -29,8 +29,8 @@ from twisted.internet import defer
 
 from synapse.config import cache as cache_config
 from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.util import Clock
 from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,9 @@ class ExpiringCache(Generic[KT, VT]):
             return
 
         def f() -> "defer.Deferred[None]":
-            return run_as_background_process("prune_cache", self._prune_cache)
+            return run_as_background_process(
+                "prune_cache", server_name, self._prune_cache
+            )
 
         self._clock.looping_call(f, self._expiry_ms / 2)
 

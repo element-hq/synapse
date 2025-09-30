@@ -38,6 +38,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace,
 )
+from synapse.metrics import SERVER_NAME_LABEL
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
@@ -79,7 +80,7 @@ logger = logging.getLogger(__name__)
 sync_processing_time = Histogram(
     "synapse_sliding_sync_processing_time",
     "Time taken to generate a sliding sync response, ignoring wait times.",
-    ["initial"],
+    labelnames=["initial", SERVER_NAME_LABEL],
 )
 
 # Limit the number of state_keys we should remember sending down the connection for each
@@ -94,6 +95,7 @@ MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
 
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
@@ -114,7 +116,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         from_token: Optional[SlidingSyncStreamToken] = None,
         timeout_ms: int = 0,
-    ) -> SlidingSyncResult:
+    ) -> Tuple[SlidingSyncResult, bool]:
         """
         Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
@@ -126,9 +128,16 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
             timeout_ms: The time in milliseconds to wait for new data to arrive. If 0,
-                we will immediately but there might not be any new data so we just return an
-                empty response.
+                we will respond immediately but there might not be any new data so we just
+                return an empty response.
+
+        Returns:
+            A tuple containing the `SlidingSyncResult` and whether we waited for new
+            activity before responding. Knowing whether we waited is useful in traces
+            to filter out long-running requests where we were just waiting.
         """
+        did_wait = False
+
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
         # auth_blocking will occur)
@@ -147,7 +156,7 @@ class SlidingSyncHandler:
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return SlidingSyncResult.empty(from_token)
+                return SlidingSyncResult.empty(from_token), did_wait
 
             # If we've spent significant time waiting to catch up, take it off
             # the timeout.
@@ -183,8 +192,9 @@ class SlidingSyncHandler:
                 current_sync_callback,
                 from_token=from_token.stream_token,
             )
+            did_wait = True
 
-        return result
+        return result, did_wait
 
     @trace
     async def current_sync_for_user(
@@ -201,7 +211,7 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            to_token: The point in the stream to sync up to.
+            to_token: The latest point in the stream to sync up to.
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
@@ -368,9 +378,9 @@ class SlidingSyncHandler:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
 
         end_time_s = self.clock.time()
-        sync_processing_time.labels(from_token is not None).observe(
-            end_time_s - start_time_s
-        )
+        sync_processing_time.labels(
+            initial=from_token is not None, **{SERVER_NAME_LABEL: self.server_name}
+        ).observe(end_time_s - start_time_s)
 
         return sliding_sync_result
 

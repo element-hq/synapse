@@ -24,7 +24,7 @@ from typing import Any, Iterable, List, Optional, Tuple
 from canonicaljson import encode_canonical_json
 from parameterized import parameterized
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import ReceiptTypes
 from synapse.api.room_versions import RoomVersions
@@ -38,7 +38,7 @@ from synapse.storage.databases.main.event_push_actions import (
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import PersistedEventPosition
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from ._base import BaseWorkerStoreTestCase
 

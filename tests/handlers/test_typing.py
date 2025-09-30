@@ -26,7 +26,7 @@ from unittest.mock import ANY, AsyncMock, Mock, call
 
 from netaddr import IPSet
 
-from twisted.test.proto_helpers import MemoryReactor
+from twisted.internet.testing import MemoryReactor
 from twisted.web.resource import Resource
 
 from synapse.api.constants import EduTypes
@@ -36,7 +36,7 @@ from synapse.handlers.typing import FORGET_TIMEOUT, TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import ThreadedMemoryReactorClock
@@ -92,6 +92,7 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,
             ip_blocklist=IPSet(),
+            proxy_config=None,
         )
 
         # the tests assume that we are starting at unix time 1000

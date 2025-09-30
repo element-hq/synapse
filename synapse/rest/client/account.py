@@ -47,7 +47,7 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.metrics import threepid_send_requests
+from synapse.metrics import SERVER_NAME_LABEL, threepid_send_requests
 from synapse.push.mailer import Mailer
 from synapse.types import JsonDict
 from synapse.types.rest import RequestBodyModel
@@ -76,6 +76,7 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.datastore = hs.get_datastores().main
         self.config = hs.config
         self.identity_handler = hs.get_identity_handler()
@@ -136,9 +137,11 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
             self.mailer.send_password_reset_mail,
             body.next_link,
         )
-        threepid_send_requests.labels(type="email", reason="password_reset").observe(
-            body.send_attempt
-        )
+        threepid_send_requests.labels(
+            type="email",
+            reason="password_reset",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(body.send_attempt)
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -325,6 +328,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self.server_name = hs.hostname
         self.config = hs.config
         self.identity_handler = hs.get_identity_handler()
         self.store = self.hs.get_datastores().main
@@ -394,9 +398,11 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
             body.next_link,
         )
 
-        threepid_send_requests.labels(type="email", reason="add_threepid").observe(
-            body.send_attempt
-        )
+        threepid_send_requests.labels(
+            type="email",
+            reason="add_threepid",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(body.send_attempt)
 
         # Wrap the session id in a JSON object
         return 200, {"sid": sid}
@@ -407,6 +413,7 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
+        self.server_name = hs.hostname
         super().__init__()
         self.store = self.hs.get_datastores().main
         self.identity_handler = hs.get_identity_handler()
@@ -469,9 +476,11 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
             body.next_link,
         )
 
-        threepid_send_requests.labels(type="msisdn", reason="add_threepid").observe(
-            body.send_attempt
-        )
+        threepid_send_requests.labels(
+            type="msisdn",
+            reason="add_threepid",
+            **{SERVER_NAME_LABEL: self.server_name},
+        ).observe(body.send_attempt)
         logger.info("MSISDN %s: got response from identity server: %s", msisdn, ret)
 
         return 200, ret
@@ -604,7 +613,7 @@ class ThreepidRestServlet(RestServlet):
     # ThreePidBindRestServelet.PostBody with an `alias_generator` to handle
     # `threePidCreds` versus `three_pid_creds`.
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        if self.hs.config.experimental.msc3861.enabled:
+        if self.hs.config.mas.enabled or self.hs.config.experimental.msc3861.enabled:
             raise NotFoundError(errcode=Codes.UNRECOGNIZED)
 
         if not self.hs.config.registration.enable_3pid_changes:
@@ -896,23 +905,27 @@ class AccountStatusRestServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    auth_delegated = hs.config.mas.enabled or hs.config.experimental.msc3861.enabled
+
+    ThreepidRestServlet(hs).register(http_server)
+    WhoamiRestServlet(hs).register(http_server)
+
+    if not auth_delegated:
+        DeactivateAccountRestServlet(hs).register(http_server)
+
     if hs.config.worker.worker_app is None:
-        if not hs.config.experimental.msc3861.enabled:
+        ThreepidBindRestServlet(hs).register(http_server)
+        ThreepidUnbindRestServlet(hs).register(http_server)
+
+        if not auth_delegated:
             EmailPasswordRequestTokenRestServlet(hs).register(http_server)
-            DeactivateAccountRestServlet(hs).register(http_server)
             PasswordRestServlet(hs).register(http_server)
             EmailThreepidRequestTokenRestServlet(hs).register(http_server)
             MsisdnThreepidRequestTokenRestServlet(hs).register(http_server)
             AddThreepidEmailSubmitTokenServlet(hs).register(http_server)
             AddThreepidMsisdnSubmitTokenServlet(hs).register(http_server)
-    ThreepidRestServlet(hs).register(http_server)
-    if hs.config.worker.worker_app is None:
-        ThreepidBindRestServlet(hs).register(http_server)
-        ThreepidUnbindRestServlet(hs).register(http_server)
-        if not hs.config.experimental.msc3861.enabled:
             ThreepidAddRestServlet(hs).register(http_server)
             ThreepidDeleteRestServlet(hs).register(http_server)
-    WhoamiRestServlet(hs).register(http_server)
 
-    if hs.config.worker.worker_app is None and hs.config.experimental.msc3720_enabled:
+    if hs.config.experimental.msc3720_enabled:
         AccountStatusRestServlet(hs).register(http_server)

@@ -78,9 +78,9 @@ from twisted.internet.interfaces import (
     ITransport,
 )
 from twisted.internet.protocol import ClientFactory, DatagramProtocol, Factory
+from twisted.internet.testing import AccumulatingProtocol, MemoryReactorClock
 from twisted.python import threadpool
 from twisted.python.failure import Failure
-from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactorClock
 from twisted.web.http_headers import Headers
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
@@ -97,12 +97,13 @@ from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
     load_legacy_third_party_event_rules,
 )
 from synapse.server import HomeServer
+from synapse.server_notices.consent_server_notices import ConfigError
 from synapse.storage import DataStore
 from synapse.storage.database import LoggingDatabaseConnection, make_pool
 from synapse.storage.engines import BaseDatabaseEngine, create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor, JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.utils import (
     LEAVE_DB,
@@ -432,7 +433,7 @@ def make_request(
 
     channel = FakeChannel(site, reactor, ip=client_ip)
 
-    req = request(channel, site)
+    req = request(channel, site, our_server_name="test_server")
     channel.request = req
 
     req.content = BytesIO(content)
@@ -702,6 +703,7 @@ def make_fake_db_pool(
     reactor: ISynapseReactor,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
+    server_name: str,
 ) -> adbapi.ConnectionPool:
     """Wrapper for `make_pool` which builds a pool which runs db queries synchronously.
 
@@ -710,7 +712,9 @@ def make_fake_db_pool(
     is a drop-in replacement for the normal `make_pool` which builds such a connection
     pool.
     """
-    pool = make_pool(reactor, db_config, engine)
+    pool = make_pool(
+        reactor=reactor, db_config=db_config, engine=engine, server_name=server_name
+    )
 
     def runWithConnection(
         func: Callable[..., R], *args: Any, **kwargs: Any
@@ -783,7 +787,7 @@ class ThreadPool:
 
 def get_clock() -> Tuple[ThreadedMemoryReactorClock, Clock]:
     clock = ThreadedMemoryReactorClock()
-    hs_clock = Clock(clock)
+    hs_clock = Clock(clock, server_name="test_server")
     return clock, hs_clock
 
 
@@ -1088,12 +1092,19 @@ def setup_test_homeserver(
             "args": {"database": test_db_location, "cp_min": 1, "cp_max": 1},
         }
 
+        server_name = config.server.server_name
+        if not isinstance(server_name, str):
+            raise ConfigError("Must be a string", ("server_name",))
+
         # Check if we have set up a DB that we can use as a template.
         global PREPPED_SQLITE_DB_CONN
         if PREPPED_SQLITE_DB_CONN is None:
             temp_engine = create_engine(database_config)
             PREPPED_SQLITE_DB_CONN = LoggingDatabaseConnection(
-                sqlite3.connect(":memory:"), temp_engine, "PREPPED_CONN"
+                conn=sqlite3.connect(":memory:"),
+                engine=temp_engine,
+                default_txn_name="PREPPED_CONN",
+                server_name=server_name,
             )
 
             database = DatabaseConnectionConfig("master", database_config)
@@ -1138,6 +1149,9 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
+    # Register the cleanup hook
+    cleanup_func(hs.cleanup)
+
     # Install @cache_in_self attributes
     for key, val in kwargs.items():
         setattr(hs, "_" + key, val)
@@ -1149,6 +1163,16 @@ def setup_test_homeserver(
     # synchronous for testing.
     with patch("synapse.storage.database.make_pool", side_effect=make_fake_db_pool):
         hs.setup()
+
+    # Register background tasks required by this server. This must be done
+    # somewhat manually due to the background tasks not being registered
+    # unless handlers are instantiated.
+    #
+    # Since, we don't have to worry about `daemonize` (forking the process) in tests, we
+    # can just start the background tasks straight away after `hs.setup`. (compare this
+    # with where we call `hs.start_background_tasks()` outside of the test environment).
+    if hs.config.worker.run_background_tasks:
+        hs.start_background_tasks()
 
     # Since we've changed the databases to run DB transactions on the same
     # thread, we need to stop the event fetcher hogging that one thread.

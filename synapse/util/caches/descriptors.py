@@ -579,9 +579,12 @@ def cachedList(
     Used to do batch lookups for an already created cache. One of the arguments
     is specified as a list that is iterated through to lookup keys in the
     original cache. A new tuple consisting of the (deduplicated) keys that weren't in
-    the cache gets passed to the original function, which is expected to results
+    the cache gets passed to the original function, which is expected to result
     in a map of key to value for each passed value. The new results are stored in the
-    original cache. Note that any missing values are cached as None.
+    original cache.
+
+    Note that any values in the input that end up being missing from both the
+    cache and the returned dictionary will be cached as `None`.
 
     Args:
         cached_method_name: The name of the single-item lookup method.
