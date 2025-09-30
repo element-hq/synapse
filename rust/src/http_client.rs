@@ -12,14 +12,13 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future};
+use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
 use futures::TryStreamExt;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
-use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 use crate::errors::HttpResponseException;
