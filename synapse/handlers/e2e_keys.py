@@ -849,23 +849,18 @@ class E2eKeysHandler:
 
         device_keys = keys.get("device_keys", None)
         if device_keys:
-            # Validate that user_id and device_id match the requesting user
-            if (
-                device_keys["user_id"] == user_id
-                and device_keys["device_id"] == device_id
-            ):
-                await self.upload_device_keys_for_user(
-                    user_id=user_id,
-                    device_id=device_id,
-                    keys={"device_keys": device_keys},
-                )
-            else:
-                log_kv(
-                    {
-                        "message": "Not updating device_keys for user, user_id or device_id mismatch",
-                        "user_id": user_id,
-                    }
-                )
+            log_kv(
+                {
+                    "message": "Updating device_keys for user.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            await self.upload_device_keys_for_user(
+                user_id=user_id,
+                device_id=device_id,
+                keys={"device_keys": device_keys},
+            )
         else:
             log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
 
@@ -881,12 +876,11 @@ class E2eKeysHandler:
             await self._upload_one_time_keys_for_user(
                 user_id, device_id, time_now, one_time_keys
             )
-        elif one_time_keys:
-            log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
         else:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
+
         fallback_keys = keys.get("fallback_keys")
         if fallback_keys:
             log_kv(
@@ -897,8 +891,6 @@ class E2eKeysHandler:
                 }
             )
             await self.store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
-        elif fallback_keys:
-            log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
         else:
             log_kv(
                 {"message": "Did not update fallback_keys", "reason": "no keys given"}

@@ -23,6 +23,7 @@
 import logging
 import re
 from collections import Counter
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from synapse._pydantic_compat import (
@@ -31,6 +32,7 @@ from synapse._pydantic_compat import (
 )
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
+    Codes,
     InteractiveAuthIncompleteError,
     InvalidAPICallError,
     SynapseError,
@@ -226,7 +228,22 @@ class KeyUploadServlet(RestServlet):
 
         # Map the pydantic model to a plain old dict, which the handler expects.
         keys = {}
-        if body.device_keys:
+        if body.device_keys is not None:
+            # Validate the `user_id` and `device_id` fields in each device key
+            # match that of the requester.
+            if body.device_keys.user_id != user_id:
+                raise SynapseError(
+                    code=HTTPStatus.BAD_REQUEST,
+                    errcode=Codes.BAD_JSON,
+                    msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
+                )
+            if body.device_keys.device_id != device_id:
+                raise SynapseError(
+                    code=HTTPStatus.BAD_REQUEST,
+                    errcode=Codes.BAD_JSON,
+                    msg="Provided `device_id` in `device_keys` does not match that of the authenticated user device",
+                )
+
             keys["device_keys"] = {
                 "user_id": body.device_keys.user_id,
                 "device_id": body.device_keys.device_id,
@@ -234,7 +251,7 @@ class KeyUploadServlet(RestServlet):
                 "keys": body.device_keys.keys,
                 "signatures": body.device_keys.signatures,
             }
-        if body.fallback_keys:
+        if body.fallback_keys is not None:
             keys["fallback_keys"] = {}
             for (
                 algorithm_and_device_id,
@@ -252,7 +269,7 @@ class KeyUploadServlet(RestServlet):
                     # The fallback key is represented as a base64-encoded string.
                     keys["fallback_keys"][algorithm_and_device_id] = key_base64_or_obj
 
-        if body.one_time_keys:
+        if body.one_time_keys is not None:
             keys["one_time_keys"] = {}
             for (
                 algorithm_and_device_id,
