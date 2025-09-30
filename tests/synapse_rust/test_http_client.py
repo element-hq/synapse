@@ -174,21 +174,24 @@ class HttpClientTestCase(HomeserverTestCase):
 
         async def do_request() -> None:
             # Should have the same logcontext as the caller
-            self._check_current_logcontext("sentinel")
+            self._check_current_logcontext("foo")
 
-            with LoggingContext(name="test", server_name="test_server"):
-                self._check_current_logcontext("test")
+            with LoggingContext(name="competing", server_name="test_server"):
+                logger.info("asdf1")
                 # Make the actual request
                 await self._rust_http_client.get(
                     url=self.server.endpoint,
                     response_limit=1 * 1024 * 1024,
                 )
-                self._check_current_logcontext("test")
+                logger.info("asdf2")
+                self._check_current_logcontext("competing")
 
             # Back to the caller's context outside of the `LoggingContext` block
-            self._check_current_logcontext("sentinel")
+            self._check_current_logcontext("foo")
 
-        self.get_success(self.till_deferred_has_result(do_request()))
+        with LoggingContext(name="foo", server_name="test_server"):
+            self.get_success(self.till_deferred_has_result(do_request()))
+            self._check_current_logcontext("foo")
 
         # Back to the sentinel context
         self._check_current_logcontext("sentinel")
