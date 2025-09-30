@@ -49,7 +49,7 @@ class KeyUploadTestCase(unittest.HomeserverTestCase):
 
     def test_upload_keys_fails_on_invalid_structure(self) -> None:
         """Check that we validate the structure of keys upon upload.
-        
+
         Regression test for https://github.com/element-hq/synapse/pull/17097
         """
         self.register_user("alice", "wonderland")
@@ -61,6 +61,38 @@ class KeyUploadTestCase(unittest.HomeserverTestCase):
             {
                 # Error: device_keys must be a dict
                 "device_keys": ["some", "stuff", "weewoo"]
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                # Error: properties of fallback_keys must be in the form `<algorithm>:<device_id>`
+                "fallback_keys": {"invalid_key": "signature_base64"}
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                # Same as above, but for one_time_keys
+                "one_time_keys": {"invalid_key": "signature_base64"}
             },
             alice_token,
         )

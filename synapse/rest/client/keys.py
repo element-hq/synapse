@@ -26,9 +26,12 @@ from collections import Counter
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
+from typing_extensions import Self
+
 from synapse._pydantic_compat import (
     StrictBool,
     StrictStr,
+    validator,
 )
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
@@ -177,6 +180,23 @@ class KeyUploadServlet(RestServlet):
         May be absent if a new fallback key is not required.
         """
 
+        @validator("fallback_keys", pre=True)
+        def validate_fallback_keys(cls: Self, v: Any) -> Any:
+            if v is None:
+                return v
+            if not isinstance(v, dict):
+                raise TypeError("fallback_keys must be a mapping")
+
+            for k, _ in v.items():
+                if not len(k.split(":")) == 2:
+                    raise SynapseError(
+                        code=HTTPStatus.BAD_REQUEST,
+                        errcode=Codes.BAD_JSON,
+                        msg=f"Invalid fallback_keys key {k!r}. "
+                        'Expected "<algorithm>:<device_id>".',
+                    )
+            return v
+
         one_time_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
         """
         One-time public keys for “pre-key” messages. The names of the properties
@@ -185,6 +205,23 @@ class KeyUploadServlet(RestServlet):
         The format of the key is determined by the key algorithm, see:
         https://spec.matrix.org/v1.16/client-server-api/#key-algorithms.
         """
+
+        @validator("one_time_keys", pre=True)
+        def validate_one_time_keys(cls: Self, v: Any) -> Any:
+            if v is None:
+                return v
+            if not isinstance(v, dict):
+                raise TypeError("one_time_keys must be a mapping")
+
+            for k, _ in v.items():
+                if not len(k.split(":")) == 2:
+                    raise SynapseError(
+                        code=HTTPStatus.BAD_REQUEST,
+                        errcode=Codes.BAD_JSON,
+                        msg=f"Invalid one_time_keys key {k!r}. "
+                        'Expected "<algorithm>:<device_id>".',
+                    )
+            return v
 
     async def on_POST(
         self, request: SynapseRequest, device_id: Optional[str]
