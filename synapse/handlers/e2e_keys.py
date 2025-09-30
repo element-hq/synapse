@@ -847,9 +847,8 @@ class E2eKeysHandler:
         """
         time_now = self.clock.time_msec()
 
-        # TODO: Validate the JSON to make sure it has the right keys.
         device_keys = keys.get("device_keys", None)
-        if device_keys and isinstance(device_keys, dict):
+        if device_keys:
             # Validate that user_id and device_id match the requesting user
             if (
                 device_keys["user_id"] == user_id
@@ -871,7 +870,7 @@ class E2eKeysHandler:
             log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
 
         one_time_keys = keys.get("one_time_keys", None)
-        if one_time_keys and isinstance(one_time_keys, dict):
+        if one_time_keys:
             log_kv(
                 {
                     "message": "Updating one_time_keys for device.",
@@ -888,10 +887,8 @@ class E2eKeysHandler:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
-        fallback_keys = keys.get("fallback_keys") or keys.get(
-            "org.matrix.msc2732.fallback_keys"
-        )
-        if fallback_keys and isinstance(fallback_keys, dict):
+        fallback_keys = keys.get("fallback_keys")
+        if fallback_keys:
             log_kv(
                 {
                     "message": "Updating fallback_keys for device.",
