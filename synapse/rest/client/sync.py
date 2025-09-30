@@ -363,9 +363,6 @@ class SyncRestServlet(RestServlet):
 
         # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
         # states that this field should always be included, as long as the server supports the feature.
-        response["org.matrix.msc2732.device_unused_fallback_key_types"] = (
-            sync_result.device_unused_fallback_key_types
-        )
         response["device_unused_fallback_key_types"] = (
             sync_result.device_unused_fallback_key_types
         )
