@@ -29,8 +29,19 @@ T = TypeVar("T")
 class HttpClientTestCase(HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         hs = self.setup_test_homeserver()
+
+        # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
+        # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
+        # already running and we rely on that to start the Tokio thread pool in Rust.
+        self._http_client = hs.get_proxied_http_client()
+        self._rust_http_client = HttpClient(
+            reactor=hs.get_reactor(),
+            user_agent=self._http_client.user_agent.decode("utf8"),
+        )
+
         # This triggers the server startup hooks, which starts the Tokio thread pool
         reactor.run()
+
         return hs
 
     def tearDown(self) -> None:
@@ -42,13 +53,6 @@ class HttpClientTestCase(HomeserverTestCase):
             triggers = shutdown_triggers.get(phase, [])
             for callbable, args, kwargs in triggers:
                 callbable(*args, **kwargs)
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self._http_client = hs.get_proxied_http_client()
-        self._rust_http_client = HttpClient(
-            reactor=hs.get_reactor(),
-            user_agent=self._http_client.user_agent.decode("utf8"),
-        )
 
     def till_deferred_has_result(
         self,
