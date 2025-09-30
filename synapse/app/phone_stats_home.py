@@ -30,14 +30,16 @@ from twisted.internet import defer
 
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util.constants import ONE_HOUR_SECONDS, ONE_MINUTE_SECONDS
+from synapse.util.constants import (
+    MILLISECONDS_PER_SECOND,
+    ONE_HOUR_SECONDS,
+    ONE_MINUTE_SECONDS,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger("synapse.app.homeserver")
-
-MILLISECONDS_PER_SECOND = 1000
 
 INITIAL_DELAY_BEFORE_FIRST_PHONE_HOME_SECONDS = 5 * ONE_MINUTE_SECONDS
 """

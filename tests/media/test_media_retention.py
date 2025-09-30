@@ -37,7 +37,6 @@ from synapse.util.stringutils import (
 
 from tests import unittest
 from tests.unittest import override_config
-from tests.utils import MockClock
 
 
 class MediaRetentionTestCase(unittest.HomeserverTestCase):
@@ -50,12 +49,6 @@ class MediaRetentionTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
         admin.register_servlets_for_client_rest_resource,
     ]
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        # We need to be able to test advancing time in the homeserver, so we
-        # replace the test homeserver's default clock with a MockClock, which
-        # supports advancing time.
-        return self.setup_test_homeserver(clock=MockClock())
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.remote_server_name = "remote.homeserver"

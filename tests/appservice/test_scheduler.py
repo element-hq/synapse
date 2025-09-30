@@ -44,13 +44,12 @@ from synapse.types import DeviceListUpdates, JsonDict
 from synapse.util.clock import Clock
 
 from tests import unittest
-
-from ..utils import MockClock
+from tests.server import get_clock
 
 
 class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self.clock = MockClock()
+        self.reactor, self.clock = get_clock()
         self.store = Mock()
         self.as_api = Mock()
 
@@ -171,6 +170,7 @@ class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
 class ApplicationServiceSchedulerRecovererTestCase(unittest.HomeserverTestCase):
     def setUp(self) -> None:
         super().setUp()
+        self.reactor, self.clock = get_clock()
         self.as_api = Mock()
         self.store = Mock()
         self.service = Mock()

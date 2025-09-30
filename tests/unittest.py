@@ -80,7 +80,7 @@ from synapse.logging.context import (
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
-from synapse.types import JsonDict, Requester, UserID, create_requester
+from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import Clock
 from synapse.util.httpresourcetree import create_resource_tree
 
@@ -98,6 +98,8 @@ from tests.utils import checked_cast, default_config, setupdb
 
 setupdb()
 setup_logging()
+
+logger = logging.getLogger(__name__)
 
 TV = TypeVar("TV")
 _ExcType = TypeVar("_ExcType", bound=BaseException, covariant=True)
@@ -135,7 +137,7 @@ def around(target: TV) -> Callable[[Callable[Concatenate[S, P], R]], None]:
     return _around
 
 
-_TConfig = TypeVar("_TConfig", Config, RootConfig)
+_TConfig = TypeVar("_TConfig", Config, HomeServerConfig)
 
 
 def deepcopy_config(config: _TConfig) -> _TConfig:
@@ -161,13 +163,13 @@ def deepcopy_config(config: _TConfig) -> _TConfig:
 
 
 @functools.lru_cache(maxsize=8)
-def _parse_config_dict(config: str) -> RootConfig:
+def _parse_config_dict(config: str) -> HomeServerConfig:
     config_obj = HomeServerConfig()
     config_obj.parse_config_dict(json.loads(config), "", "")
     return config_obj
 
 
-def make_homeserver_config_obj(config: Dict[str, Any]) -> RootConfig:
+def make_homeserver_config_obj(config: Dict[str, Any]) -> HomeServerConfig:
     """Creates a :class:`HomeServerConfig` instance with the given configuration dict.
 
     This is equivalent to::
@@ -392,8 +394,8 @@ class HomeserverTestCase(TestCase):
         hijacking the authentication system to return a fixed user, and then
         calling the prepare function.
         """
+        # We need to share the reactor between the homeserver and all of our test utils.
         self.reactor, self.clock = get_clock()
-        self._hs_args = {"clock": self.clock, "reactor": self.reactor}
         self.hs = self.make_homeserver(self.reactor, self.clock)
 
         self.hs.get_datastores().main.tests_allow_no_chain_cover_index = False
@@ -511,7 +513,7 @@ class HomeserverTestCase(TestCase):
 
         Function to be overridden in subclasses.
         """
-        hs = self.setup_test_homeserver()
+        hs = self.setup_test_homeserver(reactor=reactor, clock=clock)
         return hs
 
     def create_test_resource(self) -> Resource:
@@ -634,7 +636,12 @@ class HomeserverTestCase(TestCase):
         )
 
     def setup_test_homeserver(
-        self, server_name: Optional[str] = None, **kwargs: Any
+        self,
+        server_name: Optional[str] = None,
+        config: Optional[JsonDict] = None,
+        reactor: Optional[ISynapseReactor] = None,
+        clock: Optional[Clock] = None,
+        **extra_homeserver_attributes: Any,
     ) -> HomeServer:
         """
         Set up the test homeserver, meant to be called by the overridable
@@ -647,12 +654,15 @@ class HomeserverTestCase(TestCase):
         Returns:
             synapse.server.HomeServer
         """
-        kwargs = dict(kwargs)
-        kwargs.update(self._hs_args)
-        if "config" not in kwargs:
+        if config is None:
             config = self.default_config()
-        else:
-            config = kwargs["config"]
+
+        # The sane default is to use the same reactor and clock as our other test utils
+        if reactor is None:
+            reactor = self.reactor
+
+        if clock is None:
+            clock = self.clock
 
         # The server name can be specified using either the `name` argument or a config
         # override. The `name` argument takes precedence over any config overrides.
@@ -661,19 +671,24 @@ class HomeserverTestCase(TestCase):
 
         # Parse the config from a config dict into a HomeServerConfig
         config_obj = make_homeserver_config_obj(config)
-        kwargs["config"] = config_obj
 
         # The server name in the config is now `name`, if provided, or the `server_name`
         # from a config override, or the default of "test". Whichever it is, we
         # construct a homeserver with a matching name.
         server_name = config_obj.server.server_name
-        kwargs["name"] = server_name
 
         async def run_bg_updates() -> None:
             with LoggingContext(name="run_bg_updates", server_name=server_name):
                 self.get_success(stor.db_pool.updates.run_background_updates(False))
 
-        hs = setup_test_homeserver(self.addCleanup, **kwargs)
+        hs = setup_test_homeserver(
+            cleanup_func=self.addCleanup,
+            server_name=server_name,
+            config=config_obj,
+            reactor=reactor,
+            clock=clock,
+            **extra_homeserver_attributes,
+        )
         stor = hs.get_datastores().main
 
         # Run the database background updates, when running against "master".

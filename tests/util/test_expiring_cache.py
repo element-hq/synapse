@@ -19,24 +19,23 @@
 #
 #
 
-from typing import List, cast
+from typing import List
 
 from synapse.util.caches.expiringcache import ExpiringCache
-from synapse.util.clock import Clock
 
-from tests.utils import MockClock
+from tests.server import get_clock
 
 from .. import unittest
 
 
 class ExpiringCacheTestCase(unittest.HomeserverTestCase):
     def test_get_set(self) -> None:
-        clock = MockClock()
+        reactor, clock = get_clock()
         cache: ExpiringCache[str, str] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
             hs=self.hs,
-            clock=cast(Clock, clock),
+            clock=clock,
             max_len=1,
         )
 
@@ -45,12 +44,12 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache["key"], "value")
 
     def test_eviction(self) -> None:
-        clock = MockClock()
+        reactor, clock = get_clock()
         cache: ExpiringCache[str, str] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
             hs=self.hs,
-            clock=cast(Clock, clock),
+            clock=clock,
             max_len=2,
         )
 
@@ -65,12 +64,12 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache.get("key3"), "value3")
 
     def test_iterable_eviction(self) -> None:
-        clock = MockClock()
+        reactor, clock = get_clock()
         cache: ExpiringCache[str, List[int]] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
             hs=self.hs,
-            clock=cast(Clock, clock),
+            clock=clock,
             max_len=5,
             iterable=True,
         )
@@ -90,26 +89,26 @@ class ExpiringCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(cache.get("key4"), [6, 7])
 
     def test_time_eviction(self) -> None:
-        clock = MockClock()
+        reactor, clock = get_clock()
         cache: ExpiringCache[str, int] = ExpiringCache(
             cache_name="test",
             server_name="testserver",
             hs=self.hs,
-            clock=cast(Clock, clock),
+            clock=clock,
             expiry_ms=1000,
         )
 
         cache["key"] = 1
-        clock.advance_time(0.5)
+        reactor.advance(0.5)
         cache["key2"] = 2
 
         self.assertEqual(cache.get("key"), 1)
         self.assertEqual(cache.get("key2"), 2)
 
-        clock.advance_time(0.9)
+        reactor.advance(0.9)
         self.assertEqual(cache.get("key"), None)
         self.assertEqual(cache.get("key2"), 2)
 
-        clock.advance_time(1)
+        reactor.advance(1)
         self.assertEqual(cache.get("key"), None)
         self.assertEqual(cache.get("key2"), None)

@@ -231,7 +231,10 @@ class MSC3861OAuthDelegation(TestCase):
         reactor, clock = get_clock()
         with self.assertRaises(ConfigError):
             setup_test_homeserver(
-                self.addCleanup, reactor=reactor, clock=clock, config=config
+                cleanup_func=self.addCleanup,
+                config=config,
+                reactor=reactor,
+                clock=clock,
             )
 
     def test_jwt_auth_cannot_be_enabled(self) -> None:
@@ -395,7 +398,10 @@ class MasAuthDelegation(TestCase):
         reactor, clock = get_clock()
         with self.assertRaises(ConfigError):
             setup_test_homeserver(
-                self.addCleanup, reactor=reactor, clock=clock, config=config
+                cleanup_func=self.addCleanup,
+                config=config,
+                reactor=reactor,
+                clock=clock,
             )
 
     @skip_unless(HAS_AUTHLIB, "requires authlib")

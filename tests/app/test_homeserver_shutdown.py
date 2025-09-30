@@ -48,7 +48,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         """Ensure the `SynapseHomeServer` can be fully shutdown and garbage collected"""
         self.reactor, self.clock = get_clock()
         self.hs = setup_test_homeserver(
-            self.addCleanup,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
             homeserver_to_use=SynapseHomeServer,
             clock=self.clock,
@@ -119,7 +119,7 @@ class HomeserverCleanShutdownTestCase(HomeserverTestCase):
         before background updates have completed"""
         self.reactor, self.clock = get_clock()
         self.hs = setup_test_homeserver(
-            self.addCleanup,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
             homeserver_to_use=SynapseHomeServer,
             clock=self.clock,
