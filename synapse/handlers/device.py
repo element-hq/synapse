@@ -961,6 +961,7 @@ class DeviceWriterHandler(DeviceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
         self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
 
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by
