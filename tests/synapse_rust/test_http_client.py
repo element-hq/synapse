@@ -10,20 +10,71 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+import json
+import threading
 import time
-from typing import Any, Coroutine, Generator, TypeVar, Union
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Coroutine, Generator, Optional, TypeVar, Union
 
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.logging.context import LoggingContext
+from synapse.logging.context import LoggingContext, current_context, _Sentinel
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
+from synapse.types import JsonDict
 from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
 T = TypeVar("T")
+
+
+class StubRequestHandler(BaseHTTPRequestHandler):
+    server: "StubServer"
+
+    def do_GET(self) -> None:
+        self.server.calls += 1
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
+
+    def log_message(self, format: str, *args: Any) -> None:
+        # Don't log anything; by default, the server logs to stderr
+        pass
+
+
+class StubServer(HTTPServer):
+    """A stub HTTP server that we can send requests to for testing.
+
+    This opens a real HTTP server on a random port, on a separate thread.
+    """
+
+    calls: int = 0
+    """How many times has the endpoint been requested."""
+
+    _thread: threading.Thread
+
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), StubRequestHandler)
+
+        self._thread = threading.Thread(
+            target=self.serve_forever,
+            name="StubServer",
+            kwargs={"poll_interval": 0.01},
+            daemon=True,
+        )
+        self._thread.start()
+
+    def shutdown(self) -> None:
+        super().shutdown()
+        self._thread.join()
+
+    @property
+    def endpoint(self) -> str:
+        return f"http://127.0.0.1:{self.server_port}/"
 
 
 class HttpClientTestCase(HomeserverTestCase):
@@ -43,6 +94,9 @@ class HttpClientTestCase(HomeserverTestCase):
         reactor.run()
 
         return hs
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.server = StubServer()
 
     def tearDown(self) -> None:
         # MemoryReactor doesn't trigger the shutdown phases, and we want the
@@ -79,13 +133,38 @@ class HttpClientTestCase(HomeserverTestCase):
 
         return deferred
 
+    def _check_current_logcontext(self, expected_logcontext_string: str) -> None:
+        context = current_context()
+        assert isinstance(context, LoggingContext) or isinstance(context, _Sentinel), (
+            f"Expected LoggingContext({expected_logcontext_string}) but saw {context}"
+        )
+        self.assertEqual(
+            str(context),
+            expected_logcontext_string,
+            f"Expected LoggingContext({expected_logcontext_string}) but saw {context}",
+        )
+
     def test_logging_context(self) -> None:
-        async def asdf() -> None:
+        # Sanity check that we start in the sentinel context
+        self._check_current_logcontext("sentinel")
+
+        async def do_request() -> None:
+            # Should have the same logcontext as the caller
+            self._check_current_logcontext("sentinel")
+
             with LoggingContext(name="test", server_name="test_server"):
-                # TODO: Test logging context before/after this call
+                self._check_current_logcontext("test")
+                # Make the actual request
                 await self._rust_http_client.get(
-                    url="http://localhost",
+                    url=self.server.endpoint,
                     response_limit=1 * 1024 * 1024,
                 )
+                self._check_current_logcontext("test")
 
-        self.get_success(self.till_deferred_has_result(asdf()))
+            # Back to the caller's context outside of the `LoggingContext` block
+            self._check_current_logcontext("sentinel")
+
+        self.get_success(self.till_deferred_has_result(do_request()))
+
+        # Back to the sentinel context
+        self._check_current_logcontext("sentinel")
