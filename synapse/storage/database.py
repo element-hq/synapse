@@ -62,7 +62,6 @@ from synapse.logging.context import (
     make_deferred_yieldable,
 )
 from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
@@ -638,7 +637,7 @@ class DatabasePool:
         # background updates of tables that aren't safe to update.
         self._clock.call_later(
             0.0,
-            run_as_background_process,
+            self.hs.run_as_background_process,
             "upsert_safety_check",
             self._check_safe_to_upsert,
         )
