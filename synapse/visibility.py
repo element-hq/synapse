@@ -55,7 +55,7 @@ from synapse.types import (
     get_domain_from_id,
 )
 from synapse.types.state import StateFilter
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 filtered_event_logger = logging.getLogger("synapse.visibility.filtered_event_debug")

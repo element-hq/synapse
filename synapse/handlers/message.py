@@ -81,9 +81,10 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import json_decoder, json_encoder, log_failure, unwrapFirstError
+from synapse.util import log_failure, unwrapFirstError
 from synapse.util.async_helpers import Linearizer, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.json import json_decoder, json_encoder
 from synapse.util.metrics import measure_func
 from synapse.visibility import get_effective_room_visibility_from_state
 
@@ -512,7 +513,9 @@ class EventCreationHandler:
 
         # We limit concurrent event creation for a room to 1. This prevents state resolution
         # from occurring when sending bursts of events to a local room
-        self.limiter = Linearizer(max_count=1, name="room_event_creation_limit")
+        self.limiter = Linearizer(
+            max_count=1, name="room_event_creation_limit", clock=self.clock
+        )
 
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
 
@@ -1013,13 +1016,36 @@ class EventCreationHandler:
             await self.clock.sleep(random.randint(1, 10))
             raise ShadowBanError()
 
-        if ratelimit:
+        room_version = None
+
+        if (
+            event_dict["type"] == EventTypes.Redaction
+            and "redacts" in event_dict["content"]
+            and self.hs.config.experimental.msc4169_enabled
+        ):
             room_id = event_dict["room_id"]
             try:
                 room_version = await self.store.get_room_version(room_id)
             except NotFoundError:
-                # The room doesn't exist.
                 raise AuthError(403, f"User {requester.user} not in room {room_id}")
+
+            if not room_version.updated_redaction_rules:
+                # Legacy room versions need the "redacts" field outside of the event's
+                # content. However clients may still send it within the content, so move
+                # the field if necessary for compatibility.
+                redacts = event_dict.get("redacts") or event_dict["content"].pop(
+                    "redacts", None
+                )
+                if redacts is not None and "redacts" not in event_dict:
+                    event_dict["redacts"] = redacts
+
+        if ratelimit:
+            if room_version is None:
+                room_id = event_dict["room_id"]
+                try:
+                    room_version = await self.store.get_room_version(room_id)
+                except NotFoundError:
+                    raise AuthError(403, f"User {requester.user} not in room {room_id}")
 
             if room_version.updated_redaction_rules:
                 redacts = event_dict["content"].get("redacts")
@@ -1113,6 +1139,12 @@ class EventCreationHandler:
 
                 assert self.hs.is_mine_id(event.sender), "User must be our own: %s" % (
                     event.sender,
+                )
+                # if this room uses a policy server, try to get a signature now.
+                # We use verify=False here as we are about to call is_event_allowed on the same event
+                # which will do sig checks.
+                await self._policy_handler.ask_policy_server_to_sign_event(
+                    event, verify=False
                 )
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)

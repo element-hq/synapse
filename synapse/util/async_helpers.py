@@ -47,7 +47,6 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
     overload,
 )
 
@@ -65,7 +64,7 @@ from synapse.logging.context import (
     run_coroutine_in_background,
     run_in_background,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -575,25 +574,20 @@ class Linearizer:
 
     def __init__(
         self,
-        name: Optional[str] = None,
+        *,
+        name: str,
         max_count: int = 1,
-        clock: Optional[Clock] = None,
+        clock: Clock,
     ):
         """
         Args:
+            name: TODO
             max_count: The maximum number of concurrent accesses
+            clock: (ideally, the homeserver clock `hs.get_clock()`)
         """
-        if name is None:
-            self.name: Union[str, int] = id(self)
-        else:
-            self.name = name
-
-        if not clock:
-            from twisted.internet import reactor
-
-            clock = Clock(cast(IReactorTime, reactor))
-        self._clock = clock
+        self.name = name
         self.max_count = max_count
+        self._clock = clock
 
         # key_to_defer is a map from the key to a _LinearizerEntry.
         self.key_to_defer: Dict[Hashable, _LinearizerEntry] = {}

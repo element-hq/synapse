@@ -30,7 +30,7 @@ from synapse.api.errors import RedirectException
 from synapse.module_api import ModuleApi
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 

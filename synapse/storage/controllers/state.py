@@ -77,7 +77,9 @@ class StateStorageController:
 
         # Used by `_get_joined_hosts` to ensure only one thing mutates the cache
         # at a time. Keyed by room_id.
-        self._joined_host_linearizer = Linearizer("_JoinedHostsCache")
+        self._joined_host_linearizer = Linearizer(
+            name="_JoinedHostsCache", clock=self._clock
+        )
 
     def notify_event_un_partial_stated(self, event_id: str) -> None:
         self._partial_state_events_tracker.notify_un_partial_stated(event_id)
@@ -682,6 +684,8 @@ class StateStorageController:
                - the stream id which these results go up to
                - list of current_state_delta_stream rows. If it is empty, we are
                  up to date.
+
+            A maximum of 100 rows will be returned.
         """
         # FIXME(faster_joins): what do we do here?
         #   https://github.com/matrix-org/synapse/issues/13008

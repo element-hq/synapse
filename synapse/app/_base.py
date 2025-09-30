@@ -72,8 +72,7 @@ from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
-from synapse.logging.context import PreserveLoggingContext
-from synapse.logging.opentracing import init_tracer
+from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
@@ -183,25 +182,23 @@ def start_reactor(
         if gc_thresholds:
             gc.set_threshold(*gc_thresholds)
         install_gc_manager()
-        run_command()
 
-    # make sure that we run the reactor with the sentinel log context,
-    # otherwise other PreserveLoggingContext instances will get confused
-    # and complain when they see the logcontext arbitrarily swapping
-    # between the sentinel and `run` logcontexts.
-    #
-    # We also need to drop the logcontext before forking if we're daemonizing,
-    # otherwise the cputime metrics get confused about the per-thread resource usage
-    # appearing to go backwards.
-    with PreserveLoggingContext():
-        if daemonize:
-            assert pid_file is not None
+        # Reset the logging context when we start the reactor (whenever we yield control
+        # to the reactor, the `sentinel` logging context needs to be set so we don't
+        # leak the current logging context and erroneously apply it to the next task the
+        # reactor event loop picks up)
+        with PreserveLoggingContext():
+            run_command()
 
-            if print_pidfile:
-                print(pid_file)
+    if daemonize:
+        assert pid_file is not None
 
-            daemonize_process(pid_file, logger)
-        run()
+        if print_pidfile:
+            print(pid_file)
+
+        daemonize_process(pid_file, logger)
+
+    run()
 
 
 def quit_with_error(error_string: str) -> NoReturn:
@@ -243,7 +240,7 @@ def redirect_stdio_to_logs() -> None:
 
 
 def register_start(
-    cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
+    hs: "HomeServer", cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
 ) -> None:
     """Register a callback with the reactor, to be called once it is running
 
@@ -280,7 +277,8 @@ def register_start(
             # on as normal.
             os._exit(1)
 
-    reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
+    clock = hs.get_clock()
+    clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
 
 
 def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
@@ -519,7 +517,9 @@ async def start(hs: "HomeServer") -> None:
     # numbers of DNS requests don't starve out other users of the threadpool.
     resolver_threadpool = ThreadPool(name="gai_resolver")
     resolver_threadpool.start()
-    reactor.addSystemEventTrigger("during", "shutdown", resolver_threadpool.stop)
+    hs.get_clock().add_system_event_trigger(
+        "during", "shutdown", resolver_threadpool.stop
+    )
     reactor.installNameResolver(
         GAIResolver(reactor, getThreadPool=lambda: resolver_threadpool)
     )
@@ -573,9 +573,6 @@ async def start(hs: "HomeServer") -> None:
     # Load the certificate from disk.
     refresh_certificate(hs)
 
-    # Start the tracer
-    init_tracer(hs)  # noqa
-
     # Instantiate the modules so they can register their web resources to the module API
     # before we start the listeners.
     module_api = hs.get_module_api()
@@ -601,10 +598,12 @@ async def start(hs: "HomeServer") -> None:
     hs.get_datastores().main.db_pool.start_profiling()
     hs.get_pusherpool().start()
 
+    def log_shutdown() -> None:
+        with LoggingContext(name="log_shutdown", server_name=server_name):
+            logger.info("Shutting down...")
+
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger(
-        "before", "shutdown", logger.info, "Shutting down..."
-    )
+    hs.get_clock().add_system_event_trigger("before", "shutdown", log_shutdown)
 
     setup_sentry(hs)
     setup_sdnotify(hs)
@@ -719,7 +718,7 @@ def setup_sdnotify(hs: "HomeServer") -> None:
     # we're not using systemd.
     sdnotify(b"READY=1\nMAINPID=%i" % (os.getpid(),))
 
-    hs.get_reactor().addSystemEventTrigger(
+    hs.get_clock().add_system_event_trigger(
         "before", "shutdown", sdnotify, b"STOPPING=1"
     )
 

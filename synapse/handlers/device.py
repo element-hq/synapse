@@ -1002,7 +1002,7 @@ class DeviceWriterHandler(DeviceHandler):
         # rolling-restarting Synapse.
         if self._is_main_device_list_writer:
             # On start up check if there are any updates pending.
-            hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
+            hs.get_clock().call_when_running(self._handle_new_device_update_async)
             self.device_list_updater = DeviceListUpdater(hs, self)
             hs.get_federation_registry().register_edu_handler(
                 EduTypes.DEVICE_LIST_UPDATE,
@@ -1450,8 +1450,12 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_device_list")
-        self._resync_linearizer = Linearizer(name="remote_device_resync")
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_device_list", clock=self.clock
+        )
+        self._resync_linearizer = Linearizer(
+            name="remote_device_resync", clock=self.clock
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[

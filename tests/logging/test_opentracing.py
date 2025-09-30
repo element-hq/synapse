@@ -35,7 +35,7 @@ from synapse.logging.opentracing import (
     tag_args,
     trace_with_opname,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 try:
     import opentracing
@@ -91,7 +91,7 @@ class TracingScopeTestCase(TestCase):
 
     def test_start_active_span(self) -> None:
         # the scope manager assumes a logging context of some sort.
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
             self.assertIsNone(self._tracer.active_span)
 
             # start_active_span should start and activate a span.
@@ -115,7 +115,7 @@ class TracingScopeTestCase(TestCase):
     def test_nested_spans(self) -> None:
         """Starting two spans off inside each other should work"""
 
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
             with start_active_span("root span", tracer=self._tracer) as root_scope:
                 self.assertEqual(self._tracer.active_span, root_scope.span)
                 root_context = cast(jaeger_client.SpanContext, root_scope.span.context)
@@ -159,7 +159,14 @@ class TracingScopeTestCase(TestCase):
     def test_overlapping_spans(self) -> None:
         """Overlapping spans which are not neatly nested should work"""
         reactor = MemoryReactorClock()
-        clock = Clock(reactor)
+        # type-ignore: mypy-zope doesn't seem to recognise that `MemoryReactorClock`
+        # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
+        # Reactor/Clock interfaces), via inheritance from
+        # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
+        clock = Clock(
+            reactor,  # type: ignore[arg-type]
+            server_name="test_server",
+        )
 
         scopes = []
 
@@ -194,7 +201,7 @@ class TracingScopeTestCase(TestCase):
 
                 self.assertEqual(self._tracer.active_span, root_scope.span)
 
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
             # start the test off
             d1 = defer.ensureDeferred(root())
 
@@ -223,7 +230,14 @@ class TracingScopeTestCase(TestCase):
         parent.
         """
         reactor = MemoryReactorClock()
-        clock = Clock(reactor)
+        # type-ignore: mypy-zope doesn't seem to recognise that `MemoryReactorClock`
+        # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
+        # Reactor/Clock interfaces), via inheritance from
+        # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
+        clock = Clock(
+            reactor,  # type: ignore[arg-type]
+            server_name="test_server",
+        )
 
         scope_map: Dict[str, opentracing.Scope] = {}
 
@@ -302,7 +316,7 @@ class TracingScopeTestCase(TestCase):
             # We shouldn't see any active spans outside of the scope
             self.assertIsNone(self._tracer.active_span)
 
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
             # Start the test off
             d_root = defer.ensureDeferred(root())
 
@@ -345,7 +359,7 @@ class TracingScopeTestCase(TestCase):
         Test whether we can use `@trace_with_opname` (`@trace`) and `@tag_args`
         with sync functions
         """
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
 
             @trace_with_opname("fixture_sync_func", tracer=self._tracer)
             @tag_args
@@ -366,7 +380,7 @@ class TracingScopeTestCase(TestCase):
         Test whether we can use `@trace_with_opname` (`@trace`) and `@tag_args`
         with functions that return deferreds
         """
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
 
             @trace_with_opname("fixture_deferred_func", tracer=self._tracer)
             @tag_args
@@ -390,7 +404,7 @@ class TracingScopeTestCase(TestCase):
         Test whether we can use `@trace_with_opname` (`@trace`) and `@tag_args`
         with async functions
         """
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
 
             @trace_with_opname("fixture_async_func", tracer=self._tracer)
             @tag_args
@@ -412,7 +426,7 @@ class TracingScopeTestCase(TestCase):
         Test whether we can use `@trace_with_opname` (`@trace`) and `@tag_args`
         with functions that return an awaitable (e.g. a coroutine)
         """
-        with LoggingContext("root context"):
+        with LoggingContext(name="root context", server_name="test_server"):
             # Something we can return without `await` to get a coroutine
             async def fixture_async_func() -> str:
                 return "foo"

@@ -146,7 +146,7 @@ def make_pool(
     def _on_new_connection(conn: Connection) -> None:
         # Ensure we have a logging context so we can correctly track queries,
         # etc.
-        with LoggingContext("db.on_new_connection"):
+        with LoggingContext(name="db.on_new_connection", server_name=server_name):
             engine.on_new_connection(
                 LoggingDatabaseConnection(
                     conn=conn,
@@ -1043,7 +1043,9 @@ class DatabasePool:
             assert not self.engine.in_transaction(conn)
 
             with LoggingContext(
-                str(curr_context), parent_context=parent_context
+                name=str(curr_context),
+                server_name=self.server_name,
+                parent_context=parent_context,
             ) as context:
                 with opentracing.start_active_span(
                     operation_name="db.connection",
@@ -2653,12 +2655,19 @@ def make_in_list_sql_clause(
 
 
 # These overloads ensure that `columns` and `iterable` values have the same length.
-# Suppress "Single overload definition, multiple required" complaint.
-@overload  # type: ignore[misc]
+@overload
 def make_tuple_in_list_sql_clause(
     database_engine: BaseDatabaseEngine,
     columns: Tuple[str, str],
     iterable: Collection[Tuple[Any, Any]],
+) -> Tuple[str, list]: ...
+
+
+@overload
+def make_tuple_in_list_sql_clause(
+    database_engine: BaseDatabaseEngine,
+    columns: Tuple[str, str, str],
+    iterable: Collection[Tuple[Any, Any, Any]],
 ) -> Tuple[str, list]: ...
 
 

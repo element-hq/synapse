@@ -22,7 +22,8 @@ from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction, StoreError
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
-from synapse.util import json_encoder, stringutils as stringutils
+from synapse.util import stringutils
+from synapse.util.json import json_encoder
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,21 @@ class DelayedEventsStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction(
             "restart_delayed_event", restart_delayed_event_txn
+        )
+
+    async def get_count_of_delayed_events(self) -> int:
+        """Returns the number of pending delayed events in the DB."""
+
+        def _get_count_of_delayed_events(txn: LoggingTransaction) -> int:
+            sql = "SELECT count(*) FROM delayed_events"
+
+            txn.execute(sql)
+            resp = txn.fetchone()
+            return resp[0] if resp is not None else 0
+
+        return await self.db_pool.runInteraction(
+            "get_count_of_delayed_events",
+            _get_count_of_delayed_events,
         )
 
     async def get_all_delayed_events_for_user(

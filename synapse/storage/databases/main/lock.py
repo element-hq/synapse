@@ -38,7 +38,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.types import ISynapseReactor
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -99,7 +99,7 @@ class LockStore(SQLBaseStore):
         # lead to a race, as we may drop the lock while we are still processing.
         # However, a) it should be a small window, b) the lock is best effort
         # anyway and c) we want to really avoid leaking locks when we restart.
-        hs.get_reactor().addSystemEventTrigger(
+        hs.get_clock().add_system_event_trigger(
             "before",
             "shutdown",
             self._on_shutdown,
