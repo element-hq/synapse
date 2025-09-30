@@ -11,21 +11,24 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 import json
+import logging
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Any, Coroutine, Generator, Optional, TypeVar, Union
+from typing import Any, Coroutine, Generator, TypeVar, Union
 
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.logging.context import LoggingContext, current_context, _Sentinel
+from synapse.logging.context import LoggingContext, _Sentinel, current_context
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
-from synapse.types import JsonDict
 from synapse.util.clock import Clock
+from synapse.util.json import json_decoder
 
 from tests.unittest import HomeserverTestCase
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -143,6 +146,23 @@ class HttpClientTestCase(HomeserverTestCase):
             expected_logcontext_string,
             f"Expected LoggingContext({expected_logcontext_string}) but saw {context}",
         )
+
+    def test_request_response(self) -> None:
+        """
+        Test to make sure we can make a basic request and get the expected
+        response.
+        """
+
+        async def do_request() -> None:
+            resp_body = await self._rust_http_client.get(
+                url=self.server.endpoint,
+                response_limit=1 * 1024 * 1024,
+            )
+            raw_response = json_decoder.decode(resp_body.decode("utf-8"))
+            self.assertEqual(raw_response, {"ok": True})
+
+        self.get_success(self.till_deferred_has_result(do_request()))
+        self.assertEqual(self.server.calls, 1)
 
     def test_logging_context(self) -> None:
         # Sanity check that we start in the sentinel context
