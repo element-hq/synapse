@@ -40,6 +40,38 @@ from tests.unittest import override_config
 from tests.utils import HAS_AUTHLIB
 
 
+class KeyUploadTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        keys.register_servlets,
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+    ]
+
+    def test_upload_keys_fails_on_invalid_structure(self) -> None:
+        """Check that we validate the structure of keys upon upload.
+        
+        Regression test for https://github.com/element-hq/synapse/pull/17097
+        """
+        self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland")
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                # Error: device_keys must be a dict
+                "device_keys": ["some", "stuff", "weewoo"]
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+
 class KeyQueryTestCase(unittest.HomeserverTestCase):
     servlets = [
         keys.register_servlets,
