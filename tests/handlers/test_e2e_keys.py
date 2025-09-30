@@ -410,7 +410,6 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         device_id = "xyz"
         fallback_key = {"alg1:k1": "fallback_key1"}
         fallback_key2 = {"alg1:k2": "fallback_key2"}
-        fallback_key3 = {"alg1:k2": "fallback_key3"}
         otk = {"alg1:k2": "key2"}
 
         # we shouldn't have any unused fallback keys yet
@@ -529,28 +528,6 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             claim_res,
             {"failures": {}, "one_time_keys": {local_user: {device_id: fallback_key2}}},
-        )
-
-        # using the unstable prefix should also set the fallback key
-        self.get_success(
-            self.handler.upload_keys_for_user(
-                local_user,
-                device_id,
-                {"org.matrix.msc2732.fallback_keys": fallback_key3},
-            )
-        )
-
-        claim_res = self.get_success(
-            self.handler.claim_one_time_keys(
-                {local_user: {device_id: {"alg1": 1}}},
-                self.requester,
-                timeout=None,
-                always_include_fallback_keys=False,
-            )
-        )
-        self.assertEqual(
-            claim_res,
-            {"failures": {}, "one_time_keys": {local_user: {device_id: fallback_key3}}},
         )
 
     def test_fallback_key_bulk(self) -> None:
