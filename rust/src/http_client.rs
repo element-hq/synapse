@@ -19,6 +19,7 @@ use futures::TryStreamExt;
 use once_cell::sync::OnceCell;
 use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use reqwest::RequestBuilder;
+use std::sync::OnceLock;
 use tokio::runtime::Runtime;
 
 use crate::errors::HttpResponseException;
@@ -218,29 +219,32 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
-        create_deferred(py, self.reactor.bind(py), async move {
-            let response = builder.send().await.context("sending request")?;
+        Ok(make_deferred_yieldable(
+            py,
+            &create_deferred(py, self.reactor.bind(py), async move {
+                let response = builder.send().await.context("sending request")?;
 
-            let status = response.status();
+                let status = response.status();
 
-            let mut stream = response.bytes_stream();
-            let mut buffer = Vec::new();
-            while let Some(chunk) = stream.try_next().await.context("reading body")? {
-                if buffer.len() + chunk.len() > response_limit {
-                    Err(anyhow::anyhow!("Response size too large"))?;
+                let mut stream = response.bytes_stream();
+                let mut buffer = Vec::new();
+                while let Some(chunk) = stream.try_next().await.context("reading body")? {
+                    if buffer.len() + chunk.len() > response_limit {
+                        Err(anyhow::anyhow!("Response size too large"))?;
+                    }
+
+                    buffer.extend_from_slice(&chunk);
                 }
 
-                buffer.extend_from_slice(&chunk);
-            }
+                if !status.is_success() {
+                    return Err(HttpResponseException::new(status, buffer));
+                }
 
-            if !status.is_success() {
-                return Err(HttpResponseException::new(status, buffer));
-            }
+                let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
 
-            let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
-
-            Ok(r)
-        })
+                Ok(r)
+            })?,
+        ))
     }
 }
 
@@ -300,4 +304,24 @@ where
     });
 
     Ok(deferred)
+}
+
+static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
+
+/// Given a deferred, make it follow the Synapse logcontext rules
+fn make_deferred_yieldable<'py>(
+    py: Python<'py>,
+    deferred: &Bound<'py, PyAny>,
+) -> Bound<'py, PyAny> {
+    let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
+        let sys = PyModule::import(py, "synapse.logging.context").unwrap();
+        let func = sys.getattr("make_deferred_yieldable").unwrap().unbind();
+        func
+    });
+
+    make_deferred_yieldable
+        .call1(py, (deferred,))
+        .unwrap()
+        .extract(py)
+        .unwrap()
 }
