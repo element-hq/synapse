@@ -55,9 +55,9 @@ class JsonResourceTests(unittest.TestCase):
         reactor, clock = get_clock()
         self.reactor = reactor
         self.homeserver = setup_test_homeserver(
-            self.addCleanup,
-            clock=clock,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
+            clock=clock,
         )
 
     def test_handler_for_request(self) -> None:
@@ -217,9 +217,9 @@ class OptionsResourceTests(unittest.TestCase):
         reactor, clock = get_clock()
         self.reactor = reactor
         self.homeserver = setup_test_homeserver(
-            self.addCleanup,
-            clock=clock,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
+            clock=clock,
         )
 
         class DummyResource(Resource):
