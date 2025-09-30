@@ -165,6 +165,10 @@ class HttpClientTestCase(HomeserverTestCase):
         self.assertEqual(self.server.calls, 1)
 
     def test_logging_context(self) -> None:
+        """
+        Test to make sure the `LoggingContext` (logcontext) is handled correctly
+        when making requests.
+        """
         # Sanity check that we start in the sentinel context
         self._check_current_logcontext("sentinel")
 
