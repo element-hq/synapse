@@ -40,7 +40,7 @@ from synapse.logging.opentracing import (
     start_active_span,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.synapse_rust_wrapper.http_client import HttpClient
+from synapse.synapse_rust.http_client import HttpClient
 from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
