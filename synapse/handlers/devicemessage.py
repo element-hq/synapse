@@ -21,10 +21,17 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from synapse.api.constants import EduTypes, EventContentFields, ToDeviceEventTypes
-from synapse.api.errors import Codes, SynapseError
+from canonicaljson import encode_canonical_json
+
+from synapse.api.constants import (
+    MAX_EDU_SIZE,
+    EduTypes,
+    EventContentFields,
+    ToDeviceEventTypes,
+)
+from synapse.api.errors import Codes, EventSizeError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.logging.context import run_in_background
 from synapse.logging.opentracing import (
@@ -281,18 +288,18 @@ class DeviceMessageHandler:
 
         remote_edu_contents = {}
         for destination, messages in remote_messages.items():
-            # The EDU contains a "message_id" property which is used for
-            # idempotence. Make up a random one.
-            message_id = random_string(16)
-            log_kv({"destination": destination, "message_id": message_id})
-
-            remote_edu_contents[destination] = {
-                "messages": messages,
-                "sender": sender_user_id,
-                "type": message_type,
-                "message_id": message_id,
-                "org.matrix.opentracing_context": json_encoder.encode(context),
-            }
+            edu_contents = get_device_message_edu_contents(
+                sender_user_id, message_type, messages, context
+            )
+            remote_edu_contents[destination] = edu_contents
+            log_kv(
+                {
+                    "destination": destination,
+                    "message_ids": [
+                        edu_content["message_id"] for edu_content in edu_contents
+                    ],
+                }
+            )
 
         # Add messages to the database.
         # Retrieve the stream id of the last-processed to-device message.
@@ -397,3 +404,121 @@ class DeviceMessageHandler:
             "events": messages,
             "next_batch": f"d{stream_id}",
         }
+
+
+def get_device_message_edu_contents(
+    sender_user_id: str,
+    message_type: str,
+    messages: Dict[str, Dict[str, JsonDict]],
+    context: Dict[str, Any],
+) -> List[JsonDict]:
+    """
+    This function takes a dictionary of to-device messages and splits them into several
+    EDUs by recipient if necessary as the overall request can overrun the
+    `max_request_body_size` and prevent outbound federation traffic because of the size
+    of the transaction (cf. MAX_EDU_SIZE).
+
+    Args:
+        sender_user_id: The user that is sending the to-device messages.
+        message_type: The type of to-device messages that are being sent.
+        messages: A dictionary containing recipients mapped to messages intended for them.
+        context: The span context for opentracing
+
+    Returns:
+        A list of dictionary containing the EDUs of to-device messages
+        Raises an EventSizeError if a single to-device message is too large
+        to fit into an EDU.
+    """
+
+    first_message_id = random_string(16)
+    BASE_EDU_CONTENT = {
+        "messages": {},
+        "sender": sender_user_id,
+        "type": message_type,
+        "message_id": first_message_id,
+    }
+    # This is the size of the full EDU without any messages and without the
+    # opentracing context as this is not sent as part of the transaction
+    BASE_EDU_SIZE = len(
+        encode_canonical_json(
+            {
+                "edu_type": "m.direct_to_device",
+                "content": BASE_EDU_CONTENT,
+            }
+        )
+    )
+    BASE_EDU_CONTENT["org.matrix.opentracing_context"] = json_encoder.encode(context)
+
+    edu_contents = []
+
+    current_edu_content: JsonDict = create_new_to_device_edu_content(
+        sender_user_id,
+        message_type,
+        context,
+        first_message_id,
+    )
+    current_edu_size = BASE_EDU_SIZE
+
+    for recipient, message in messages.items():
+        # As curly braces is already taken into account in BASE_EDU_CONTENT["messages"]
+        # we remove 2 for those and add 1 for the comma per message
+        message_entry_size = len(encode_canonical_json({recipient: message})) - 2 + 1
+
+        if BASE_EDU_SIZE + message_entry_size > MAX_EDU_SIZE:
+            raise EventSizeError(
+                f"device message to {recipient} too large to fit in a single EDU",
+                unpersistable=True,
+            )
+
+        if len(current_edu_content["messages"]) > 0:
+            message_entry_size += 1  # Add 1 for the comma
+
+        if current_edu_size + message_entry_size > MAX_EDU_SIZE:
+            edu_contents.append(current_edu_content)
+            logger.debug(
+                "Splitting %d to-device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
+                len(current_edu_content["messages"]),
+                sender_user_id,
+                current_edu_content["message_id"],
+                len(edu_contents),
+            )
+
+            current_edu_content = create_new_to_device_edu_content(
+                sender_user_id, message_type, context
+            )
+
+            current_edu_size = BASE_EDU_SIZE
+
+        current_edu_content["messages"][recipient] = message
+        current_edu_size += message_entry_size
+
+    if len(current_edu_content["messages"]) > 0:
+        edu_contents.append(current_edu_content)
+        logger.debug(
+            "Splitting remaining %d device messages from %s into EDU (message_id=%s), (total EDUs so far: %d)",
+            len(current_edu_content["messages"]),
+            sender_user_id,
+            current_edu_content["message_id"],
+            len(edu_contents),
+        )
+
+    return edu_contents
+
+
+def create_new_to_device_edu_content(
+    sender_user_id: str,
+    message_type: str,
+    context: Dict[str, Any],
+    message_id: str = random_string(16),
+) -> JsonDict:
+    """
+    Create a new `m.direct_to_device` EDU `content` object with a unique message ID.
+    """
+    content = {
+        "messages": {},
+        "sender": sender_user_id,
+        "type": message_type,
+        "message_id": message_id,
+        "org.matrix.opentracing_context": json_encoder.encode(context),
+    }
+    return content
