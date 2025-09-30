@@ -1,0 +1,1 @@
+Remove internal `ReplicationUploadKeysForUserRestServlet` as a follow-up to the work in https://github.com/element-hq/synapse/pull/18581 that moved device changes off the main process.
