@@ -20,7 +20,13 @@ from typing import Any, Coroutine, Generator, TypeVar, Union
 from twisted.internet.defer import Deferred, ensureDeferred
 from twisted.internet.testing import MemoryReactor
 
-from synapse.logging.context import LoggingContext, _Sentinel, current_context
+from synapse.logging.context import (
+    LoggingContext,
+    _Sentinel,
+    current_context,
+    run_in_background,
+    PreserveLoggingContext,
+)
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
 from synapse.util.clock import Clock
@@ -165,7 +171,7 @@ class HttpClientTestCase(HomeserverTestCase):
         self.get_success(self.till_deferred_has_result(do_request()))
         self.assertEqual(self.server.calls, 1)
 
-    def test_logging_context(self) -> None:
+    async def test_logging_context(self) -> None:
         """
         Test to make sure the `LoggingContext` (logcontext) is handled correctly
         when making requests.
@@ -173,26 +179,53 @@ class HttpClientTestCase(HomeserverTestCase):
         # Sanity check that we start in the sentinel context
         self._check_current_logcontext("sentinel")
 
+        callback_finished = False
+
         async def do_request() -> None:
-            # Should have the same logcontext as the caller
-            self._check_current_logcontext("foo")
+            nonlocal callback_finished
+            try:
+                # Should have the same logcontext as the caller
+                self._check_current_logcontext("foo")
 
-            with LoggingContext(name="competing", server_name="test_server"):
-                logger.info("asdf1")
-                # Make the actual request
-                await self._rust_http_client.get(
-                    url=self.server.endpoint,
-                    response_limit=1 * 1024 * 1024,
-                )
-                logger.info("asdf2")
-                self._check_current_logcontext("competing")
+                with LoggingContext(name="competing", server_name="test_server"):
+                    logger.info("asdf3")
+                    # with PreserveLoggingContext():
+                    # Make the actual request
+                    await self._rust_http_client.get(
+                        url=self.server.endpoint,
+                        response_limit=1 * 1024 * 1024,
+                    )
+                    logger.info("asdf4")
+                    self._check_current_logcontext("competing")
 
-            # Back to the caller's context outside of the `LoggingContext` block
-            self._check_current_logcontext("foo")
+                # Back to the caller's context outside of the `LoggingContext` block
+                self._check_current_logcontext("foo")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
 
+        logger.info("asdf1")
         with LoggingContext(name="foo", server_name="test_server"):
-            self.get_success(self.till_deferred_has_result(do_request()))
+            # Fire off the function, but don't wait on it.
+            run_in_background(do_request)
+            logger.info("asdf2")
+
+            # Now wait for the function under test to have run
+            with PreserveLoggingContext():
+                while not callback_finished:
+                    # await self.hs.get_clock().sleep(0)
+                    time.sleep(0.1)
+                    self.reactor.advance(0)
+
+            logger.info("asdf5")
+            # check that the logcontext is left in a sane state.
             self._check_current_logcontext("foo")
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
 
         # Back to the sentinel context
         self._check_current_logcontext("sentinel")
