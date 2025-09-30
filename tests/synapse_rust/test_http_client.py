@@ -19,7 +19,7 @@ from twisted.internet.testing import MemoryReactor
 from synapse.logging.context import LoggingContext
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 
@@ -77,7 +77,7 @@ class HttpClientTestCase(HomeserverTestCase):
 
     def test_logging_context(self) -> None:
         async def asdf() -> None:
-            with LoggingContext("test"):
+            with LoggingContext(name="test", server_name="test_server"):
                 # TODO: Test logging context before/after this call
                 await self._rust_http_client.get(
                     url="http://localhost",
