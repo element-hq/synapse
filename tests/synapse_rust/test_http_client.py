@@ -86,7 +86,8 @@ class HttpClientTestCase(HomeserverTestCase):
 
         # XXX: We must create the Rust HTTP client before we call `reactor.run()` below.
         # Twisted's `MemoryReactor` doesn't invoke `callWhenRunning` callbacks if it's
-        # already running and we rely on that to start the Tokio thread pool in Rust.
+        # already running and we rely on that to start the Tokio thread pool in Rust. In
+        # the future, this may not matter, see https://github.com/twisted/twisted/pull/12514
         self._http_client = hs.get_proxied_http_client()
         self._rust_http_client = HttpClient(
             reactor=hs.get_reactor(),
