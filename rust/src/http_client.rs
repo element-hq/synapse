@@ -219,6 +219,8 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
+        // We use `make_deferred_yieldable` to make the returned deferred follow Synapse
+        // logcontext rules.
         Ok(make_deferred_yieldable(
             py,
             &create_deferred(py, self.reactor.bind(py), async move {
