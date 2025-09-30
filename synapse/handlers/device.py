@@ -122,6 +122,7 @@ class DeviceHandler:
     store: "GenericWorkerStore"
 
     def __init__(self, hs: "HomeServer"):
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
