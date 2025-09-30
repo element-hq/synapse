@@ -19,7 +19,7 @@
 #
 #
 import json
-from typing import TYPE_CHECKING, Dict, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
 
 from canonicaljson import encode_canonical_json
 
@@ -462,20 +462,18 @@ class ProfileWorkerStore(SQLBaseStore):
             self._check_profile_size(txn, user_id, field_name, new_value)
 
             if isinstance(self.database_engine, PostgresEngine):
+                # The type differs between psycopg2 and psycopg, but gets used
+                # identically.
+                Json: Any
                 if isinstance(self.database_engine, Psycopg2Engine):
                     from psycopg2.extras import Json
                 elif isinstance(self.database_engine, PsycopgEngine):
-                    # mypy tells me:
-                    #  error: Incompatible import of "Json" (imported name has type
-                    #  "type[psycopg.types.json.Json]", local name has type
-                    #  "type[psycopg2._json.Json]")  [assignment]
-                    # and since both of the psycopg-related modules are optional
-                    # dependencies, just tell mypy to ignore it for now.
-                    from psycopg.types.json import Json  # type: ignore[assignment]
+                    from psycopg.types.json import Json
                 else:
-                    msg = "Unknown Database Engine Type"
-                    # I do not know an appropriate Exception to raise here
-                    raise ValueError(msg)
+                    # This should never happen.
+                    raise ValueError(
+                        f"Invalid database engine type: {self.database_engine.__class__.__name__}"
+                    )
 
                 # Note that the || jsonb operator is not recursive, any duplicate
                 # keys will be taken from the second value.
