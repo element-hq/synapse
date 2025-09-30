@@ -22,10 +22,10 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.logging.context import (
     LoggingContext,
+    PreserveLoggingContext,
     _Sentinel,
     current_context,
     run_in_background,
-    PreserveLoggingContext,
 )
 from synapse.server import HomeServer
 from synapse.synapse_rust.http_client import HttpClient
