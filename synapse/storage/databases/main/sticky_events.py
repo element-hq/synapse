@@ -295,6 +295,9 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             # We shouldn't be passed rejected events, but if we do, we filter them out too.
             if ev.rejected_reason is not None:
                 continue
+            # We can't persist outlier sticky events as we don't know the room state at that event
+            if ev.internal_metadata.is_outlier():
+                continue
             # MSC: The presence of sticky.duration_ms with a valid value makes the event “sticky”
             sticky_duration = ev.sticky_duration()
             if sticky_duration:
