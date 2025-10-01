@@ -66,7 +66,6 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable, run_in_background
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.state import CREATE_KEY, POWER_KEY
@@ -1225,6 +1224,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
         self.server_name = hs.hostname
+        self.hs = hs
         self.event_creation_handler = hs.get_event_creation_handler()
         self.auth = hs.get_auth()
         self._store = hs.get_datastores().main
@@ -1307,9 +1307,8 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                 )
 
                 if with_relations:
-                    run_as_background_process(
+                    self.hs.run_as_background_process(
                         "redact_related_events",
-                        self.server_name,
                         self._relation_handler.redact_events_related_to,
                         requester=requester,
                         event_id=event_id,

@@ -19,7 +19,17 @@
 #
 #
 
-from typing import Dict, Iterable, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    TypeVar,
+)
 from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
@@ -36,6 +46,7 @@ from synapse.appservice import (
     TransactionUnusedFallbackKeys,
 )
 from synapse.handlers.appservice import ApplicationServicesHandler
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client import login, receipts, register, room, sendtodevice
 from synapse.server import HomeServer
 from synapse.types import (
@@ -53,6 +64,11 @@ from tests.server import get_clock
 from tests.test_utils import event_injection
 from tests.unittest import override_config
 
+if TYPE_CHECKING:
+    from typing_extensions import LiteralString
+
+R = TypeVar("R")
+
 
 class AppServiceHandlerTestCase(unittest.TestCase):
     """Tests the ApplicationServicesHandler."""
@@ -64,6 +80,17 @@ class AppServiceHandlerTestCase(unittest.TestCase):
         self.reactor, self.clock = get_clock()
 
         hs = Mock()
+
+        def test_run_as_background_process(
+            desc: "LiteralString",
+            func: Callable[..., Awaitable[Optional[R]]],
+            *args: Any,
+            **kwargs: Any,
+        ) -> "defer.Deferred[Optional[R]]":
+            # Ignore linter error as this is used only for testing purposes (i.e. outside of Synapse).
+            return run_as_background_process(desc, "test_server", func, *args, **kwargs)  # type: ignore[untracked-background-process]
+
+        hs.run_as_background_process = test_run_as_background_process
         hs.get_datastores.return_value = Mock(main=self.mock_store)
         self.mock_store.get_appservice_last_pos = AsyncMock(return_value=None)
         self.mock_store.set_appservice_last_pos = AsyncMock(return_value=None)
