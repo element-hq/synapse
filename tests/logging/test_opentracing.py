@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Awaitable, Dict, cast
+from typing import Awaitable, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
