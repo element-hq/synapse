@@ -22,7 +22,8 @@
 import datetime
 import importlib.resources as importlib_resources
 import os
-from typing import Any, Dict, List, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -1312,3 +1313,91 @@ class RegistrationTokenValidityRestServletTestCase(unittest.HomeserverTestCase):
             f"{self.url}?token={token}",
         )
         self.assertEqual(channel.code, 200, msg=channel.result)
+
+
+class EmailRegisterRestServletTestCase(unittest.HomeserverTestCase):
+    servlets = [register.register_servlets]
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        hs = super().make_homeserver(reactor, clock)
+
+        async def send_email(
+            email_address: str,
+            subject: str,
+            app_name: str,
+            html: str,
+            text: str,
+            additional_headers: Optional[Dict[str, str]] = None,
+        ) -> None:
+            self.email_attempts.append(text)
+
+        self.email_attempts: List[str] = []
+        hs.get_send_email_handler().send_email = send_email  # type: ignore[method-assign]
+        return hs
+
+    @unittest.override_config(
+        {
+            "public_baseurl": "https://test_server",
+            "registrations_require_3pid": ["email"],
+            "disable_msisdn_registration": True,
+            "email": {
+                "smtp_host": "mail_server",
+                "smtp_port": 2525,
+                "notif_from": "sender@host",
+            },
+        }
+    )
+    def test_email_3pid_registration_race(self) -> None:
+        channel = self.make_request("POST", b"register", {"password": "password"})
+        session = channel.json_body["session"]
+
+        # request a token to be sent by email for validation
+        channel = self.make_request(
+            "POST",
+            b"register/email/requestToken",
+            {
+                "client_secret": "client_secret",
+                "email": "email@email",
+                "send_attempt": 1,
+            },
+        )
+        sid = channel.json_body["sid"]
+
+        email_text = self.email_attempts[0]
+        match = re.search("https://test_server(.*)", email_text)
+        assert match is not None
+        validation_url = match.group(1)
+
+        # "Click" the link in the email to validate the adress
+        self.make_request("GET", validation_url.encode("utf-8"))
+
+        # launch 2 simultaneous register request, only one account
+        # should be created after that.
+        register_content = {
+            "auth": {
+                "session": session,
+                "threepid_creds": {
+                    "client_secret": "client_secret",
+                    "sid": sid,
+                },
+                "type": "m.login.email.identity",
+            },
+            "password": "password",
+        }
+        register1_channel = self.make_request(
+            "POST", b"register", register_content, await_result=False
+        )
+        register2_channel = self.make_request(
+            "POST", b"register", register_content, await_result=False
+        )
+        while (
+            not register1_channel.is_finished() or not register2_channel.is_finished()
+        ):
+            self.pump()
+
+        self.assertEqual(
+            register1_channel.json_body["user_id"],
+            register2_channel.json_body["user_id"],
+        )

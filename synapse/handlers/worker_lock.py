@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
     from synapse.server import HomeServer
 
+logger = logging.getLogger(__name__)
+
 
 logger = logging.getLogger(__name__)
 
@@ -254,8 +256,13 @@ class WaitingLock:
                             timeout=timeout,
                             clock=self.clock,
                         )
+                        # Let's reset retry interval since we got notified, we
+                        # should only increase it if we hit the previous one
+                        self._retry_interval = 0.1
                 except Exception:
                     pass
+
+        logger.warn(f"lock taken: {self.lock_name}, {self.lock_key}")
 
         return await self._inner_lock.__aenter__()
 
@@ -271,6 +278,7 @@ class WaitingLock:
 
         try:
             r = await self._inner_lock.__aexit__(exc_type, exc, tb)
+            logger.warn(f"lock released: {self.lock_name}, {self.lock_key}")
         finally:
             self._lock_span.__exit__(exc_type, exc, tb)
 
