@@ -218,34 +218,29 @@ impl HttpClient {
         builder: RequestBuilder,
         response_limit: usize,
     ) -> PyResult<Bound<'a, PyAny>> {
-        // We use `make_deferred_yieldable` to make the returned deferred follow Synapse
-        // logcontext rules.
-        Ok(make_deferred_yieldable(
-            py,
-            &create_deferred(py, self.reactor.bind(py), async move {
-                let response = builder.send().await.context("sending request")?;
+        create_deferred(py, self.reactor.bind(py), async move {
+            let response = builder.send().await.context("sending request")?;
 
-                let status = response.status();
+            let status = response.status();
 
-                let mut stream = response.bytes_stream();
-                let mut buffer = Vec::new();
-                while let Some(chunk) = stream.try_next().await.context("reading body")? {
-                    if buffer.len() + chunk.len() > response_limit {
-                        Err(anyhow::anyhow!("Response size too large"))?;
-                    }
-
-                    buffer.extend_from_slice(&chunk);
+            let mut stream = response.bytes_stream();
+            let mut buffer = Vec::new();
+            while let Some(chunk) = stream.try_next().await.context("reading body")? {
+                if buffer.len() + chunk.len() > response_limit {
+                    Err(anyhow::anyhow!("Response size too large"))?;
                 }
 
-                if !status.is_success() {
-                    return Err(HttpResponseException::new(status, buffer));
-                }
+                buffer.extend_from_slice(&chunk);
+            }
 
-                let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
+            if !status.is_success() {
+                return Err(HttpResponseException::new(status, buffer));
+            }
 
-                Ok(r)
-            })?,
-        ))
+            let r = Python::with_gil(|py| buffer.into_pyobject(py).map(|o| o.unbind()))?;
+
+            Ok(r)
+        })
     }
 }
 
@@ -304,7 +299,8 @@ where
         });
     });
 
-    Ok(deferred)
+    // Make the deferred follow the Synapse logcontext rules
+    make_deferred_yieldable(py, &deferred)
 }
 
 static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
