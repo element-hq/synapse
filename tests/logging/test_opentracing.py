@@ -163,7 +163,9 @@ class TracingScopeTestCase(TestCase):
         # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
         # Reactor/Clock interfaces), via inheritance from
         # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
-        clock = Clock(
+        # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
+        # for testing purposes.
+        clock = Clock(  # type: ignore[multiple-internal-clocks]
             reactor,  # type: ignore[arg-type]
             server_name="test_server",
         )
@@ -234,7 +236,9 @@ class TracingScopeTestCase(TestCase):
         # implements `ISynapseThreadlessReactor` (combination of the normal Twisted
         # Reactor/Clock interfaces), via inheritance from
         # `twisted.internet.testing.MemoryReactor` and `twisted.internet.testing.Clock`
-        clock = Clock(
+        # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
+        # for testing purposes.
+        clock = Clock(  # type: ignore[multiple-internal-clocks]
             reactor,  # type: ignore[arg-type]
             server_name="test_server",
         )

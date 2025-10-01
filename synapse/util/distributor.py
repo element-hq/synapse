@@ -20,6 +20,7 @@
 #
 import logging
 from typing import (
+    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -36,9 +37,12 @@ from typing_extensions import ParamSpec
 from twisted.internet import defer
 
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import UserID
 from synapse.util.async_helpers import maybe_awaitable
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,13 +62,13 @@ class Distributor:
       model will do for today.
     """
 
-    def __init__(self, server_name: str) -> None:
+    def __init__(self, hs: "HomeServer") -> None:
         """
         Args:
             server_name: The homeserver name of the server (used to label metrics)
                 (this should be `hs.hostname`).
         """
-        self.server_name = server_name
+        self.hs = hs
         self.signals: Dict[str, Signal] = {}
         self.pre_registration: Dict[str, List[Callable]] = {}
 
@@ -97,8 +101,8 @@ class Distributor:
         if name not in self.signals:
             raise KeyError("%r does not have a signal named %s" % (self, name))
 
-        run_as_background_process(
-            name, self.server_name, self.signals[name].fire, *args, **kwargs
+        self.hs.run_as_background_process(
+            name, self.signals[name].fire, *args, **kwargs
         )
 
 

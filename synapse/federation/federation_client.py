@@ -148,6 +148,7 @@ class FederationClient(FederationBase):
         self._get_pdu_cache: ExpiringCache[str, Tuple[EventBase, str]] = ExpiringCache(
             cache_name="get_pdu_cache",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self._clock,
             max_len=1000,
             expiry_ms=120 * 1000,
@@ -167,6 +168,7 @@ class FederationClient(FederationBase):
         ] = ExpiringCache(
             cache_name="get_room_hierarchy_cache",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self._clock,
             max_len=1000,
             expiry_ms=5 * 60 * 1000,

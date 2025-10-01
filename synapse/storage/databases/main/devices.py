@@ -195,7 +195,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
 
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self._prune_old_outbound_device_pokes, 60 * 60 * 1000
             )
 
@@ -1390,7 +1390,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     table="device_lists_remote_resync",
                     keyvalues={"user_id": user_id},
                     values={},
-                    insertion_values={"added_ts": self._clock.time_msec()},
+                    insertion_values={"added_ts": self.clock.time_msec()},
                 )
 
         await self.db_pool.runInteraction(
@@ -1601,7 +1601,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         that user when the destination comes back. It doesn't matter which device
         we keep.
         """
-        yesterday = self._clock.time_msec() - prune_age
+        yesterday = self.clock.time_msec() - prune_age
 
         def _prune_txn(txn: LoggingTransaction) -> None:
             # look for (user, destination) pairs which have an update older than
@@ -2086,7 +2086,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     stream_id,
                 )
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
 
         encoded_context = json_encoder.encode(context)
         mark_sent = not self.hs.is_mine_id(user_id)
