@@ -43,10 +43,10 @@ from synapse.api.errors import (
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
-    parse_and_validate_json_object_from_request,
     parse_integer,
     parse_json_object_from_request,
     parse_string,
+    validate_json_object,
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag
@@ -228,9 +228,16 @@ class KeyUploadServlet(RestServlet):
     ) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
-        body = parse_and_validate_json_object_from_request(
-            request, self.KeyUploadRequestBody
-        )
+
+        # Parse the request body. Validate separately, as the handler expects a
+        # plain dict, rather than any parsed object.
+        #
+        # Note: It would be nice to work with a parsed object, but the handler
+        # needs to encode portions of the request body as canonical JSON before
+        # storing the result in the DB. There's little point in converted to a
+        # parsed object and then back to a dict.
+        body = parse_json_object_from_request(request)
+        validate_json_object(body, self.KeyUploadRequestBody)
 
         if device_id is not None:
             # Providing the device_id should only be done for setting keys
@@ -263,69 +270,30 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        # Map the pydantic model to a plain old dict, which the handler expects.
-        keys = {}
-        if body.device_keys is not None:
-            # Validate the `user_id` and `device_id` fields in each device key
-            # match that of the requester.
-            if body.device_keys.user_id != user_id:
-                raise SynapseError(
-                    code=HTTPStatus.BAD_REQUEST,
-                    errcode=Codes.BAD_JSON,
-                    msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
-                )
-            if body.device_keys.device_id != device_id:
-                raise SynapseError(
-                    code=HTTPStatus.BAD_REQUEST,
-                    errcode=Codes.BAD_JSON,
-                    msg="Provided `device_id` in `device_keys` does not match that of the authenticated user device",
-                )
-
-            keys["device_keys"] = {
-                "user_id": body.device_keys.user_id,
-                "device_id": body.device_keys.device_id,
-                "algorithms": body.device_keys.algorithms,
-                "keys": body.device_keys.keys,
-                "signatures": body.device_keys.signatures,
-            }
-        if body.fallback_keys is not None:
-            keys["fallback_keys"] = {}
-            for (
-                algorithm_and_device_id,
-                key_base64_or_obj,
-            ) in body.fallback_keys.items():
-                if isinstance(key_base64_or_obj, self.KeyUploadRequestBody.KeyObject):
-                    # The fallback key is represented as an object.
-                    keys["fallback_keys"][algorithm_and_device_id] = {
-                        "key": key_base64_or_obj.key,
-                        # Only include this property on fallback keys.
-                        "fallback": key_base64_or_obj.fallback,
-                        "signatures": key_base64_or_obj.signatures,
-                    }
-                else:
-                    # The fallback key is represented as a base64-encoded string.
-                    keys["fallback_keys"][algorithm_and_device_id] = key_base64_or_obj
-
-        if body.one_time_keys is not None:
-            keys["one_time_keys"] = {}
-            for (
-                algorithm_and_device_id,
-                key_base64_or_obj,
-            ) in body.one_time_keys.items():
-                if isinstance(key_base64_or_obj, self.KeyUploadRequestBody.KeyObject):
-                    # This one-time key is represented as an object.
-                    keys["one_time_keys"][algorithm_and_device_id] = {
-                        "key": key_base64_or_obj.key,
-                        "signatures": key_base64_or_obj.signatures,
-                    }
-                else:
-                    # This one-time key is represented as a base64-encoded string.
-                    keys["one_time_keys"][algorithm_and_device_id] = key_base64_or_obj
+        # Validate the provided `user_id` and `device_id` fields in
+        # `device_keys` match that of the requesting user. We can't do
+        # this directly in the pydantic model as we don't have access
+        # to the requester yet.
+        #
+        # TODO: We could use ValidationInfo when we switch to Pydantic v2.
+        # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
+        if body["device_keys"]["user_id"] != user_id:
+            raise SynapseError(
+                code=HTTPStatus.BAD_REQUEST,
+                errcode=Codes.BAD_JSON,
+                msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
+            )
+        if body["device_keys"]["device_id"] != device_id:
+            raise SynapseError(
+                code=HTTPStatus.BAD_REQUEST,
+                errcode=Codes.BAD_JSON,
+                msg="Provided `device_id` in `device_keys` does not match that of the authenticated user device",
+            )
 
         result = await self.e2e_keys_handler.upload_keys_for_user(
             user_id=user_id,
             device_id=device_id,
-            keys=keys,
+            keys=body,
         )
 
         return 200, result
