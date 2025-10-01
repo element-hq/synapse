@@ -36,7 +36,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func
 
 if TYPE_CHECKING:
@@ -72,6 +72,12 @@ class TransactionManager:
         # HACK to get unique tx id
         self._next_txn_id = int(self.clock.time_msec())
 
+        self._is_shutdown = False
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        self._transport_layer.shutdown()
+
     @measure_func("_send_new_transaction")
     async def send_new_transaction(
         self,
@@ -85,6 +91,12 @@ class TransactionManager:
             pdus: In-order list of PDUs to send
             edus: List of EDUs to send
         """
+
+        if self._is_shutdown:
+            logger.warning(
+                "TransactionManager has been shutdown, not sending transaction"
+            )
+            return
 
         # Make a transaction-sending opentracing span. This span follows on from
         # all the edus in that transaction. This needs to be done since there is

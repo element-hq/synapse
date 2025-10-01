@@ -28,7 +28,6 @@ import yaml
 from twisted.internet import defer, reactor as reactor_
 
 from synapse.config.homeserver import HomeServerConfig
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
@@ -53,7 +52,6 @@ class MockHomeserver(HomeServer):
 
 
 def run_background_updates(hs: HomeServer) -> None:
-    server_name = hs.hostname
     main = hs.get_datastores().main
     state = hs.get_datastores().state
 
@@ -67,14 +65,13 @@ def run_background_updates(hs: HomeServer) -> None:
     def run() -> None:
         # Apply all background updates on the database.
         defer.ensureDeferred(
-            run_as_background_process(
+            hs.run_as_background_process(
                 "background_updates",
-                server_name,
                 run_background_updates,
             )
         )
 
-    reactor.callWhenRunning(run)
+    hs.get_clock().call_when_running(run)
 
     reactor.run()
 

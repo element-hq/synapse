@@ -59,11 +59,11 @@ from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.signatures import SignatureWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict, StrCollection
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -167,6 +167,7 @@ class EventFederationWorkerStore(
         # Cache of event ID to list of auth event IDs and their depths.
         self._event_auth_cache: LruCache[str, List[Tuple[str, int]]] = LruCache(
             max_size=500000,
+            clock=self.hs.get_clock(),
             server_name=self.server_name,
             cache_name="_event_auth_cache",
             size_callback=len,
@@ -176,7 +177,7 @@ class EventFederationWorkerStore(
         # index.
         self.tests_allow_no_chain_cover_index = True
 
-        self._clock.looping_call(self._get_stats_for_federation_staging, 30 * 1000)
+        self.clock.looping_call(self._get_stats_for_federation_staging, 30 * 1000)
 
         if isinstance(self.database_engine, PostgresEngine):
             self.db_pool.updates.register_background_validate_constraint_and_delete_rows(
@@ -1328,7 +1329,7 @@ class EventFederationWorkerStore(
                 (
                     room_id,
                     current_depth,
-                    self._clock.time_msec(),
+                    self.clock.time_msec(),
                     BACKFILL_EVENT_EXPONENTIAL_BACKOFF_MAXIMUM_DOUBLING_STEPS,
                     BACKFILL_EVENT_EXPONENTIAL_BACKOFF_STEP_MILLISECONDS,
                     limit,
@@ -1841,7 +1842,7 @@ class EventFederationWorkerStore(
                 last_cause=EXCLUDED.last_cause;
         """
 
-        txn.execute(sql, (room_id, event_id, 1, self._clock.time_msec(), cause))
+        txn.execute(sql, (room_id, event_id, 1, self.clock.time_msec(), cause))
 
     @trace
     async def get_event_ids_with_failed_pull_attempts(
@@ -1905,7 +1906,7 @@ class EventFederationWorkerStore(
             ),
         )
 
-        current_time = self._clock.time_msec()
+        current_time = self.clock.time_msec()
 
         event_ids_with_backoff = {}
         for event_id, last_attempt_ts, num_attempts in event_failed_pull_attempts:
@@ -2025,7 +2026,7 @@ class EventFederationWorkerStore(
             values={},
             insertion_values={
                 "room_id": event.room_id,
-                "received_ts": self._clock.time_msec(),
+                "received_ts": self.clock.time_msec(),
                 "event_json": json_encoder.encode(event.get_dict()),
                 "internal_metadata": json_encoder.encode(
                     event.internal_metadata.get_dict()
@@ -2299,7 +2300,7 @@ class EventFederationWorkerStore(
             # If there is nothing in the staging area default it to 0.
             age = 0
             if received_ts is not None:
-                age = self._clock.time_msec() - received_ts
+                age = self.clock.time_msec() - received_ts
 
             return count, age
 

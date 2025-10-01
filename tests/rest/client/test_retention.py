@@ -27,7 +27,7 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.visibility import filter_events_for_client
 
 from tests import unittest

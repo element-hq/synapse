@@ -38,8 +38,8 @@ from synapse.http.servlet import (
 from synapse.storage.keys import FetchKeyResultForRemote
 from synapse.types import JsonDict
 from synapse.types.rest import RequestBodyModel
-from synapse.util import json_decoder
 from synapse.util.async_helpers import yieldable_gather_results
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

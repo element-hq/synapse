@@ -44,9 +44,9 @@ from synapse.types import (
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
 )
-from synapse.util import json_decoder
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.cancellation import cancellable
+from synapse.util.json import json_decoder
 from synapse.util.retryutils import (
     NotRetryingDestination,
     filter_destinations_by_retry_limiter,
@@ -111,8 +111,7 @@ class E2eKeysHandler:
 
         # Limit the number of in-flight requests from a single device.
         self._query_devices_linearizer = Linearizer(
-            name="query_devices",
-            max_count=10,
+            name="query_devices", max_count=10, clock=hs.get_clock()
         )
 
         self._query_appservices_for_otks = (
@@ -1769,7 +1768,9 @@ class SigningKeyEduUpdater:
         assert isinstance(device_handler, DeviceWriterHandler)
         self._device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_signing_key")
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_signing_key", clock=self.clock
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[str, List[Tuple[JsonDict, JsonDict]]] = {}

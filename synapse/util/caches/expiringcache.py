@@ -21,16 +21,28 @@
 
 import logging
 from collections import OrderedDict
-from typing import Any, Generic, Iterable, Literal, Optional, TypeVar, Union, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    Iterable,
+    Literal,
+    Optional,
+    TypeVar,
+    Union,
+    overload,
+)
 
 import attr
 
 from twisted.internet import defer
 
 from synapse.config import cache as cache_config
-from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.util import Clock
 from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.clock import Clock
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +61,7 @@ class ExpiringCache(Generic[KT, VT]):
         *,
         cache_name: str,
         server_name: str,
+        hs: "HomeServer",
         clock: Clock,
         max_len: int = 0,
         expiry_ms: int = 0,
@@ -99,9 +112,7 @@ class ExpiringCache(Generic[KT, VT]):
             return
 
         def f() -> "defer.Deferred[None]":
-            return run_as_background_process(
-                "prune_cache", server_name, self._prune_cache
-            )
+            return hs.run_as_background_process("prune_cache", self._prune_cache)
 
         self._clock.looping_call(f, self._expiry_ms / 2)
 

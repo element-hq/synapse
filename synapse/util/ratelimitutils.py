@@ -53,7 +53,7 @@ from synapse.logging.context import (
 )
 from synapse.logging.opentracing import start_active_span
 from synapse.metrics import SERVER_NAME_LABEL, Histogram, LaterGauge
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 if typing.TYPE_CHECKING:
     from contextlib import _GeneratorContextManager
@@ -419,4 +419,7 @@ class _PerHostRatelimiter:
             except KeyError:
                 pass
 
-        self.clock.call_later(0.0, start_next_request)
+        self.clock.call_later(
+            0.0,
+            start_next_request,
+        )

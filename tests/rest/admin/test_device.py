@@ -29,7 +29,7 @@ from synapse.api.errors import Codes
 from synapse.handlers.device import DeviceWriterHandler
 from synapse.rest.client import devices, login
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

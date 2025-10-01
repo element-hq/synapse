@@ -51,7 +51,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer
 from synapse.types import JsonDict, RoomAlias, RoomID, StrCollection
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

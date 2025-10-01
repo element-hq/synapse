@@ -565,7 +565,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 sql,
                 (
                     user_id.to_string(),
-                    self._clock.time_msec() - self.unused_expiration_time,
+                    self.clock.time_msec() - self.unused_expiration_time,
                 ),
             )
             row = txn.fetchone()
@@ -1059,7 +1059,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
             txn: LoggingTransaction,
         ) -> int:
             # Calculate the timestamp for the start of the time period
-            start_ts = self._clock.time_msec() - time_period_ms
+            start_ts = self.clock.time_msec() - time_period_ms
             txn.execute(sql, (user_id, start_ts))
             row = txn.fetchone()
             if row is None:

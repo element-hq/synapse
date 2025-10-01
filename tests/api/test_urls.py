@@ -17,7 +17,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

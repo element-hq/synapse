@@ -47,7 +47,6 @@ from synapse.api.errors import (
 )
 from synapse.logging.opentracing import log_kv, set_tag, trace
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.http.devices import (
@@ -125,7 +124,7 @@ class DeviceHandler:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
-        self.hs = hs
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
         self.store = cast("GenericWorkerStore", hs.get_datastores().main)
         self.notifier = hs.get_notifier()
         self.state = hs.get_state_handler()
@@ -191,10 +190,9 @@ class DeviceHandler:
             and self._delete_stale_devices_after is not None
         ):
             self.clock.looping_call(
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 DELETE_STALE_DEVICES_INTERVAL_MS,
                 desc="delete_stale_devices",
-                server_name=self.server_name,
                 func=self._delete_stale_devices,
             )
 
@@ -963,10 +961,9 @@ class DeviceWriterHandler(DeviceHandler):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
+        self.server_name = hs.hostname  # nb must be called this for @measure_func
+        self.hs = hs  # nb must be called this for @wrap_as_background_process
 
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @measure_func and @wrap_as_background_process
         # We only need to poke the federation sender explicitly if its on the
         # same instance. Other federation sender instances will get notified by
         # `synapse.app.generic_worker.FederationSenderHandler` when it sees it
@@ -1002,7 +999,7 @@ class DeviceWriterHandler(DeviceHandler):
         # rolling-restarting Synapse.
         if self._is_main_device_list_writer:
             # On start up check if there are any updates pending.
-            hs.get_reactor().callWhenRunning(self._handle_new_device_update_async)
+            hs.get_clock().call_when_running(self._handle_new_device_update_async)
             self.device_list_updater = DeviceListUpdater(hs, self)
             hs.get_federation_registry().register_edu_handler(
                 EduTypes.DEVICE_LIST_UPDATE,
@@ -1444,14 +1441,18 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
     def __init__(self, hs: "HomeServer", device_handler: DeviceWriterHandler):
         super().__init__(hs)
 
-        self.server_name = hs.hostname
+        self.hs = hs
         self.federation = hs.get_federation_client()
         self.server_name = hs.hostname  # nb must be called this for @measure_func
         self.clock = hs.get_clock()  # nb must be called this for @measure_func
         self.device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_device_list")
-        self._resync_linearizer = Linearizer(name="remote_device_resync")
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_device_list", clock=self.clock
+        )
+        self._resync_linearizer = Linearizer(
+            name="remote_device_resync", clock=self.clock
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[
@@ -1464,6 +1465,7 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         self._seen_updates: ExpiringCache[str, Set[str]] = ExpiringCache(
             cache_name="device_update_edu",
             server_name=self.server_name,
+            hs=self.hs,
             clock=self.clock,
             max_len=10000,
             expiry_ms=30 * 60 * 1000,
@@ -1473,9 +1475,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
         # Attempt to resync out of sync device lists every 30s.
         self._resync_retry_lock = Lock()
         self.clock.looping_call(
-            run_as_background_process,
+            self.hs.run_as_background_process,
             30 * 1000,
-            server_name=self.server_name,
             func=self._maybe_retry_device_resync,
             desc="_maybe_retry_device_resync",
         )
@@ -1595,9 +1596,8 @@ class DeviceListUpdater(DeviceListWorkerUpdater):
             if resync:
                 # We mark as stale up front in case we get restarted.
                 await self.store.mark_remote_users_device_caches_as_stale([user_id])
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "_maybe_retry_device_resync",
-                    self.server_name,
                     self.multi_user_device_resync,
                     [user_id],
                     False,

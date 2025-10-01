@@ -39,7 +39,7 @@ from synapse.appservice import ApplicationService
 from synapse.server import HomeServer
 from synapse.storage.databases.main.registration import TokenLookupResult
 from synapse.types import Requester, UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import override_config
@@ -304,7 +304,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
 
         failure = self.get_failure(self.auth.get_user_by_req(request), AuthError)
         self.assertEqual(failure.value.code, 400)
-        self.assertEqual(failure.value.errcode, Codes.EXCLUSIVE)
+        self.assertEqual(failure.value.errcode, Codes.UNKNOWN_DEVICE)
 
     def test_get_user_by_req__puppeted_token__not_tracking_puppeted_mau(self) -> None:
         self.store.get_user_by_access_token = AsyncMock(

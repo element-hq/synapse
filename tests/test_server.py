@@ -36,8 +36,8 @@ from synapse.http.server import (
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.logging.context import make_deferred_yieldable
 from synapse.types import JsonDict
-from synapse.util import Clock
 from synapse.util.cancellation import cancellable
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.http.server._base import test_disconnect
@@ -55,9 +55,9 @@ class JsonResourceTests(unittest.TestCase):
         reactor, clock = get_clock()
         self.reactor = reactor
         self.homeserver = setup_test_homeserver(
-            self.addCleanup,
-            clock=clock,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
+            clock=clock,
         )
 
     def test_handler_for_request(self) -> None:
@@ -217,9 +217,9 @@ class OptionsResourceTests(unittest.TestCase):
         reactor, clock = get_clock()
         self.reactor = reactor
         self.homeserver = setup_test_homeserver(
-            self.addCleanup,
-            clock=clock,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
+            clock=clock,
         )
 
         class DummyResource(Resource):

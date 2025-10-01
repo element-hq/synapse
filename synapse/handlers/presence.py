@@ -107,7 +107,6 @@ from synapse.events.presence_router import PresenceRouter
 from synapse.logging.context import run_in_background
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.http.presence import (
@@ -537,19 +536,15 @@ class WorkerPresenceHandler(BasePresenceHandler):
         self._bump_active_client = ReplicationBumpPresenceActiveTime.make_client(hs)
         self._set_state_client = ReplicationPresenceSetState.make_client(hs)
 
-        self._send_stop_syncing_loop = self.clock.looping_call(
-            self.send_stop_syncing, UPDATE_SYNCING_USERS_MS
+        self.clock.looping_call(self.send_stop_syncing, UPDATE_SYNCING_USERS_MS)
+
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "generic_presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
-        )
-
+    @wrap_as_background_process("WorkerPresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         if self._track_presence:
             self.hs.get_replication_command_handler().send_command(
@@ -779,9 +774,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
 class PresenceHandler(BasePresenceHandler):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
-        self.server_name = (
-            hs.hostname
-        )  # nb must be called this for @wrap_as_background_process
+        self.server_name = hs.hostname
         self.wheel_timer: WheelTimer[str] = WheelTimer()
         self.notifier = hs.get_notifier()
 
@@ -842,13 +835,10 @@ class PresenceHandler(BasePresenceHandler):
         # have not yet been persisted
         self.unpersisted_users_changes: Set[str] = set()
 
-        hs.get_reactor().addSystemEventTrigger(
-            "before",
-            "shutdown",
-            run_as_background_process,
-            "presence.on_shutdown",
-            self.server_name,
-            self._on_shutdown,
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
         # Keeps track of the number of *ongoing* syncs on this process. While
@@ -872,14 +862,19 @@ class PresenceHandler(BasePresenceHandler):
         ] = {}
         self.external_process_last_updated_ms: Dict[str, int] = {}
 
-        self.external_sync_linearizer = Linearizer(name="external_sync_linearizer")
+        self.external_sync_linearizer = Linearizer(
+            name="external_sync_linearizer", clock=self.clock
+        )
 
         if self._track_presence:
             # Start a LoopingCall in 30s that fires every 5s.
             # The initial delay is to allow disconnected clients a chance to
             # reconnect before we treat them as offline.
             self.clock.call_later(
-                30, self.clock.looping_call, self._handle_timeouts, 5000
+                30,
+                self.clock.looping_call,
+                self._handle_timeouts,
+                5000,
             )
 
         # Presence information is persisted, whether or not it is being tracked
@@ -906,6 +901,7 @@ class PresenceHandler(BasePresenceHandler):
         self._event_pos = self.store.get_room_max_stream_ordering()
         self._event_processing = False
 
+    @wrap_as_background_process("PresenceHandler._on_shutdown")
     async def _on_shutdown(self) -> None:
         """Gets called when shutting down. This lets us persist any updates that
         we haven't yet persisted, e.g. updates that only changes some internal
@@ -1537,8 +1533,8 @@ class PresenceHandler(BasePresenceHandler):
             finally:
                 self._event_processing = False
 
-        run_as_background_process(
-            "presence.notify_new_event", self.server_name, _process_presence
+        self.hs.run_as_background_process(
+            "presence.notify_new_event", _process_presence
         )
 
     async def _unsafe_process(self) -> None:
@@ -1548,7 +1544,7 @@ class PresenceHandler(BasePresenceHandler):
                 self.clock, name="presence_delta", server_name=self.server_name
             ):
                 room_max_stream_ordering = self.store.get_room_max_stream_ordering()
-                if self._event_pos == room_max_stream_ordering:
+                if self._event_pos >= room_max_stream_ordering:
                     return
 
                 logger.debug(

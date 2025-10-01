@@ -28,7 +28,8 @@ import attr
 import pymacaroons
 from pymacaroons.exceptions import MacaroonVerificationFailedException
 
-from synapse.util import Clock, stringutils
+from synapse.util import stringutils
+from synapse.util.clock import Clock
 
 MacaroonType = Literal["access", "delete_pusher", "session"]
 

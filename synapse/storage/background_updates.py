@@ -41,11 +41,11 @@ from typing import (
 import attr
 
 from synapse._pydantic_compat import BaseModel
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection
-from synapse.util import Clock, json_encoder
+from synapse.util.clock import Clock
+from synapse.util.json import json_encoder
 
 from . import engines
 
@@ -284,6 +284,13 @@ class BackgroundUpdater:
         self.sleep_duration_ms = hs.config.background_updates.sleep_duration_ms
         self.sleep_enabled = hs.config.background_updates.sleep_enabled
 
+    def shutdown(self) -> None:
+        """
+        Stop any further background updates from happening.
+        """
+        self.enabled = False
+        self._background_update_handlers.clear()
+
     def get_status(self) -> UpdaterStatus:
         """An integer summarising the updater status. Used as a metric."""
         if self._aborted:
@@ -395,9 +402,8 @@ class BackgroundUpdater:
             # if we start a new background update, not all updates are done.
             self._all_done = False
             sleep = self.sleep_enabled
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "background_updates",
-                self.server_name,
                 self.run_background_updates,
                 sleep,
             )

@@ -21,6 +21,7 @@
 
 import logging
 from typing import (
+    TYPE_CHECKING,
     Awaitable,
     Callable,
     Dict,
@@ -38,8 +39,10 @@ from twisted.internet import defer
 
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
-from synapse.util import Clock
+from synapse.util.clock import Clock
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -97,12 +100,13 @@ class BatchingQueue(Generic[V, R]):
         self,
         *,
         name: str,
-        server_name: str,
+        hs: "HomeServer",
         clock: Clock,
         process_batch_callback: Callable[[List[V]], Awaitable[R]],
     ):
         self._name = name
-        self.server_name = server_name
+        self.hs = hs
+        self.server_name = hs.hostname
         self._clock = clock
 
         # The set of keys currently being processed.
@@ -127,6 +131,14 @@ class BatchingQueue(Generic[V, R]):
             name=self._name, **{SERVER_NAME_LABEL: self.server_name}
         )
 
+    def shutdown(self) -> None:
+        """
+        Prepares the object for garbage collection by removing any handed out
+        references.
+        """
+        number_queued.remove(self._name, self.server_name)
+        number_of_keys.remove(self._name, self.server_name)
+
     async def add_to_queue(self, value: V, key: Hashable = ()) -> R:
         """Adds the value to the queue with the given key, returning the result
         of the processing function for the batch that included the given value.
@@ -145,9 +157,7 @@ class BatchingQueue(Generic[V, R]):
         # If we're not currently processing the key fire off a background
         # process to start processing.
         if key not in self._processing_keys:
-            run_as_background_process(
-                self._name, self.server_name, self._process_queue, key
-            )
+            self.hs.run_as_background_process(self._name, self._process_queue, key)
 
         with self._number_in_flight_metric.track_inprogress():
             return await make_deferred_yieldable(d)

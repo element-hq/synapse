@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import List, Mapping, Optional, Sequence
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 from twisted.internet import defer, task
 
@@ -256,7 +256,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
         return self.base_directory
 
 
-def start(config_options: List[str]) -> None:
+def load_config(argv_options: List[str]) -> Tuple[HomeServerConfig, argparse.Namespace]:
     parser = argparse.ArgumentParser(description="Synapse Admin Command")
     HomeServerConfig.add_arguments_to_parser(parser)
 
@@ -282,11 +282,15 @@ def start(config_options: List[str]) -> None:
     export_data_parser.set_defaults(func=export_data_command)
 
     try:
-        config, args = HomeServerConfig.load_config_with_parser(parser, config_options)
+        config, args = HomeServerConfig.load_config_with_parser(parser, argv_options)
     except ConfigError as e:
         sys.stderr.write("\n" + str(e) + "\n")
         sys.exit(1)
 
+    return config, args
+
+
+def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
     if config.worker.worker_app is not None:
         assert config.worker.worker_app == "synapse.app.admin_cmd"
 
@@ -325,7 +329,7 @@ def start(config_options: List[str]) -> None:
     # command.
 
     async def run() -> None:
-        with LoggingContext("command"):
+        with LoggingContext(name="command", server_name=config.server.server_name):
             await _base.start(ss)
             await args.func(ss, args)
 
@@ -337,5 +341,6 @@ def start(config_options: List[str]) -> None:
 
 
 if __name__ == "__main__":
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    homeserver_config, args = load_config(sys.argv[1:])
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        start(homeserver_config, args)

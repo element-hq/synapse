@@ -28,6 +28,7 @@ import sys
 import traceback
 import warnings
 from textwrap import indent
+from threading import Thread
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -40,6 +41,7 @@ from typing import (
     Tuple,
     cast,
 )
+from wsgiref.simple_server import WSGIServer
 
 from cryptography.utils import CryptographyDeprecationWarning
 from typing_extensions import ParamSpec
@@ -73,7 +75,6 @@ from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
-from synapse.logging.opentracing import init_tracer
 from synapse.metrics import install_gc_manager, register_threadpool
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
@@ -98,22 +99,47 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-# list of tuples of function, args list, kwargs dict
-_sighup_callbacks: List[
-    Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]
-] = []
+_instance_id_to_sighup_callbacks_map: Dict[
+    str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
+] = {}
+"""
+Map from homeserver instance_id to a list of callbacks.
+
+We use `instance_id` instead of `server_name` because it's possible to have multiple
+workers running in the same process with the same `server_name`.
+"""
 P = ParamSpec("P")
 
 
-def register_sighup(func: Callable[P, None], *args: P.args, **kwargs: P.kwargs) -> None:
+def register_sighup(
+    homeserver_instance_id: str,
+    func: Callable[P, None],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> None:
     """
     Register a function to be called when a SIGHUP occurs.
 
     Args:
+        homeserver_instance_id: The unique ID for this Synapse process instance
+            (`hs.get_instance_id()`) that this hook is associated with.
         func: Function to be called when sent a SIGHUP signal.
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
-    _sighup_callbacks.append((func, args, kwargs))
+
+    _instance_id_to_sighup_callbacks_map.setdefault(homeserver_instance_id, []).append(
+        (func, args, kwargs)
+    )
+
+
+def unregister_sighups(instance_id: str) -> None:
+    """
+    Unregister all sighup functions associated with this Synapse instance.
+
+    Args:
+        instance_id: Unique ID for this Synapse process instance.
+    """
+    _instance_id_to_sighup_callbacks_map.pop(instance_id, [])
 
 
 def start_worker_reactor(
@@ -241,7 +267,7 @@ def redirect_stdio_to_logs() -> None:
 
 
 def register_start(
-    cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
+    hs: "HomeServer", cb: Callable[P, Awaitable], *args: P.args, **kwargs: P.kwargs
 ) -> None:
     """Register a callback with the reactor, to be called once it is running
 
@@ -278,10 +304,13 @@ def register_start(
             # on as normal.
             os._exit(1)
 
-    reactor.callWhenRunning(lambda: defer.ensureDeferred(wrapper()))
+    clock = hs.get_clock()
+    clock.call_when_running(lambda: defer.ensureDeferred(wrapper()))
 
 
-def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
+def listen_metrics(
+    bind_addresses: StrCollection, port: int
+) -> List[Tuple[WSGIServer, Thread]]:
     """
     Start Prometheus metrics server.
 
@@ -294,14 +323,22 @@ def listen_metrics(bind_addresses: StrCollection, port: int) -> None:
     bytecode at a time), this still works because the metrics thread can preempt the
     Twisted reactor thread between bytecode boundaries and the metrics thread gets
     scheduled with roughly equal priority to the Twisted reactor thread.
+
+    Returns:
+        List of WSGIServer with the thread they are running on.
     """
     from prometheus_client import start_http_server as start_http_server_prometheus
 
     from synapse.metrics import RegistryProxy
 
+    servers: List[Tuple[WSGIServer, Thread]] = []
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
-        start_http_server_prometheus(port, addr=host, registry=RegistryProxy)
+        server, thread = start_http_server_prometheus(
+            port, addr=host, registry=RegistryProxy
+        )
+        servers.append((server, thread))
+    return servers
 
 
 def listen_manhole(
@@ -309,7 +346,7 @@ def listen_manhole(
     port: int,
     manhole_settings: ManholeConfig,
     manhole_globals: dict,
-) -> None:
+) -> List[Port]:
     # twisted.conch.manhole 21.1.0 uses "int_from_bytes", which produces a confusing
     # warning. It's fixed by https://github.com/twisted/twisted/pull/1522), so
     # suppress the warning for now.
@@ -321,7 +358,7 @@ def listen_manhole(
 
     from synapse.util.manhole import manhole
 
-    listen_tcp(
+    return listen_tcp(
         bind_addresses,
         port,
         manhole(settings=manhole_settings, globals=manhole_globals),
@@ -498,7 +535,7 @@ def refresh_certificate(hs: "HomeServer") -> None:
         logger.info("Context factories updated.")
 
 
-async def start(hs: "HomeServer") -> None:
+async def start(hs: "HomeServer", freeze: bool = True) -> None:
     """
     Start a Synapse server or worker.
 
@@ -509,6 +546,11 @@ async def start(hs: "HomeServer") -> None:
 
     Args:
         hs: homeserver instance
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
     """
     server_name = hs.hostname
     reactor = hs.get_reactor()
@@ -517,7 +559,9 @@ async def start(hs: "HomeServer") -> None:
     # numbers of DNS requests don't starve out other users of the threadpool.
     resolver_threadpool = ThreadPool(name="gai_resolver")
     resolver_threadpool.start()
-    reactor.addSystemEventTrigger("during", "shutdown", resolver_threadpool.stop)
+    hs.get_clock().add_system_event_trigger(
+        "during", "shutdown", resolver_threadpool.stop
+    )
     reactor.installNameResolver(
         GAIResolver(reactor, getThreadPool=lambda: resolver_threadpool)
     )
@@ -539,12 +583,17 @@ async def start(hs: "HomeServer") -> None:
                 # we're not using systemd.
                 sdnotify(b"RELOADING=1")
 
-                for i, args, kwargs in _sighup_callbacks:
-                    i(*args, **kwargs)
+            for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
+                for func, args, kwargs in sighup_callbacks:
+                    func(*args, **kwargs)
 
                 sdnotify(b"READY=1")
 
-            return run_as_background_process(
+            # It's okay to ignore the linter error here and call
+            # `run_as_background_process` directly because `_handle_sighup` operates
+            # outside of the scope of a specific `HomeServer` instance and holds no
+            # references to it which would prevent a clean shutdown.
+            return run_as_background_process(  # type: ignore[untracked-background-process]
                 "sighup",
                 server_name,
                 _handle_sighup,
@@ -562,17 +611,14 @@ async def start(hs: "HomeServer") -> None:
 
         signal.signal(signal.SIGHUP, run_sighup)
 
-        register_sighup(refresh_certificate, hs)
-        register_sighup(reload_cache_config, hs.config)
+        register_sighup(hs.get_instance_id(), refresh_certificate, hs)
+        register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
 
     # Load the certificate from disk.
     refresh_certificate(hs)
-
-    # Start the tracer
-    init_tracer(hs)  # noqa
 
     # Instantiate the modules so they can register their web resources to the module API
     # before we start the listeners.
@@ -600,11 +646,15 @@ async def start(hs: "HomeServer") -> None:
     hs.get_pusherpool().start()
 
     def log_shutdown() -> None:
-        with LoggingContext("log_shutdown"):
+        with LoggingContext(name="log_shutdown", server_name=server_name):
             logger.info("Shutting down...")
 
     # Log when we start the shut down process.
-    hs.get_reactor().addSystemEventTrigger("before", "shutdown", log_shutdown)
+    hs.register_sync_shutdown_handler(
+        phase="before",
+        eventType="shutdown",
+        shutdown_func=log_shutdown,
+    )
 
     setup_sentry(hs)
     setup_sdnotify(hs)
@@ -633,18 +683,24 @@ async def start(hs: "HomeServer") -> None:
         # `REQUIRED_ON_BACKGROUND_TASK_STARTUP`
         start_phone_stats_home(hs)
 
-    # We now freeze all allocated objects in the hopes that (almost)
-    # everything currently allocated are things that will be used for the
-    # rest of time. Doing so means less work each GC (hopefully).
-    #
-    # PyPy does not (yet?) implement gc.freeze()
-    if hasattr(gc, "freeze"):
-        gc.collect()
-        gc.freeze()
+    if freeze:
+        # We now freeze all allocated objects in the hopes that (almost)
+        # everything currently allocated are things that will be used for the
+        # rest of time. Doing so means less work each GC (hopefully).
+        #
+        # Note that freezing the homeserver object means that it won't be able to be
+        # garbage collected in the case of attempting an in-memory `shutdown`. This only
+        # needs to be considered if such a case is desirable. Exiting the entire Python
+        # process will function expectedly either way.
+        #
+        # PyPy does not (yet?) implement gc.freeze()
+        if hasattr(gc, "freeze"):
+            gc.collect()
+            gc.freeze()
 
-        # Speed up shutdowns by freezing all allocated objects. This moves everything
-        # into the permanent generation and excludes them from the final GC.
-        atexit.register(gc.freeze)
+            # Speed up process exit by freezing all allocated objects. This moves everything
+            # into the permanent generation and excludes them from the final GC.
+            atexit.register(gc.freeze)
 
 
 def reload_cache_config(config: HomeServerConfig) -> None:
@@ -719,7 +775,7 @@ def setup_sdnotify(hs: "HomeServer") -> None:
     # we're not using systemd.
     sdnotify(b"READY=1\nMAINPID=%i" % (os.getpid(),))
 
-    hs.get_reactor().addSystemEventTrigger(
+    hs.get_clock().add_system_event_trigger(
         "before", "shutdown", sdnotify, b"STOPPING=1"
     )
 

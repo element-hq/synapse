@@ -24,7 +24,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import UserTypes
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.unittest import default_config, override_config

@@ -30,7 +30,7 @@ from synapse.http.federation.srv_resolver import Server, SrvResolver
 from synapse.logging.context import LoggingContext, current_context
 
 from tests import unittest
-from tests.utils import MockClock
+from tests.server import get_clock
 
 
 class SrvResolverTestCase(unittest.TestCase):
@@ -52,7 +52,10 @@ class SrvResolverTestCase(unittest.TestCase):
 
         @defer.inlineCallbacks
         def do_lookup() -> Generator["Deferred[object]", object, List[Server]]:
-            with LoggingContext("one") as ctx:
+            with LoggingContext(
+                name="one",
+                server_name="test_server",
+            ) as ctx:
                 resolve_d = resolver.resolve_service(service_name)
                 result: List[Server]
                 result = yield defer.ensureDeferred(resolve_d)  # type: ignore[assignment]
@@ -102,7 +105,7 @@ class SrvResolverTestCase(unittest.TestCase):
 
     @defer.inlineCallbacks
     def test_from_cache(self) -> Generator["Deferred[object]", object, None]:
-        clock = MockClock()
+        reactor, clock = get_clock()
 
         dns_client_mock = Mock(spec_set=["lookupService"])
         dns_client_mock.lookupService = Mock(spec_set=[])

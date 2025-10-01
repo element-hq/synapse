@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.deactivate_account import (
     ReplicationNotifyAccountDeactivatedServlet,
 )
@@ -62,7 +61,7 @@ class DeactivateAccountHandler:
         # Start the user parter loop so it can resume parting users from rooms where
         # it left off (if it has work left to do).
         if hs.config.worker.worker_app is None:
-            hs.get_reactor().callWhenRunning(self._start_user_parting)
+            hs.get_clock().call_when_running(self._start_user_parting)
         else:
             self._notify_account_deactivated_client = (
                 ReplicationNotifyAccountDeactivatedServlet.make_client(hs)
@@ -272,8 +271,8 @@ class DeactivateAccountHandler:
         pending deactivation, if it isn't already running.
         """
         if not self._user_parter_running:
-            run_as_background_process(
-                "user_parter_loop", self.server_name, self._user_parter_loop
+            self.hs.run_as_background_process(
+                "user_parter_loop", self._user_parter_loop
             )
 
     async def _user_parter_loop(self) -> None:

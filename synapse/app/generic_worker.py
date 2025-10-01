@@ -49,6 +49,7 @@ from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.server import JsonResource, OptionsResource
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -277,11 +278,13 @@ class GenericWorkerServer(HomeServer):
                 self._listen_http(listener)
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -295,9 +298,11 @@ class GenericWorkerServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -310,13 +315,26 @@ class GenericWorkerServer(HomeServer):
         self.get_replication_command_handler().start_replication(self)
 
 
-def start(config_options: List[str]) -> None:
+def load_config(argv_options: List[str]) -> HomeServerConfig:
+    """
+    Parse the commandline and config files (does not generate config)
+
+    Args:
+        argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
+
+    Returns:
+        Config object.
+    """
     try:
-        config = HomeServerConfig.load_config("Synapse worker", config_options)
+        config = HomeServerConfig.load_config("Synapse worker", argv_options)
     except ConfigError as e:
         sys.stderr.write("\n" + str(e) + "\n")
         sys.exit(1)
 
+    return config
+
+
+def start(config: HomeServerConfig) -> None:
     # For backwards compatibility let any of the old app names.
     assert config.worker.worker_app in (
         "synapse.app.appservice",
@@ -346,6 +364,9 @@ def start(config_options: List[str]) -> None:
 
     setup_logging(hs, config, use_worker_options=True)
 
+    # Start the tracer
+    init_tracer(hs)  # noqa
+
     try:
         hs.setup()
 
@@ -356,11 +377,9 @@ def start(config_options: List[str]) -> None:
         handle_startup_exception(e)
 
     async def start() -> None:
-        # Re-establish log context now that we're back from the reactor
-        with LoggingContext("start"):
-            await _base.start(hs)
+        await _base.start(hs)
 
-    register_start(start)
+    register_start(hs, start)
 
     # redirect stdio to the logs, if configured.
     if not hs.config.logging.no_redirect_stdio:
@@ -370,8 +389,9 @@ def start(config_options: List[str]) -> None:
 
 
 def main() -> None:
-    with LoggingContext("main"):
-        start(sys.argv[1:])
+    homeserver_config = load_config(sys.argv[1:])
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
+        start(homeserver_config)
 
 
 if __name__ == "__main__":

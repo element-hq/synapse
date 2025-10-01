@@ -37,7 +37,7 @@ from synapse.storage.databases.main.user_directory import (
 )
 from synapse.storage.roommember import ProfileInfo
 from synapse.types import UserID
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import ThreadedMemoryReactorClock
 from tests.test_utils.event_injection import inject_member_event

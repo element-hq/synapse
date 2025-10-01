@@ -81,7 +81,6 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.federation import (
     ReplicationFederationSendEventsRestServlet,
 )
@@ -153,6 +152,7 @@ class FederationEventHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self.hs = hs
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
@@ -175,6 +175,7 @@ class FederationEventHandler:
         )
         self._notifier = hs.get_notifier()
 
+        self._server_name = hs.hostname
         self._is_mine_id = hs.is_mine_id
         self._is_mine_server_name = hs.is_mine_server_name
         self._instance_name = hs.get_instance_name()
@@ -191,7 +192,7 @@ class FederationEventHandler:
         # federation event staging area.
         self.room_queues: Dict[str, List[Tuple[EventBase, str]]] = {}
 
-        self._room_pdu_linearizer = Linearizer("fed_room_pdu")
+        self._room_pdu_linearizer = Linearizer(name="fed_room_pdu", clock=self._clock)
 
     async def on_receive_pdu(self, origin: str, pdu: EventBase) -> None:
         """Process a PDU received via a federation /send/ transaction
@@ -974,9 +975,8 @@ class FederationEventHandler:
         # Process previously failed backfill events in the background to not waste
         # time on something that is likely to fail again.
         if len(events_with_failed_pull_attempts) > 0:
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "_process_new_pulled_events_with_failed_pull_attempts",
-                self.server_name,
                 _process_new_pulled_events,
                 events_with_failed_pull_attempts,
             )
@@ -1568,9 +1568,8 @@ class FederationEventHandler:
                     resync = True
 
             if resync:
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "resync_device_due_to_pdu",
-                    self.server_name,
                     self._resync_device,
                     event.sender,
                 )

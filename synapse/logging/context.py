@@ -238,12 +238,13 @@ class _Sentinel:
     we should always know which server the logs are coming from.
     """
 
-    __slots__ = ["previous_context", "finished", "request", "tag"]
+    __slots__ = ["previous_context", "finished", "server_name", "request", "tag"]
 
     def __init__(self) -> None:
         # Minimal set for compatibility with LoggingContext
         self.previous_context = None
         self.finished = False
+        self.server_name = "unknown_server_from_sentinel_context"
         self.request = None
         self.tag = None
 
@@ -282,14 +283,19 @@ class LoggingContext:
           child to the parent
 
     Args:
-        name: Name for the context for logging. If this is omitted, it is
-           inherited from the parent context.
+        name: Name for the context for logging.
+        server_name: The name of the server this context is associated with
+            (`config.server.server_name` or `hs.hostname`)
         parent_context (LoggingContext|None): The parent of the new context
+        request: Synapse Request Context object. Useful to associate all the logs
+            happening to a given request.
+
     """
 
     __slots__ = [
         "previous_context",
         "name",
+        "server_name",
         "parent_context",
         "_resource_usage",
         "usage_start",
@@ -301,7 +307,9 @@ class LoggingContext:
 
     def __init__(
         self,
-        name: Optional[str] = None,
+        *,
+        name: str,
+        server_name: str,
         parent_context: "Optional[LoggingContext]" = None,
         request: Optional[ContextRequest] = None,
     ) -> None:
@@ -314,6 +322,8 @@ class LoggingContext:
         # if the context is not currently active.
         self.usage_start: Optional[resource.struct_rusage] = None
 
+        self.name = name
+        self.server_name = server_name
         self.main_thread = get_thread_id()
         self.request = None
         self.tag = ""
@@ -325,22 +335,14 @@ class LoggingContext:
 
         self.parent_context = parent_context
 
+        # Inherit some fields from the parent context
         if self.parent_context is not None:
-            # we track the current request_id
+            # which request this corresponds to
             self.request = self.parent_context.request
 
         if request is not None:
             # the request param overrides the request from the parent context
             self.request = request
-
-        # if we don't have a `name`, but do have a parent context, use its name.
-        if self.parent_context and name is None:
-            name = str(self.parent_context)
-        if name is None:
-            raise ValueError(
-                "LoggingContext must be given either a name or a parent context"
-            )
-        self.name = name
 
     def __str__(self) -> str:
         return self.name
@@ -588,7 +590,26 @@ class LoggingContextFilter(logging.Filter):
     record.
     """
 
-    def __init__(self, request: str = ""):
+    def __init__(
+        self,
+        # `request` is here for backwards compatibility since we previously recommended
+        # people manually configure `LoggingContextFilter` like the following.
+        #
+        # ```yaml
+        # filters:
+        #   context:
+        #       (): synapse.logging.context.LoggingContextFilter
+        #       request: ""
+        # ```
+        #
+        # TODO: Since we now configure `LoggingContextFilter` automatically since #8051
+        # (2020-08-11), we could consider removing this useless parameter. This would
+        # require people to remove their own manual configuration of
+        # `LoggingContextFilter` as it would cause `TypeError: Filter.__init__() got an
+        # unexpected keyword argument 'request'` -> `ValueError: Unable to configure
+        # filter 'context'`
+        request: str = "",
+    ):
         self._default_request = request
 
     def filter(self, record: logging.LogRecord) -> Literal[True]:
@@ -598,11 +619,13 @@ class LoggingContextFilter(logging.Filter):
         """
         context = current_context()
         record.request = self._default_request
+        record.server_name = "unknown_server_from_no_context"
 
         # context should never be None, but if it somehow ends up being, then
         # we end up in a death spiral of infinite loops, so let's check, for
         # robustness' sake.
         if context is not None:
+            record.server_name = context.server_name
             # Logging is interested in the request ID. Note that for backwards
             # compatibility this is stored as the "request" on the record.
             record.request = str(context)
@@ -728,12 +751,15 @@ def nested_logging_context(suffix: str) -> LoggingContext:
             "Starting nested logging context from sentinel context: metrics will be lost"
         )
         parent_context = None
+        server_name = "unknown_server_from_sentinel_context"
     else:
         assert isinstance(curr_context, LoggingContext)
         parent_context = curr_context
+        server_name = parent_context.server_name
     prefix = str(curr_context)
     return LoggingContext(
-        prefix + "-" + suffix,
+        name=prefix + "-" + suffix,
+        server_name=server_name,
         parent_context=parent_context,
     )
 
@@ -802,13 +828,15 @@ def run_in_background(
     deferred returned by the function completes.
 
     To explain how the log contexts work here:
-     - When `run_in_background` is called, the current context is stored ("original"),
-       we kick off the background task in the current context, and we restore that
-       original context before returning
-     - When the background task finishes, we don't want to leak our context into the
-       reactor which would erroneously get attached to the next operation picked up by
-       the event loop. We add a callback to the deferred which will clear the logging
-       context after it finishes and yields control back to the reactor.
+     - When `run_in_background` is called, the calling logcontext is stored
+       ("original"), we kick off the background task in the current context, and we
+       restore that original context before returning.
+     - For a completed deferred, that's the end of the story.
+     - For an incomplete deferred, when the background task finishes, we don't want to
+       leak our context into the reactor which would erroneously get attached to the
+       next operation picked up by the event loop. We add a callback to the deferred
+       which will clear the logging context after it finishes and yields control back to
+       the reactor.
 
     Useful for wrapping functions that return a deferred or coroutine, which you don't
     yield or await on (for instance because you want to pass it to
@@ -857,22 +885,36 @@ def run_in_background(
 
     # The deferred has already completed
     if d.called and not d.paused:
-        # The function should have maintained the logcontext, so we can
-        # optimise out the messing about
+        # If the function messes with logcontexts, we can assume it follows the Synapse
+        # logcontext rules (Rules for functions returning awaitables: "If the awaitable
+        # is already complete, the function returns with the same logcontext it started
+        # with."). If it function doesn't touch logcontexts at all, we can also assume
+        # the logcontext is unchanged.
+        #
+        # Either way, the function should have maintained the calling logcontext, so we
+        # can avoid messing with it further. Additionally, if the deferred has already
+        # completed, then it would be a mistake to then add a deferred callback (below)
+        # to reset the logcontext to the sentinel logcontext as that would run
+        # immediately (remember our goal is to maintain the calling logcontext when we
+        # return).
         return d
 
-    # The function may have reset the context before returning, so we need to restore it
-    # now.
+    # Since the function we called may follow the Synapse logcontext rules (Rules for
+    # functions returning awaitables: "If the awaitable is incomplete, the function
+    # clears the logcontext before returning"), the function may have reset the
+    # logcontext before returning, so we need to restore the calling logcontext now
+    # before we return ourselves.
     #
     # Our goal is to have the caller logcontext unchanged after firing off the
     # background task and returning.
     set_current_context(calling_context)
 
-    # The original logcontext will be restored when the deferred completes, but
-    # there is nothing waiting for it, so it will get leaked into the reactor (which
-    # would then get picked up by the next thing the reactor does). We therefore
-    # need to reset the logcontext here (set the `sentinel` logcontext) before
-    # yielding control back to the reactor.
+    # If the function we called is playing nice and following the Synapse logcontext
+    # rules, it will restore original calling logcontext when the deferred completes;
+    # but there is nothing waiting for it, so it will get leaked into the reactor (which
+    # would then get picked up by the next thing the reactor does). We therefore need to
+    # reset the logcontext here (set the `sentinel` logcontext) before yielding control
+    # back to the reactor.
     #
     # (If this feels asymmetric, consider it this way: we are
     # effectively forking a new thread of execution. We are
@@ -894,10 +936,9 @@ def run_coroutine_in_background(
     Useful for wrapping coroutines that you don't yield or await on (for
     instance because you want to pass it to deferred.gatherResults()).
 
-    This is a special case of `run_in_background` where we can accept a
-    coroutine directly rather than a function. We can do this because coroutines
-    do not run until called, and so calling an async function without awaiting
-    cannot change the log contexts.
+    This is a special case of `run_in_background` where we can accept a coroutine
+    directly rather than a function. We can do this because coroutines do not continue
+    running once they have yielded.
 
     This is an ergonomic helper so we can do this:
     ```python
@@ -908,33 +949,7 @@ def run_coroutine_in_background(
     run_in_background(lambda: func1(arg1))
     ```
     """
-    calling_context = current_context()
-
-    # Wrap the coroutine in a deferred, which will have the side effect of executing the
-    # coroutine in the background.
-    d = defer.ensureDeferred(coroutine)
-
-    # The function may have reset the context before returning, so we need to restore it
-    # now.
-    #
-    # Our goal is to have the caller logcontext unchanged after firing off the
-    # background task and returning.
-    set_current_context(calling_context)
-
-    # The original logcontext will be restored when the deferred completes, but
-    # there is nothing waiting for it, so it will get leaked into the reactor (which
-    # would then get picked up by the next thing the reactor does). We therefore
-    # need to reset the logcontext here (set the `sentinel` logcontext) before
-    # yielding control back to the reactor.
-    #
-    # (If this feels asymmetric, consider it this way: we are
-    # effectively forking a new thread of execution. We are
-    # probably currently within a ``with LoggingContext()`` block,
-    # which is supposed to have a single entry and exit point. But
-    # by spawning off another deferred, we are effectively
-    # adding a new exit point.)
-    d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
-    return d
+    return run_in_background(lambda: coroutine)
 
 
 T = TypeVar("T")
@@ -1069,12 +1084,18 @@ def defer_to_threadpool(
             "Calling defer_to_threadpool from sentinel context: metrics will be lost"
         )
         parent_context = None
+        server_name = "unknown_server_from_sentinel_context"
     else:
         assert isinstance(curr_context, LoggingContext)
         parent_context = curr_context
+        server_name = parent_context.server_name
 
     def g() -> R:
-        with LoggingContext(str(curr_context), parent_context=parent_context):
+        with LoggingContext(
+            name=str(curr_context),
+            server_name=server_name,
+            parent_context=parent_context,
+        ):
             return f(*args, **kwargs)
 
     return make_deferred_yieldable(threads.deferToThreadPool(reactor, threadpool, g))

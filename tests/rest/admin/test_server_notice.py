@@ -28,7 +28,7 @@ from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest

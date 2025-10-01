@@ -52,9 +52,10 @@ from zope.interface import implementer
 
 from twisted.internet import defer, interfaces, reactor
 from twisted.internet.defer import CancelledError
-from twisted.internet.interfaces import IReactorTime
 from twisted.python import failure
 from twisted.web import resource
+
+from synapse.types import ISynapseThreadlessReactor
 
 try:
     from twisted.web.pages import notFound
@@ -77,10 +78,11 @@ from synapse.api.errors import (
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
-from synapse.util import Clock, json_encoder
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
+from synapse.util.clock import Clock
 from synapse.util.iterutils import chunk_seq
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     import opentracing
@@ -409,8 +411,26 @@ class DirectServeJsonResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            canonical_json: TODO
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
+
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeJsonResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
         self.canonical_json = canonical_json
@@ -588,8 +608,24 @@ class DirectServeHtmlResource(_AsyncResource):
         # Clock is optional as this class is exposed to the module API.
         clock: Optional[Clock] = None,
     ):
+        """
+        Args:
+            extract_context: TODO
+            clock: This is expected to be passed in by any Synapse code.
+                Only optional for the Module API.
+        """
         if clock is None:
-            clock = Clock(cast(IReactorTime, reactor))
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeHtmlResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
+                cast(ISynapseThreadlessReactor, reactor),
+                server_name="synapse_module_running_from_unknown_server",
+            )
 
         super().__init__(clock, extract_context)
 

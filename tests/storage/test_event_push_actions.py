@@ -29,7 +29,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.event_push_actions import NotifCounts
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

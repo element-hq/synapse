@@ -13,7 +13,6 @@
 #
 
 
-import enum
 import logging
 from itertools import chain
 from typing import (
@@ -75,18 +74,13 @@ from synapse.types.handlers.sliding_sync import (
 )
 from synapse.types.state import StateFilter
 from synapse.util import MutableOverlayMapping
+from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
 logger = logging.getLogger(__name__)
-
-
-class Sentinel(enum.Enum):
-    # defining a sentinel in this way allows mypy to correctly handle the
-    # type of a dictionary lookup and subsequent type narrowing.
-    UNSET_SENTINEL = object()
 
 
 # Helper definition for the types that we might return. We do this to avoid
