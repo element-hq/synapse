@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pymacaroons
 
+from twisted.internet.address import IPv4Address
 from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.sso import MappingException
@@ -1684,5 +1685,5 @@ def _build_callback_request(
     request.args = {}
     request.args[b"code"] = [code.encode("utf-8")]
     request.args[b"state"] = [state.encode("utf-8")]
-    request.getClientAddress.return_value.host = ip_address
+    request.getClientAddress.return_value = IPv4Address(type="TCP", host=ip_address, port=12345)
     return request

@@ -314,7 +314,8 @@ class BaseAuth:
             client_address, IPv6Address
         ):
             logger.error(
-                "Unable to view IP address of the requester. Check that you are setting the X-Forwarded-For header correctly in your reverse proxy. Assuming '127.0.0.1'"
+                "Unable to view IP address of the requester. " \
+                "Check that you are setting the X-Forwarded-For header correctly in your reverse proxy."
             )
             raise SynapseError(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
