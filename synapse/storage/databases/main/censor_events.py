@@ -77,7 +77,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             return
 
         before_ts = (
-            self._clock.time_msec() - self.hs.config.server.redaction_retention_period
+            self.clock.time_msec() - self.hs.config.server.redaction_retention_period
         )
 
         # We fetch all redactions that:

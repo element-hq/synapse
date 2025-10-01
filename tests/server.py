@@ -28,6 +28,7 @@ import sqlite3
 import time
 import uuid
 import warnings
+import weakref
 from collections import deque
 from io import SEEK_END, BytesIO
 from typing import (
@@ -56,7 +57,7 @@ from zope.interface import implementer
 
 import twisted
 from twisted.enterprise import adbapi
-from twisted.internet import address, tcp, threads, udp
+from twisted.internet import address, defer, tcp, threads, udp
 from twisted.internet._resolver import SimpleResolverComplexifier
 from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.internet.defer import Deferred, fail, maybeDeferred, succeed
@@ -524,6 +525,19 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         # overwrite it again.
         self.nameResolver = SimpleResolverComplexifier(FakeResolver())
 
+    def run(self) -> None:
+        """
+        Override the call from `MemoryReactorClock` to add an additional step that
+        cleans up any `whenRunningHooks` that have been called.
+        This is necessary for a clean shutdown to occur as these hooks can hold
+        references to the `SynapseHomeServer`.
+        """
+        super().run()
+
+        # `MemoryReactorClock` never clears the hooks that have already been called.
+        # So manually clear the hooks here after they have been run.
+        self.whenRunningHooks.clear()
+
     def installNameResolver(self, resolver: IHostnameResolver) -> IHostnameResolver:
         raise NotImplementedError()
 
@@ -647,6 +661,19 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
             # reactor.callFromThread to feed results back from the db functions to the
             # main thread.
             super().advance(0)
+
+
+def cleanup_test_reactor_system_event_triggers(
+    reactor: ThreadedMemoryReactorClock,
+) -> None:
+    """Cleanup any registered system event triggers.
+    The `twisted.internet.test.ThreadedMemoryReactor` does not implement
+    `removeSystemEventTrigger` so won't clean these triggers up on it's own properly.
+    When trying to override `removeSystemEventTrigger` in `ThreadedMemoryReactorClock`
+    in order to implement this functionality, twisted complains about the reactor being
+    unclean and fails some tests.
+    """
+    reactor.triggers.clear()
 
 
 def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
@@ -780,13 +807,18 @@ class ThreadPool:
         d: "Deferred[None]" = Deferred()
         d.addCallback(lambda x: function(*args, **kwargs))
         d.addBoth(_)
-        self._reactor.callLater(0, d.callback, True)
+        # mypy ignored here because:
+        #   - this is part of the test infrastructure (outside of Synapse) so tracking
+        #     these calls for for homeserver shutdown doesn't make sense.
+        self._reactor.callLater(0, d.callback, True)  # type: ignore[call-later-not-tracked]
         return d
 
 
 def get_clock() -> Tuple[ThreadedMemoryReactorClock, Clock]:
+    # Ignore the linter error since this is an expected usage of creating a `Clock` for
+    # testing purposes.
     reactor = ThreadedMemoryReactorClock()
-    hs_clock = Clock(reactor, server_name="test_server")
+    hs_clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
     return reactor, hs_clock
 
 
@@ -898,10 +930,16 @@ class FakeTransport:
             # some implementations of IProducer (for example, FileSender)
             # don't return a deferred.
             d = maybeDeferred(self.producer.resumeProducing)
-            d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure (outside of Synapse) so tracking
+            #     these calls for for homeserver shutdown doesn't make sense.
+            d.addCallback(lambda x: self._reactor.callLater(0.1, _produce))  # type: ignore[call-later-not-tracked,call-overload]
 
         if not streaming:
-            self._reactor.callLater(0.0, _produce)
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure (outside of Synapse) so tracking
+            #     these calls for for homeserver shutdown doesn't make sense.
+            self._reactor.callLater(0.0, _produce)  # type: ignore[call-later-not-tracked]
 
     def write(self, byt: bytes) -> None:
         if self.disconnecting:
@@ -913,7 +951,10 @@ class FakeTransport:
         # TLSMemoryBIOProtocol) get very confused if a read comes back while they are
         # still doing a write. Doing a callLater here breaks the cycle.
         if self.autoflush:
-            self._reactor.callLater(0.0, self.flush)
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure (outside of Synapse) so tracking
+            #     these calls for for homeserver shutdown doesn't make sense.
+            self._reactor.callLater(0.0, self.flush)  # type: ignore[call-later-not-tracked]
 
     def writeSequence(self, seq: Iterable[bytes]) -> None:
         for x in seq:
@@ -943,7 +984,10 @@ class FakeTransport:
 
         self.buffer = self.buffer[len(to_write) :]
         if self.buffer and self.autoflush:
-            self._reactor.callLater(0.0, self.flush)
+            # mypy ignored here because:
+            #   - this is part of the test infrastructure (outside of Synapse) so tracking
+            #     these calls for for homeserver shutdown doesn't make sense.
+            self._reactor.callLater(0.0, self.flush)  # type: ignore[call-later-not-tracked]
 
         if not self.buffer and self.disconnecting:
             logger.info("FakeTransport: Buffer now empty, completing disconnect")
@@ -1020,7 +1064,7 @@ class TestHomeServer(HomeServer):
 
 def setup_test_homeserver(
     *,
-    cleanup_func: Callable[[Callable[[], None]], None],
+    cleanup_func: Callable[[Callable[[], Optional["Deferred[None]"]]], None],
     server_name: str = "test",
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
@@ -1035,8 +1079,10 @@ def setup_test_homeserver(
     If no datastore is supplied, one is created and given to the homeserver.
 
     Args:
-        cleanup_func: The function used to register a cleanup routine for after the
-            test.
+        cleanup_func : The function used to register a cleanup routine for
+                       after the test. If the function returns a Deferred, the
+                       test case will wait until the Deferred has fired before
+                       proceeding to the next cleanup function.
         server_name: Homeserver name
         config: Homeserver config
         reactor: Twisted reactor
@@ -1062,7 +1108,9 @@ def setup_test_homeserver(
         raise ConfigError("Must be a string", ("server_name",))
 
     if "clock" not in extra_homeserver_attributes:
-        extra_homeserver_attributes["clock"] = Clock(reactor, server_name=server_name)
+        # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
+        # for testing purposes (i.e. outside of Synapse).
+        extra_homeserver_attributes["clock"] = Clock(reactor, server_name=server_name)  # type: ignore[multiple-internal-clocks]
 
     config.caches.resize_all_caches()
 
@@ -1154,8 +1202,21 @@ def setup_test_homeserver(
         reactor=reactor,
     )
 
-    # Register the cleanup hook
-    cleanup_func(hs.cleanup)
+    # Capture the `hs` as a `weakref` here to ensure there is no scenario where uncalled
+    # cleanup functions result in holding the `hs` in memory.
+    cleanup_hs_ref = weakref.ref(hs)
+
+    def shutdown_hs_on_cleanup() -> "Deferred[None]":
+        cleanup_hs = cleanup_hs_ref()
+        deferred: "Deferred[None]" = defer.succeed(None)
+        if cleanup_hs is not None:
+            deferred = defer.ensureDeferred(cleanup_hs.shutdown())
+        return deferred
+
+    # Register the cleanup hook for the homeserver.
+    # A full `hs.shutdown()` is necessary otherwise CI tests will fail while exhibiting
+    # strange behaviours.
+    cleanup_func(shutdown_hs_on_cleanup)
 
     # Install @cache_in_self attributes
     for key, val in extra_homeserver_attributes.items():
@@ -1184,14 +1245,18 @@ def setup_test_homeserver(
     hs.get_datastores().main.USE_DEDICATED_DB_THREADS_FOR_EVENT_FETCHING = False
 
     if USE_POSTGRES_FOR_TESTS:
-        database_pool = hs.get_datastores().databases[0]
+        # Capture the `database_pool` as a `weakref` here to ensure there is no scenario where uncalled
+        # cleanup functions result in holding the `hs` in memory.
+        database_pool = weakref.ref(hs.get_datastores().databases[0])
 
         # We need to do cleanup on PostgreSQL
         def cleanup() -> None:
             import psycopg2
 
             # Close all the db pools
-            database_pool._db_pool.close()
+            db_pool = database_pool()
+            if db_pool is not None:
+                db_pool._db_pool.close()
 
             dropped = False
 

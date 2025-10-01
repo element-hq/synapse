@@ -53,6 +53,7 @@ from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import delay_cancellation
 from synapse.util.caches.deferred_cache import DeferredCache
 from synapse.util.caches.lrucache import LruCache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -154,11 +155,18 @@ class _CacheDescriptorBase:
         )
 
 
-class HasServerName(Protocol):
+class HasServerNameAndClock(Protocol):
     server_name: str
     """
     The homeserver name that this cache is associated with (used to label the metric)
     (`hs.hostname`).
+    """
+
+    clock: Clock
+    """
+    The homeserver clock instance used to track delayed and looping calls. Important to
+    be able to fully cleanup the homeserver instance on server shutdown.
+    (`hs.get_clock()`).
     """
 
 
@@ -239,7 +247,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[HasServerName], owner: Optional[Type]
+        self, obj: Optional[HasServerNameAndClock], owner: Optional[Type]
     ) -> Callable[..., "defer.Deferred[Any]"]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
@@ -249,9 +257,13 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         assert obj.server_name is not None, (
             "The `server_name` attribute must be set on the object where `@cached` decorator is used."
         )
+        assert obj.clock is not None, (
+            "The `clock` attribute must be set on the object where `@cached` decorator is used."
+        )
 
         cache: DeferredCache[CacheKey, Any] = DeferredCache(
             name=self.name,
+            clock=obj.clock,
             server_name=obj.server_name,
             max_entries=self.max_entries,
             tree=self.tree,

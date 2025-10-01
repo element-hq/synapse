@@ -41,7 +41,6 @@ from prometheus_client import Counter
 from twisted.internet.protocol import ReconnectingClientFactory
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
     Command,
@@ -132,6 +131,7 @@ class ReplicationCommandHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self.hs = hs
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -361,9 +361,8 @@ class ReplicationCommandHandler:
             return
 
         # fire off a background process to start processing the queue.
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "process-replication-data",
-            self.server_name,
             self._unsafe_process_queue,
             stream_name,
         )

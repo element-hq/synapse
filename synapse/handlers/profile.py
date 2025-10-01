@@ -56,8 +56,8 @@ class ProfileHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname  # nb must be called this for @cached
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self.store = hs.get_datastores().main
-        self.clock = hs.get_clock()
         self.hs = hs
 
         self.federation = hs.get_federation_client()

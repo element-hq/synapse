@@ -167,8 +167,9 @@ class ApplicationServiceSchedulerTransactionCtrlTestCase(unittest.TestCase):
         )
 
 
-class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
+class ApplicationServiceSchedulerRecovererTestCase(unittest.HomeserverTestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.reactor, self.clock = get_clock()
         self.as_api = Mock()
         self.store = Mock()
@@ -176,6 +177,7 @@ class ApplicationServiceSchedulerRecovererTestCase(unittest.TestCase):
         self.callback = AsyncMock()
         self.recoverer = _Recoverer(
             server_name="test_server",
+            hs=self.hs,
             clock=self.clock,
             as_api=self.as_api,
             store=self.store,

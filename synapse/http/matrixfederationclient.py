@@ -90,6 +90,7 @@ from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
 from synapse.util.async_helpers import AwakenableSleeper, Linearizer, timeout_deferred
+from synapse.util.clock import Clock
 from synapse.util.json import json_decoder
 from synapse.util.metrics import Measure
 from synapse.util.stringutils import parse_and_validate_server_name
@@ -270,6 +271,7 @@ class LegacyJsonSendParser(_BaseJsonParser[Tuple[int, JsonDict]]):
 
 
 async def _handle_response(
+    clock: Clock,
     reactor: IReactorTime,
     timeout_sec: float,
     request: MatrixFederationRequest,
@@ -299,7 +301,11 @@ async def _handle_response(
         check_content_type_is(response.headers, parser.CONTENT_TYPE)
 
         d = read_body_with_max_size(response, parser, max_response_size)
-        d = timeout_deferred(d, timeout=timeout_sec, reactor=reactor)
+        d = timeout_deferred(
+            deferred=d,
+            timeout=timeout_sec,
+            clock=clock,
+        )
 
         length = await make_deferred_yieldable(d)
 
@@ -411,6 +417,7 @@ class MatrixFederationHttpClient:
         self.server_name = hs.hostname
 
         self.reactor = hs.get_reactor()
+        self.clock = hs.get_clock()
 
         user_agent = hs.version_string
         if hs.config.server.user_agent_suffix:
@@ -424,6 +431,7 @@ class MatrixFederationHttpClient:
             federation_agent: IAgent = MatrixFederationAgent(
                 server_name=self.server_name,
                 reactor=self.reactor,
+                clock=self.clock,
                 tls_client_options_factory=tls_client_options_factory,
                 user_agent=user_agent.encode("ascii"),
                 ip_allowlist=hs.config.server.federation_ip_range_allowlist,
@@ -457,7 +465,6 @@ class MatrixFederationHttpClient:
             ip_blocklist=hs.config.server.federation_ip_range_blocklist,
         )
 
-        self.clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self.version_string_bytes = hs.version_string.encode("ascii")
         self.default_timeout_seconds = hs.config.federation.client_timeout_ms / 1000
@@ -470,9 +477,9 @@ class MatrixFederationHttpClient:
         self.max_long_retries = hs.config.federation.max_long_retries
         self.max_short_retries = hs.config.federation.max_short_retries
 
-        self._cooperator = Cooperator(scheduler=_make_scheduler(self.reactor))
+        self._cooperator = Cooperator(scheduler=_make_scheduler(self.clock))
 
-        self._sleeper = AwakenableSleeper(self.reactor)
+        self._sleeper = AwakenableSleeper(self.clock)
 
         self._simple_http_client = SimpleHttpClient(
             hs,
@@ -484,6 +491,10 @@ class MatrixFederationHttpClient:
         self.remote_download_linearizer = Linearizer(
             name="remote_download_linearizer", max_count=6, clock=self.clock
         )
+        self._is_shutdown = False
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
 
     def wake_destination(self, destination: str) -> None:
         """Called when the remote server may have come back online."""
@@ -629,6 +640,7 @@ class MatrixFederationHttpClient:
         limiter = await synapse.util.retryutils.get_retry_limiter(
             destination=request.destination,
             our_server_name=self.server_name,
+            hs=self.hs,
             clock=self.clock,
             store=self._store,
             backoff_on_404=backoff_on_404,
@@ -675,7 +687,7 @@ class MatrixFederationHttpClient:
                 (b"", b"", path_bytes, None, query_bytes, b"")
             )
 
-            while True:
+            while not self._is_shutdown:
                 try:
                     json = request.get_json()
                     if json:
@@ -733,9 +745,9 @@ class MatrixFederationHttpClient:
                                 bodyProducer=producer,
                             )
                             request_deferred = timeout_deferred(
-                                request_deferred,
+                                deferred=request_deferred,
                                 timeout=_sec_timeout,
-                                reactor=self.reactor,
+                                clock=self.clock,
                             )
 
                             response = await make_deferred_yieldable(request_deferred)
@@ -793,7 +805,9 @@ class MatrixFederationHttpClient:
                         # Update transactions table?
                         d = treq.content(response)
                         d = timeout_deferred(
-                            d, timeout=_sec_timeout, reactor=self.reactor
+                            deferred=d,
+                            timeout=_sec_timeout,
+                            clock=self.clock,
                         )
 
                         try:
@@ -861,6 +875,15 @@ class MatrixFederationHttpClient:
                             request.destination,
                             delay_seconds,
                         )
+
+                        if self._is_shutdown:
+                            # Immediately fail sending the request instead of starting a
+                            # potentially long sleep after the server has requested
+                            # shutdown.
+                            # This is the code path followed when the
+                            # `federation_transaction_transmission_loop` has been
+                            # cancelled.
+                            raise
 
                         # Sleep for the calculated delay, or wake up immediately
                         # if we get notified that the server is back up.
@@ -1074,6 +1097,7 @@ class MatrixFederationHttpClient:
             parser = cast(ByteParser[T], JsonParser())
 
         body = await _handle_response(
+            self.clock,
             self.reactor,
             _sec_timeout,
             request,
@@ -1152,7 +1176,13 @@ class MatrixFederationHttpClient:
             _sec_timeout = self.default_timeout_seconds
 
         body = await _handle_response(
-            self.reactor, _sec_timeout, request, response, start_ms, parser=JsonParser()
+            self.clock,
+            self.reactor,
+            _sec_timeout,
+            request,
+            response,
+            start_ms,
+            parser=JsonParser(),
         )
         return body
 
@@ -1358,6 +1388,7 @@ class MatrixFederationHttpClient:
             parser = cast(ByteParser[T], JsonParser())
 
         body = await _handle_response(
+            self.clock,
             self.reactor,
             _sec_timeout,
             request,
@@ -1431,7 +1462,13 @@ class MatrixFederationHttpClient:
             _sec_timeout = self.default_timeout_seconds
 
         body = await _handle_response(
-            self.reactor, _sec_timeout, request, response, start_ms, parser=JsonParser()
+            self.clock,
+            self.reactor,
+            _sec_timeout,
+            request,
+            response,
+            start_ms,
+            parser=JsonParser(),
         )
         return body
 

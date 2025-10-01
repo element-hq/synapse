@@ -126,6 +126,7 @@ class SyncRestServlet(RestServlet):
 
         self._json_filter_cache: LruCache[str, bool] = LruCache(
             max_size=1000,
+            clock=self.clock,
             cache_name="sync_valid_filter",
             server_name=self.server_name,
         )
