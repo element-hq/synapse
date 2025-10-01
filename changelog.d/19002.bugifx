@@ -1,0 +1,1 @@
+Fix bug where ephemeral events were not filtered by room ID

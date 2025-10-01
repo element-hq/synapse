@@ -578,12 +578,8 @@ class SyncHandler:
             ephemeral_by_room: JsonDict = {}
 
             for event in typing:
-                # we want to exclude the room_id from the event, but modifying the
-                # result returned by the event source is poor form (it might cache
-                # the object)
                 room_id = event["room_id"]
-                event_copy = {k: v for (k, v) in event.items() if k != "room_id"}
-                ephemeral_by_room.setdefault(room_id, []).append(event_copy)
+                ephemeral_by_room.setdefault(room_id, []).append(event)
 
             receipt_key = (
                 since_token.receipt_key
@@ -603,9 +599,7 @@ class SyncHandler:
 
             for event in receipts:
                 room_id = event["room_id"]
-                # exclude room id, as above
-                event_copy = {k: v for (k, v) in event.items() if k != "room_id"}
-                ephemeral_by_room.setdefault(room_id, []).append(event_copy)
+                ephemeral_by_room.setdefault(room_id, []).append(event)
 
         return now_token, ephemeral_by_room
 
@@ -2734,9 +2728,13 @@ class SyncHandler:
                 )
             )
 
-            ephemeral = await sync_config.filter_collection.filter_room_ephemeral(
-                ephemeral
-            )
+            ephemeral = [
+                # exclude room id
+                {k: v for (k, v) in event.items() if k != "room_id"}
+                for event in await sync_config.filter_collection.filter_room_ephemeral(
+                    ephemeral
+                )
+            ]
 
             if not (
                 always_include
