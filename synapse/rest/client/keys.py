@@ -270,25 +270,26 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        # Validate the provided `user_id` and `device_id` fields in
-        # `device_keys` match that of the requesting user. We can't do
-        # this directly in the pydantic model as we don't have access
-        # to the requester yet.
-        #
-        # TODO: We could use ValidationInfo when we switch to Pydantic v2.
-        # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
-        if body["device_keys"]["user_id"] != user_id:
-            raise SynapseError(
-                code=HTTPStatus.BAD_REQUEST,
-                errcode=Codes.BAD_JSON,
-                msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
-            )
-        if body["device_keys"]["device_id"] != device_id:
-            raise SynapseError(
-                code=HTTPStatus.BAD_REQUEST,
-                errcode=Codes.BAD_JSON,
-                msg="Provided `device_id` in `device_keys` does not match that of the authenticated user device",
-            )
+        if "device_keys" in body:
+            # Validate the provided `user_id` and `device_id` fields in
+            # `device_keys` match that of the requesting user. We can't do
+            # this directly in the pydantic model as we don't have access
+            # to the requester yet.
+            #
+            # TODO: We could use ValidationInfo when we switch to Pydantic v2.
+            # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
+            if body["device_keys"]["user_id"] != user_id:
+                raise SynapseError(
+                    code=HTTPStatus.BAD_REQUEST,
+                    errcode=Codes.BAD_JSON,
+                    msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
+                )
+            if body["device_keys"]["device_id"] != device_id:
+                raise SynapseError(
+                    code=HTTPStatus.BAD_REQUEST,
+                    errcode=Codes.BAD_JSON,
+                    msg="Provided `device_id` in `device_keys` does not match that of the authenticated user device",
+                )
 
         result = await self.e2e_keys_handler.upload_keys_for_user(
             user_id=user_id,
