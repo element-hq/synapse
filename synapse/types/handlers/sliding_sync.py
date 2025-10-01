@@ -396,12 +396,35 @@ class SlidingSyncResult:
                     or bool(self.prev_batch)
                 )
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadsExtension:
+            # TODO: comment
+            """The Threads extension (MSC4360)
+
+            Attributes:
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUpdates:
+                # TODO: comment
+                thread_root: Optional[EventBase]
+
+                # TODO: comment
+                prev_batch: Optional[StreamToken]
+
+            updates: Optional[Mapping[str, Mapping[str, ThreadUpdates]]]
+            prev_batch: Optional[ThreadSubscriptionsToken]
+
+            def __bool__(self) -> bool:
+                return bool(self.updates) or bool(self.prev_batch)
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
         thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
+        threads: Optional[ThreadsExtension] = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -411,6 +434,7 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.threads
             )
 
     next_pos: SlidingSyncStreamToken

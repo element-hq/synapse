@@ -77,6 +77,7 @@ class SlidingSyncExtensionHandler:
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
+        self._enable_threads_ext = hs.config.experimental.msc4360_enabled
 
     @trace
     async def get_extensions_response(
@@ -177,6 +178,18 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        threads_coro = None
+        if (
+            sync_config.extensions.threads is not None
+            and self._enable_threads_ext
+        ):
+            threads_coro = self.get_threads_extension_response(
+                sync_config=sync_config,
+                threads_request=sync_config.extensions.threads,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         (
             to_device_response,
             e2ee_response,
@@ -184,6 +197,7 @@ class SlidingSyncExtensionHandler:
             receipts_response,
             typing_response,
             thread_subs_response,
+            threads_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
@@ -191,6 +205,7 @@ class SlidingSyncExtensionHandler:
             receipts_coro,
             typing_coro,
             thread_subs_coro,
+            threads_coro,
         )
 
         return SlidingSyncResult.Extensions(
@@ -200,6 +215,7 @@ class SlidingSyncExtensionHandler:
             receipts=receipts_response,
             typing=typing_response,
             thread_subscriptions=thread_subs_response,
+            threads=threads_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -968,5 +984,37 @@ class SlidingSyncExtensionHandler:
         return SlidingSyncResult.Extensions.ThreadSubscriptionsExtension(
             subscribed=subscribed_threads,
             unsubscribed=unsubscribed_threads,
+            prev_batch=prev_batch,
+        )
+
+    async def get_threads_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        threads_request: SlidingSyncConfig.Extensions.ThreadsExtension,
+        to_token: StreamToken,
+        from_token: Optional[SlidingSyncStreamToken],
+    ) -> Optional[SlidingSyncResult.Extensions.ThreadsExtension]:
+        """Handle Threads extension (MSC4360)
+
+        Args:
+            sync_config: Sync configuration
+            threads_request: The threads extension from the request
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+
+        Returns:
+            the response (None if empty or threads extension is disabled)
+        """
+        if not threads_request.enabled:
+            return None
+
+        # TODO: implement
+
+        _limit = threads_request.limit
+
+        prev_batch = None
+
+        return SlidingSyncResult.Extensions.ThreadsExtension(
+            updates=None,
             prev_batch=prev_batch,
         )

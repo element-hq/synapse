@@ -347,6 +347,7 @@ T3 = TypeVar("T3")
 T4 = TypeVar("T4")
 T5 = TypeVar("T5")
 T6 = TypeVar("T6")
+T7 = TypeVar("T7")
 
 
 @overload
@@ -475,6 +476,30 @@ async def gather_optional_coroutines(
     ],
 ) -> Tuple[
     Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5], Optional[T6]
+]: ...
+
+
+@overload
+async def gather_optional_coroutines(
+    *coroutines: Unpack[
+        Tuple[
+            Optional[Coroutine[Any, Any, T1]],
+            Optional[Coroutine[Any, Any, T2]],
+            Optional[Coroutine[Any, Any, T3]],
+            Optional[Coroutine[Any, Any, T4]],
+            Optional[Coroutine[Any, Any, T5]],
+            Optional[Coroutine[Any, Any, T6]],
+            Optional[Coroutine[Any, Any, T7]],
+        ]
+    ],
+) -> Tuple[
+    Optional[T1],
+    Optional[T2],
+    Optional[T3],
+    Optional[T4],
+    Optional[T5],
+    Optional[T6],
+    Optional[T7],
 ]: ...
 
 

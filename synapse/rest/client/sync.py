@@ -648,6 +648,7 @@ class SlidingSyncRestServlet(RestServlet):
         - receipts (MSC3960)
         - account data (MSC3959)
         - thread subscriptions (MSC4308)
+        - threads (MSC4360)
 
     Request query parameters:
         timeout: How long to wait for new events in milliseconds.
@@ -1091,6 +1092,12 @@ class SlidingSyncRestServlet(RestServlet):
                 _serialise_thread_subscriptions(extensions.thread_subscriptions)
             )
 
+        # excludes both None and falsy `threads`
+        if extensions.threads:
+            serialized_extensions["io.element.msc4360.threads"] = _serialise_threads(
+                extensions.threads
+            )
+
         return serialized_extensions
 
 
@@ -1123,6 +1130,30 @@ def _serialise_thread_subscriptions(
 
     if thread_subscriptions.prev_batch:
         out["prev_batch"] = thread_subscriptions.prev_batch.to_string()
+
+    return out
+
+
+# TODO: is this necessary for serialization?
+def _serialise_threads(
+    threads: SlidingSyncResult.Extensions.ThreadsExtension,
+) -> JsonDict:
+    out: JsonDict = {}
+
+    if threads.updates:
+        out["updates"] = {
+            room_id: {
+                thread_root_id: {
+                    "thread_root": update.thread_root,
+                    "prev_batch": update.prev_batch,
+                }
+                for thread_root_id, update in thread_updates.items()
+            }
+            for room_id, thread_updates in threads.updates.items()
+        }
+
+    if threads.prev_batch:
+        out["prev_batch"] = threads.prev_batch.to_string()
 
     return out
 
