@@ -567,7 +567,7 @@ class AuthHandler:
             await self.store.set_ui_auth_clientdict(sid, clientdict)
 
         user_agent = get_request_user_agent(request)
-        clientip = request.getClientAddress().host
+        clientip = self.auth.get_ip_address_from_request(request)
 
         await self.store.add_user_agent_ip_to_ui_auth_session(
             session.session_id, user_agent, clientip

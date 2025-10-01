@@ -329,6 +329,7 @@ class UsernameAvailabilityRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self._auth = hs.get_auth()
         self.server_name = hs.hostname
         self.registration_handler = hs.get_registration_handler()
         self.ratelimiter = FederationRateLimiter(
@@ -361,7 +362,7 @@ class UsernameAvailabilityRestServlet(RestServlet):
         if self.inhibit_user_in_use_error:
             return 200, {"available": True}
 
-        ip = request.getClientAddress().host
+        ip = self._auth.get_ip_address_from_request(request)
         with self.ratelimiter.ratelimit(ip) as wait_deferred:
             await wait_deferred
 
@@ -395,6 +396,7 @@ class RegistrationTokenValidityRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.hs = hs
+        self._auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.ratelimiter = Ratelimiter(
             store=self.store,
@@ -403,7 +405,8 @@ class RegistrationTokenValidityRestServlet(RestServlet):
         )
 
     async def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
-        await self.ratelimiter.ratelimit(None, (request.getClientAddress().host,))
+        ip_address = self._auth.get_ip_address_from_request(request)
+        await self.ratelimiter.ratelimit(None, (ip_address,))
 
         if not self.hs.config.registration.enable_registration:
             raise SynapseError(
@@ -456,7 +459,7 @@ class RegisterRestServlet(RestServlet):
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
-        client_addr = request.getClientAddress().host
+        client_addr = self.auth.get_ip_address_from_request(request)
 
         await self.ratelimiter.ratelimit(None, client_addr, update=False)
 
@@ -916,7 +919,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         body = parse_json_object_from_request(request)
 
-        client_addr = request.getClientAddress().host
+        client_addr = self.auth.get_ip_address_from_request(request)
 
         await self.ratelimiter.ratelimit(None, client_addr, update=False)
 

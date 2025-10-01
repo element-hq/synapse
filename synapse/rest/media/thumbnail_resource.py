@@ -58,6 +58,7 @@ class ThumbnailResource(RestServlet):
     ):
         super().__init__()
 
+        self._auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.media_repo = media_repo
         self.media_storage = media_storage
@@ -120,7 +121,7 @@ class ThumbnailResource(RestServlet):
                 respond_404(request)
                 return
 
-            ip_address = request.getClientAddress().host
+            ip_address = self._auth.get_ip_address_from_request(request)
             remote_resp_function = (
                 self.thumbnail_provider.select_or_generate_remote_thumbnail
                 if self.dynamic_thumbnails

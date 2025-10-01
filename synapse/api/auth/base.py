@@ -359,7 +359,8 @@ class BaseAuth:
             return None
 
         if app_service.ip_range_whitelist:
-            ip_address = IPAddress(request.getClientAddress().host)
+            ip_address_str = self.get_ip_address_from_request(request)
+            ip_address = IPAddress(ip_address_str)
             if ip_address not in app_service.ip_range_whitelist:
                 return None
 
