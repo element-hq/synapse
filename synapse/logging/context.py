@@ -285,7 +285,11 @@ class LoggingContext:
     Args:
         name: Name for the context for logging.
         server_name: The name of the server this context is associated with
-            (`config.server.server_name` or `hs.hostname`)
+            (`config.server.server_name` or `hs.hostname`).
+
+            If not provided, this will be set to "SERVER_NAME_NOT_PROVIDED".
+            This is a backwards-compatibility patch for
+            https://github.com/matrix-org/synapse-s3-storage-provider/issues/133.
         parent_context (LoggingContext|None): The parent of the new context
         request: Synapse Request Context object. Useful to associate all the logs
             happening to a given request.
@@ -309,7 +313,7 @@ class LoggingContext:
         self,
         *,
         name: str,
-        server_name: str,
+        server_name: str = "SERVER_NAME_NOT_PROVIDED",
         parent_context: "Optional[LoggingContext]" = None,
         request: Optional[ContextRequest] = None,
     ) -> None:
