@@ -19,10 +19,12 @@
 #
 #
 import logging
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Tuple
 
 from netaddr import IPAddress
 
+from twisted.internet.address import IPv4Address, IPv6Address
 from twisted.web.server import Request
 
 from synapse import event_auth
@@ -31,6 +33,7 @@ from synapse.api.errors import (
     AuthError,
     Codes,
     MissingClientTokenError,
+    SynapseError,
     UnstableSpecAuthError,
 )
 from synapse.appservice import ApplicationService
@@ -290,6 +293,36 @@ class BaseAuth:
                 raise MissingClientTokenError()
 
             return query_params[0].decode("ascii")
+
+    @staticmethod
+    def get_ip_address_from_request(request: Request) -> str:
+        """
+        Extract the IPv4 or IPv6 address from a client request.
+
+        Args:
+            request: The request to process.
+
+        Returns:
+            The IPv4 or IPv6 address of the client.
+
+        Raises:
+            SynapseError: If an IP address could not be extracted from the
+                request.
+        """
+        client_address = request.getClientAddress()
+        if not isinstance(client_address, IPv4Address) and not isinstance(
+            client_address, IPv6Address
+        ):
+            logger.error(
+                "Unable to view IP address of the requester. Check that you are setting the X-Forwarded-For header correctly in your reverse proxy. Assuming '127.0.0.1'"
+            )
+            raise SynapseError(
+                HTTPStatus.INTERNAL_SERVER_ERROR,
+                "Unable to read client IP address",
+                Codes.UNKNOWN,
+            )
+
+        return client_address.host
 
     @cancellable
     async def get_appservice_user(
