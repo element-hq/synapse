@@ -117,7 +117,24 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
-# Upgrading to v1.138.1
+# Upgrading to v1.139.0
+
+## `/register` requests from old application service implementations may break when using MAS
+
+Application Services that do not set `inhibit_login=true` when calling `POST
+/_matrix/client/v3/register` will receive the error
+`IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED` in response. This is a
+result of [MSC4190: Device management for application
+services](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) which
+adds new endpoints for application services to create encryption-ready devices
+with other than `/login` or `/register` without `inhibit_login=true`.
+
+If an application service you use starts to fail with the mentioned error,
+ensure it is up to date. If it is, then kindly let the author know that they
+need to update their implementation to call `/register` with
+`inhibit_login=true`.
+
+# Upgrading to v1.138.2
 
 ## Drop support for Ubuntu 24.10 Oracular Oriole, and add support for Ubuntu 25.04 Plucky Puffin
 

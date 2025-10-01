@@ -216,6 +216,13 @@ class LoginRestServlet(RestServlet):
                         "This login method is only valid for application services"
                     )
 
+                if appservice.msc4190_device_management:
+                    raise SynapseError(
+                        400,
+                        "This appservice has MSC4190 enabled, so appservice login cannot be used.",
+                        errcode=Codes.APPSERVICE_LOGIN_UNSUPPORTED,
+                    )
+
                 if appservice.is_rate_limited():
                     await self._address_ratelimiter.ratelimit(
                         None, request.getClientAddress().host

@@ -34,7 +34,7 @@ from synapse.logging.opentracing import (
     set_tag,
 )
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, get_domain_from_id
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:

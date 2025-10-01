@@ -20,7 +20,7 @@ from synapse.replication.tcp.streams._base import (
 )
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.replication._base import BaseStreamTestCase
 

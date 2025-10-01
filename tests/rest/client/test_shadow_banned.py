@@ -34,7 +34,7 @@ from synapse.rest.client import (
 )
 from synapse.server import HomeServer
 from synapse.types import UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

@@ -26,7 +26,7 @@ from synapse.api.constants import EduTypes
 from synapse.api.errors import HttpResponseException
 from synapse.events import EventBase
 from synapse.federation.persistence import TransactionActions
-from synapse.federation.units import Edu, Transaction
+from synapse.federation.units import Edu, Transaction, serialize_and_filter_pdus
 from synapse.logging.opentracing import (
     extract_text_map,
     set_tag,
@@ -36,7 +36,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import JsonDict
-from synapse.util import json_decoder
+from synapse.util.json import json_decoder
 from synapse.util.metrics import measure_func
 
 if TYPE_CHECKING:
@@ -119,7 +119,7 @@ class TransactionManager:
                 transaction_id=txn_id,
                 origin=self.server_name,
                 destination=destination,
-                pdus=[p.get_pdu_json() for p in pdus],
+                pdus=serialize_and_filter_pdus(pdus),
                 edus=[edu.get_dict() for edu in edus],
             )
 

@@ -64,11 +64,11 @@ from synapse.types import (
     StrCollection,
     get_verify_key_from_cross_signing_key,
 )
-from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_decoder, json_encoder
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:

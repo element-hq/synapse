@@ -33,7 +33,7 @@ from twisted.web.http_headers import Headers
 from twisted.web.iweb import IResponse
 
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.stringutils import random_string
 
 from tests.test_utils import FakeResponse

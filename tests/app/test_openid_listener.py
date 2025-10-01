@@ -29,7 +29,7 @@ from synapse.app.homeserver import SynapseHomeServer
 from synapse.config.server import parse_listener_def
 from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import make_request
 from tests.unittest import HomeserverTestCase

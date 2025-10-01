@@ -308,17 +308,21 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-def setup(config_options: List[str]) -> SynapseHomeServer:
+def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     """
+    Parse the commandline and config files
+
+    Supports generation of config files, so is used for the main homeserver app.
+
     Args:
-        config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.
+        argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
     Returns:
         A homeserver instance.
     """
     try:
         config = HomeServerConfig.load_or_generate_config(
-            "Synapse Homeserver", config_options
+            "Synapse Homeserver", argv_options
         )
     except ConfigError as e:
         sys.stderr.write("\n")
@@ -331,6 +335,20 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
         # If a config isn't returned, and an exception isn't raised, we're just
         # generating config files and shouldn't try to continue.
         sys.exit(0)
+
+    return config
+
+
+def setup(config: HomeServerConfig) -> SynapseHomeServer:
+    """
+    Create and setup a Synapse homeserver instance given a configuration.
+
+    Args:
+        config: The configuration for the homeserver.
+
+    Returns:
+        A homeserver instance.
+    """
 
     if config.worker.worker_app:
         raise ConfigError(
@@ -387,7 +405,7 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
-    register_start(start)
+    register_start(hs, start)
 
     return hs
 
@@ -405,10 +423,12 @@ def run(hs: HomeServer) -> None:
 
 
 def main() -> None:
+    homeserver_config = load_or_generate_config(sys.argv[1:])
+
     with LoggingContext("main"):
         # check base requirements
         check_requirements()
-        hs = setup(sys.argv[1:])
+        hs = setup(homeserver_config)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:

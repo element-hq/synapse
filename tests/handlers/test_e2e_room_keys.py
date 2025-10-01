@@ -27,7 +27,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.api.errors import SynapseError
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 

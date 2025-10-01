@@ -21,9 +21,12 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
+from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.metrics.background_process_metrics import (
+    run_as_background_process,
+)
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
 )
@@ -414,7 +417,7 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id=delay_id,
@@ -440,7 +443,7 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id=delay_id,
@@ -466,7 +469,7 @@ class DelayedEventsHandler:
         # Use standard request limiter for sending delayed events on-demand,
         # as an on-demand send is similar to sending a regular event.
         await self._request_ratelimiter.ratelimit(requester)
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(
             delay_id=delay_id,
