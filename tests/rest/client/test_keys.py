@@ -103,6 +103,63 @@ class KeyUploadTestCase(unittest.HomeserverTestCase):
             channel.result,
         )
 
+    def test_upload_keys_fails_on_invalid_user_id_or_device_id(self) -> None:
+        """
+        Validate that the requesting user is uploading their own keys and nobody
+        else's.
+        """
+        device_id = "DEVICE_ID"
+        alice_user_id = self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland", device_id=device_id)
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                "device_keys": {
+                    # Included `user_id` does not match requesting user.
+                    "user_id": "@unknown_user:test",
+                    "device_id": device_id,
+                    "algorithms": ["m.olm.curve25519-aes-sha2"],
+                    "keys": {
+                        f"ed25519:{device_id}": "publickey",
+                    },
+                    "signatures": {},
+                }
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                "device_keys": {
+                    "user_id": alice_user_id,
+                    # Included `device_id` does not match requesting user's.
+                    "device_id": "UNKNOWN_DEVICE_ID",
+                    "algorithms": ["m.olm.curve25519-aes-sha2"],
+                    "keys": {
+                        f"ed25519:{device_id}": "publickey",
+                    },
+                    "signatures": {},
+                }
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(
+            channel.json_body["errcode"],
+            Codes.BAD_JSON,
+            channel.result,
+        )
+
 
 class KeyQueryTestCase(unittest.HomeserverTestCase):
     servlets = [
