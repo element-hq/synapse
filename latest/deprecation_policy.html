@@ -159,11 +159,12 @@
                             <nav class="pagetoc"></nav>
                         </div>
 
-                        <h1 id="deprecation-policy-for-platform-dependencies"><a class="header" href="#deprecation-policy-for-platform-dependencies">Deprecation Policy for Platform Dependencies</a></h1>
-<p>Synapse has a number of platform dependencies, including Python, Rust, 
-PostgreSQL and SQLite. This document outlines the policy towards which versions 
-we support, and when we drop support for versions in the future.</p>
-<h2 id="policy"><a class="header" href="#policy">Policy</a></h2>
+                        <h1 id="deprecation-policy"><a class="header" href="#deprecation-policy">Deprecation Policy</a></h1>
+<p>Synapse has a number of <strong>platform dependencies</strong> (Python, Rust, PostgreSQL, and SQLite)
+and <strong>application dependencies</strong> (Python and Rust packages). This document outlines the
+policy towards which versions we support, and when we drop support for versions in the
+future.</p>
+<h2 id="platform-dependencies"><a class="header" href="#platform-dependencies">Platform Dependencies</a></h2>
 <p>Synapse follows the upstream support life cycles for Python and PostgreSQL,
 i.e. when a version reaches End of Life Synapse will withdraw support for that
 version in future releases.</p>
@@ -177,7 +178,7 @@ people building from source should ensure they can fetch recent versions of Rust
 <p>The oldest supported version of SQLite is the version
 <a href="https://packages.debian.org/bullseye/libsqlite3-0">provided</a> by
 <a href="https://wiki.debian.org/DebianOldStable">Debian oldstable</a>.</p>
-<h2 id="context"><a class="header" href="#context">Context</a></h2>
+<h3 id="context"><a class="header" href="#context">Context</a></h3>
 <p>It is important for system admins to have a clear understanding of the platform
 requirements of Synapse and its deprecation policies so that they can
 effectively plan upgrading their infrastructure ahead of time. This is
@@ -197,6 +198,34 @@ the ecosystem.</p>
 release&quot;; bugfixes are published for the latest minor release only. We chose to
 track Debian's oldstable as this is relatively conservative, predictably updated
 and is consistent with the <code>.deb</code> packages released by Matrix.org.</p>
+<h2 id="application-dependencies"><a class="header" href="#application-dependencies">Application dependencies</a></h2>
+<p>For application-level Python dependencies, we often specify loose version constraints
+(ex. <code>&gt;=X.Y.Z</code>) to be forwards compatible with any new versions. Upper bounds (<code>&lt;A.B.C</code>)
+are only added when necessary to prevent known incompatibilities.</p>
+<p>When selecting a minimum version, while we are mindful of the impact on downstream
+package maintainers, our primary focus is on the maintainability and progress of Synapse
+itself.</p>
+<p>For developers, a Python dependency version can be considered a &quot;no-brainer&quot; upgrade once it is
+available in both the latest <a href="https://packages.debian.org/stable/">Debian Stable</a> and
+<a href="https://launchpad.net/ubuntu">Ubuntu LTS</a> repositories. No need to burden yourself with
+extra scrutiny or consideration at this point.</p>
+<p>We aggressively update Rust dependencies. Since these are statically linked and managed
+entirely by <code>cargo</code> during build, they <em>can</em> pose no ongoing maintenance burden on others.
+This allows us to freely upgrade to leverage the latest ecosystem advancements assuming
+they don't have their own system-level dependencies.</p>
+<h3 id="context-1"><a class="header" href="#context-1">Context</a></h3>
+<p>Because Python dependencies can easily be managed in a virtual environment, we are less
+concerned about the criteria for selecting minimum versions. The only thing of concern
+is making sure we're not making it unnecessarily difficult for downstream package
+maintainers. Generally, this just means avoiding the bleeding edge for a few months.</p>
+<p>The situation for Rust dependencies is fundamentally different. For packagers, the
+concerns around Python dependency versions do not apply. The <code>cargo</code> tool handles
+downloading and building all libraries to satisfy dependencies, and these libraries are
+statically linked into the final binary. This means that from a packager's perspective,
+the Rust dependency versions are an internal build detail, not a runtime dependency to
+be managed on the target system. Consequently, we have even greater flexibility to
+upgrade Rust dependencies as needed for the project. Some distros (e.g. Fedora) do
+package Rust libraries, but this appears to be the outlier rather than the norm.</p>
 
                     </main>
 
