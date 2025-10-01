@@ -179,10 +179,7 @@ class SlidingSyncExtensionHandler:
             )
 
         threads_coro = None
-        if (
-            sync_config.extensions.threads is not None
-            and self._enable_threads_ext
-        ):
+        if sync_config.extensions.threads is not None and self._enable_threads_ext:
             threads_coro = self.get_threads_extension_response(
                 sync_config=sync_config,
                 threads_request=sync_config.extensions.threads,
