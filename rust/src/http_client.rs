@@ -313,16 +313,12 @@ static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new(
 fn make_deferred_yieldable<'py>(
     py: Python<'py>,
     deferred: &Bound<'py, PyAny>,
-) -> Bound<'py, PyAny> {
+) -> PyResult<Bound<'py, PyAny>> {
     let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
         let sys = PyModule::import(py, "synapse.logging.context").unwrap();
         let func = sys.getattr("make_deferred_yieldable").unwrap().unbind();
         func
     });
 
-    make_deferred_yieldable
-        .call1(py, (deferred,))
-        .unwrap()
-        .extract(py)
-        .unwrap()
+    make_deferred_yieldable.call1(py, (deferred,))?.extract(py)
 }
