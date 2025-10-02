@@ -50,7 +50,6 @@ from synapse.handlers.state_deltas import MatchChange, StateDeltasHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.invite_rule import InviteRule
@@ -2190,7 +2189,10 @@ class RoomForgetterHandler(StateDeltasHandler):
             self._notifier.add_replication_callback(self.notify_new_event)
 
             # We kick this off to pick up outstanding work from before the last restart.
-            self._clock.call_later(0, self.notify_new_event)
+            self._clock.call_later(
+                0,
+                self.notify_new_event,
+            )
 
     def notify_new_event(self) -> None:
         """Called when there may be more deltas to process"""
@@ -2205,9 +2207,7 @@ class RoomForgetterHandler(StateDeltasHandler):
             finally:
                 self._is_processing = False
 
-        run_as_background_process(
-            "room_forgetter.notify_new_event", self.server_name, process
-        )
+        self._hs.run_as_background_process("room_forgetter.notify_new_event", process)
 
     async def _unsafe_process(self) -> None:
         # If self.pos is None then means we haven't fetched it from DB

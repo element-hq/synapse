@@ -32,7 +32,6 @@ from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.federation import send_queue
 from synapse.federation.sender import FederationSender
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.streams import (
     AccountDataStream,
     DeviceListsStream,
@@ -344,7 +343,9 @@ class ReplicationDataHandler:
         # to wedge here forever.
         deferred: "Deferred[None]" = Deferred()
         deferred = timeout_deferred(
-            deferred, _WAIT_FOR_REPLICATION_TIMEOUT_SECONDS, self._reactor
+            deferred=deferred,
+            timeout=_WAIT_FOR_REPLICATION_TIMEOUT_SECONDS,
+            clock=self._clock,
         )
 
         waiting_list = self._streams_to_waiters.setdefault(
@@ -513,8 +514,8 @@ class FederationSenderHandler:
             # no need to queue up another task.
             return
 
-        run_as_background_process(
-            "_save_and_send_ack", self.server_name, self._save_and_send_ack
+        self._hs.run_as_background_process(
+            "_save_and_send_ack", self._save_and_send_ack
         )
 
     async def _save_and_send_ack(self) -> None:
