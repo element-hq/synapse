@@ -57,7 +57,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
 ONE_TIME_KEY_UPLOAD = "one_time_key_upload_lock"
 
 
@@ -847,14 +846,22 @@ class E2eKeysHandler:
         """
         time_now = self.clock.time_msec()
 
-        # TODO: Validate the JSON to make sure it has the right keys.
         device_keys = keys.get("device_keys", None)
         if device_keys:
+            log_kv(
+                {
+                    "message": "Updating device_keys for user.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
             await self.upload_device_keys_for_user(
                 user_id=user_id,
                 device_id=device_id,
                 keys={"device_keys": device_keys},
             )
+        else:
+            log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
 
         one_time_keys = keys.get("one_time_keys", None)
         if one_time_keys:
@@ -872,8 +879,9 @@ class E2eKeysHandler:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
+
         fallback_keys = keys.get("fallback_keys")
-        if fallback_keys and isinstance(fallback_keys, dict):
+        if fallback_keys:
             log_kv(
                 {
                     "message": "Updating fallback_keys for device.",
@@ -882,8 +890,6 @@ class E2eKeysHandler:
                 }
             )
             await self.store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
-        elif fallback_keys:
-            log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
         else:
             log_kv(
                 {"message": "Did not update fallback_keys", "reason": "no keys given"}
