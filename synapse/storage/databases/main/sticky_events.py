@@ -593,7 +593,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             txn.execute(
                 f"""
                 UPDATE event_json
-                SET internal_metadata = json_set(internal_metadata, '$.soft_failed', 'false')
+                SET internal_metadata = json_set(internal_metadata, '$.soft_failed', json('false'))
                 WHERE {clause}
                 """,
                 args,
