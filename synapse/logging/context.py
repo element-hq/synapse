@@ -33,7 +33,6 @@ See doc/log_contexts.rst for details on how this works.
 import logging
 import threading
 import typing
-import warnings
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
@@ -377,47 +376,6 @@ class LoggingContext:
 
     def __str__(self) -> str:
         return self.name
-
-    @classmethod
-    def current_context(cls) -> LoggingContextOrSentinel:
-        """Get the current logging context from thread local storage
-
-        This exists for backwards compatibility. ``current_context()`` should be
-        called directly.
-
-        Returns:
-            The current logging context
-        """
-        warnings.warn(
-            "synapse.logging.context.LoggingContext.current_context() is deprecated "
-            "in favor of synapse.logging.context.current_context().",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return current_context()
-
-    @classmethod
-    def set_current_context(
-        cls, context: LoggingContextOrSentinel
-    ) -> LoggingContextOrSentinel:
-        """Set the current logging context in thread local storage
-
-        This exists for backwards compatibility. ``set_current_context()`` should be
-        called directly.
-
-        Args:
-            context: The context to activate.
-
-        Returns:
-            The context that was previously active
-        """
-        warnings.warn(
-            "synapse.logging.context.LoggingContext.set_current_context() is deprecated "
-            "in favor of synapse.logging.context.set_current_context().",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return set_current_context(context)
 
     def __enter__(self) -> "LoggingContext":
         """Enters this logging context into thread local storage"""
