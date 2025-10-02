@@ -61,6 +61,7 @@ _ThreadSubscription: TypeAlias = (
 _ThreadUnsubscription: TypeAlias = (
     SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadUnsubscription
 )
+_ThreadUpdate: TypeAlias = SlidingSyncResult.Extensions.ThreadsExtension.ThreadUpdate
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -1005,13 +1006,32 @@ class SlidingSyncExtensionHandler:
         if not threads_request.enabled:
             return None
 
+        limit = threads_request.limit
+
+        # TODO: is the `room_key` the right thing to use here?
+        # ie. does it translate into /relations
+
+        # TODO: use new function to get thread updates
+        updates, prev_batch = await self.store.get_thread_updates_for_user(
+            user_id=sync_config.user.to_string(),
+            from_token=from_token.stream_token if from_token else None,
+            to_token=to_token,
+            limit=limit,
+        )
+
+        if len(updates) == 0:
+            return None
+
         # TODO: implement
 
-        _limit = threads_request.limit
-
-        prev_batch = None
+        thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
+        for thread_root_id, room_id in updates:
+            thread_updates.setdefault(room_id, {})[thread_root_id] = _ThreadUpdate(
+                thread_root=None,
+                prev_batch=None,
+            )
 
         return SlidingSyncResult.Extensions.ThreadsExtension(
-            updates=None,
+            updates=thread_updates,
             prev_batch=prev_batch,
         )

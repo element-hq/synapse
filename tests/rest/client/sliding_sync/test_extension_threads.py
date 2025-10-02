@@ -16,6 +16,7 @@ import logging
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
+from synapse.api.constants import RelationTypes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -106,4 +107,121 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             EXT_NAME,
             response_body["extensions"],
             response_body,
+        )
+
+    def test_threads_initial_sync(self) -> None:
+        """
+        Test threads appear in initial sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        _latest_event_id = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": user1_id,
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )["event_id"]
+
+        # # get the baseline stream_id of the thread_subscriptions stream
+        # # before we write any data.
+        # # Required because the initial value differs between SQLite and Postgres.
+        # base = self.store.get_max_thread_subscriptions_stream_id()
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+
+        # Sync
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Assert
+        self.assertEqual(
+            response_body["extensions"][EXT_NAME],
+            {
+                "updates": {
+                    room_id: {
+                        thread_root_id: {
+                            "thread_root": None,
+                            "prev_batch": None,
+                        }
+                    }
+                }
+            },
+        )
+
+    def test_threads_incremental_sync(self) -> None:
+        """
+        Test new thread updates appear in incremental sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # get the baseline stream_id of the room events stream
+        # before we write any data.
+        # Required because the initial value differs between SQLite and Postgres.
+        # base = self.store.get_room_max_stream_ordering()
+
+        # Initial sync
+        _, sync_pos = self.do_sync(sync_body, tok=user1_tok)
+        logger.info("Synced to: %r, now subscribing to thread", sync_pos)
+
+        # Do thing
+        _latest_event_id = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": user1_id,
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )["event_id"]
+
+        # Incremental sync
+        response_body, sync_pos = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+        logger.info("Synced to: %r", sync_pos)
+
+        # Assert
+        self.assertEqual(
+            response_body["extensions"][EXT_NAME],
+            {
+                "updates": {
+                    room_id: {
+                        thread_root_id: {
+                            "thread_root": None,
+                            "prev_batch": None,
+                        }
+                    }
+                }
+            },
         )

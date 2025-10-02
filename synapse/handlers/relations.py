@@ -109,8 +109,6 @@ class RelationsHandler:
     ) -> JsonDict:
         """Get related events of a event, ordered by topological ordering.
 
-        TODO Accept a PaginationConfig instead of individual pagination parameters.
-
         Args:
             requester: The user requesting the relations.
             event_id: Fetch events that relate to this event ID.

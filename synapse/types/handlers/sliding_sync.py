@@ -405,15 +405,15 @@ class SlidingSyncResult:
             """
 
             @attr.s(slots=True, frozen=True, auto_attribs=True)
-            class ThreadUpdates:
+            class ThreadUpdate:
                 # TODO: comment
                 thread_root: Optional[EventBase]
 
                 # TODO: comment
                 prev_batch: Optional[StreamToken]
 
-            updates: Optional[Mapping[str, Mapping[str, ThreadUpdates]]]
-            prev_batch: Optional[ThreadSubscriptionsToken]
+            updates: Optional[Mapping[str, Mapping[str, ThreadUpdate]]]
+            prev_batch: Optional[int]
 
             def __bool__(self) -> bool:
                 return bool(self.updates) or bool(self.prev_batch)

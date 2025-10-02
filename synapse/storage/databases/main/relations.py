@@ -1118,6 +1118,97 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_related_thread_id", _get_related_thread_id
         )
 
+    async def get_thread_updates_for_user(
+        self,
+        *,
+        user_id: str,
+        from_token: Optional[StreamToken] = None,
+        to_token: Optional[StreamToken] = None,
+        limit: int = 5,
+    ) -> Tuple[Sequence[Tuple[str, str]], Optional[int]]:
+        # TODO: comment
+        """Get a list of updates threads, ordered by stream ordering of their
+        latest reply.
+
+        Args:
+            user_id: Only fetch threads for rooms that the `user` is `join`ed to.
+            from_token: Fetch rows from a previous next_batch, or from the start if None.
+            to_token: Fetch rows from a previous prev_batch, or from the stream end if None.
+            limit: Only fetch the most recent `limit` threads.
+
+        Returns:
+            A tuple of:
+                A list of thread root event IDs.
+
+                The next_batch, if one exists.
+        """
+        # Ensure bad limits aren't being passed in.
+        assert limit >= 0
+
+        # Generate the pagination clause, if necessary.
+        #
+        # Find any threads where the latest reply is between the stream ordering bounds.
+        pagination_clause = ""
+        pagination_args: List[str] = []
+        if from_token:
+            from_bound = from_token.room_key.stream
+            pagination_clause += " AND stream_ordering > ?"
+            pagination_args.append(str(from_bound))
+
+        if to_token:
+            to_bound = to_token.room_key.stream
+            pagination_clause += " AND stream_ordering <= ?"
+            pagination_args.append(str(to_bound))
+
+        # TODO: get room_ids somehow...
+        # seems inefficient as we have to basically query for every single joined room
+        # id don't we?
+        # How would a specific thread_updates table be any better?
+        # There must be something somewhere that already does a query which has a
+        # "filter by all rooms that a user is joined to" clause.
+        sql = f"""
+            SELECT thread_id, room_id, latest_event_id, stream_ordering
+            FROM threads
+            WHERE
+                room_id LIKE ?
+                {pagination_clause}
+            ORDER BY stream_ordering DESC
+            LIMIT ?
+        """
+        # sql = """
+        #     SELECT event_id, relation_type, sender, topological_ordering, stream_ordering
+        #     FROM event_relations
+        #     INNER JOIN events USING (event_id)
+        #     WHERE relates_to_id = ? AND %s
+        #     ORDER BY topological_ordering %s, stream_ordering %s
+        #     LIMIT ?
+        # """ % (
+        #     " AND ".join(where_clause),
+        #     order,
+        #     order,
+        # )
+
+        def _get_thread_updates_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> Tuple[List[Tuple[str, str]], Optional[int]]:
+            txn.execute(sql, ("%", *pagination_args, limit + 1))
+
+            rows = cast(List[Tuple[str, str, str, int]], txn.fetchall())
+            thread_ids = [(r[0], r[1]) for r in rows]
+
+            # If there are more events, generate the next pagination key from the
+            # last thread which will be returned.
+            next_token = None
+            if len(thread_ids) > limit:
+                # TODO: why -2?
+                next_token = rows[-2][3]
+
+            return thread_ids[:limit], next_token
+
+        return await self.db_pool.runInteraction(
+            "get_thread_updates_for_user", _get_thread_updates_for_user_txn
+        )
+
 
 class RelationsStore(RelationsWorkerStore):
     pass

@@ -1134,7 +1134,6 @@ def _serialise_thread_subscriptions(
     return out
 
 
-# TODO: is this necessary for serialization?
 def _serialise_threads(
     threads: SlidingSyncResult.Extensions.ThreadsExtension,
 ) -> JsonDict:
@@ -1153,7 +1152,7 @@ def _serialise_threads(
         }
 
     if threads.prev_batch:
-        out["prev_batch"] = threads.prev_batch.to_string()
+        out["prev_batch"] = str(threads.prev_batch)
 
     return out
 
