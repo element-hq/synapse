@@ -35,7 +35,6 @@ from synapse.logging.opentracing import (
     tag_args,
     trace_with_opname,
 )
-from synapse.logging.scopecontextmanager import LogContextScopeManager
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util.clock import Clock
 
@@ -49,8 +48,10 @@ except ImportError:
 
 try:
     import opentracing
+    from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     opentracing = None  # type: ignore
+    LogContextScopeManager = None  # type: ignore
 
 import logging
 
@@ -70,7 +71,7 @@ class LogContextScopeManagerTestCase(TestCase):
     opentracing backend is Jaeger.
     """
 
-    if opentracing is None:
+    if opentracing is None or LogContextScopeManager is None:
         skip = "Requires opentracing"  # type: ignore[unreachable]
     if jaeger_client is None:
         skip = "Requires jaeger_client"  # type: ignore[unreachable]
