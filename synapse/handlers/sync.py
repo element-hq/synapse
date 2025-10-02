@@ -553,7 +553,7 @@ class SyncHandler:
         Returns:
             A tuple of the now StreamToken, updated to reflect the which typing
             events are included, and a dict mapping from room_id to a list of
-            typing events for that room.
+            ephemeral events for that room.
         """
 
         sync_config = sync_result_builder.sync_config
@@ -2729,7 +2729,7 @@ class SyncHandler:
             )
 
             ephemeral = [
-                # exclude room id
+                # copy fields from each `event` into a new dict, excluding `room_id`
                 {k: v for (k, v) in event.items() if k != "room_id"}
                 for event in await sync_config.filter_collection.filter_room_ephemeral(
                     ephemeral
