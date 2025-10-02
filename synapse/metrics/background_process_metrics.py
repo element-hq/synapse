@@ -259,6 +259,12 @@ def run_as_background_process(
         rules.
     """
 
+    # Since we track the tracing scope in the `LoggingContext`, before we move to the
+    # sentinel logcontext (or a new new `LoggingContext`), grab the currently active
+    # tracing span (if any) so that we can create a cross-link to the background process
+    # trace.
+    original_active_tracing_span = active_span()
+
     async def run() -> Optional[R]:
         with _bg_metrics_lock:
             count = _background_process_counts.get(desc, 0)
@@ -276,8 +282,6 @@ def run_as_background_process(
         ) as logging_context:
             try:
                 if bg_start_span:
-                    original_active_tracing_span = active_span()
-
                     # If there is already an active span (e.g. because this background
                     # process was started as part of handling a request for example),
                     # because this is a long-running background task that may serve a
