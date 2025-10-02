@@ -56,14 +56,6 @@ except ImportError:
     jaeger_client = None  # type: ignore
 
 
-try:
-    import opentracing
-
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
-except ImportError:
-    opentracing = None  # type: ignore
-    LogContextScopeManager = None  # type: ignore
-
 import logging
 
 from tests.unittest import TestCase
