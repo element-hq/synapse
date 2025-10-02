@@ -25,6 +25,7 @@ from typing import (
     cast,
 )
 
+from synapse.storage.engines import PostgresEngine
 from twisted.internet.defer import Deferred
 
 from synapse import event_auth
@@ -531,39 +532,72 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             (event_id, self._sticky_events_id_gen.get_next_txn(txn))
             for event_id in passing_event_ids
         ]
-        values_placeholders = ", ".join(["(?, ?)"] * len(new_stream_ids))
+        # [event_id, stream_pos, event_id, stream_pos, ...]
         params = [p for pair in new_stream_ids for p in pair]
-        txn.execute(
-            f"""
-            UPDATE sticky_events AS se
-            SET
-                soft_failed = FALSE,
-                stream_id   = v.stream_id
-            FROM (VALUES
-                {values_placeholders}
-            ) AS v(event_id, stream_id)
-            WHERE se.event_id = v.event_id;
-            """,
-            params,
-        )
-        # Also update the internal metadata on the event itself, so when we filter_events_for_client
-        # we don't filter them out. It's a bit sad internal_metadata is TEXT and not JSONB...
-        clause, args = make_in_list_sql_clause(
-            txn.database_engine,
-            "event_id",
-            passing_event_ids,
-        )
-        txn.execute(
-            """
-            UPDATE event_json
-            SET internal_metadata = (
-                jsonb_set(internal_metadata::jsonb, '{soft_failed}', 'false'::jsonb)
-            )::text
-            WHERE %s
-            """
-            % clause,
-            args,
-        )
+        if isinstance(txn.database_engine, PostgresEngine):
+            values_placeholders = ", ".join(["(?, ?)"] * len(new_stream_ids))
+            txn.execute(
+                f"""
+                UPDATE sticky_events AS se
+                SET
+                    soft_failed = FALSE,
+                    stream_id   = v.stream_id
+                FROM (VALUES
+                    {values_placeholders}
+                ) AS v(event_id, stream_id)
+                WHERE se.event_id = v.event_id;
+                """,
+                params,
+            )
+            # Also update the internal metadata on the event itself, so when we filter_events_for_client
+            # we don't filter them out. It's a bit sad internal_metadata is TEXT and not JSONB...
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine,
+                "event_id",
+                passing_event_ids,
+            )
+            txn.execute(
+                """
+                UPDATE event_json
+                SET internal_metadata = (
+                    jsonb_set(internal_metadata::jsonb, '{soft_failed}', 'false'::jsonb)
+                )::text
+                WHERE %s
+                """
+                % clause,
+                args,
+            )
+        else:
+            # Use a CASE expression to update in bulk for sqlite
+            case_expr = " ".join(
+                [f"WHEN ? THEN ? " for _ in new_stream_ids]
+            )
+            txn.execute(
+                f"""
+                UPDATE sticky_events
+                SET
+                    soft_failed = FALSE,
+                    stream_id = CASE event_id
+                        {case_expr}
+                        ELSE stream_id
+                    END
+                WHERE event_id IN ({",".join("?" * len(new_stream_ids))});
+                """,
+                params + [eid for eid, _ in new_stream_ids],
+            )
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine,
+                "event_id",
+                passing_event_ids,
+            )
+            txn.execute(
+                f"""
+                UPDATE event_json
+                SET internal_metadata = json_set(internal_metadata, '$.soft_failed', 'false')
+                WHERE {clause}
+                """,
+                args,
+            )
         # finally, invalidate caches
         for event_id in passing_event_ids:
             self.invalidate_get_event_cache_after_txn(txn, event_id)
