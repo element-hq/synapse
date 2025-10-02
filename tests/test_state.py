@@ -29,7 +29,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    cast,
 )
 from unittest.mock import AsyncMock, Mock
 
@@ -43,12 +42,11 @@ from synapse.events.snapshot import EventContext
 from synapse.state import StateHandler, StateResolutionHandler, _make_state_cache_entry
 from synapse.types import MutableStateMap, StateMap
 from synapse.types.state import StateFilter
-from synapse.util.clock import Clock
 from synapse.util.macaroons import MacaroonGenerator
 
 from tests import unittest
-
-from .utils import MockClock, default_config
+from tests.server import get_clock
+from tests.utils import default_config
 
 _next_event_id = 1000
 
@@ -248,7 +246,7 @@ class StateTestCase(unittest.TestCase):
                 "hostname",
             ]
         )
-        clock = cast(Clock, MockClock())
+        reactor, clock = get_clock()
         hs.config = default_config("tesths", True)
         hs.get_datastores.return_value = Mock(
             main=self.dummy_store,

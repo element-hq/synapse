@@ -1,0 +1,1 @@
+Fix documentation for `rc_room_creation` and `rc_reports` to clarify that a `per_user` rate limit is not supported.
