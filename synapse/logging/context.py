@@ -55,10 +55,28 @@ from typing_extensions import ParamSpec
 from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
+from synapse.logging.loggers import ExplicitlyConfiguredLogger
+from synapse.util.stringutils import random_string
+
 if TYPE_CHECKING:
+    from synapse.logging.scopecontextmanager import _LogContextScope
     from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
+
+original_logger_class = logging.getLoggerClass()
+logging.setLoggerClass(ExplicitlyConfiguredLogger)
+logcontext_debug_logger = logging.getLogger("synapse.logging.context.debug")
+"""
+A logger for debugging when the logcontext switches.
+
+Because this is very noisy and probably something only developers want to see when
+debugging logcontext problems, we want people to explictly opt-in before seeing anything
+in the logs. Requires explicitly setting `synapse.logging.context.debug` in the logging
+configuration and does not inherit the log level from the parent logger.
+"""
+# Restore the original logger class
+logging.setLoggerClass(original_logger_class)
 
 try:
     import resource
@@ -238,7 +256,14 @@ class _Sentinel:
     we should always know which server the logs are coming from.
     """
 
-    __slots__ = ["previous_context", "finished", "server_name", "request", "tag"]
+    __slots__ = [
+        "previous_context",
+        "finished",
+        "scope",
+        "server_name",
+        "request",
+        "tag",
+    ]
 
     def __init__(self) -> None:
         # Minimal set for compatibility with LoggingContext
@@ -246,6 +271,7 @@ class _Sentinel:
         self.finished = False
         self.server_name = "unknown_server_from_sentinel_context"
         self.request = None
+        self.scope = None
         self.tag = None
 
     def __str__(self) -> str:
@@ -303,6 +329,7 @@ class LoggingContext:
         "finished",
         "request",
         "tag",
+        "scope",
     ]
 
     def __init__(
@@ -327,6 +354,7 @@ class LoggingContext:
         self.main_thread = get_thread_id()
         self.request = None
         self.tag = ""
+        self.scope: Optional["_LogContextScope"] = None
 
         # keep track of whether we have hit the __exit__ block for this context
         # (suggesting that the the thing that created the context thinks it should
@@ -339,6 +367,9 @@ class LoggingContext:
         if self.parent_context is not None:
             # which request this corresponds to
             self.request = self.parent_context.request
+
+            # we also track the current scope:
+            self.scope = self.parent_context.scope
 
         if request is not None:
             # the request param overrides the request from the parent context
@@ -390,6 +421,7 @@ class LoggingContext:
 
     def __enter__(self) -> "LoggingContext":
         """Enters this logging context into thread local storage"""
+        logcontext_debug_logger.debug("LoggingContext(%s).__enter__", self.name)
         old_context = set_current_context(self)
         if self.previous_context != old_context:
             logcontext_error(
@@ -412,6 +444,9 @@ class LoggingContext:
         Returns:
             None to avoid suppressing any exceptions that were thrown.
         """
+        logcontext_debug_logger.debug(
+            "LoggingContext(%s).__exit__ --> %s", self.name, self.previous_context
+        )
         current = set_current_context(self.previous_context)
         if current is not self:
             if current is SENTINEL_CONTEXT:
@@ -660,14 +695,21 @@ class PreserveLoggingContext:
     reactor back to the code).
     """
 
-    __slots__ = ["_old_context", "_new_context"]
+    __slots__ = ["_old_context", "_new_context", "_instance_id"]
 
     def __init__(
         self, new_context: LoggingContextOrSentinel = SENTINEL_CONTEXT
     ) -> None:
         self._new_context = new_context
+        self._instance_id = random_string(5)
 
     def __enter__(self) -> None:
+        logcontext_debug_logger.debug(
+            "PreserveLoggingContext(%s).__enter__ %s --> %s",
+            self._instance_id,
+            current_context(),
+            self._new_context,
+        )
         self._old_context = set_current_context(self._new_context)
 
     def __exit__(
@@ -676,6 +718,12 @@ class PreserveLoggingContext:
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
+        logcontext_debug_logger.debug(
+            "PreserveLoggingContext(%s).__exit %s --> %s",
+            self._instance_id,
+            current_context(),
+            self._old_context,
+        )
         context = set_current_context(self._old_context)
 
         if context != self._new_context:
@@ -855,7 +903,11 @@ def run_in_background(
         Note that the returned Deferred does not follow the synapse logcontext
         rules.
     """
+    instance_id = random_string(5)
     calling_context = current_context()
+    logcontext_debug_logger.debug(
+        "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
+    )
     try:
         # (kick off the task in the current context)
         res = f(*args, **kwargs)
@@ -897,6 +949,11 @@ def run_in_background(
         # to reset the logcontext to the sentinel logcontext as that would run
         # immediately (remember our goal is to maintain the calling logcontext when we
         # return).
+        logcontext_debug_logger.debug(
+            "run_in_background(%s): deferred already completed and the function should have maintained the logcontext %s",
+            instance_id,
+            calling_context,
+        )
         return d
 
     # Since the function we called may follow the Synapse logcontext rules (Rules for
@@ -907,6 +964,11 @@ def run_in_background(
     #
     # Our goal is to have the caller logcontext unchanged after firing off the
     # background task and returning.
+    logcontext_debug_logger.debug(
+        "run_in_background(%s): restoring calling logcontext %s",
+        instance_id,
+        calling_context,
+    )
     set_current_context(calling_context)
 
     # If the function we called is playing nice and following the Synapse logcontext
@@ -922,7 +984,23 @@ def run_in_background(
     # which is supposed to have a single entry and exit point. But
     # by spawning off another deferred, we are effectively
     # adding a new exit point.)
-    d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
+    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
+
+        def _log_set_context_cb(
+            result: ResultT, context: LoggingContextOrSentinel
+        ) -> ResultT:
+            logcontext_debug_logger.debug(
+                "run_in_background(%s): resetting logcontext to %s",
+                instance_id,
+                context,
+            )
+            set_current_context(context)
+            return result
+
+        d.addBoth(_log_set_context_cb, SENTINEL_CONTEXT)
+    else:
+        d.addBoth(_set_context_cb, SENTINEL_CONTEXT)
+
     return d
 
 
@@ -978,10 +1056,21 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     restores the old context once the awaitable completes (execution passes from the
     reactor back to the code).
     """
+    instance_id = random_string(5)
+    logcontext_debug_logger.debug(
+        "make_deferred_yieldable(%s): called with logcontext=%s",
+        instance_id,
+        current_context(),
+    )
+
     # The deferred has already completed
     if deferred.called and not deferred.paused:
         # it looks like this deferred is ready to run any callbacks we give it
         # immediately. We may as well optimise out the logcontext faffery.
+        logcontext_debug_logger.debug(
+            "make_deferred_yieldable(%s): deferred already completed and the function should have maintained the logcontext",
+            instance_id,
+        )
         return deferred
 
     # Our goal is to have the caller logcontext unchanged after they yield/await the
@@ -993,8 +1082,31 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     # does) while the deferred runs in the reactor event loop, we reset the logcontext
     # and add a callback to the deferred to restore it so the caller's logcontext is
     # active when the deferred completes.
-    prev_context = set_current_context(SENTINEL_CONTEXT)
-    deferred.addBoth(_set_context_cb, prev_context)
+
+    logcontext_debug_logger.debug(
+        "make_deferred_yieldable(%s): resetting logcontext to %s",
+        instance_id,
+        SENTINEL_CONTEXT,
+    )
+    calling_context = set_current_context(SENTINEL_CONTEXT)
+
+    if logcontext_debug_logger.isEnabledFor(logging.DEBUG):
+
+        def _log_set_context_cb(
+            result: ResultT, context: LoggingContextOrSentinel
+        ) -> ResultT:
+            logcontext_debug_logger.debug(
+                "make_deferred_yieldable(%s): restoring calling logcontext to %s",
+                instance_id,
+                context,
+            )
+            set_current_context(context)
+            return result
+
+        deferred.addBoth(_log_set_context_cb, calling_context)
+    else:
+        deferred.addBoth(_set_context_cb, calling_context)
+
     return deferred
 
 
