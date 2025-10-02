@@ -43,17 +43,17 @@ from synapse.util.clock import Clock
 from tests.server import get_clock
 
 try:
+    import jaeger_client
+except ImportError:
+    jaeger_client = None  # type: ignore
+
+try:
     import opentracing
 
     from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     opentracing = None  # type: ignore
     LogContextScopeManager = None  # type: ignore
-
-try:
-    import jaeger_client
-except ImportError:
-    jaeger_client = None  # type: ignore
 
 
 import logging
