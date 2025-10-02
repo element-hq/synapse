@@ -48,6 +48,7 @@ except ImportError:
 
 try:
     import opentracing
+
     from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     opentracing = None  # type: ignore
