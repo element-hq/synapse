@@ -266,7 +266,6 @@ class ReplicationDataHandler:
                 users=[row.user_id for row in rows],
             )
         elif stream_name == StickyEventsStream.NAME:
-            print(f"STICKY_EVENTS on_rdata {token} => {rows}")
             self.notifier.on_new_event(
                 StreamKeyType.STICKY_EVENTS,
                 token,
