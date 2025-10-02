@@ -45,7 +45,7 @@ from prometheus_client import Gauge
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction, EventTypes
+from synapse.api.constants import Direction, EventTypes, StickyEventSoftFailed
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
@@ -74,6 +74,10 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.replication.tcp.streams import BackfillStream, UnPartialStatedEventStream
+from synapse.replication.tcp.streams._base import (
+    StickyEventsStream,
+    StickyEventsStreamRow,
+)
 from synapse.replication.tcp.streams.events import EventsStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedEventStreamRow
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -462,6 +466,12 @@ class EventsWorkerStore(SQLBaseStore):
                 if row.rejection_status_changed:
                     # If the partial-stated event became rejected or unrejected
                     # when it wasn't before, we need to invalidate this cache.
+                    self._invalidate_local_get_event_cache(row.event_id)
+        elif stream_name == StickyEventsStream.NAME:
+            for row in rows:
+                assert isinstance(row, StickyEventsStreamRow)
+                if row.soft_failed_status == StickyEventSoftFailed.FORMER_TRUE:
+                    # was soft-failed, now not, so invalidate caches
                     self._invalidate_local_get_event_cache(row.event_id)
 
         super().process_replication_rows(stream_name, instance_name, token, rows)

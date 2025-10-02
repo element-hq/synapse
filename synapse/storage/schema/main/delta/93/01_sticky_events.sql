@@ -18,7 +18,11 @@ CREATE TABLE IF NOT EXISTS sticky_events(
   event_id TEXT NOT NULL,
   sender TEXT NOT NULL,
   expires_at BIGINT NOT NULL,
-  soft_failed BOOLEAN NOT NULL
+  -- 0=False, 1=True, 2=False-but-was-True
+  -- We need '2' to handle cache invalidation downstream.
+  -- Receiving a sticky event replication row with '2' will cause get_event
+  -- caches to be invalidated, so the soft-failure status can change.
+  soft_failed SMALLINT NOT NULL
 );
 
 -- for pulling out soft failed events by room

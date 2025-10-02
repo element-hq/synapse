@@ -15,4 +15,4 @@ CREATE SEQUENCE sticky_events_sequence;
 -- Synapse streams start at 2, because the default position is 1
 -- so any item inserted at position 1 is ignored.
 -- We have to use nextval not START WITH 2, see https://github.com/element-hq/synapse/issues/18712
-SELECT nextval('thread_subscriptions_sequence');
+SELECT nextval('sticky_events_sequence');

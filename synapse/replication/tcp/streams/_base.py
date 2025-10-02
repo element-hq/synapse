@@ -34,7 +34,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, StickyEventSoftFailed
 from synapse.replication.http.streams import ReplicationGetStreamUpdates
 
 if TYPE_CHECKING:
@@ -768,15 +768,17 @@ class ThreadSubscriptionsStream(_StreamFromIdGen):
         return rows, rows[-1][0], len(updates) == limit
 
 
+@attr.s(slots=True, auto_attribs=True)
+class StickyEventsStreamRow:
+    """Stream to inform workers about changes to sticky events."""
+
+    room_id: str
+    event_id: str  # The sticky event ID
+    soft_failed_status: StickyEventSoftFailed
+
+
 class StickyEventsStream(_StreamFromIdGen):
     """A sticky event was changed."""
-
-    @attr.s(slots=True, auto_attribs=True)
-    class StickyEventsStreamRow:
-        """Stream to inform workers about changes to sticky events."""
-
-        room_id: str
-        event_id: str  # The sticky event ID
 
     NAME = "sticky_events"
     ROW_TYPE = StickyEventsStreamRow
@@ -799,9 +801,9 @@ class StickyEventsStream(_StreamFromIdGen):
             (
                 stream_id,
                 # These are the args to `StickyEventsStreamRow`
-                (room_id, event_id),
+                (room_id, event_id, soft_failed),
             )
-            for stream_id, room_id, event_id in updates
+            for stream_id, room_id, event_id, soft_failed in updates
         ]
 
         if not rows:

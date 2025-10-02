@@ -28,7 +28,7 @@ from typing import (
 from twisted.internet.defer import Deferred
 
 from synapse import event_auth
-from synapse.api.constants import EventTypes, StickyEvent
+from synapse.api.constants import EventTypes, StickyEvent, StickyEventSoftFailed
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
@@ -171,15 +171,15 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         txn.execute(
             f"""
             SELECT stream_id, room_id, event_id FROM sticky_events
-            WHERE soft_failed=FALSE AND expires_at > ? AND stream_id > ? AND stream_id <= ? AND {clause}
+            WHERE soft_failed != ? AND expires_at > ? AND stream_id > ? AND stream_id <= ? AND {clause}
             """,
-            (now, from_id, to_id, *room_id_values),
+            (StickyEventSoftFailed.TRUE, now, from_id, to_id, *room_id_values),
         )
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 
     async def get_updated_sticky_events(
         self, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str]]:
+    ) -> List[Tuple[int, str, str, StickyEventSoftFailed]]:
         """Get updates to sticky events between two stream IDs.
 
         Args:
@@ -200,14 +200,14 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
     def _get_updated_sticky_events_txn(
         self, txn: LoggingTransaction, from_id: int, to_id: int, limit: int
-    ) -> List[Tuple[int, str, str]]:
+    ) -> List[Tuple[int, str, str, StickyEventSoftFailed]]:
         txn.execute(
             """
-            SELECT stream_id, room_id, event_id FROM sticky_events WHERE stream_id > ? AND stream_id <= ? LIMIT ?
+            SELECT stream_id, room_id, event_id, soft_failed FROM sticky_events WHERE stream_id > ? AND stream_id <= ? LIMIT ?
             """,
             (from_id, to_id, limit),
         )
-        return cast(List[Tuple[int, str, str]], txn.fetchall())
+        return cast(List[Tuple[int, str, str, StickyEventSoftFailed]], txn.fetchall())
 
     async def get_sticky_event_ids_sent_by_self(
         self, room_id: str, from_stream_pos: int
@@ -237,9 +237,9 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             """
             SELECT sticky_events.event_id, sticky_events.sender, events.stream_ordering FROM sticky_events
             INNER JOIN events ON events.event_id = sticky_events.event_id
-            WHERE soft_failed=FALSE AND expires_at > ? AND sticky_events.room_id = ?
+            WHERE soft_failed=? AND expires_at > ? AND sticky_events.room_id = ?
             """,
-            (now_ms, room_id),
+            (StickyEventSoftFailed.FALSE, now_ms, room_id),
         )
         rows = cast(List[Tuple[str, str, int]], txn.fetchall())
         return [
@@ -341,7 +341,9 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                     ev.event_id,
                     ev.sender,
                     expires_at,
-                    ev.internal_metadata.is_soft_failed(),
+                    StickyEventSoftFailed.TRUE
+                    if ev.internal_metadata.is_soft_failed()
+                    else StickyEventSoftFailed.FALSE,
                 )
                 for (ev, expires_at, stream_id) in sticky_events
             ],
@@ -426,7 +428,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 iterable=new_membership_changes,
                 keyvalues={
                     "room_id": room_id,
-                    "soft_failed": True,
+                    "soft_failed": StickyEventSoftFailed.TRUE,
                 },
                 retcols=("event_id",),
                 desc="_get_soft_failed_sticky_events_to_recheck_members",
@@ -457,7 +459,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             table="sticky_events",
             keyvalues={
                 "room_id": room_id,
-                "soft_failed": True,
+                "soft_failed": StickyEventSoftFailed.TRUE,
             },
             retcols=("event_id",),
             desc="_get_soft_failed_sticky_events_to_recheck",
@@ -540,14 +542,14 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 f"""
                 UPDATE sticky_events AS se
                 SET
-                    soft_failed = FALSE,
+                    soft_failed = ?,
                     stream_id   = v.stream_id
                 FROM (VALUES
                     {values_placeholders}
                 ) AS v(event_id, stream_id)
                 WHERE se.event_id = v.event_id;
                 """,
-                params,
+                [StickyEventSoftFailed.FORMER_TRUE] + params,
             )
             # Also update the internal metadata on the event itself, so when we filter_events_for_client
             # we don't filter them out. It's a bit sad internal_metadata is TEXT and not JSONB...
@@ -574,14 +576,16 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
                 f"""
                 UPDATE sticky_events
                 SET
-                    soft_failed = FALSE,
+                    soft_failed = ?,
                     stream_id = CASE event_id
                         {case_expr}
                         ELSE stream_id
                     END
                 WHERE event_id IN ({",".join("?" * len(new_stream_ids))});
                 """,
-                params + [eid for eid, _ in new_stream_ids],
+                [StickyEventSoftFailed.FORMER_TRUE]
+                + params
+                + [eid for eid, _ in new_stream_ids],
             )
             clause, args = make_in_list_sql_clause(
                 txn.database_engine,
