@@ -27,8 +27,8 @@ from twisted.python.failure import Failure
 from synapse.logging.context import (
     ContextResourceUsage,
     LoggingContext,
+    PreserveLoggingContext,
     nested_logging_context,
-    set_current_context,
 )
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
 from synapse.metrics.background_process_metrics import (
@@ -422,14 +422,11 @@ class TaskScheduler:
             """
 
             current_time = self._clock.time()
-            calling_context = set_current_context(task_log_context)
-            try:
+            with PreserveLoggingContext(task_log_context):
                 usage = task_log_context.get_resource_usage()
                 TaskScheduler._log_task_usage(
                     "continuing", task, usage, current_time - start_time
                 )
-            finally:
-                set_current_context(calling_context)
 
         async def wrapper() -> None:
             with nested_logging_context(task.id) as log_context:
