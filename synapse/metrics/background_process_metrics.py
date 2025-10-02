@@ -268,7 +268,7 @@ def run_as_background_process(
     """
 
     # Since we track the tracing scope in the `LoggingContext`, before we move to the
-    # sentinel logcontext (or a new new `LoggingContext`), grab the currently active
+    # sentinel logcontext (or a new `LoggingContext`), grab the currently active
     # tracing span (if any) so that we can create a cross-link to the background process
     # trace.
     original_active_tracing_span = active_span(tracer=test_only_tracer)
