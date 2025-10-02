@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Awaitable, Dict, cast
+from typing import Awaitable, Optional, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
@@ -327,11 +327,12 @@ class LogContextScopeManagerTestCase(TestCase):
         reactor, clock = get_clock()
 
         callback_finished = False
-        active_span_in_callback = None
+        active_span_in_callback: Optional[jaeger_client.Span] = None
 
         async def bg_task() -> None:
             nonlocal callback_finished, active_span_in_callback
             try:
+                assert isinstance(self._tracer.active_span, jaeger_client.Span)
                 active_span_in_callback = self._tracer.active_span
             finally:
                 # When exceptions happen, we still want to mark the callback as finished
@@ -388,11 +389,12 @@ class LogContextScopeManagerTestCase(TestCase):
         reactor, clock = get_clock()
 
         callback_finished = False
-        active_span_in_callback = None
+        active_span_in_callback: Optional[jaeger_client.Span] = None
 
         async def bg_task() -> None:
             nonlocal callback_finished, active_span_in_callback
             try:
+                assert isinstance(self._tracer.active_span, jaeger_client.Span)
                 active_span_in_callback = self._tracer.active_span
             finally:
                 # When exceptions happen, we still want to mark the callback as finished
@@ -452,22 +454,22 @@ class LogContextScopeManagerTestCase(TestCase):
             expected_spans,
         )
 
-        span_map: Dict[str, jaeger_client.SpanContext] = {
-            span.operation_name: span for span in self._reporter.get_spans()
-        }
+        span_map = {span.operation_name: span for span in self._reporter.get_spans()}
         span_id_to_friendly_name = {
-            span.context.span_id: span.operation_name
-            for span in self._reporter.get_spans()
+            span.span_id: span.operation_name for span in self._reporter.get_spans()
         }
 
-        def get_span_friendly_name(span_id: int) -> str:
+        def get_span_friendly_name(span_id: Optional[int]) -> str:
+            if span_id is None:
+                return "None"
+
             return span_id_to_friendly_name.get(span_id, f"unknown span {span_id}")
 
         # Ensure the background process trace/span is disconnected from the request
         # trace/span.
         self.assertNotEqual(
-            get_span_friendly_name(span_map["bgproc.some-bg-task"].context.parent_id),
-            get_span_friendly_name(span_map["some-request"].context.span_id),
+            get_span_friendly_name(span_map["bgproc.some-bg-task"].parent_id),
+            get_span_friendly_name(span_map["some-request"].span_id),
         )
 
         # We should see a cross-link in the request trace pointing to the background
@@ -475,19 +477,21 @@ class LogContextScopeManagerTestCase(TestCase):
         #
         # Make sure `start_bgproc.some-bg-task` is part of the request trace
         self.assertEqual(
-            get_span_friendly_name(
-                span_map["start_bgproc.some-bg-task"].context.parent_id
-            ),
-            get_span_friendly_name(span_map["some-request"].context.span_id),
+            get_span_friendly_name(span_map["start_bgproc.some-bg-task"].parent_id),
+            get_span_friendly_name(span_map["some-request"].span_id),
         )
         # And has some references to the background process trace
         self.assertIncludes(
             {
                 f"{reference.type}:{get_span_friendly_name(reference.referenced_context.span_id)}"
-                for reference in span_map["start_bgproc.some-bg-task"].references
+                if isinstance(reference.referenced_context, jaeger_client.SpanContext)
+                else f"{reference.type}:None"
+                for reference in (
+                    span_map["start_bgproc.some-bg-task"].references or []
+                )
             },
             {
-                f"follows_from:{get_span_friendly_name(span_map['bgproc.some-bg-task'].context.span_id)}"
+                f"follows_from:{get_span_friendly_name(span_map['bgproc.some-bg-task'].span_id)}"
             },
             exact=True,
         )
@@ -497,19 +501,21 @@ class LogContextScopeManagerTestCase(TestCase):
         #
         # Make sure `start_bgproc.some-bg-task` is part of the request trace
         self.assertEqual(
-            get_span_friendly_name(
-                span_map["bgproc_child.some-bg-task"].context.parent_id
-            ),
-            get_span_friendly_name(span_map["bgproc.some-bg-task"].context.span_id),
+            get_span_friendly_name(span_map["bgproc_child.some-bg-task"].parent_id),
+            get_span_friendly_name(span_map["bgproc.some-bg-task"].span_id),
         )
         # And has some references to the background process trace
         self.assertIncludes(
             {
                 f"{reference.type}:{get_span_friendly_name(reference.referenced_context.span_id)}"
-                for reference in span_map["bgproc_child.some-bg-task"].references
+                if isinstance(reference.referenced_context, jaeger_client.SpanContext)
+                else f"{reference.type}:None"
+                for reference in (
+                    span_map["bgproc_child.some-bg-task"].references or []
+                )
             },
             {
-                f"follows_from:{get_span_friendly_name(span_map['some-request'].context.span_id)}"
+                f"follows_from:{get_span_friendly_name(span_map['some-request'].span_id)}"
             },
             exact=True,
         )
