@@ -213,6 +213,11 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # This should never get called.
         raise NotImplementedError()
 
+    def notify_new_server_joined(self, server: str, room_id: str) -> None:
+        """As per FederationSender"""
+        # This should never get called.
+        raise NotImplementedError()
+
     def build_and_send_edu(
         self,
         destination: str,

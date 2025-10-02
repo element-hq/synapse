@@ -240,6 +240,13 @@ class AbstractFederationSender(metaclass=abc.ABCMeta):
         raise NotImplementedError()
 
     @abc.abstractmethod
+    def notify_new_server_joined(self, server: str, room_id: str) -> None:
+        """This gets called when we a new server has joined a room. We might
+        want to send out some events to this server.
+        """
+        raise NotImplementedError()
+
+    @abc.abstractmethod
     async def send_read_receipt(self, receipt: ReadReceipt) -> None:
         """Send a RR to any other servers in the room
 
@@ -487,6 +494,9 @@ class FederationSender(AbstractFederationSender):
             queue = PerDestinationQueue(self.hs, self._transaction_manager, destination)
             self._per_destination_queues[destination] = queue
         return queue
+
+    def notify_new_server_joined(self, server: str, room_id: str) -> None:
+        print(f"FEDSENDER: new server joined: server={server} room={room_id}")
 
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to

@@ -48,6 +48,7 @@ from synapse.replication.tcp.commands import (
     FederationAckCommand,
     LockReleasedCommand,
     NewActiveTaskCommand,
+    NewServerJoinedCommand,
     PositionCommand,
     RdataCommand,
     RemoteServerUpCommand,
@@ -764,6 +765,12 @@ class ReplicationCommandHandler:
         """Called when get a new REMOTE_SERVER_UP command."""
         self._notifier.notify_remote_server_up(cmd.data)
 
+    def on_NEW_SERVER_JOINED(
+        self, conn: IReplicationConnection, cmd: NewServerJoinedCommand
+    ) -> None:
+        """Called when get a new NEW_SERVER_JOINED command."""
+        self._notifier.notify_new_server_joined(cmd.server, cmd.room_id)
+
     def on_LOCK_RELEASED(
         self, conn: IReplicationConnection, cmd: LockReleasedCommand
     ) -> None:
@@ -885,6 +892,9 @@ class ReplicationCommandHandler:
 
     def send_remote_server_up(self, server: str) -> None:
         self.send_command(RemoteServerUpCommand(server))
+
+    def send_new_server_joined(self, server: str, room_id: str) -> None:
+        self.send_command(NewServerJoinedCommand(server, room_id))
 
     def stream_update(self, stream_name: str, token: Optional[int], data: Any) -> None:
         """Called when a new update is available to stream to Redis subscribers.

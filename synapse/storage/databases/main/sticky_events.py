@@ -25,7 +25,6 @@ from typing import (
     cast,
 )
 
-from synapse.storage.engines import PostgresEngine
 from twisted.internet.defer import Deferred
 
 from synapse import event_auth
@@ -44,6 +43,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events import DeltaState
 from synapse.storage.databases.main.state import StateGroupWorkerStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types.state import StateFilter
 from synapse.util.stringutils import shortstr
@@ -569,9 +569,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             )
         else:
             # Use a CASE expression to update in bulk for sqlite
-            case_expr = " ".join(
-                [f"WHEN ? THEN ? " for _ in new_stream_ids]
-            )
+            case_expr = " ".join(["WHEN ? THEN ? " for _ in new_stream_ids])
             txn.execute(
                 f"""
                 UPDATE sticky_events
