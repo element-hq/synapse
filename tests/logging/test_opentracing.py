@@ -382,7 +382,8 @@ class LogContextScopeManagerTestCase(TestCase):
         """
         Test to make sure that the background process work has its own trace and is
         disconnected from any currently active trace (like a request). But we still have
-        cross-links between the two traces.
+        cross-links between the two traces if there was already an active trace/span when
+        we kicked off the background process.
         """
         reactor, clock = get_clock()
 
@@ -458,11 +459,15 @@ class LogContextScopeManagerTestCase(TestCase):
             span.context.span_id: span.operation_name
             for span in self._reporter.get_spans()
         }
+
+        def get_span_friendly_name(span_id: int) -> str:
+            return span_id_to_friendly_name.get(span_id, f"unknown span {span_id}")
+
         # Ensure the background process trace/span is disconnected from the request
         # trace/span.
         self.assertNotEqual(
-            span_map["bgproc.some-bg-task"].context.parent_id,
-            span_map["some-request"].context.span_id,
+            get_span_friendly_name(span_map["bgproc.some-bg-task"].context.parent_id),
+            get_span_friendly_name(span_map["some-request"].context.span_id),
         )
 
         # We should see a cross-link in the request trace pointing to the background
@@ -470,16 +475,20 @@ class LogContextScopeManagerTestCase(TestCase):
         #
         # Make sure `start_bgproc.some-bg-task` is part of the request trace
         self.assertEqual(
-            span_map["start_bgproc.some-bg-task"].context.parent_id,
-            span_map["some-request"].context.span_id,
+            get_span_friendly_name(
+                span_map["start_bgproc.some-bg-task"].context.parent_id
+            ),
+            get_span_friendly_name(span_map["some-request"].context.span_id),
         )
         # And has some references to the background process trace
         self.assertIncludes(
             {
-                f"{reference.type}:{reference.referenced_context.span_id}"
+                f"{reference.type}:{get_span_friendly_name(reference.referenced_context.span_id)}"
                 for reference in span_map["start_bgproc.some-bg-task"].references
             },
-            {f"follows_from:{span_map['bgproc.some-bg-task'].context.span_id}"},
+            {
+                f"follows_from:{get_span_friendly_name(span_map['bgproc.some-bg-task'].context.span_id)}"
+            },
             exact=True,
         )
 
@@ -488,15 +497,19 @@ class LogContextScopeManagerTestCase(TestCase):
         #
         # Make sure `start_bgproc.some-bg-task` is part of the request trace
         self.assertEqual(
-            span_map["bgproc_child.some-bg-task"].context.parent_id,
-            span_map["bgproc.some-bg-task"].context.span_id,
+            get_span_friendly_name(
+                span_map["bgproc_child.some-bg-task"].context.parent_id
+            ),
+            get_span_friendly_name(span_map["bgproc.some-bg-task"].context.span_id),
         )
         # And has some references to the background process trace
         self.assertIncludes(
             {
-                f"{reference.type}:{reference.referenced_context.span_id}"
+                f"{reference.type}:{get_span_friendly_name(reference.referenced_context.span_id)}"
                 for reference in span_map["bgproc_child.some-bg-task"].references
             },
-            {f"follows_from:{span_map['some-request'].context.span_id}"},
+            {
+                f"follows_from:{get_span_friendly_name(span_map['some-request'].context.span_id)}"
+            },
             exact=True,
         )
