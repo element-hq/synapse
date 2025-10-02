@@ -2573,6 +2573,23 @@ Example configuration:
 turn_allow_guests: false
 ```
 ---
+## MatrixRTC
+
+Options related to advertise MatrixRTC backend infrastructure like SFUs.
+
+---
+### `transports`
+
+*(array|null)*
+
+Example configuration:
+```
+matrix_rtc:
+  transports::
+    - type: livekit
+      livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+```
+---
 ## Registration
 
 Registration can be rate-limited using the parameters in the [Ratelimiting](#ratelimiting) section of this manual.
