@@ -684,9 +684,21 @@ def start_active_span_from_edu(
 
 # Opentracing setters for tags, logs, etc
 @only_if_tracing
-def active_span() -> Optional["opentracing.Span"]:
-    """Get the currently active span, if any"""
-    return opentracing.tracer.active_span
+def active_span(
+    *,
+    tracer: Optional["opentracing.Tracer"] = None,
+) -> Optional["opentracing.Span"]:
+    """
+    Get the currently active span, if any
+
+    Args:
+        tracer: override the opentracing tracer. By default the global tracer is used.
+    """
+    if tracer is None:
+        # use the global tracer by default
+        tracer = opentracing.tracer
+
+    return tracer.active_span
 
 
 @ensure_active_span("set a tag")

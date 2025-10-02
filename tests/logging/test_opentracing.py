@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Awaitable, cast
+from typing import Awaitable, Dict, cast
 
 from twisted.internet import defer
 from twisted.internet.testing import MemoryReactorClock
@@ -35,17 +35,22 @@ from synapse.logging.opentracing import (
     tag_args,
     trace_with_opname,
 )
+from synapse.logging.scopecontextmanager import LogContextScopeManager
+from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.util.clock import Clock
 
-try:
-    from synapse.logging.scopecontextmanager import LogContextScopeManager
-except ImportError:
-    LogContextScopeManager = None  # type: ignore
+from tests.server import get_clock
 
 try:
     import jaeger_client
 except ImportError:
     jaeger_client = None  # type: ignore
+
+
+try:
+    import opentracing
+except ImportError:
+    opentracing = None  # type: ignore
 
 import logging
 
@@ -65,7 +70,7 @@ class LogContextScopeManagerTestCase(TestCase):
     opentracing backend is Jaeger.
     """
 
-    if LogContextScopeManager is None:
+    if opentracing is None:
         skip = "Requires opentracing"  # type: ignore[unreachable]
     if jaeger_client is None:
         skip = "Requires jaeger_client"  # type: ignore[unreachable]
@@ -75,9 +80,8 @@ class LogContextScopeManagerTestCase(TestCase):
         # global variables that power opentracing. We create our own tracer instance
         # and test with it.
 
-        scope_manager = LogContextScopeManager()
         config = jaeger_client.config.Config(
-            config={}, service_name="test", scope_manager=scope_manager
+            config={}, service_name="test", scope_manager=LogContextScopeManager()
         )
 
         self._reporter = jaeger_client.reporter.InMemoryReporter()
@@ -314,4 +318,185 @@ class LogContextScopeManagerTestCase(TestCase):
         self.assertEqual(
             [span.operation_name for span in self._reporter.get_spans()],
             ["fixture_awaitable_return_func"],
+        )
+
+    async def test_run_as_background_process_standalone(self) -> None:
+        """
+        Test to make sure that the background process work starts its own trace.
+        """
+        reactor, clock = get_clock()
+
+        callback_finished = False
+        active_span_in_callback = None
+
+        async def bg_task() -> None:
+            nonlocal callback_finished, active_span_in_callback
+            try:
+                active_span_in_callback = self._tracer.active_span
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        # type-ignore: We ignore because the point is to test the bare function
+        run_as_background_process(  # type: ignore[untracked-background-process]
+            desc="some-bg-task",
+            server_name="test_server",
+            func=bg_task,
+            test_only_tracer=self._tracer,
+        )
+
+        # Now wait for the background process to finish
+        while not callback_finished:
+            await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        self.assertEqual(
+            active_span_in_callback.operation_name if active_span_in_callback else None,
+            "bgproc.some-bg-task",
+            "expected a new span to be started for the background task",
+        )
+
+        # The spans should be reported in order of their finishing.
+        #
+        # We use `assertIncludes` just as an easier way to see if items are missing or
+        # added. We assert the order just below
+        actual_spans = [span.operation_name for span in self._reporter.get_spans()]
+        expected_spans = ["bgproc.some-bg-task"]
+        self.assertIncludes(
+            set(actual_spans),
+            set(expected_spans),
+            exact=True,
+        )
+        # This is where we actually assert the correct order
+        self.assertEqual(
+            actual_spans,
+            expected_spans,
+        )
+
+    async def test_run_as_background_process_cross_link(self) -> None:
+        """
+        Test to make sure that the background process work has its own trace and is
+        disconnected from any currently active trace (like a request). But we still have
+        cross-links between the two traces.
+        """
+        reactor, clock = get_clock()
+
+        callback_finished = False
+        active_span_in_callback = None
+
+        async def bg_task() -> None:
+            nonlocal callback_finished, active_span_in_callback
+            try:
+                active_span_in_callback = self._tracer.active_span
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        with LoggingContext(name="some-request", server_name="test_server"):
+            with start_active_span(
+                "some-request",
+                tracer=self._tracer,
+            ):
+                # type-ignore: We ignore because the point is to test the bare function
+                run_as_background_process(  # type: ignore[untracked-background-process]
+                    desc="some-bg-task",
+                    server_name="test_server",
+                    func=bg_task,
+                    test_only_tracer=self._tracer,
+                )
+
+        # Now wait for the background process to finish
+        while not callback_finished:
+            await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # We start `bgproc.some-bg-task` and `bgproc_child.some-bg-task` (see
+        # `run_as_background_process` implementation for why). Either is fine but for
+        # now we expect the child as its the innermost one that was started.
+        self.assertEqual(
+            active_span_in_callback.operation_name if active_span_in_callback else None,
+            "bgproc_child.some-bg-task",
+            "expected a new span to be started for the background task",
+        )
+
+        # The spans should be reported in order of their finishing.
+        #
+        # We use `assertIncludes` just as an easier way to see if items are missing or
+        # added. We assert the order just below
+        actual_spans = [span.operation_name for span in self._reporter.get_spans()]
+        expected_spans = [
+            "start_bgproc.some-bg-task",
+            "bgproc_child.some-bg-task",
+            "bgproc.some-bg-task",
+            "some-request",
+        ]
+        self.assertIncludes(
+            set(actual_spans),
+            set(expected_spans),
+            exact=True,
+        )
+        # This is where we actually assert the correct order
+        self.assertEqual(
+            actual_spans,
+            expected_spans,
+        )
+
+        span_map: Dict[str, jaeger_client.SpanContext] = {
+            span.operation_name: span for span in self._reporter.get_spans()
+        }
+        span_id_to_friendly_name = {
+            span.context.span_id: span.operation_name
+            for span in self._reporter.get_spans()
+        }
+        # Ensure the background process trace/span is disconnected from the request
+        # trace/span.
+        self.assertNotEqual(
+            span_map["bgproc.some-bg-task"].context.parent_id,
+            span_map["some-request"].context.span_id,
+        )
+
+        # We should see a cross-link in the request trace pointing to the background
+        # process trace.
+        #
+        # Make sure `start_bgproc.some-bg-task` is part of the request trace
+        self.assertEqual(
+            span_map["start_bgproc.some-bg-task"].context.parent_id,
+            span_map["some-request"].context.span_id,
+        )
+        # And has some references to the background process trace
+        self.assertIncludes(
+            {
+                f"{reference.type}:{reference.referenced_context.span_id}"
+                for reference in span_map["start_bgproc.some-bg-task"].references
+            },
+            {f"follows_from:{span_map['bgproc.some-bg-task'].context.span_id}"},
+            exact=True,
+        )
+
+        # We should see a cross-link in the background process trace pointing to the
+        # request trace that kicked off the work.
+        #
+        # Make sure `start_bgproc.some-bg-task` is part of the request trace
+        self.assertEqual(
+            span_map["bgproc_child.some-bg-task"].context.parent_id,
+            span_map["bgproc.some-bg-task"].context.span_id,
+        )
+        # And has some references to the background process trace
+        self.assertIncludes(
+            {
+                f"{reference.type}:{reference.referenced_context.span_id}"
+                for reference in span_map["bgproc_child.some-bg-task"].references
+            },
+            {f"follows_from:{span_map['some-request'].context.span_id}"},
+            exact=True,
         )
