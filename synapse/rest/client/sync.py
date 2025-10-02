@@ -1142,10 +1142,9 @@ def _serialise_threads(
     if threads.updates:
         out["updates"] = {
             room_id: {
-                thread_root_id: {
-                    "thread_root": update.thread_root,
-                    "prev_batch": update.prev_batch,
-                }
+                thread_root_id: attr.asdict(
+                    update, filter=lambda _attr, v: v is not None
+                )
                 for thread_root_id, update in thread_updates.items()
             }
             for room_id, thread_updates in threads.updates.items()

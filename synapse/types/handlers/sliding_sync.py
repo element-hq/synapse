@@ -412,6 +412,9 @@ class SlidingSyncResult:
                 # TODO: comment
                 prev_batch: Optional[StreamToken]
 
+                def __bool__(self) -> bool:
+                    return bool(self.thread_root) or bool(self.prev_batch)
+
             updates: Optional[Mapping[str, Mapping[str, ThreadUpdate]]]
             prev_batch: Optional[int]
 

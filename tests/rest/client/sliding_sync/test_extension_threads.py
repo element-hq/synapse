@@ -153,16 +153,7 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # Assert
         self.assertEqual(
             response_body["extensions"][EXT_NAME],
-            {
-                "updates": {
-                    room_id: {
-                        thread_root_id: {
-                            "thread_root": None,
-                            "prev_batch": None,
-                        }
-                    }
-                }
-            },
+            {"updates": {room_id: {thread_root_id: {}}}},
         )
 
     def test_threads_incremental_sync(self) -> None:
@@ -214,14 +205,5 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # Assert
         self.assertEqual(
             response_body["extensions"][EXT_NAME],
-            {
-                "updates": {
-                    room_id: {
-                        thread_root_id: {
-                            "thread_root": None,
-                            "prev_batch": None,
-                        }
-                    }
-                }
-            },
+            {"updates": {room_id: {thread_root_id: {}}}},
         )
