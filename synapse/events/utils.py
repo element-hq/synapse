@@ -877,7 +877,7 @@ def maybe_upsert_event_field(
     return upsert_okay
 
 
-def strip_event(event: EventBase) -> JsonDict:
+def strip_event(event: EventBase, for_federation: Optional[bool] = False) -> JsonDict:
     """
     Used for "stripped state" events which provide a simplified view of the state of a
     room intended to help a potential joiner identify the room (relevant when the user
@@ -886,13 +886,10 @@ def strip_event(event: EventBase) -> JsonDict:
     Stripped state events can only have the `sender`, `type`, `state_key` and `content`
     properties present.
     """
-    # MSC4311: Ensure the create event is available on invites and knocks.
-    # TODO: Implement the rest of MSC4311
-    if (
-        event.room_version.msc4291_room_ids_as_hashes
-        and event.type == EventTypes.Create
-        and event.get_state_key() == ""
-    ):
+    # MSC4311 makes all stripped state events fully-formed PDUs over federation,
+    # especially the `m.room.create` event.
+    # TODO: Implement the validation component of MSC4311
+    if for_federation:
         return event.get_pdu_json()
 
     return {

@@ -1375,10 +1375,16 @@ class FederationClient(FederationBase):
         room_id: str,
         event_id: str,
         pdu: EventBase,
+        stripped_state: List[JsonDict],
     ) -> EventBase:
         room_version = await self.store.get_room_version(room_id)
 
-        content = await self._do_send_invite(destination, pdu, room_version)
+        content = await self._do_send_invite(
+            destination,
+            pdu,
+            room_version,
+            stripped_state,
+        )
 
         pdu_dict = content["event"]
 
@@ -1399,7 +1405,11 @@ class FederationClient(FederationBase):
         return pdu
 
     async def _do_send_invite(
-        self, destination: str, pdu: EventBase, room_version: RoomVersion
+        self,
+        destination: str,
+        pdu: EventBase,
+        room_version: RoomVersion,
+        stripped_state: List[JsonDict],
     ) -> JsonDict:
         """Actually sends the invite, first trying v2 API and falling back to
         v1 API if necessary.
@@ -1422,7 +1432,7 @@ class FederationClient(FederationBase):
                 content={
                     "event": pdu.get_pdu_json(time_now),
                     "room_version": room_version.identifier,
-                    "invite_room_state": pdu.unsigned.get("invite_room_state", []),
+                    "invite_room_state": stripped_state,
                 },
             )
         except HttpResponseException as e:
