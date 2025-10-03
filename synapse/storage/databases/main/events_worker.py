@@ -45,7 +45,7 @@ from prometheus_client import Gauge
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction, EventTypes, StickyEventSoftFailed
+from synapse.api.constants import Direction, EventTypes
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
@@ -470,9 +470,8 @@ class EventsWorkerStore(SQLBaseStore):
         elif stream_name == StickyEventsStream.NAME:
             for row in rows:
                 assert isinstance(row, StickyEventsStreamRow)
-                if row.soft_failed_status == StickyEventSoftFailed.FORMER_TRUE:
-                    # was soft-failed, now not, so invalidate caches
-                    self._invalidate_local_get_event_cache(row.event_id)
+                # In case soft-failure status changed, invalidate the cache.
+                self._invalidate_local_get_event_cache(row.event_id)
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
 

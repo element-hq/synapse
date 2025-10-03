@@ -543,7 +543,12 @@ class FederationSender(AbstractFederationSender):
             filter_out_remote_partial_state_events=True,
         )
         if sticky_events:
-            logger.info("sending %d sticky events to newly joined server %s in room %s", len(sticky_events), new_server, room_id)
+            logger.info(
+                "sending %d sticky events to newly joined server %s in room %s",
+                len(sticky_events),
+                new_server,
+                room_id,
+            )
             # we don't track that we sent up to this stream position since it won't make any difference
             # since notify_new_server_joined is only called initially.
             await self._transaction_manager.send_new_transaction(
