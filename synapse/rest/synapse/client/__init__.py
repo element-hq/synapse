@@ -31,6 +31,7 @@ from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResou
 from synapse.rest.synapse.client.sso_register import SsoRegisterResource
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.rest.synapse.mas import MasResource
+from synapse.rest.synapse.media import MediaResource
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -63,6 +64,9 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
 
         resources["/_synapse/jwks"] = JwksResource(hs)
         resources["/_synapse/mas"] = MasResource(hs)
+
+    if hs.config.media.can_load_media_repo:
+        resources["/_synapse/media"] = MediaResource(hs)
 
     # provider-specific SSO bits. Only load these if they are enabled, since they
     # rely on optional dependencies.
