@@ -61,6 +61,7 @@ _ThreadSubscription: TypeAlias = (
 _ThreadUnsubscription: TypeAlias = (
     SlidingSyncResult.Extensions.ThreadSubscriptionsExtension.ThreadUnsubscription
 )
+_ThreadUpdate: TypeAlias = SlidingSyncResult.Extensions.ThreadsExtension.ThreadUpdate
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -76,7 +77,9 @@ class SlidingSyncExtensionHandler:
         self.event_sources = hs.get_event_sources()
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
+        self.relations_handler = hs.get_relations_handler()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
+        self._enable_threads_ext = hs.config.experimental.msc4360_enabled
 
     @trace
     async def get_extensions_response(
@@ -177,6 +180,15 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
+        threads_coro = None
+        if sync_config.extensions.threads is not None and self._enable_threads_ext:
+            threads_coro = self.get_threads_extension_response(
+                sync_config=sync_config,
+                threads_request=sync_config.extensions.threads,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         (
             to_device_response,
             e2ee_response,
@@ -184,6 +196,7 @@ class SlidingSyncExtensionHandler:
             receipts_response,
             typing_response,
             thread_subs_response,
+            threads_response,
         ) = await gather_optional_coroutines(
             to_device_coro,
             e2ee_coro,
@@ -191,6 +204,7 @@ class SlidingSyncExtensionHandler:
             receipts_coro,
             typing_coro,
             thread_subs_coro,
+            threads_coro,
         )
 
         return SlidingSyncResult.Extensions(
@@ -200,6 +214,7 @@ class SlidingSyncExtensionHandler:
             receipts=receipts_response,
             typing=typing_response,
             thread_subscriptions=thread_subs_response,
+            threads=threads_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -968,5 +983,67 @@ class SlidingSyncExtensionHandler:
         return SlidingSyncResult.Extensions.ThreadSubscriptionsExtension(
             subscribed=subscribed_threads,
             unsubscribed=unsubscribed_threads,
+            prev_batch=prev_batch,
+        )
+
+    async def get_threads_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        threads_request: SlidingSyncConfig.Extensions.ThreadsExtension,
+        to_token: StreamToken,
+        from_token: Optional[SlidingSyncStreamToken],
+    ) -> Optional[SlidingSyncResult.Extensions.ThreadsExtension]:
+        """Handle Threads extension (MSC4360)
+
+        Args:
+            sync_config: Sync configuration
+            threads_request: The threads extension from the request
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+
+        Returns:
+            the response (None if empty or threads extension is disabled)
+        """
+        if not threads_request.enabled:
+            return None
+
+        limit = threads_request.limit
+
+        # TODO: is the `room_key` the right thing to use here?
+        # ie. does it translate into /relations
+
+        updates, prev_batch = await self.store.get_thread_updates_for_user(
+            user_id=sync_config.user.to_string(),
+            from_token=from_token.stream_token if from_token else None,
+            to_token=to_token,
+            limit=limit,
+            include_thread_roots=threads_request.include_roots,
+        )
+
+        if len(updates) == 0:
+            return None
+
+        # Collect thread root events and get bundled aggregations
+        thread_root_events = [event for _, _, event in updates if event]
+        aggregations_map = {}
+        if thread_root_events:
+            aggregations_map = await self.relations_handler.get_bundled_aggregations(
+                thread_root_events,
+                sync_config.user.to_string(),
+            )
+
+        thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
+        for thread_root_id, room_id, thread_root_event in updates:
+            bundled_aggs = (
+                aggregations_map.get(thread_root_id) if thread_root_event else None
+            )
+            thread_updates.setdefault(room_id, {})[thread_root_id] = _ThreadUpdate(
+                thread_root=thread_root_event,
+                prev_batch=None,
+                bundled_aggregations=bundled_aggs,
+            )
+
+        return SlidingSyncResult.Extensions.ThreadsExtension(
+            updates=thread_updates,
             prev_batch=prev_batch,
         )

@@ -376,6 +376,19 @@ class SlidingSyncBody(RequestBodyModel):
             enabled: Optional[StrictBool] = False
             limit: StrictInt = 100
 
+        class ThreadsExtension(RequestBodyModel):
+            """The Threads extension (MSC4360)
+
+            Attributes:
+                enabled
+                include_roots: whether to include thread root events in the extension response.
+                limit: maximum number of thread updates to return.
+            """
+
+            enabled: Optional[StrictBool] = False
+            include_roots: StrictBool = False
+            limit: StrictInt = 100
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
@@ -384,6 +397,7 @@ class SlidingSyncBody(RequestBodyModel):
         thread_subscriptions: Optional[ThreadSubscriptionsExtension] = Field(
             alias="io.element.msc4308.thread_subscriptions"
         )
+        threads: Optional[ThreadsExtension] = Field(alias="io.element.msc4360.threads")
 
     conn_id: Optional[StrictStr]
 

@@ -37,7 +37,7 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import MAIN_TIMELINE, Direction, RelationTypes
+from synapse.api.constants import MAIN_TIMELINE, Direction, Membership, RelationTypes
 from synapse.api.errors import SynapseError
 from synapse.events import EventBase
 from synapse.storage._base import SQLBaseStore
@@ -47,6 +47,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
+from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.stream import (
     generate_next_token,
     generate_pagination_bounds,
@@ -95,7 +96,7 @@ class _RelatedEvent:
     sender: str
 
 
-class RelationsWorkerStore(SQLBaseStore):
+class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -591,14 +592,18 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_applicable_edits", _get_applicable_edits_txn
         )
 
-        edits = await self.get_events(edit_ids.values())  # type: ignore[attr-defined]
+        edits = await self.get_events(edit_ids.values())
 
         # Map to the original event IDs to the edit events.
         #
         # There might not be an edit event due to there being no edits or
         # due to the event not being known, either case is treated the same.
         return {
-            original_event_id: edits.get(edit_ids.get(original_event_id))
+            original_event_id: (
+                edits.get(edit_id)
+                if (edit_id := edit_ids.get(original_event_id))
+                else None
+            )
             for original_event_id in event_ids
         }
 
@@ -706,7 +711,7 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_thread_summaries", _get_thread_summaries_txn
         )
 
-        latest_events = await self.get_events(latest_event_ids.values())  # type: ignore[attr-defined]
+        latest_events = await self.get_events(latest_event_ids.values())
 
         # Map to the event IDs to the thread summary.
         #
@@ -1117,6 +1122,143 @@ class RelationsWorkerStore(SQLBaseStore):
         return await self.db_pool.runInteraction(
             "get_related_thread_id", _get_related_thread_id
         )
+
+    async def get_thread_updates_for_user(
+        self,
+        *,
+        user_id: str,
+        from_token: Optional[StreamToken] = None,
+        to_token: Optional[StreamToken] = None,
+        limit: int = 5,
+        include_thread_roots: bool = False,
+    ) -> Tuple[Sequence[Tuple[str, str, Optional[EventBase]]], Optional[int]]:
+        """Get a list of updated threads, ordered by stream ordering of their
+        latest reply, filtered to only include threads in rooms where the user
+        was joined at the time of the thread's latest update.
+
+        Note: This function has a known limitation due to the threads table only
+        storing the latest update per thread. If a thread had multiple updates
+        within the token range and the user left the room between updates, earlier
+        updates that occurred while the user was joined will NOT be returned.
+
+        Example edge case:
+            t1: User joins room, thread updated (user should see this)
+            t2: User leaves room
+            t3: Thread updated again (user should NOT see this)
+            Result: Neither update is returned (because membership check at t3 fails)
+
+        This is an acceptable trade-off to avoid expensive queries through the
+        event_relations table.
+
+        Args:
+            user_id: Only fetch threads for rooms where the user was joined at
+                the time of the thread's latest update.
+            from_token: Fetch rows from a previous next_batch, or from the start if None.
+            to_token: Fetch rows from a previous prev_batch, or from the stream end if None.
+            limit: Only fetch the most recent `limit` threads.
+            include_thread_roots: If True, fetch and return the thread root EventBase
+                objects. If False, return None for the event.
+
+        Returns:
+            A tuple of:
+                A list of (thread_id, room_id, thread_root_event) tuples.
+                    thread_root_event will be None if include_thread_roots=False.
+                The next_batch, if one exists.
+        """
+        # Ensure bad limits aren't being passed in.
+        assert limit >= 0
+
+        # Generate the pagination clause, if necessary.
+        #
+        # Find any threads where the latest reply is between the stream ordering bounds.
+        pagination_clause = ""
+        pagination_args: List[str] = []
+        if from_token:
+            from_bound = from_token.room_key.stream
+            pagination_clause += " AND stream_ordering > ?"
+            pagination_args.append(str(from_bound))
+
+        if to_token:
+            to_bound = to_token.room_key.stream
+            pagination_clause += " AND stream_ordering <= ?"
+            pagination_args.append(str(to_bound))
+
+        # Filter threads to only those in rooms where the user was joined at the
+        # time of the thread's latest update.
+        #
+        # We use room_memberships.event_stream_ordering to perform a point-in-time
+        # membership check. This finds the most recent membership event for the user
+        # in each room that occurred at or before the thread's latest update
+        # (threads.stream_ordering), and verifies it was a 'join' membership.
+        #
+        # Note: Due to the threads table only storing the latest update per thread,
+        # this approach has a known limitation: if a thread had multiple updates and
+        # the user left the room between updates, earlier updates that occurred while
+        # they were joined will not be returned. This is an acceptable trade-off to
+        # avoid expensive queries through event_relations.
+        sql = f"""
+            SELECT thread_id, room_id, latest_event_id, stream_ordering
+            FROM threads
+            WHERE EXISTS (
+                SELECT 1
+                FROM room_memberships AS rm
+                WHERE rm.room_id = threads.room_id
+                    AND rm.user_id = ?
+                    AND rm.event_stream_ordering <= threads.stream_ordering
+                    AND rm.membership = ?
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM room_memberships AS rm2
+                        WHERE rm2.room_id = rm.room_id
+                            AND rm2.user_id = rm.user_id
+                            AND rm2.event_stream_ordering > rm.event_stream_ordering
+                            AND rm2.event_stream_ordering <= threads.stream_ordering
+                    )
+            )
+            {pagination_clause}
+            ORDER BY stream_ordering DESC
+            LIMIT ?
+        """
+
+        def _get_thread_updates_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> Tuple[List[Tuple[str, str]], Optional[int]]:
+            txn.execute(sql, (user_id, Membership.JOIN, *pagination_args, limit + 1))
+
+            rows = cast(List[Tuple[str, str, str, int]], txn.fetchall())
+            thread_ids = [(r[0], r[1]) for r in rows]
+
+            # If there are more events, generate the next pagination key from the
+            # last thread which will be returned.
+            next_token = None
+            if len(thread_ids) > limit:
+                # TODO: why -2?
+                next_token = rows[-2][3]
+
+            return thread_ids[:limit], next_token
+
+        thread_ids, next_token = await self.db_pool.runInteraction(
+            "get_thread_updates_for_user", _get_thread_updates_for_user_txn
+        )
+
+        # Optionally fetch thread root events
+        if include_thread_roots and thread_ids:
+            thread_root_ids = [thread_id for thread_id, _ in thread_ids]
+            thread_root_events = await self.get_events_as_list(thread_root_ids)
+            event_map = {e.event_id: e for e in thread_root_events}
+
+            return (
+                [
+                    (thread_id, room_id, event_map.get(thread_id))
+                    for thread_id, room_id in thread_ids
+                ],
+                next_token,
+            )
+        else:
+            return (
+                [(thread_id, room_id, None) for thread_id, room_id in thread_ids],
+                next_token,
+            )
 
 
 class RelationsStore(RelationsWorkerStore):

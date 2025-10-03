@@ -40,6 +40,9 @@ import attr
 from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+
+if TYPE_CHECKING:
+    from synapse.handlers.relations import BundledAggregations
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -396,12 +399,41 @@ class SlidingSyncResult:
                     or bool(self.prev_batch)
                 )
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadsExtension:
+            # TODO: comment
+            """The Threads extension (MSC4360)
+
+            Attributes:
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUpdate:
+                # The thread root event, if requested via include_roots
+                thread_root: Optional[EventBase]
+
+                # Pagination token for this thread
+                prev_batch: Optional[StreamToken]
+
+                # Bundled aggregations for the thread root event (includes latest_event)
+                bundled_aggregations: Optional["BundledAggregations"] = None
+
+                def __bool__(self) -> bool:
+                    return bool(self.thread_root) or bool(self.prev_batch)
+
+            updates: Optional[Mapping[str, Mapping[str, ThreadUpdate]]]
+            prev_batch: Optional[int]
+
+            def __bool__(self) -> bool:
+                return bool(self.updates) or bool(self.prev_batch)
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
         thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
+        threads: Optional[ThreadsExtension] = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -411,6 +443,7 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.threads
             )
 
     next_pos: SlidingSyncStreamToken
