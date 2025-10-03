@@ -89,13 +89,6 @@ class SynapseHomeServer(HomeServer):
 
     DATASTORE_CLASS = DataStore
 
-    def start_background_tasks(self) -> None:
-        super().start_background_tasks()
-
-        # Start any other background tasks needed by Synapse main process.
-
-        self.get_datastores().main.db_pool.updates.start_doing_background_updates()
-
     def _listener_http(
         self,
         config: HomeServerConfig,
@@ -450,6 +443,10 @@ def setup(
             await oidc.load_metadata()
 
         await _base.start(hs, freeze)
+
+        # TODO: This should be moved to `SynapseHomeServer.start_background_tasks` (this
+        # way it matches the behavior of only running on `main`)
+        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     # Register a callback to be invoked once the reactor is running
     register_start(hs, _start_when_reactor_running)
