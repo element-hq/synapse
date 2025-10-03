@@ -398,18 +398,12 @@ def create_homeserver(
 
 def setup(
     hs: SynapseHomeServer,
-    freeze: bool = True,
 ) -> None:
     """
     Create and setup a Synapse homeserver instance given a configuration.
 
     Args:
         hs: The homeserver to setup.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
 
     Returns:
         A homeserver instance.
@@ -428,7 +422,29 @@ def setup(
     except Exception as e:
         handle_startup_exception(e)
 
+
+def run(
+    hs: HomeServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Start the reactor and the Synapse homeserver once the reactor is running.
+
+    Args:
+        hs: The homeserver to run.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+    """
+
     async def start() -> None:
+        # TODO: This should be moved to same pattern we use for other background tasks:
+        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
+        # `start_background_tasks` to start it.
+        #
         # Load the OIDC provider metadatas, if OIDC is enabled.
         if hs.config.oidc.oidc_enabled:
             oidc = hs.get_oidc_handler()
@@ -439,10 +455,10 @@ def setup(
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
+    # Register a callback to be invoked once the reactor is running
     register_start(hs, start)
 
-
-def run(hs: HomeServer) -> None:
+    # Start the reactor
     _base.start_reactor(
         "synapse-homeserver",
         soft_file_limit=hs.config.server.soft_file_limit,
