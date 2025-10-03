@@ -599,7 +599,11 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
         # There might not be an edit event due to there being no edits or
         # due to the event not being known, either case is treated the same.
         return {
-            original_event_id: edits.get(edit_ids.get(original_event_id))
+            original_event_id: (
+                edits.get(edit_id)
+                if (edit_id := edit_ids.get(original_event_id))
+                else None
+            )
             for original_event_id in event_ids
         }
 
