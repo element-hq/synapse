@@ -83,6 +83,10 @@ def gz_wrap(r: Resource) -> Resource:
 
 
 class SynapseHomeServer(HomeServer):
+    """
+    Homeserver class for the main Synapse process.
+    """
+
     DATASTORE_CLASS = DataStore
 
     def start_background_tasks(self) -> None:
