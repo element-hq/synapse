@@ -81,7 +81,6 @@ from synapse.appservice import (
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.events import EventBase
 from synapse.logging.context import run_in_background
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main import DataStore
 from synapse.types import DeviceListUpdates, JsonMapping
 from synapse.util.clock import Clock
@@ -200,6 +199,7 @@ class _ServiceQueuer:
         )
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
+        self.hs = hs
         self._store = hs.get_datastores().main
 
     def start_background_request(self, service: ApplicationService) -> None:
@@ -207,9 +207,7 @@ class _ServiceQueuer:
         if service.id in self.requests_in_flight:
             return
 
-        run_as_background_process(
-            "as-sender", self.server_name, self._send_request, service
-        )
+        self.hs.run_as_background_process("as-sender", self._send_request, service)
 
     async def _send_request(self, service: ApplicationService) -> None:
         # sanity-check: we shouldn't get here if this service already has a sender
@@ -361,6 +359,7 @@ class _TransactionController:
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
+        self.hs = hs
         self.store = hs.get_datastores().main
         self.as_api = hs.get_application_service_api()
 
@@ -448,6 +447,7 @@ class _TransactionController:
         recoverer = self.RECOVERER_CLASS(
             self.server_name,
             self.clock,
+            self.hs,
             self.store,
             self.as_api,
             service,
@@ -494,6 +494,7 @@ class _Recoverer:
         self,
         server_name: str,
         clock: Clock,
+        hs: "HomeServer",
         store: DataStore,
         as_api: ApplicationServiceApi,
         service: ApplicationService,
@@ -501,6 +502,7 @@ class _Recoverer:
     ):
         self.server_name = server_name
         self.clock = clock
+        self.hs = hs
         self.store = store
         self.as_api = as_api
         self.service = service
@@ -513,9 +515,8 @@ class _Recoverer:
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
         self.scheduled_recovery = self.clock.call_later(
             delay,
-            run_as_background_process,
+            self.hs.run_as_background_process,
             "as-recoverer",
-            self.server_name,
             self.retry,
         )
 
@@ -535,9 +536,8 @@ class _Recoverer:
         if self.scheduled_recovery:
             self.clock.cancel_call_later(self.scheduled_recovery)
         # Run a retry, which will resechedule a recovery if it fails.
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "retry",
-            self.server_name,
             self.retry,
         )
 

@@ -265,6 +265,8 @@ This software is dual-licensed by New Vector Ltd (Element). It can be used eithe
 
 Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
 
+Please contact `licensing@element.io <mailto:licensing@element.io>`_ to purchase an Element commercial license for this software.
+
 
 .. |support| image:: https://img.shields.io/badge/matrix-community%20support-success
   :alt: (get community support in #synapse:matrix.org)

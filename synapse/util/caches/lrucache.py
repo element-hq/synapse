@@ -45,14 +45,10 @@ from typing import (
     overload,
 )
 
-from twisted.internet import defer, reactor
+from twisted.internet import defer
 
 from synapse.config import cache as cache_config
-from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
-)
 from synapse.metrics.jemalloc import get_jemalloc_stats
-from synapse.types import ISynapseThreadlessReactor
 from synapse.util import caches
 from synapse.util.caches import CacheMetric, EvictionReason, register_cache
 from synapse.util.caches.treecache import (
@@ -123,6 +119,7 @@ GLOBAL_ROOT = ListNode["_Node"].create_root_node()
 
 def _expire_old_entries(
     server_name: str,
+    hs: "HomeServer",
     clock: Clock,
     expiry_seconds: float,
     autotune_config: Optional[dict],
@@ -228,9 +225,8 @@ def _expire_old_entries(
 
         logger.info("Dropped %d items from caches", i)
 
-    return run_as_background_process(
+    return hs.run_as_background_process(
         "LruCache._expire_old_entries",
-        server_name,
         _internal_expire_old_entries,
         clock,
         expiry_seconds,
@@ -261,6 +257,7 @@ def setup_expire_lru_cache_entries(hs: "HomeServer") -> None:
         _expire_old_entries,
         30 * 1000,
         server_name,
+        hs,
         clock,
         expiry_time,
         hs.config.caches.cache_autotuning,
@@ -404,13 +401,13 @@ class LruCache(Generic[KT, VT]):
         self,
         *,
         max_size: int,
+        clock: Clock,
         server_name: str,
         cache_name: str,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
-        clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
         extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
     ): ...
@@ -420,13 +417,13 @@ class LruCache(Generic[KT, VT]):
         self,
         *,
         max_size: int,
-        server_name: Literal[None] = None,
+        clock: Clock,
+        server_name: str,
         cache_name: Literal[None] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
-        clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
         extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
     ): ...
@@ -435,13 +432,13 @@ class LruCache(Generic[KT, VT]):
         self,
         *,
         max_size: int,
-        server_name: Optional[str] = None,
+        clock: Clock,
+        server_name: str,
         cache_name: Optional[str] = None,
         cache_type: Type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
-        clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
         extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
     ):
@@ -450,12 +447,10 @@ class LruCache(Generic[KT, VT]):
             max_size: The maximum amount of entries the cache can hold
 
             server_name: The homeserver name that this cache is associated with
-                (used to label the metric) (`hs.hostname`). Must be set if `cache_name` is
-                set. If unset, no metrics will be reported on this cache.
+                (used to label the metric) (`hs.hostname`).
 
-            cache_name: The name of this cache, for the prometheus metrics. Must be set
-                if `server_name` is set. If unset, no metrics will be reported on this
-                cache.
+            cache_name: The name of this cache, for the prometheus metrics. If unset, no
+                metrics will be reported on this cache.
 
             cache_type:
                 type of underlying cache to be used. Typically one of dict
@@ -494,13 +489,6 @@ class LruCache(Generic[KT, VT]):
 
                 Note: The new key does not have to be unique.
         """
-        # Default `clock` to something sensible. Note that we rename it to
-        # `real_clock` so that mypy doesn't think its still `Optional`.
-        if clock is None:
-            real_clock = Clock(cast(ISynapseThreadlessReactor, reactor))
-        else:
-            real_clock = clock
-
         cache: Union[Dict[KT, _Node[KT, VT]], TreeCache] = cache_type()
         self.cache = cache  # Used for introspection.
         self.apply_cache_factor_from_config = apply_cache_factor_from_config
@@ -592,7 +580,7 @@ class LruCache(Generic[KT, VT]):
                 key,
                 value,
                 weak_ref_to_self,
-                real_clock,
+                clock,
                 callbacks,
                 prune_unread_entries,
             )
@@ -610,7 +598,7 @@ class LruCache(Generic[KT, VT]):
                 metrics.inc_memory_usage(node.memory)
 
         def move_node_to_front(node: _Node[KT, VT]) -> None:
-            node.move_to_front(real_clock, list_root)
+            node.move_to_front(clock, list_root)
 
         def delete_node(node: _Node[KT, VT]) -> int:
             node.drop_from_lists()

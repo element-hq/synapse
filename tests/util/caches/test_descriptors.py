@@ -49,6 +49,7 @@ from synapse.util.caches import descriptors
 from synapse.util.caches.descriptors import _CacheContext, cached, cachedList
 
 from tests import unittest
+from tests.server import get_clock
 from tests.test_utils import get_awaitable_result
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,10 @@ logger = logging.getLogger(__name__)
 
 def run_on_reactor() -> "Deferred[int]":
     d: "Deferred[int]" = Deferred()
-    cast(IReactorTime, reactor).callLater(0, d.callback, 0)
+    # mypy ignored here because:
+    #   - this is part of the test infrastructure (outside of Synapse) so tracking
+    #     these calls for for homeserver shutdown doesn't make sense.
+    cast(IReactorTime, reactor).callLater(0, d.callback, 0)  # type: ignore[call-later-not-tracked]
     return make_deferred_yieldable(d)
 
 
@@ -67,6 +71,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> str:
@@ -102,6 +107,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(num_args=1)
             def fn(self, arg1: int, arg2: int) -> str:
@@ -148,6 +154,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
         obj = Cls()
         obj.mock.return_value = "fish"
@@ -179,6 +186,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, kwarg1: int = 2) -> str:
@@ -214,6 +222,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> NoReturn:
@@ -239,6 +248,7 @@ class DescriptorTestCase(unittest.TestCase):
             result: Optional[Deferred] = None
             call_count = 0
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> Deferred:
@@ -293,6 +303,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int) -> "Deferred[int]":
@@ -306,7 +317,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         @defer.inlineCallbacks
         def do_lookup() -> Generator["Deferred[Any]", object, int]:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 r = yield obj.fn(1)
                 self.assertEqual(current_context(), c1)
             return cast(int, r)
@@ -337,6 +348,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int) -> Deferred:
@@ -350,7 +362,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         @defer.inlineCallbacks
         def do_lookup() -> Generator["Deferred[object]", object, None]:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 try:
                     d = obj.fn(1)
                     self.assertEqual(
@@ -381,6 +393,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int = 2, arg3: int = 3) -> str:
@@ -419,6 +432,7 @@ class DescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(iterable=True)
             def fn(self, arg1: int, arg2: int) -> Tuple[str, ...]:
@@ -453,6 +467,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(iterable=True)
             def fn(self, arg1: int) -> NoReturn:
@@ -476,6 +491,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached(cache_context=True)
             async def func1(self, key: str, cache_context: _CacheContext) -> int:
@@ -504,6 +520,7 @@ class DescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             async def fn(self, arg1: int) -> str:
@@ -537,6 +554,7 @@ class DescriptorTestCase(unittest.TestCase):
         class Cls:
             inner_context_was_finished = False
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             async def fn(self, arg1: int) -> str:
@@ -547,7 +565,7 @@ class DescriptorTestCase(unittest.TestCase):
         obj = Cls()
 
         async def do_lookup() -> None:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 try:
                     await obj.fn(123)
                     self.fail("No CancelledError thrown")
@@ -583,6 +601,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
     def test_passthrough(self) -> Generator["Deferred[Any]", object, None]:
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -599,6 +618,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -619,6 +639,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -639,6 +660,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
     def test_invalidate_missing(self) -> None:
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -652,6 +674,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached(max_entries=10)
             def func(self, key: int) -> int:
@@ -681,6 +704,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> "Deferred[int]":
@@ -701,6 +725,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -736,6 +761,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached(max_entries=2)
             def func(self, key: str) -> str:
@@ -775,6 +801,7 @@ class CacheDecoratorTestCase(unittest.HomeserverTestCase):
 
         class A:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def func(self, key: str) -> str:
@@ -824,6 +851,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> None:
@@ -843,7 +871,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
                 assert context.name == "c1"
                 return self.mock(args1, arg2)
 
-        with LoggingContext("c1") as c1:
+        with LoggingContext(name="c1", server_name="test_server") as c1:
             obj = Cls()
             obj.mock.return_value = {10: "fish", 20: "chips"}
 
@@ -890,6 +918,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int) -> None:
@@ -934,6 +963,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
             def __init__(self) -> None:
                 self.mock = mock.Mock()
                 self.server_name = "test_server"
+                _, self.clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached()
             def fn(self, arg1: int, arg2: int) -> None:
@@ -975,6 +1005,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> None:
@@ -1011,6 +1042,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         class Cls:
             inner_context_was_finished = False
             server_name = "test_server"  # nb must be called this for @cached
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @cached()
             def fn(self, arg1: int) -> None:
@@ -1025,7 +1057,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
         obj = Cls()
 
         async def do_lookup() -> None:
-            with LoggingContext("c1") as c1:
+            with LoggingContext(name="c1", server_name="test_server") as c1:
                 try:
                     await obj.list_fn([123])
                     self.fail("No CancelledError thrown")
@@ -1055,6 +1087,7 @@ class CachedListDescriptorTestCase(unittest.TestCase):
 
         class Cls:
             server_name = "test_server"
+            _, clock = get_clock()  # nb must be called this for @cached
 
             @descriptors.cached(tree=True)
             def fn(self, room_id: str, event_id: str) -> None:

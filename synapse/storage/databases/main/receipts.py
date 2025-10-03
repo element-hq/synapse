@@ -1073,7 +1073,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         if event_ts is None:
             return None
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         logger.debug(
             "Receipt %s for event %s in %s (%i ms old)",
             receipt_type,

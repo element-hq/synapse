@@ -68,7 +68,6 @@ from synapse.media.media_storage import (
 from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import UserID
@@ -110,7 +109,7 @@ class MediaRepository:
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
         self.thumbnail_requirements = hs.config.media.thumbnail_requirements
 
-        self.remote_media_linearizer = Linearizer(name="media_remote")
+        self.remote_media_linearizer = Linearizer(name="media_remote", clock=self.clock)
 
         self.recently_accessed_remotes: Set[Tuple[str, str]] = set()
         self.recently_accessed_locals: Set[str] = set()
@@ -189,16 +188,14 @@ class MediaRepository:
         self.media_repository_callbacks = hs.get_module_api_callbacks().media_repository
 
     def _start_update_recently_accessed(self) -> Deferred:
-        return run_as_background_process(
+        return self.hs.run_as_background_process(
             "update_recently_accessed_media",
-            self.server_name,
             self._update_recently_accessed,
         )
 
     def _start_apply_media_retention_rules(self) -> Deferred:
-        return run_as_background_process(
+        return self.hs.run_as_background_process(
             "apply_media_retention_rules",
-            self.server_name,
             self._apply_media_retention_rules,
         )
 

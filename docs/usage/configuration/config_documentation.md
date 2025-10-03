@@ -2006,9 +2006,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_reports:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -2031,9 +2030,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_room_creation:
-  per_user:
-    per_second: 0.016
-    burst_count: 10.0
+  per_second: 0.016
+  burst_count: 10.0
 ```
 
 Example configuration:

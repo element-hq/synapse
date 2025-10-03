@@ -17,10 +17,12 @@
 from typing import (
     Any,
     Callable,
+    Dict,
+    List,
 )
 
-import attr
 from typing_extensions import ParamSpec
+from zope.interface import implementer
 
 from twisted.internet import defer, task
 from twisted.internet.defer import Deferred
@@ -34,23 +36,54 @@ from synapse.util import log_failure
 P = ParamSpec("P")
 
 
-@attr.s(slots=True)
 class Clock:
     """
     A Clock wraps a Twisted reactor and provides utilities on top of it.
+
+    This clock should be used in place of calls to the base reactor wherever `LoopingCall`
+    or `DelayedCall` are made (such as when calling `reactor.callLater`. This is to
+    ensure the calls made by this `HomeServer` instance are tracked and can be cleaned
+    up during `HomeServer.shutdown()`.
+
+    We enforce usage of this clock instead of using the reactor directly via lints in
+    `scripts-dev/mypy_synapse_plugin.py`.
+
 
     Args:
         reactor: The Twisted reactor to use.
     """
 
-    _reactor: ISynapseThreadlessReactor = attr.ib()
+    _reactor: ISynapseThreadlessReactor
+
+    def __init__(self, reactor: ISynapseThreadlessReactor, server_name: str) -> None:
+        self._reactor = reactor
+        self._server_name = server_name
+
+        self._delayed_call_id: int = 0
+        """Unique ID used to track delayed calls"""
+
+        self._looping_calls: List[LoopingCall] = []
+        """List of active looping calls"""
+
+        self._call_id_to_delayed_call: Dict[int, IDelayedCall] = {}
+        """Mapping from unique call ID to delayed call"""
+
+        self._is_shutdown = False
+        """Whether shutdown has been requested by the HomeServer"""
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        self.cancel_all_looping_calls()
+        self.cancel_all_delayed_calls()
 
     async def sleep(self, seconds: float) -> None:
         d: defer.Deferred[float] = defer.Deferred()
         # Start task in the `sentinel` logcontext, to avoid leaking the current context
         # into the reactor once it finishes.
         with context.PreserveLoggingContext():
-            self._reactor.callLater(seconds, d.callback, seconds)
+            # We can ignore the lint here since this class is the one location callLater should
+            # be called.
+            self._reactor.callLater(seconds, d.callback, seconds)  # type: ignore[call-later-not-tracked]
             await d
 
     def time(self) -> float:
@@ -123,6 +156,9 @@ class Clock:
     ) -> LoopingCall:
         """Common functionality for `looping_call` and `looping_call_now`"""
 
+        if self._is_shutdown:
+            raise Exception("Cannot start looping call. Clock has been shutdown")
+
         def wrapped_f(*args: P.args, **kwargs: P.kwargs) -> Deferred:
             assert context.current_context() is context.SENTINEL_CONTEXT, (
                 "Expected `looping_call` callback from the reactor to start with the sentinel logcontext "
@@ -144,13 +180,19 @@ class Clock:
             # this function and yield control back to the reactor to avoid leaking the
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
-            with context.PreserveLoggingContext(context.LoggingContext("looping_call")):
+            with context.PreserveLoggingContext(
+                context.LoggingContext(
+                    name="looping_call", server_name=self._server_name
+                )
+            ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
                 return context.run_in_background(f, *args, **kwargs)
 
-        call = task.LoopingCall(wrapped_f, *args, **kwargs)
+        # We can ignore the lint here since this is the one location LoopingCall's
+        # should be created.
+        call = task.LoopingCall(wrapped_f, *args, **kwargs)  # type: ignore[prefer-synapse-clock-looping-call]
         call.clock = self._reactor
         # If `now=true`, the function will be called here immediately so we need to be
         # in the sentinel context now.
@@ -160,10 +202,32 @@ class Clock:
         with context.PreserveLoggingContext():
             d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
+        self._looping_calls.append(call)
         return call
 
+    def cancel_all_looping_calls(self, consumeErrors: bool = True) -> None:
+        """
+        Stop all running looping calls.
+
+        Args:
+            consumeErrors: Whether to re-raise errors encountered when cancelling the
+            scheduled call.
+        """
+        for call in self._looping_calls:
+            try:
+                call.stop()
+            except Exception:
+                if not consumeErrors:
+                    raise
+        self._looping_calls.clear()
+
     def call_later(
-        self, delay: float, callback: Callable, *args: Any, **kwargs: Any
+        self,
+        delay: float,
+        callback: Callable,
+        *args: Any,
+        call_later_cancel_on_shutdown: bool = True,
+        **kwargs: Any,
     ) -> IDelayedCall:
         """Call something later
 
@@ -175,37 +239,78 @@ class Clock:
             delay: How long to wait in seconds.
             callback: Function to call
             *args: Postional arguments to pass to function.
+            call_later_cancel_on_shutdown: Whether this call should be tracked for cleanup during
+                shutdown. In general, all calls should be tracked. There may be a use case
+                not to track calls with a `timeout` of 0 (or similarly short) since tracking
+                them may result in rapid insertions and removals of tracked calls
+                unnecessarily. But unless a specific instance of tracking proves to be an
+                issue, we can just track all delayed calls.
             **kwargs: Key arguments to pass to function.
         """
 
-        def wrapped_callback(*args: Any, **kwargs: Any) -> None:
-            assert context.current_context() is context.SENTINEL_CONTEXT, (
-                "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
-                f"but saw {context.current_context()}. In other words, another task shouldn't have "
-                "leaked their logcontext to us."
-            )
+        if self._is_shutdown:
+            raise Exception("Cannot start delayed call. Clock has been shutdown")
 
-            # Because this is a callback from the reactor, we will be using the
-            # `sentinel` log context at this point. We want the function to log with
-            # some logcontext as we want to know which server the logs came from.
-            #
-            # We use `PreserveLoggingContext` to prevent our new `call_later`
-            # logcontext from finishing as soon as we exit this function, in case `f`
-            # returns an awaitable/deferred which would continue running and may try to
-            # restore the `loop_call` context when it's done (because it's trying to
-            # adhere to the Synapse logcontext rules.)
-            #
-            # This also ensures that we return to the `sentinel` context when we exit
-            # this function and yield control back to the reactor to avoid leaking the
-            # current logcontext to the reactor (which would then get picked up and
-            # associated with the next thing the reactor does)
-            with context.PreserveLoggingContext(context.LoggingContext("call_later")):
-                # We use `run_in_background` to reset the logcontext after `f` (or the
-                # awaitable returned by `f`) completes to avoid leaking the current
-                # logcontext to the reactor
-                context.run_in_background(callback, *args, **kwargs)
+        def create_wrapped_callback(
+            track_for_shutdown_cancellation: bool,
+        ) -> Callable[P, None]:
+            def wrapped_callback(*args: Any, **kwargs: Any) -> None:
+                assert context.current_context() is context.SENTINEL_CONTEXT, (
+                    "Expected `call_later` callback from the reactor to start with the sentinel logcontext "
+                    f"but saw {context.current_context()}. In other words, another task shouldn't have "
+                    "leaked their logcontext to us."
+                )
 
-        return self._reactor.callLater(delay, wrapped_callback, *args, **kwargs)
+                # Because this is a callback from the reactor, we will be using the
+                # `sentinel` log context at this point. We want the function to log with
+                # some logcontext as we want to know which server the logs came from.
+                #
+                # We use `PreserveLoggingContext` to prevent our new `call_later`
+                # logcontext from finishing as soon as we exit this function, in case `f`
+                # returns an awaitable/deferred which would continue running and may try to
+                # restore the `loop_call` context when it's done (because it's trying to
+                # adhere to the Synapse logcontext rules.)
+                #
+                # This also ensures that we return to the `sentinel` context when we exit
+                # this function and yield control back to the reactor to avoid leaking the
+                # current logcontext to the reactor (which would then get picked up and
+                # associated with the next thing the reactor does)
+                try:
+                    with context.PreserveLoggingContext(
+                        context.LoggingContext(
+                            name="call_later", server_name=self._server_name
+                        )
+                    ):
+                        # We use `run_in_background` to reset the logcontext after `f` (or the
+                        # awaitable returned by `f`) completes to avoid leaking the current
+                        # logcontext to the reactor
+                        context.run_in_background(callback, *args, **kwargs)
+                finally:
+                    if track_for_shutdown_cancellation:
+                        # We still want to remove the call from the tracking map. Even if
+                        # the callback raises an exception.
+                        self._call_id_to_delayed_call.pop(call_id)
+
+            return wrapped_callback
+
+        if call_later_cancel_on_shutdown:
+            call_id = self._delayed_call_id
+            self._delayed_call_id = self._delayed_call_id + 1
+
+            # We can ignore the lint here since this class is the one location callLater
+            # should be called.
+            call = self._reactor.callLater(
+                delay, create_wrapped_callback(True), *args, **kwargs
+            )  # type: ignore[call-later-not-tracked]
+            call = DelayedCallWrapper(call, call_id, self)
+            self._call_id_to_delayed_call[call_id] = call
+            return call
+        else:
+            # We can ignore the lint here since this class is the one location callLater should
+            # be called.
+            return self._reactor.callLater(
+                delay, create_wrapped_callback(False), *args, **kwargs
+            )  # type: ignore[call-later-not-tracked]
 
     def cancel_call_later(self, timer: IDelayedCall, ignore_errs: bool = False) -> None:
         try:
@@ -213,6 +318,24 @@ class Clock:
         except Exception:
             if not ignore_errs:
                 raise
+
+    def cancel_all_delayed_calls(self, ignore_errs: bool = True) -> None:
+        """
+        Stop all scheduled calls that were marked with `cancel_on_shutdown` when they were created.
+
+        Args:
+            ignore_errs: Whether to re-raise errors encountered when cancelling the
+            scheduled call.
+        """
+        # We make a copy here since calling `cancel()` on a delayed_call
+        # will result in the call removing itself from the map mid-iteration.
+        for call in list(self._call_id_to_delayed_call.values()):
+            try:
+                call.cancel()
+            except Exception:
+                if not ignore_errs:
+                    raise
+        self._call_id_to_delayed_call.clear()
 
     def call_when_running(
         self,
@@ -258,7 +381,9 @@ class Clock:
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
             with context.PreserveLoggingContext(
-                context.LoggingContext("call_when_running")
+                context.LoggingContext(
+                    name="call_when_running", server_name=self._server_name
+                )
             ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
@@ -276,7 +401,7 @@ class Clock:
         callback: Callable[P, object],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> None:
+    ) -> Any:
         """
         Add a function to be called when a system event occurs.
 
@@ -290,6 +415,9 @@ class Clock:
             callback: Function to call
             *args: Postional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
+
+        Returns:
+            an ID that can be used to remove this call with `reactor.removeSystemEventTrigger`.
         """
 
         def wrapped_callback(*args: Any, **kwargs: Any) -> None:
@@ -313,7 +441,11 @@ class Clock:
             # this function and yield control back to the reactor to avoid leaking the
             # current logcontext to the reactor (which would then get picked up and
             # associated with the next thing the reactor does)
-            with context.PreserveLoggingContext(context.LoggingContext("system_event")):
+            with context.PreserveLoggingContext(
+                context.LoggingContext(
+                    name="system_event", server_name=self._server_name
+                )
+            ):
                 # We use `run_in_background` to reset the logcontext after `f` (or the
                 # awaitable returned by `f`) completes to avoid leaking the current
                 # logcontext to the reactor
@@ -321,6 +453,50 @@ class Clock:
 
         # We can ignore the lint here since this class is the one location
         # `addSystemEventTrigger` should be called.
-        self._reactor.addSystemEventTrigger(
+        return self._reactor.addSystemEventTrigger(
             phase, event_type, wrapped_callback, *args, **kwargs
         )  # type: ignore[prefer-synapse-clock-add-system-event-trigger]
+
+
+@implementer(IDelayedCall)
+class DelayedCallWrapper:
+    """Wraps an `IDelayedCall` so that we can intercept the call to `cancel()` and
+    properly cleanup the delayed call from the tracking map of the `Clock`.
+
+    args:
+        delayed_call: The actual `IDelayedCall`
+        call_id: Unique identifier for this delayed call
+        clock: The clock instance tracking this call
+    """
+
+    def __init__(self, delayed_call: IDelayedCall, call_id: int, clock: Clock):
+        self.delayed_call = delayed_call
+        self.call_id = call_id
+        self.clock = clock
+
+    def cancel(self) -> None:
+        """Remove the call from the tracking map and propagate the call to the
+        underlying delayed_call.
+        """
+        self.delayed_call.cancel()
+        try:
+            self.clock._call_id_to_delayed_call.pop(self.call_id)
+        except KeyError:
+            # If the delayed call isn't being tracked anymore we can just move on.
+            pass
+
+    def getTime(self) -> float:
+        """Propagate the call to the underlying delayed_call."""
+        return self.delayed_call.getTime()
+
+    def delay(self, secondsLater: float) -> None:
+        """Propagate the call to the underlying delayed_call."""
+        self.delayed_call.delay(secondsLater)
+
+    def reset(self, secondsFromNow: float) -> None:
+        """Propagate the call to the underlying delayed_call."""
+        self.delayed_call.reset(secondsFromNow)
+
+    def active(self) -> bool:
+        """Propagate the call to the underlying delayed_call."""
+        return self.delayed_call.active()

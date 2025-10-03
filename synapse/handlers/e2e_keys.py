@@ -112,8 +112,7 @@ class E2eKeysHandler:
 
         # Limit the number of in-flight requests from a single device.
         self._query_devices_linearizer = Linearizer(
-            name="query_devices",
-            max_count=10,
+            name="query_devices", max_count=10, clock=hs.get_clock()
         )
 
         self._query_appservices_for_otks = (
@@ -873,9 +872,7 @@ class E2eKeysHandler:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
-        fallback_keys = keys.get("fallback_keys") or keys.get(
-            "org.matrix.msc2732.fallback_keys"
-        )
+        fallback_keys = keys.get("fallback_keys")
         if fallback_keys and isinstance(fallback_keys, dict):
             log_kv(
                 {
@@ -1765,7 +1762,9 @@ class SigningKeyEduUpdater:
         assert isinstance(device_handler, DeviceWriterHandler)
         self._device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_signing_key")
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_signing_key", clock=self.clock
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[str, List[Tuple[JsonDict, JsonDict]]] = {}
