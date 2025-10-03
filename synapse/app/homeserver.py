@@ -423,7 +423,7 @@ def setup(
         handle_startup_exception(e)
 
 
-def run(
+def start(
     hs: HomeServer,
     *,
     freeze: bool = True,
@@ -440,10 +440,8 @@ def run(
             False otherwise the homeserver cannot be garbage collected after `shutdown`.
     """
 
-    async def start() -> None:
-        # TODO: This should be moved to same pattern we use for other background tasks:
-        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
-        # `start_background_tasks` to start it.
+    async def _start_when_reactor_running() -> None:
+        # TODO: Feels like this should be moved somewhere else.
         #
         # Load the OIDC provider metadatas, if OIDC is enabled.
         if hs.config.oidc.oidc_enabled:
@@ -453,10 +451,13 @@ def run(
 
         await _base.start(hs, freeze)
 
+        # TODO: This should be moved to same pattern we use for other background tasks:
+        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
+        # `start_background_tasks` to start it.
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     # Register a callback to be invoked once the reactor is running
-    register_start(hs, start)
+    register_start(hs, _start_when_reactor_running)
 
     # Start the reactor
     _base.start_reactor(
@@ -483,7 +484,7 @@ def main() -> None:
         if not hs.config.logging.no_redirect_stdio:
             redirect_stdio_to_logs()
 
-        run(hs)
+        start(hs)
 
 
 if __name__ == "__main__":
