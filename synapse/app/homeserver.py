@@ -71,7 +71,8 @@ from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
-from synapse.util.check_dependencies import VERSION, check_requirements
+from synapse.util import SYNAPSE_VERSION
+from synapse.util.check_dependencies import check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
 
@@ -399,7 +400,7 @@ def setup(
     hs = SynapseHomeServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{VERSION}",
+        version_string=f"Synapse/{SYNAPSE_VERSION}",
         reactor=reactor,
     )
 
