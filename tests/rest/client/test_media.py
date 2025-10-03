@@ -2971,6 +2971,51 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         channel = self.upload_media(900)
         self.assertEqual(channel.code, 200)
 
+    @override_config(
+        {
+            "experimental_features": {"msc4335_enabled": True},
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                    "msc4335_info_url": "https://example.com",
+                }
+            ],
+        }
+    )
+    def test_msc4335_returns_user_limit_exceeded(self) -> None:
+        """Test that the MSC4335 error is returned when experimental feature is enabled."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
+        )
+        self.assertEqual(
+            channel.json_body["org.matrix.msc4335.info_url"], "https://example.com"
+        )
+
+    @override_config(
+        {
+            "experimental_features": {"msc4335_enabled": True},
+            "media_upload_limits": [
+                {
+                    "time_period": "1d",
+                    "max_size": "1K",
+                }
+            ],
+        }
+    )
+    def test_msc4335_requires_info_url(self) -> None:
+        """Test that the MSC4335 error is not used if info_url is not provided."""
+        channel = self.upload_media(500)
+        self.assertEqual(channel.code, 200)
+
+        channel = self.upload_media(800)
+        self.assertEqual(channel.code, 400)
+
 
 class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
     """
@@ -3181,49 +3226,3 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
         # n.b. this response is not spec compliant as described at: https://github.com/element-hq/synapse/issues/18749
         self.assertEqual(channel.code, 400)
         self.assertEqual(channel.json_body["errcode"], Codes.RESOURCE_LIMIT_EXCEEDED)
-
-    @override_config(
-        {
-            "experimental_features": {"msc4335_enabled": True},
-            "media_upload_limits": [
-                {
-                    "time_period": "1d",
-                    "max_size": "1K",
-                    "msc4335_info_url": "https://example.com",
-                }
-            ],
-        }
-    )
-    def test_msc4335_returns_user_limit_exceeded(self) -> None:
-        """Test that the MSC4335 error is returned when experimental feature is enabled."""
-        channel = self.upload_media(500, self.tok3)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800, self.tok3)
-        self.assertEqual(channel.code, 403)
-        self.assertEqual(channel.json_body["errcode"], Codes.UNKNOWN)
-        self.assertEqual(
-            channel.json_body["org.matrix.msc4335.errcode"], "M_USER_LIMIT_EXCEEDED"
-        )
-        self.assertEqual(
-            channel.json_body["org.matrix.msc4335.info_url"], "https://example.com"
-        )
-
-    @override_config(
-        {
-            "experimental_features": {"msc4335_enabled": True},
-            "media_upload_limits": [
-                {
-                    "time_period": "1d",
-                    "max_size": "1K",
-                }
-            ],
-        }
-    )
-    def test_msc4335_requires_info_url(self) -> None:
-        """Test that the MSC4335 error is not used if info_url is not provided."""
-        channel = self.upload_media(500, self.tok3)
-        self.assertEqual(channel.code, 200)
-
-        channel = self.upload_media(800, self.tok3)
-        self.assertEqual(channel.code, 400)

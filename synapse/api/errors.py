@@ -152,6 +152,8 @@ class Codes(str, Enum):
     # Part of MSC4326
     UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
 
+    MSC4335_USER_LIMIT_EXCEEDED = "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
@@ -526,9 +528,13 @@ class MSC4335UserLimitExceededError(SynapseError):
     ):
         additional_fields = {
             "org.matrix.msc4335.info_url": info_url,
-            "org.matrix.msc4335.errcode": "M_USER_LIMIT_EXCEEDED",
         }
-        super().__init__(code, msg, Codes.UNKNOWN, additional_fields=additional_fields)
+        super().__init__(
+            code,
+            msg,
+            Codes.MSC4335_USER_LIMIT_EXCEEDED,
+            additional_fields=additional_fields,
+        )
 
 
 class EventSizeError(SynapseError):
