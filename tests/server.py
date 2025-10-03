@@ -1198,7 +1198,6 @@ def setup_test_homeserver(
     hs = homeserver_to_use(
         server_name,
         config=config,
-        version_string="Synapse/tests",
         reactor=reactor,
     )
 

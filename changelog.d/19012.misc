@@ -1,0 +1,1 @@
+Remove `version_string` argument from `HomeServer` since it's always the same.

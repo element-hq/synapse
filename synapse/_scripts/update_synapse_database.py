@@ -31,7 +31,6 @@ from synapse.config.homeserver import HomeServerConfig
 from synapse.server import HomeServer
 from synapse.storage import DataStore
 from synapse.types import ISynapseReactor
-from synapse.util import SYNAPSE_VERSION
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -47,7 +46,6 @@ class MockHomeserver(HomeServer):
             hostname=config.server.server_name,
             config=config,
             reactor=reactor,
-            version_string=f"Synapse/{SYNAPSE_VERSION}",
         )
 
 

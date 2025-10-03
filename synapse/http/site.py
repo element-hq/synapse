@@ -741,6 +741,7 @@ class SynapseSite(ProxySite):
 
     def __init__(
         self,
+        *,
         logger_name: str,
         site_tag: str,
         config: ListenerConfig,

@@ -98,7 +98,6 @@ from synapse.storage.databases.state.bg_updates import StateBackgroundUpdateStor
 from synapse.storage.engines import create_engine
 from synapse.storage.prepare_database import prepare_database
 from synapse.types import ISynapseReactor
-from synapse.util import SYNAPSE_VERSION
 
 # Cast safety: Twisted does some naughty magic which replaces the
 # twisted.internet.reactor module with a Reactor instance at runtime.
@@ -325,7 +324,6 @@ class MockHomeserver(HomeServer):
             hostname=config.server.server_name,
             config=config,
             reactor=reactor,
-            version_string=f"Synapse/{SYNAPSE_VERSION}",
         )
 
 
