@@ -1187,7 +1187,9 @@ class PersistEventsStore:
             )
 
         if self.msc4354_sticky_events:
-            self.store.insert_sticky_events_txn(txn, events_and_contexts)
+            self.store.insert_sticky_events_txn(
+                txn, [ev for ev, _ in events_and_contexts]
+            )
             for ev, _ in events_and_contexts:
                 if ev.type == "m.room.member" and ev.membership == "join":
                     print(f"GOT JOIN FOR {ev.state_key}")
@@ -2657,6 +2659,11 @@ class PersistEventsStore:
                 # Update the event_backward_extremities table now that this
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
+
+                if self.msc4354_sticky_events and event.sticky_duration():
+                    # The de-outliered event is sticky. Update the sticky events table to ensure
+                    # we delivery this down /sync.
+                    self.store.insert_sticky_events_txn(txn, [event])
 
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 

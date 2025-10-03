@@ -212,7 +212,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     async def get_sticky_event_ids_sent_by_self(
         self, room_id: str, from_stream_pos: int
     ) -> List[str]:
-        """Get sticky event IDs which have been sent by users on this homeserver.
+        """Get unexpired sticky event IDs which have been sent by users on this homeserver.
 
         Used when sending sticky events eagerly to newly joined servers, or when catching up over federation.
 
@@ -284,12 +284,12 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
     def insert_sticky_events_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[EventPersistencePair],
+        events: List[EventBase],
     ) -> None:
         now_ms = self._now()
         # event, expires_at, stream_id
         sticky_events: List[Tuple[EventBase, int, int]] = []
-        for ev, _ in events_and_contexts:
+        for ev in events:
             # MSC: Note: policy servers and other similar antispam techniques still apply to these events.
             if ev.internal_metadata.policy_server_spammy:
                 continue
