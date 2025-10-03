@@ -398,12 +398,19 @@ def create_homeserver(
 
 def setup(
     hs: SynapseHomeServer,
+    *,
+    freeze: bool = True,
 ) -> None:
     """
     Create and setup a Synapse homeserver instance given a configuration.
 
     Args:
         hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
 
     Returns:
         A homeserver instance.
@@ -421,24 +428,6 @@ def setup(
         hs.setup()
     except Exception as e:
         handle_startup_exception(e)
-
-
-def start(
-    hs: HomeServer,
-    *,
-    freeze: bool = True,
-) -> None:
-    """
-    Start the reactor and the Synapse homeserver once the reactor is running.
-
-    Args:
-        hs: The homeserver to run.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
-    """
 
     async def _start_when_reactor_running() -> None:
         # TODO: Feels like this should be moved somewhere else.
@@ -459,7 +448,16 @@ def start(
     # Register a callback to be invoked once the reactor is running
     register_start(hs, _start_when_reactor_running)
 
-    # Start the reactor
+
+def start_reactor(
+    hs: HomeServer,
+) -> None:
+    """
+    Start the reactor.
+
+    Args:
+        hs: The homeserver to run.
+    """
     _base.start_reactor(
         "synapse-homeserver",
         soft_file_limit=hs.config.server.soft_file_limit,
@@ -484,7 +482,7 @@ def main() -> None:
         if not hs.config.logging.no_redirect_stdio:
             redirect_stdio_to_logs()
 
-        start(hs)
+        start_reactor(hs)
 
 
 if __name__ == "__main__":
