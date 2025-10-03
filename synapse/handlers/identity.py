@@ -57,6 +57,7 @@ id_server_scheme = "https://"
 
 class IdentityHandler:
     def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
         self.store = hs.get_datastores().main
         # An HTTP client for contacting trusted URLs.
         self.http_client = SimpleHttpClient(hs)
@@ -97,9 +98,8 @@ class IdentityHandler:
             address: The actual threepid ID, e.g. the phone number or email address
         """
 
-        await self._3pid_validation_ratelimiter_ip.ratelimit(
-            None, (medium, request.getClientAddress().host)
-        )
+        ip_address = self._auth.get_ip_address_from_request(request)
+        await self._3pid_validation_ratelimiter_ip.ratelimit(None, (medium, ip_address))
         await self._3pid_validation_ratelimiter_address.ratelimit(
             None, (medium, address)
         )

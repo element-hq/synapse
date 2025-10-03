@@ -205,6 +205,7 @@ class LoginRestServlet(RestServlet):
         )
 
         request_info = request.request_info()
+        ip_address = self.auth.get_ip_address_from_request(request)
 
         try:
             if login_submission["type"] == LoginRestServlet.APPSERVICE_TYPE:
@@ -224,9 +225,7 @@ class LoginRestServlet(RestServlet):
                     )
 
                 if appservice.is_rate_limited():
-                    await self._address_ratelimiter.ratelimit(
-                        None, request.getClientAddress().host
-                    )
+                    await self._address_ratelimiter.ratelimit(None, ip_address)
 
                 result = await self._do_appservice_login(
                     login_submission,
@@ -238,27 +237,21 @@ class LoginRestServlet(RestServlet):
                 self.jwt_enabled
                 and login_submission["type"] == LoginRestServlet.JWT_TYPE
             ):
-                await self._address_ratelimiter.ratelimit(
-                    None, request.getClientAddress().host
-                )
+                await self._address_ratelimiter.ratelimit(None, ip_address)
                 result = await self._do_jwt_login(
                     login_submission,
                     should_issue_refresh_token=should_issue_refresh_token,
                     request_info=request_info,
                 )
             elif login_submission["type"] == LoginRestServlet.TOKEN_TYPE:
-                await self._address_ratelimiter.ratelimit(
-                    None, request.getClientAddress().host
-                )
+                await self._address_ratelimiter.ratelimit(None, ip_address)
                 result = await self._do_token_login(
                     login_submission,
                     should_issue_refresh_token=should_issue_refresh_token,
                     request_info=request_info,
                 )
             else:
-                await self._address_ratelimiter.ratelimit(
-                    None, request.getClientAddress().host
-                )
+                await self._address_ratelimiter.ratelimit(None, ip_address)
                 result = await self._do_other_login(
                     login_submission,
                     should_issue_refresh_token=should_issue_refresh_token,

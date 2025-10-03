@@ -21,6 +21,7 @@
 from typing import Any, Dict
 from unittest.mock import AsyncMock, Mock
 
+from twisted.internet.address import IPv4Address
 from twisted.internet.testing import MemoryReactor
 
 from synapse.handlers.cas import CasResponse
@@ -234,6 +235,7 @@ def _mock_request() -> Mock:
             "write",
         ]
     )
+    mock.getClientAddress.return_value = IPv4Address(type="TCP", host="127.0.0.1", port=12345)
     # `_disconnected` musn't be another `Mock`, otherwise it will be truthy.
     mock._disconnected = False
     return mock

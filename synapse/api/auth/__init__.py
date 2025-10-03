@@ -188,6 +188,22 @@ class Auth(Protocol):
                 request
         """
 
+    @staticmethod
+    def get_ip_address_from_request(request: Request) -> str:
+        """
+        Extract the IPv4 or IPv6 address from a client request.
+
+        Args:
+            request: The request to process.
+
+        Returns:
+            The IPv4 or IPv6 address of the client.
+
+        Raises:
+            SynapseError: If an IP address could not be extracted from the
+                request.
+        """
+
     async def check_user_in_room_or_world_readable(
         self, room_id: str, requester: Requester, allow_departed_users: bool = False
     ) -> Tuple[str, Optional[str]]:

@@ -134,6 +134,8 @@ class AuthRestServlet(RestServlet):
         if not session:
             raise SynapseError(400, "No session supplied")
 
+        ip_address = self.auth.get_ip_address_from_request(request)
+
         if stagetype == LoginType.RECAPTCHA:
             response = parse_string(request, "g-recaptcha-response")
 
@@ -144,7 +146,9 @@ class AuthRestServlet(RestServlet):
 
             try:
                 await self.auth_handler.add_oob_auth(
-                    LoginType.RECAPTCHA, authdict, request.getClientAddress().host
+                    LoginType.RECAPTCHA,
+                    authdict,
+                    ip_address,
                 )
             except LoginError as e:
                 # Authentication failed, let user try again
@@ -164,7 +168,9 @@ class AuthRestServlet(RestServlet):
 
             try:
                 await self.auth_handler.add_oob_auth(
-                    LoginType.TERMS, authdict, request.getClientAddress().host
+                    LoginType.TERMS,
+                    authdict,
+                    ip_address,
                 )
             except LoginError as e:
                 # Authentication failed, let user try again
@@ -195,7 +201,7 @@ class AuthRestServlet(RestServlet):
                 await self.auth_handler.add_oob_auth(
                     LoginType.REGISTRATION_TOKEN,
                     authdict,
-                    request.getClientAddress().host,
+                    ip_address,
                 )
             except LoginError as e:
                 html = self.registration_token_template.render(

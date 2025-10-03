@@ -192,7 +192,8 @@ class ThumbnailResource(RestServlet):
                 respond_404(request)
                 return
 
-            ip_address = request.getClientAddress().host
+            ip_address = self.auth.get_ip_address_from_request(request)
+
             remote_resp_function = (
                 self.thumbnailer.select_or_generate_remote_thumbnail
                 if self.dynamic_thumbnails
@@ -263,7 +264,8 @@ class DownloadResource(RestServlet):
                 request, media_id, file_name, max_timeout_ms
             )
         else:
-            ip_address = request.getClientAddress().host
+            ip_address = self.auth.get_ip_address_from_request(request)
+
             await self.media_repo.get_remote_media(
                 request,
                 server_name,
