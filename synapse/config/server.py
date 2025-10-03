@@ -169,6 +169,8 @@ DEFAULT_IP_RANGE_BLOCKLIST = [
     "fc00::/7",
     # Testing networks.
     "2001:db8::/32",
+    # RFC9637: second IPv6 documentation prefix
+    "3fff::/20",
     # Multicast.
     "ff00::/8",
     # Site-local addresses
