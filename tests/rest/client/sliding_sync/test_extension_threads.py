@@ -207,3 +207,153 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             response_body["extensions"][EXT_NAME],
             {"updates": {room_id: {thread_root_id: {}}}},
         )
+
+    def test_threads_only_from_joined_rooms(self) -> None:
+        """
+        Test that thread updates are only returned for rooms the user is joined to
+        at the time of the thread update.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # User1 creates two rooms
+        room_a_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_b_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # User2 joins only Room A
+        self.helper.join(room_a_id, user2_id, tok=user2_tok)
+
+        # Create threads in both rooms
+        thread_a_root = self.helper.send(room_a_id, body="Thread A", tok=user1_tok)[
+            "event_id"
+        ]
+        thread_b_root = self.helper.send(room_b_id, body="Thread B", tok=user1_tok)[
+            "event_id"
+        ]
+
+        # Add replies to both threads
+        self.helper.send_event(
+            room_a_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to A",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_a_root,
+                },
+            },
+            tok=user1_tok,
+        )
+        self.helper.send_event(
+            room_b_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply to B",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_b_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # User2 syncs with threads extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user2_tok)
+
+        # Assert: User2 should only see thread from Room A (where they are joined)
+        self.assertEqual(
+            response_body["extensions"][EXT_NAME],
+            {"updates": {room_a_id: {thread_a_root: {}}}},
+            "User2 should only see threads from Room A where they are joined, not Room B",
+        )
+
+    def test_threads_not_returned_after_leaving_room(self) -> None:
+        """
+        Test that thread updates are not returned after a user leaves the room,
+        even if the thread was updated while they were joined.
+
+        This tests the known limitation: if a thread has multiple updates and the
+        user leaves between them, they won't see any updates (even earlier ones
+        while joined).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create room and both users join
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+
+        # Create thread
+        thread_root = self.helper.send(room_id, body="Thread root", tok=user1_tok)[
+            "event_id"
+        ]
+
+        # Initial sync for user2
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, sync_pos = self.do_sync(sync_body, tok=user2_tok)
+
+        # Reply in thread while user2 is joined, but after initial sync
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 1 while user2 joined",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # User2 leaves the room
+        self.helper.leave(room_id, user2_id, tok=user2_tok)
+
+        # Another reply after user2 left
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 2 after user2 left",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # User2 incremental sync
+        response_body, _ = self.do_sync(sync_body, tok=user2_tok, since=sync_pos)
+
+        # Assert: User2 should NOT see the thread update (they left before latest update)
+        # Note: This demonstrates the known limitation - user2 won't see the thread
+        # even though there was an update while they were joined (Reply 1)
+        self.assertNotIn(
+            EXT_NAME,
+            response_body["extensions"],
+            "User2 should not see thread updates after leaving the room",
+        )
