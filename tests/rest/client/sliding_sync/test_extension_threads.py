@@ -357,3 +357,121 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             response_body["extensions"],
             "User2 should not see thread updates after leaving the room",
         )
+
+    def test_threads_with_include_roots_true(self) -> None:
+        """
+        Test that include_roots=True returns thread root events with latest_event
+        in the unsigned field.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread root
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # Add reply to thread
+        latest_event_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Latest reply",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        latest_event_id = latest_event_resp["event_id"]
+
+        # Sync with include_roots=True
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                    "include_roots": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Assert thread root is present
+        thread_root = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root_id
+        ]["thread_root"]
+
+        # Verify it's the correct event
+        self.assertEqual(thread_root["event_id"], thread_root_id)
+        self.assertEqual(thread_root["content"]["body"], "Thread root")
+
+        # Verify latest_event is in unsigned.m.relations.m.thread
+        latest_event = thread_root["unsigned"]["m.relations"]["m.thread"][
+            "latest_event"
+        ]
+        self.assertEqual(latest_event["event_id"], latest_event_id)
+        self.assertEqual(latest_event["content"]["body"], "Latest reply")
+
+    def test_threads_with_include_roots_false(self) -> None:
+        """
+        Test that include_roots=False (or omitted) does not return thread root events.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # Add reply
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # Sync with include_roots=False (explicitly)
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                    "include_roots": False,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Assert thread update exists but has no thread_root
+        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root_id
+        ]
+        self.assertNotIn("thread_root", thread_update)
+
+        # Also test with include_roots omitted (should behave the same)
+        sync_body_no_param = {
+            "lists": {},
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body_no_param, _ = self.do_sync(sync_body_no_param, tok=user1_tok)
+
+        thread_update_no_param = response_body_no_param["extensions"][EXT_NAME][
+            "updates"
+        ][room_id][thread_root_id]
+        self.assertNotIn("thread_root", thread_update_no_param)

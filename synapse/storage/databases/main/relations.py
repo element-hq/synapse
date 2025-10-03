@@ -47,6 +47,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
+from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.stream import (
     generate_next_token,
     generate_pagination_bounds,
@@ -95,7 +96,7 @@ class _RelatedEvent:
     sender: str
 
 
-class RelationsWorkerStore(SQLBaseStore):
+class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -591,7 +592,7 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_applicable_edits", _get_applicable_edits_txn
         )
 
-        edits = await self.get_events(edit_ids.values())  # type: ignore[attr-defined]
+        edits = await self.get_events(edit_ids.values())
 
         # Map to the original event IDs to the edit events.
         #
@@ -706,7 +707,7 @@ class RelationsWorkerStore(SQLBaseStore):
             "get_thread_summaries", _get_thread_summaries_txn
         )
 
-        latest_events = await self.get_events(latest_event_ids.values())  # type: ignore[attr-defined]
+        latest_events = await self.get_events(latest_event_ids.values())
 
         # Map to the event IDs to the thread summary.
         #
@@ -1125,7 +1126,8 @@ class RelationsWorkerStore(SQLBaseStore):
         from_token: Optional[StreamToken] = None,
         to_token: Optional[StreamToken] = None,
         limit: int = 5,
-    ) -> Tuple[Sequence[Tuple[str, str]], Optional[int]]:
+        include_thread_roots: bool = False,
+    ) -> Tuple[Sequence[Tuple[str, str, Optional[EventBase]]], Optional[int]]:
         """Get a list of updated threads, ordered by stream ordering of their
         latest reply, filtered to only include threads in rooms where the user
         was joined at the time of the thread's latest update.
@@ -1150,10 +1152,13 @@ class RelationsWorkerStore(SQLBaseStore):
             from_token: Fetch rows from a previous next_batch, or from the start if None.
             to_token: Fetch rows from a previous prev_batch, or from the stream end if None.
             limit: Only fetch the most recent `limit` threads.
+            include_thread_roots: If True, fetch and return the thread root EventBase
+                objects. If False, return None for the event.
 
         Returns:
             A tuple of:
-                A list of (thread_id, room_id) tuples.
+                A list of (thread_id, room_id, thread_root_event) tuples.
+                    thread_root_event will be None if include_thread_roots=False.
                 The next_batch, if one exists.
         """
         # Ensure bad limits aren't being passed in.
@@ -1228,9 +1233,28 @@ class RelationsWorkerStore(SQLBaseStore):
 
             return thread_ids[:limit], next_token
 
-        return await self.db_pool.runInteraction(
+        thread_ids, next_token = await self.db_pool.runInteraction(
             "get_thread_updates_for_user", _get_thread_updates_for_user_txn
         )
+
+        # Optionally fetch thread root events
+        if include_thread_roots and thread_ids:
+            thread_root_ids = [thread_id for thread_id, _ in thread_ids]
+            thread_root_events = await self.get_events_as_list(thread_root_ids)
+            event_map = {e.event_id: e for e in thread_root_events}
+
+            return (
+                [
+                    (thread_id, room_id, event_map.get(thread_id))
+                    for thread_id, room_id in thread_ids
+                ],
+                next_token,
+            )
+        else:
+            return (
+                [(thread_id, room_id, None) for thread_id, room_id in thread_ids],
+                next_token,
+            )
 
 
 class RelationsStore(RelationsWorkerStore):

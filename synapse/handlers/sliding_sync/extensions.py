@@ -77,6 +77,7 @@ class SlidingSyncExtensionHandler:
         self.event_sources = hs.get_event_sources()
         self.device_handler = hs.get_device_handler()
         self.push_rules_handler = hs.get_push_rules_handler()
+        self.relations_handler = hs.get_relations_handler()
         self._enable_thread_subscriptions = hs.config.experimental.msc4306_enabled
         self._enable_threads_ext = hs.config.experimental.msc4360_enabled
 
@@ -1011,24 +1012,35 @@ class SlidingSyncExtensionHandler:
         # TODO: is the `room_key` the right thing to use here?
         # ie. does it translate into /relations
 
-        # TODO: use new function to get thread updates
         updates, prev_batch = await self.store.get_thread_updates_for_user(
             user_id=sync_config.user.to_string(),
             from_token=from_token.stream_token if from_token else None,
             to_token=to_token,
             limit=limit,
+            include_thread_roots=threads_request.include_roots,
         )
 
         if len(updates) == 0:
             return None
 
-        # TODO: implement
+        # Collect thread root events and get bundled aggregations
+        thread_root_events = [event for _, _, event in updates if event]
+        aggregations_map = {}
+        if thread_root_events:
+            aggregations_map = await self.relations_handler.get_bundled_aggregations(
+                thread_root_events,
+                sync_config.user.to_string(),
+            )
 
         thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
-        for thread_root_id, room_id in updates:
+        for thread_root_id, room_id, thread_root_event in updates:
+            bundled_aggs = (
+                aggregations_map.get(thread_root_id) if thread_root_event else None
+            )
             thread_updates.setdefault(room_id, {})[thread_root_id] = _ThreadUpdate(
-                thread_root=None,
+                thread_root=thread_root_event,
                 prev_batch=None,
+                bundled_aggregations=bundled_aggs,
             )
 
         return SlidingSyncResult.Extensions.ThreadsExtension(

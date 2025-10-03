@@ -40,6 +40,9 @@ import attr
 from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+
+if TYPE_CHECKING:
+    from synapse.handlers.relations import BundledAggregations
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -406,11 +409,14 @@ class SlidingSyncResult:
 
             @attr.s(slots=True, frozen=True, auto_attribs=True)
             class ThreadUpdate:
-                # TODO: comment
+                # The thread root event, if requested via include_roots
                 thread_root: Optional[EventBase]
 
-                # TODO: comment
+                # Pagination token for this thread
                 prev_batch: Optional[StreamToken]
+
+                # Bundled aggregations for the thread root event (includes latest_event)
+                bundled_aggregations: Optional["BundledAggregations"] = None
 
                 def __bool__(self) -> bool:
                     return bool(self.thread_root) or bool(self.prev_batch)

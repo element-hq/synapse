@@ -31,6 +31,7 @@ from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.events.utils import (
+    EventClientSerializer,
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
     format_event_raw,
@@ -852,7 +853,10 @@ class SlidingSyncRestServlet(RestServlet):
             logger.info("Client has disconnected; not serializing response.")
             return 200, {}
 
-        response_content = await self.encode_response(requester, sliding_sync_results)
+        time_now = self.clock.time_msec()
+        response_content = await self.encode_response(
+            requester, sliding_sync_results, time_now
+        )
 
         return 200, response_content
 
@@ -861,6 +865,7 @@ class SlidingSyncRestServlet(RestServlet):
         self,
         requester: Requester,
         sliding_sync_result: SlidingSyncResult,
+        time_now: int,
     ) -> JsonDict:
         response: JsonDict = defaultdict(dict)
 
@@ -869,10 +874,10 @@ class SlidingSyncRestServlet(RestServlet):
         if serialized_lists:
             response["lists"] = serialized_lists
         response["rooms"] = await self.encode_rooms(
-            requester, sliding_sync_result.rooms
+            requester, sliding_sync_result.rooms, time_now
         )
         response["extensions"] = await self.encode_extensions(
-            requester, sliding_sync_result.extensions
+            requester, sliding_sync_result.extensions, time_now
         )
 
         return response
@@ -904,9 +909,8 @@ class SlidingSyncRestServlet(RestServlet):
         self,
         requester: Requester,
         rooms: Dict[str, SlidingSyncResult.RoomResult],
+        time_now: int,
     ) -> JsonDict:
-        time_now = self.clock.time_msec()
-
         serialize_options = SerializeEventConfig(
             event_format=format_event_for_client_v2_without_room_id,
             requester=requester,
@@ -1022,7 +1026,10 @@ class SlidingSyncRestServlet(RestServlet):
 
     @trace_with_opname("sliding_sync.encode_extensions")
     async def encode_extensions(
-        self, requester: Requester, extensions: SlidingSyncResult.Extensions
+        self,
+        requester: Requester,
+        extensions: SlidingSyncResult.Extensions,
+        time_now: int,
     ) -> JsonDict:
         serialized_extensions: JsonDict = {}
 
@@ -1094,8 +1101,12 @@ class SlidingSyncRestServlet(RestServlet):
 
         # excludes both None and falsy `threads`
         if extensions.threads:
-            serialized_extensions["io.element.msc4360.threads"] = _serialise_threads(
-                extensions.threads
+            serialized_extensions[
+                "io.element.msc4360.threads"
+            ] = await _serialise_threads(
+                self.event_serializer,
+                time_now,
+                extensions.threads,
             )
 
         return serialized_extensions
@@ -1134,21 +1145,63 @@ def _serialise_thread_subscriptions(
     return out
 
 
-def _serialise_threads(
+async def _serialise_threads(
+    event_serializer: EventClientSerializer,
+    time_now: int,
     threads: SlidingSyncResult.Extensions.ThreadsExtension,
 ) -> JsonDict:
+    """
+    Serialize the threads extension response for sliding sync.
+
+    Args:
+        event_serializer: The event serializer to use for serializing thread root events.
+        time_now: The current time in milliseconds, used for event serialization.
+        threads: The threads extension data containing thread updates and pagination tokens.
+
+    Returns:
+        A JSON-serializable dict containing:
+        - "updates": A nested dict mapping room_id -> thread_root_id -> thread update.
+          Each thread update may contain:
+          - "thread_root": The serialized thread root event (if include_roots was True),
+            with bundled aggregations including the latest_event in unsigned.m.relations.m.thread.
+          - "prev_batch": A pagination token for fetching older events in the thread.
+        - "prev_batch": A pagination token for fetching older thread updates (if available).
+    """
     out: JsonDict = {}
 
     if threads.updates:
-        out["updates"] = {
-            room_id: {
-                thread_root_id: attr.asdict(
-                    update, filter=lambda _attr, v: v is not None
-                )
-                for thread_root_id, update in thread_updates.items()
-            }
-            for room_id, thread_updates in threads.updates.items()
-        }
+        updates_dict: JsonDict = {}
+        for room_id, thread_updates in threads.updates.items():
+            room_updates: JsonDict = {}
+            for thread_root_id, update in thread_updates.items():
+                # Serialize the update
+                update_dict: JsonDict = {}
+
+                # Serialize the thread_root event if present
+                if update.thread_root is not None:
+                    # Create a mapping of event_id to bundled_aggregations
+                    bundle_aggs_map = (
+                        {thread_root_id: update.bundled_aggregations}
+                        if update.bundled_aggregations
+                        else None
+                    )
+                    serialized_events = await event_serializer.serialize_events(
+                        [update.thread_root],
+                        time_now,
+                        bundle_aggregations=bundle_aggs_map,
+                    )
+                    if serialized_events:
+                        update_dict["thread_root"] = serialized_events[0]
+
+                # Add prev_batch if present
+                if update.prev_batch is not None:
+                    update_dict["prev_batch"] = str(update.prev_batch)
+
+                room_updates[thread_root_id] = update_dict
+
+            updates_dict[room_id] = room_updates
+
+        out["updates"] = updates_dict
 
     if threads.prev_batch:
         out["prev_batch"] = str(threads.prev_batch)
