@@ -428,7 +428,9 @@ jobs:
         run: until pg_isready -h localhost; do sleep 1; done
       - run: poetry run trial --jobs=6 tests
         env:
-          SYNAPSE_POSTGRES: ${{ matrix.job.database == 'postgres' || '' }}
+          # If matrix.job.database is 'psycopg' set SYNAPSE_POSTGRES to that string;
+          # otherwise if it is 'postgres' set it to true. Otherwise, empty.
+          SYNAPSE_POSTGRES: ${{ matrix.job.database == 'psycopg' && 'psycopg' || matrix.job.database == 'postgres' || '' }}
           SYNAPSE_POSTGRES_HOST: /var/run/postgresql
           SYNAPSE_POSTGRES_USER: postgres
           SYNAPSE_POSTGRES_PASSWORD: postgres
@@ -712,6 +714,9 @@ jobs:
           - arrangement: workers
             database: Postgres
 
+          - arrangement: workers
+            database: Psycopg
+
     steps:
       - name: Checkout synapse codebase
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -738,7 +743,7 @@ jobs:
           COMPLEMENT_DIR=`pwd`/complement synapse/scripts-dev/complement.sh -p 1 -json 2>&1 | synapse/.ci/scripts/gotestfmt
         shell: bash
         env:
-          POSTGRES: ${{ (matrix.database == 'Postgres') && 1 || '' }}
+          POSTGRES: ${{ (matrix.database == 'Postgres' || matrix.database == 'Psycopg') && matrix.database || '' }}
           WORKERS: ${{ (matrix.arrangement == 'workers') && 1 || '' }}
         name: Run Complement Tests
 

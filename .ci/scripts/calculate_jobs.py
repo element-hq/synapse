@@ -56,23 +56,38 @@ if not IS_PR:
         for version in ("3.10", "3.11", "3.12", "3.13")
     )
 
+# Run with both psycopg2 and psycopg.
 trial_postgres_tests = [
     {
         "python-version": "3.9",
         "database": "postgres",
         "postgres-version": "13",
         "extras": "all",
-    }
+    },
+    {
+        "python-version": "3.9",
+        "database": "psycopg",
+        "postgres-version": "13",
+        "extras": "all",
+    },
 ]
 
 if not IS_PR:
-    trial_postgres_tests.append(
-        {
-            "python-version": "3.13",
-            "database": "postgres",
-            "postgres-version": "17",
-            "extras": "all",
-        }
+    trial_postgres_tests.extend(
+        [
+            {
+                "python-version": "3.13",
+                "database": "postgres",
+                "postgres-version": "17",
+                "extras": "all",
+            },
+            {
+                "python-version": "3.13",
+                "database": "psycopg",
+                "postgres-version": "17",
+                "extras": "all",
+            },
+        ]
     )
 
 trial_no_extra_tests = [
