@@ -462,6 +462,32 @@ class RemoteServerUpCommand(_SimpleCommand):
     NAME = "REMOTE_SERVER_UP"
 
 
+class NewServerJoinedCommand(Command):
+    """Sent when a worker has detected that a new remote server has joined a room.
+
+    Format::
+
+        NEW_SERVER_JOINED <server> <room_id>
+    """
+
+    NAME = "NEW_SERVER_JOINED"
+    __slots__ = ["server", "room_id"]
+
+    def __init__(self, server: str, room_id: str):
+        self.server = server
+        self.room_id = room_id
+
+    @classmethod
+    def from_line(
+        cls: Type["NewServerJoinedCommand"], line: str
+    ) -> "NewServerJoinedCommand":
+        server, room_id = line.split(" ")
+        return cls(server, room_id)
+
+    def to_line(self) -> str:
+        return "%s %s" % (self.server, self.room_id)
+
+
 class LockReleasedCommand(Command):
     """Sent to inform other instances that a given lock has been dropped.
 
@@ -517,6 +543,7 @@ _COMMANDS: Tuple[Type[Command], ...] = (
     FederationAckCommand,
     UserIpCommand,
     RemoteServerUpCommand,
+    NewServerJoinedCommand,
     ClearUserSyncsCommand,
     LockReleasedCommand,
     NewActiveTaskCommand,
@@ -533,6 +560,7 @@ VALID_SERVER_COMMANDS = (
     ErrorCommand.NAME,
     PingCommand.NAME,
     RemoteServerUpCommand.NAME,
+    NewServerJoinedCommand.NAME,
     LockReleasedCommand.NAME,
 )
 
@@ -547,6 +575,7 @@ VALID_CLIENT_COMMANDS = (
     UserIpCommand.NAME,
     ErrorCommand.NAME,
     RemoteServerUpCommand.NAME,
+    NewServerJoinedCommand.NAME,
     LockReleasedCommand.NAME,
 )
 

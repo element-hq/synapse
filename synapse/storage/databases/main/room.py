@@ -2460,7 +2460,10 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._instance_name = hs.get_instance_name()
 
     async def upsert_room_on_join(
-        self, room_id: str, room_version: RoomVersion, state_events: List[EventBase]
+        self,
+        room_id: str,
+        room_version: RoomVersion,
+        state_events: Optional[List[EventBase]],
     ) -> None:
         """Ensure that the room is stored in the table
 
@@ -2472,36 +2475,46 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         # mark the room as having an auth chain cover index.
         has_auth_chain_index = await self.has_auth_chain_index(room_id)
 
-        create_event = None
-        for e in state_events:
-            if (e.type, e.state_key) == (EventTypes.Create, ""):
-                create_event = e
-                break
+        # We may want to insert a row into the rooms table BEFORE having the state events in the
+        # room, in order to correctly handle the race condition where the /send_join is processed
+        # remotely which causes remote servers to send us events before we've processed the /send_join
+        # response. Therefore, we allow state_events (and thus the creator column) to be optional.
+        # When we get the /send_join response, we'll patch this up.
+        room_creator: Optional[str] = None
+        if state_events:
+            create_event = None
+            for e in state_events:
+                if (e.type, e.state_key) == (EventTypes.Create, ""):
+                    create_event = e
+                    break
 
-        if create_event is None:
-            # If the state doesn't have a create event then the room is
-            # invalid, and it would fail auth checks anyway.
-            raise StoreError(400, "No create event in state")
-
-        # Before MSC2175, the room creator was a separate field.
-        if not room_version.implicit_room_creator:
-            room_creator = create_event.content.get(EventContentFields.ROOM_CREATOR)
-
-            if not isinstance(room_creator, str):
-                # If the create event does not have a creator then the room is
+            if create_event is None:
+                # If the state doesn't have a create event then the room is
                 # invalid, and it would fail auth checks anyway.
-                raise StoreError(400, "No creator defined on the create event")
-        else:
-            room_creator = create_event.sender
+                raise StoreError(400, "No create event in state")
+
+            # Before MSC2175, the room creator was a separate field.
+            if not room_version.implicit_room_creator:
+                room_creator = create_event.content.get(EventContentFields.ROOM_CREATOR)
+
+                if not isinstance(room_creator, str):
+                    # If the create event does not have a creator then the room is
+                    # invalid, and it would fail auth checks anyway.
+                    raise StoreError(400, "No creator defined on the create event")
+            else:
+                room_creator = create_event.sender
+
+        update_with = {"room_version": room_version.identifier}
+        if room_creator:
+            update_with["creator"] = room_creator
 
         await self.db_pool.simple_upsert(
             desc="upsert_room_on_join",
             table="rooms",
             keyvalues={"room_id": room_id},
-            values={"room_version": room_version.identifier},
+            values=update_with,
             insertion_values={
                 "is_public": False,
-                "creator": room_creator,
                 "has_auth_chain_index": has_auth_chain_index,
             },
         )

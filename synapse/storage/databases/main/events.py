@@ -251,6 +251,7 @@ class PersistEventsStore:
         self.database_engine = db.engine
         self._clock = hs.get_clock()
         self._instance_name = hs.get_instance_name()
+        self.msc4354_sticky_events = hs.config.experimental.msc4354_enabled
 
         self._ephemeral_messages_enabled = hs.config.server.enable_ephemeral_messages
         self.is_mine_id = hs.is_mine_id
@@ -369,6 +370,21 @@ class PersistEventsStore:
             persist_event_counter.labels(**{SERVER_NAME_LABEL: self.server_name}).inc(
                 len(events_and_contexts)
             )
+
+            # TODO: are we guaranteed to call the below code if we were to die now?
+            # On startup we will already think we have persisted the events?
+
+            # This was originally in _persist_events_txn but it relies on non-txn functions like
+            # get_events_as_list and get_partial_filtered_current_state_ids to handle soft-failure
+            # re-evaluation, so it can't do that without leaking out the txn currently, hence it
+            # now just lives outside.
+            if self.msc4354_sticky_events:
+                # re-evaluate soft-failed sticky events.
+                await self.store.reevaluate_soft_failed_sticky_events(
+                    room_id,
+                    events_and_contexts,
+                    state_delta_for_room,
+                )
 
             if not use_negative_stream_ordering:
                 # we don't want to set the event_persisted_position to a negative
@@ -1169,6 +1185,19 @@ class PersistEventsStore:
                 min_stream_order,
                 sliding_sync_table_changes,
             )
+
+        if self.msc4354_sticky_events:
+            self.store.insert_sticky_events_txn(
+                txn, [ev for ev, _ in events_and_contexts]
+            )
+            for ev, _ in events_and_contexts:
+                if ev.type == "m.room.member" and ev.membership == "join":
+                    print(f"GOT JOIN FOR {ev.state_key}")
+                    domain = get_domain_from_id(ev.state_key)
+                    self.hs.get_notifier().notify_new_server_joined(domain, ev.room_id)
+                    self.hs.get_replication_command_handler().send_new_server_joined(
+                        domain, ev.room_id
+                    )
 
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
@@ -2630,6 +2659,11 @@ class PersistEventsStore:
                 # Update the event_backward_extremities table now that this
                 # event isn't an outlier any more.
                 self._update_backward_extremeties(txn, [event])
+
+                if self.msc4354_sticky_events and event.sticky_duration():
+                    # The de-outliered event is sticky. Update the sticky events table to ensure
+                    # we delivery this down /sync.
+                    self.store.insert_sticky_events_txn(txn, [event])
 
         return [ec for ec in events_and_contexts if ec[0] not in to_remove]
 
