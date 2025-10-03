@@ -345,26 +345,17 @@ def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     return config
 
 
-def setup(
+def create_homeserver(
     config: HomeServerConfig,
     reactor: Optional[ISynapseReactor] = None,
-    freeze: bool = True,
 ) -> SynapseHomeServer:
     """
-    Create and setup a Synapse homeserver instance given a configuration.
+    TODO
 
     Args:
         config: The configuration for the homeserver.
         reactor: Optionally provide a reactor to use. Can be useful in different
             scenarios that you want control over the reactor, such as tests.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
-
-    Returns:
-        A homeserver instance.
     """
 
     if config.worker.worker_app:
@@ -372,7 +363,6 @@ def setup(
             "You have specified `worker_app` in the config but are attempting to start a non-worker "
             "instance. Please use `python -m synapse.app.generic_worker` instead (or remove the option if this is the main process)."
         )
-        sys.exit(1)
 
     events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
     synapse.util.caches.TRACK_MEMORY_USAGE = config.caches.track_memory_usage
@@ -397,18 +387,41 @@ def setup(
             )
 
     hs = SynapseHomeServer(
-        config.server.server_name,
+        hostname=config.server.server_name,
         config=config,
         version_string=f"Synapse/{VERSION}",
         reactor=reactor,
     )
 
-    setup_logging(hs, config, use_worker_options=False)
+    return hs
+
+
+def setup(
+    hs: SynapseHomeServer,
+    freeze: bool = True,
+) -> None:
+    """
+    Create and setup a Synapse homeserver instance given a configuration.
+
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+
+    Returns:
+        A homeserver instance.
+    """
+
+    setup_logging(hs, hs.config, use_worker_options=False)
+
+    # Log after we've configured logging.
+    logger.info("Setting up server")
 
     # Start the tracer
     init_tracer(hs)  # noqa
-
-    logger.info("Setting up server")
 
     try:
         hs.setup()
@@ -427,8 +440,6 @@ def setup(
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     register_start(hs, start)
-
-    return hs
 
 
 def run(hs: HomeServer) -> None:
@@ -449,7 +460,8 @@ def main() -> None:
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         # check base requirements
         check_requirements()
-        hs = setup(homeserver_config)
+        hs = create_homeserver(homeserver_config)
+        setup(hs)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:
