@@ -2729,7 +2729,11 @@ class SyncHandler:
             )
 
             ephemeral = [
-                # copy fields from each `event` into a new dict, excluding `room_id`
+                # per spec, ephemeral events (typing notifications and read receipts)
+                # should not have a `room_id` field when sent to clients
+                # refs:
+                # - https://spec.matrix.org/v1.16/client-server-api/#mtyping
+                # - https://spec.matrix.org/v1.16/client-server-api/#mreceipt
                 {k: v for (k, v) in event.items() if k != "room_id"}
                 for event in await sync_config.filter_collection.filter_room_ephemeral(
                     ephemeral
