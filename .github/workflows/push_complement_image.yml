@@ -26,8 +26,17 @@ concurrency:
 
 jobs:
   build:
-    name: Build and push complement image
-    runs-on: ubuntu-latest
+    name: Build and push complement image for ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runs_on: ubuntu-24.04
+            suffix: linux-amd64
+          - platform: linux/arm64
+            runs_on: ubuntu-24.04-arm
+            suffix: linux-arm64
     permissions:
       contents: read
       packages: write
