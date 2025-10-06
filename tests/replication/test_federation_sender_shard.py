@@ -66,10 +66,11 @@ class FederationSenderTestCase(BaseMultiWorkerStreamTestCase):
     def setUp(self) -> None:
         super().setUp()
 
-        reactor, _ = get_clock()
+        reactor, clock = get_clock()
         self.matrix_federation_agent = MatrixFederationAgent(
             server_name="OUR_STUB_HOMESERVER_NAME",
             reactor=reactor,
+            clock=clock,
             tls_client_options_factory=None,
             user_agent=b"SynapseInTrialTest/0.0.0",
             ip_allowlist=None,

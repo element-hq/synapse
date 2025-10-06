@@ -22,7 +22,7 @@
 import logging
 import os
 import sys
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
@@ -70,6 +70,7 @@ from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
+from synapse.types import ISynapseReactor
 from synapse.util.check_dependencies import VERSION, check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
@@ -277,11 +278,13 @@ class SynapseHomeServer(HomeServer):
                 )
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -294,9 +297,11 @@ class SynapseHomeServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -340,12 +345,23 @@ def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     return config
 
 
-def setup(config: HomeServerConfig) -> SynapseHomeServer:
+def setup(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+    freeze: bool = True,
+) -> SynapseHomeServer:
     """
     Create and setup a Synapse homeserver instance given a configuration.
 
     Args:
         config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
 
     Returns:
         A homeserver instance.
@@ -384,6 +400,7 @@ def setup(config: HomeServerConfig) -> SynapseHomeServer:
         config.server.server_name,
         config=config,
         version_string=f"Synapse/{VERSION}",
+        reactor=reactor,
     )
 
     setup_logging(hs, config, use_worker_options=False)
@@ -405,7 +422,7 @@ def setup(config: HomeServerConfig) -> SynapseHomeServer:
             # Loading the provider metadata also ensures the provider config is valid.
             await oidc.load_metadata()
 
-        await _base.start(hs)
+        await _base.start(hs, freeze)
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 

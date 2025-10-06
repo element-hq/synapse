@@ -2259,9 +2259,8 @@ properties:
       Setting this to a high value allows users to report content quickly, possibly in
       duplicate. This can result in higher database usage.
     default:
-      per_user:
-        per_second: 1.0
-        burst_count: 5.0
+      per_second: 1.0
+      burst_count: 5.0
     examples:
       - per_second: 2.0
         burst_count: 20.0
@@ -2270,9 +2269,8 @@ properties:
     description: >-
       Sets rate limits for how often users are able to create rooms.
     default:
-      per_user:
-        per_second: 0.016
-        burst_count: 10.0
+      per_second: 0.016
+      burst_count: 10.0
     examples:
       - per_second: 1.0
         burst_count: 5.0

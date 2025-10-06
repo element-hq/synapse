@@ -275,7 +275,15 @@ def run_as_background_process(
     # function instead.
     stub_server_name = "synapse_module_running_from_unknown_server"
 
-    return _run_as_background_process(
+    # Ignore the linter error here. Since this is leveraging the
+    # `run_as_background_process` function directly and we don't want to break the
+    # module api, we need to keep the function signature the same. This means we don't
+    # have access to the running `HomeServer` and cannot track this background process
+    # for cleanup during shutdown.
+    # This is not an issue during runtime and is only potentially problematic if the
+    # application cares about being able to garbage collect `HomeServer` instances
+    # during runtime.
+    return _run_as_background_process(  # type: ignore[untracked-background-process]
         desc,
         stub_server_name,
         func,
@@ -1402,7 +1410,7 @@ class ModuleApi:
 
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
-                self.run_as_background_process,
+                self._hs.run_as_background_process,
                 msec,
                 desc,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
@@ -1460,7 +1468,7 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            self.run_as_background_process,
+            self._hs.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
@@ -1701,8 +1709,8 @@ class ModuleApi:
             Note that the returned Deferred does not follow the synapse logcontext
             rules.
         """
-        return _run_as_background_process(
-            desc, self.server_name, func, *args, bg_start_span=bg_start_span, **kwargs
+        return self._hs.run_as_background_process(
+            desc, func, *args, bg_start_span=bg_start_span, **kwargs
         )
 
     async def defer_to_thread(
