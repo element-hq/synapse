@@ -31,7 +31,7 @@ from twisted.internet.task import deferLater
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import Codes
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.pagination import (
@@ -54,6 +54,361 @@ from tests import unittest
 
 
 ONE_HOUR_IN_S = 3600
+
+
+class SpacesSearchTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # create some users
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_tok = self.login("user", "pass")
+
+        self.third_user = self.register_user("third_user", "pass")
+        self.third_user_tok = self.login("third_user", "pass")
+
+        # create some rooms with different options
+        self.rm1 = self.helper.create_room_as(
+            self.other_user,
+            is_public=False,
+            tok=self.other_user_tok,
+            extra_content={"name": "nefarious", "topic": "being bad"},
+        )
+        self.rm2 = self.helper.create_room_as(
+            self.third_user,
+            tok=self.third_user_tok,
+            extra_content={"name": "also nefarious"},
+        )
+        self.rm3 = self.helper.create_room_as(
+            self.admin_user,
+            is_public=False,
+            tok=self.admin_user_tok,
+            extra_content={
+                "name": "not nefarious",
+                "topic": "happy things",
+                "creation_content": {
+                    "additional_creators": [self.other_user, self.third_user]
+                },
+            },
+            room_version="12",
+        )
+        self.rm4 = self.helper.create_room_as(
+            self.other_user,
+            tok=self.other_user_tok,
+            extra_content={"name": "not related to other rooms"},
+        )
+
+        # create a space room
+        self.space_rm = self.helper.create_room_as(
+            self.other_user,
+            is_public=True,
+            extra_content={
+                "visibility": "public",
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
+            },
+            tok=self.other_user_tok,
+        )
+
+        # add three of the rooms to space
+        for state_key in [self.rm1, self.rm2, self.rm3]:
+            self.helper.send_state(
+                self.space_rm,
+                EventTypes.SpaceChild,
+                body={},
+                tok=self.other_user_tok,
+                state_key=state_key,
+            )
+
+    def test_no_auth(self) -> None:
+        """
+        If the requester does not provide authentication, a 401 is returned
+        """
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": [self.rm1]},
+        )
+
+        self.assertEqual(401, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.MISSING_TOKEN, channel.json_body["errcode"])
+
+    def test_requester_is_no_admin(self) -> None:
+        """
+        If the requester is not a server admin, an error 403 is returned.
+        """
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": [self.rm1]},
+            access_token=self.other_user_tok,
+        )
+
+        self.assertEqual(403, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
+
+    def test_bad_request(self) -> None:
+        """
+        Test that if rooms is not provided in the json body or if it is not a list,
+        a bad request error is returned.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": "rooms"},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.BAD_JSON, channel.json_body["errcode"])
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            access_token=self.admin_user_tok,
+            content={},
+        )
+        self.assertEqual(400, channel.code, msg=channel.json_body)
+        self.assertEqual(Codes.BAD_JSON, channel.json_body["errcode"])
+
+    def test_spaces_search(self) -> None:
+        """
+        Test that when provided with a child room the details of the parent space and
+        child spaces are returned
+        """
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": [self.rm1]},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.json_body)
+        rooms = channel.json_body["found_rooms"]
+        self.assertEqual(len(rooms), 4)
+
+        rm1_found = False
+        rm2_found = False
+        rm3_found = False
+        spacerm_found = False
+        for room_result in rooms:
+            room_id = room_result["room_id"]
+            if room_id == self.rm1:
+                self.assertEqual(room_result["name"], "nefarious")
+                self.assertEqual(room_result["join_rules"], "invite")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], "being bad")
+                self.assertEqual(room_result["sender"], self.other_user)
+                self.assertEqual(room_result["power_users"], [self.other_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm1_found = True
+            elif room_id == self.rm2:
+                self.assertEqual(room_result["name"], "also nefarious")
+                self.assertEqual(room_result["join_rules"], "public")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], self.third_user)
+                self.assertEqual(room_result["power_users"], [self.third_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm2_found = True
+            elif room_id == self.rm3:
+                self.assertEqual(room_result["name"], "not nefarious")
+                self.assertEqual(room_result["join_rules"], "invite")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], "happy things")
+                self.assertEqual(room_result["sender"], self.admin_user)
+                self.assertCountEqual(
+                    room_result["power_users"],
+                    [self.admin_user, self.third_user, self.other_user],
+                )
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm3_found = True
+            elif room_id == self.rm4:
+                self.fail("this room should not have been returned")
+            elif room_id == self.space_rm:
+                self.assertEqual(room_result["name"], None)
+                self.assertEqual(room_result["join_rules"], "public")
+                self.assertEqual(room_result["is_space"], True)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], self.other_user)
+                self.assertEqual(room_result["power_users"], [self.other_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                spacerm_found = True
+            else:
+                self.fail("unknown room returned")
+        self.assertEqual(rm1_found, True)
+        self.assertEqual(rm2_found, True)
+        self.assertEqual(rm3_found, True)
+        self.assertEqual(spacerm_found, True)
+
+        # should be the same if rm1 and rm2 are provided, as they share the same parent space
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": [self.rm1, self.rm2]},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.json_body)
+        rooms = channel.json_body["found_rooms"]
+        self.assertEqual(len(rooms), 4)
+        rm1_found = False
+        rm2_found = False
+        rm3_found = False
+        spacerm_found = False
+        for room_result in rooms:
+            room_id = room_result["room_id"]
+            if room_id == self.rm1:
+                self.assertEqual(room_result["name"], "nefarious")
+                self.assertEqual(room_result["join_rules"], "invite")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], "being bad")
+                self.assertEqual(room_result["sender"], self.other_user)
+                self.assertEqual(room_result["power_users"], [self.other_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm1_found = True
+            elif room_id == self.rm2:
+                self.assertEqual(room_result["name"], "also nefarious")
+                self.assertEqual(room_result["join_rules"], "public")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], self.third_user)
+                self.assertEqual(room_result["power_users"], [self.third_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm2_found = True
+            elif room_id == self.rm3:
+                self.assertEqual(room_result["name"], "not nefarious")
+                self.assertEqual(room_result["join_rules"], "invite")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], "happy things")
+                self.assertEqual(room_result["sender"], self.admin_user)
+                self.assertCountEqual(
+                    room_result["power_users"],
+                    [self.admin_user, self.third_user, self.other_user],
+                )
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm3_found = True
+            elif room_id == self.rm4:
+                self.fail("this room should not have been returned")
+            elif room_id == self.space_rm:
+                self.assertEqual(room_result["name"], None)
+                self.assertEqual(room_result["join_rules"], "public")
+                self.assertEqual(room_result["is_space"], True)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], self.other_user)
+                self.assertEqual(room_result["power_users"], [self.other_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                spacerm_found = True
+            else:
+                self.fail("unknown room returned")
+        self.assertEqual(rm1_found, True)
+        self.assertEqual(rm2_found, True)
+        self.assertEqual(rm3_found, True)
+        self.assertEqual(spacerm_found, True)
+
+        # nothing should be found for rm4 as it is not a child of any space
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": [self.rm4]},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 404, msg=channel.json_body)
+
+    def test_spaces_search_on_deleted_room(self) -> None:
+        """
+        Test that when provided with a deleted child room the details of the parent space and
+        other child spaces are still returned
+        """
+        channel = self.make_request(
+            "DELETE",
+            f"/_synapse/admin/v1/rooms/{self.rm1}",
+            {"block": True, "purge": True},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.json_body)
+
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/rooms/space/spaces_search",
+            {"rooms": [self.rm1]},
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.json_body)
+        rooms = channel.json_body["found_rooms"]
+        self.assertEqual(len(rooms), 4)
+
+        rm1_found = False
+        rm2_found = False
+        rm3_found = False
+        spacerm_found = False
+        for room_result in rooms:
+            room_id = room_result["room_id"]
+            if room_id == self.rm1:
+                self.assertEqual(room_result["name"], None)
+                self.assertEqual(room_result["join_rules"], None)
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], None)
+                self.assertEqual(room_result["power_users"], [])
+                self.assertEqual(room_result["deleted"], True)
+                self.assertEqual(room_result["aliases"], [])
+                rm1_found = True
+            elif room_id == self.rm2:
+                self.assertEqual(room_result["name"], "also nefarious")
+                self.assertEqual(room_result["join_rules"], "public")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], self.third_user)
+                self.assertEqual(room_result["power_users"], [self.third_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm2_found = True
+            elif room_id == self.rm3:
+                self.assertEqual(room_result["name"], "not nefarious")
+                self.assertEqual(room_result["join_rules"], "invite")
+                self.assertEqual(room_result["is_space"], False)
+                self.assertEqual(room_result["topic"], "happy things")
+                self.assertEqual(room_result["sender"], self.admin_user)
+                self.assertCountEqual(
+                    room_result["power_users"],
+                    [self.admin_user, self.third_user, self.other_user],
+                )
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                rm3_found = True
+            elif room_id == self.rm4:
+                self.fail("this room should not have been returned")
+            elif room_id == self.space_rm:
+                self.assertEqual(room_result["name"], None)
+                self.assertEqual(room_result["join_rules"], "public")
+                self.assertEqual(room_result["is_space"], True)
+                self.assertEqual(room_result["topic"], None)
+                self.assertEqual(room_result["sender"], self.other_user)
+                self.assertEqual(room_result["power_users"], [self.other_user])
+                self.assertEqual(room_result["deleted"], False)
+                self.assertEqual(room_result["aliases"], [])
+                spacerm_found = True
+            else:
+                self.fail("unknown room returned")
+        self.assertEqual(rm1_found, True)
+        self.assertEqual(rm2_found, True)
+        self.assertEqual(rm3_found, True)
+        self.assertEqual(spacerm_found, True)
 
 
 class DeleteRoomTestCase(unittest.HomeserverTestCase):
