@@ -1190,14 +1190,6 @@ class PersistEventsStore:
             self.store.insert_sticky_events_txn(
                 txn, [ev for ev, _ in events_and_contexts]
             )
-            for ev, _ in events_and_contexts:
-                if ev.type == "m.room.member" and ev.membership == "join":
-                    print(f"GOT JOIN FOR {ev.state_key}")
-                    domain = get_domain_from_id(ev.state_key)
-                    self.hs.get_notifier().notify_new_server_joined(domain, ev.room_id)
-                    self.hs.get_replication_command_handler().send_new_server_joined(
-                        domain, ev.room_id
-                    )
 
         # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
