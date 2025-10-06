@@ -48,7 +48,9 @@ class EventRestServlet(RestServlet):
         await assert_user_is_admin(self._auth, requester)
 
         event = await self._store.get_event(
-            event_id, EventRedactBehaviour.as_is, allow_none=True, allow_rejected=True
+            event_id,
+            EventRedactBehaviour.as_is,
+            allow_none=True,
         )
 
         if event is None:

@@ -1,8 +1,7 @@
 # Fetch Event API
 
 The fetch event API allows admins to fetch an event regardless of their membership in the room it
-originated in. Note that this endpoint will return rejected events, and you can verify that the event
-has been rejected by checking if there is a `rejection_reason` field in the `unsigned` field of the event. 
+originated in.
 
 To use it, you will need to authenticate by providing an `access_token`
 for a server admin: see [Admin API](../usage/administration/admin_api/).
