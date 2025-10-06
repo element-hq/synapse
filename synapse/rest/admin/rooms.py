@@ -63,6 +63,101 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class SpacesSearchServlet(RestServlet):
+    """
+    For each room provided, get the details of all rooms which are parents to each room,
+    as well as any other rooms which are children of the found parent spaces
+    """
+
+    PATTERNS = admin_patterns("/rooms/space/spaces_search")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._store = hs.get_datastores().main
+        self._storage_controllers = hs.get_storage_controllers()
+
+    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
+
+        content = parse_json_object_from_request(request)
+        rooms = content.get("rooms")
+
+        if not rooms:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "rooms must be provided", Codes.BAD_JSON
+            )
+        if not isinstance(rooms, list):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "rooms must be a list", Codes.BAD_JSON
+            )
+
+        async def _fetch_room_details(room_id: str, is_space: bool) -> JsonDict:
+            details = await self._store.get_room_with_stats(room_id)
+            try:
+                creation_event = await self._store.get_create_event_for_room(room_id)
+            except NotFoundError:
+                # the room may have been deleted
+                creation_event = None
+            aliases = await self._store.get_aliases_for_room(room_id)
+
+            pl_event = await self._storage_controllers.state.get_current_state_event(
+                room_id, EventTypes.PowerLevels, ""
+            )
+            pl_users = []
+            if pl_event is not None:
+                users = pl_event.content.get("users", {})
+                for user, level in users.items():
+                    if level >= 25:
+                        pl_users.append(user)
+            if (
+                creation_event
+                and creation_event.room_version.msc4289_creator_power_enabled
+            ):
+                additional_creators = creation_event.content.get(
+                    "additional_creators", []
+                )
+                pl_users.extend(additional_creators)
+                pl_users.append(creation_event.sender)
+
+            return {
+                "room_id": room_id,
+                "name": details.name if details else None,
+                "join_rules": details.join_rules if details else None,
+                "is_space": is_space,
+                "topic": details.topic if details else None,
+                "origin_server_ts": creation_event.origin_server_ts
+                if creation_event
+                else None,
+                "sender": creation_event.sender if creation_event else None,
+                "event_id": creation_event.event_id if creation_event else None,
+                "power_users": pl_users,
+                "deleted": True if not details or not creation_event else False,
+                "aliases": aliases,
+            }
+
+        parents_and_children = await self._store.get_parents_and_siblings_of_rooms(
+            rooms
+        )
+        room_details_list = []
+        seen_parents = set()
+        for parent_id, child_id in parents_and_children:
+            if parent_id in seen_parents:
+                child_details = await _fetch_room_details(child_id, False)
+                room_details_list.append(child_details)
+            else:
+                child_details = await _fetch_room_details(child_id, False)
+                room_details_list.append(child_details)
+                parent_details = await _fetch_room_details(parent_id, True)
+                room_details_list.append(parent_details)
+                seen_parents.add(parent_id)
+
+        if not room_details_list:
+            return HTTPStatus.NOT_FOUND, {}
+        else:
+            return HTTPStatus.OK, {"found_rooms": room_details_list}
+
+
 class RoomRestV2Servlet(RestServlet):
     """Delete a room from server asynchronously with a background task.
 
