@@ -177,10 +177,13 @@ def main(force_colors: bool) -> None:
                 clause = match.group()
 
                 click.secho(
-                    f"Found delta with index deletion: '{clause}' in {delta_file}\nThese should be in background updates.",
+                    f"Found delta with index deletion: '{clause}' in {delta_file}",
                     fg="red",
                     bold=True,
                     color=force_colors,
+                )
+                click.secho(
+                    " ↪ These should be in background updates.",
                 )
                 return_code = 1
 
@@ -192,10 +195,13 @@ def main(force_colors: bool) -> None:
                 table_name = match.group(1)
                 if table_name not in created_tables:
                     click.secho(
-                        f"Found delta with index creation: '{clause}' in {delta_file}\nThese should be in background updates.",
+                        f"Found delta with index creation for existing table: '{clause}' in {delta_file}",
                         fg="red",
                         bold=True,
                         color=force_colors,
+                    )
+                    click.secho(
+                        " ↪ These should be in background updates (or the table should be created in the same delta).",
                     )
                     return_code = 1
 
