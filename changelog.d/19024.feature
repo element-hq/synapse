@@ -1,0 +1,1 @@
+Allow Synapse modules to specify a custom threadpool when calling `defer_to_thread`.
