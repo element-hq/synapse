@@ -175,6 +175,7 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
+from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
 from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
@@ -322,7 +323,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         hostname: str,
         config: HomeServerConfig,
         reactor: Optional[ISynapseReactor] = None,
-        version_string: str = "Synapse",
     ):
         """
         Args:
@@ -347,7 +347,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
-        self.version_string = version_string
+        self.version_string = f"Synapse/{SYNAPSE_VERSION}"
 
         self.datastores: Optional[Databases] = None
 
