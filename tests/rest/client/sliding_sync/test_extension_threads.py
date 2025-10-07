@@ -350,8 +350,8 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user2_tok, since=sync_pos)
 
         # Assert: User2 should NOT see the thread update (they left before latest update)
-        # Note: This demonstrates the known limitation - user2 won't see the thread
-        # even though there was an update while they were joined (Reply 1)
+        # Note: This also demonstrates that only currently joined rooms are returned - user2
+        # won't see the thread even though there was an update while they were joined (Reply 1)
         self.assertNotIn(
             EXT_NAME,
             response_body["extensions"],

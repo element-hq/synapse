@@ -1134,25 +1134,10 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Tuple[Sequence[Tuple[str, str, Optional[EventBase]]], Optional[int]]:
         """Get a list of updated threads, ordered by stream ordering of their
         latest reply, filtered to only include threads in rooms where the user
-        was joined at the time of the thread's latest update.
-
-        Note: This function has a known limitation due to the threads table only
-        storing the latest update per thread. If a thread had multiple updates
-        within the token range and the user left the room between updates, earlier
-        updates that occurred while the user was joined will NOT be returned.
-
-        Example edge case:
-            t1: User joins room, thread updated (user should see this)
-            t2: User leaves room
-            t3: Thread updated again (user should NOT see this)
-            Result: Neither update is returned (because membership check at t3 fails)
-
-        This is an acceptable trade-off to avoid expensive queries through the
-        event_relations table.
+        is currently joined.
 
         Args:
-            user_id: Only fetch threads for rooms where the user was joined at
-                the time of the thread's latest update.
+            user_id: Only fetch threads for rooms that the user is currently joined to.
             from_token: Fetch rows from a previous next_batch, or from the start if None.
             to_token: Fetch rows from a previous prev_batch, or from the stream end if None.
             limit: Only fetch the most recent `limit` threads.
@@ -1183,41 +1168,20 @@ class RelationsWorkerStore(EventsWorkerStore, SQLBaseStore):
             pagination_clause += " AND stream_ordering <= ?"
             pagination_args.append(str(to_bound))
 
-        # Filter threads to only those in rooms where the user was joined at the
-        # time of the thread's latest update.
-        #
-        # We use room_memberships.event_stream_ordering to perform a point-in-time
-        # membership check. This finds the most recent membership event for the user
-        # in each room that occurred at or before the thread's latest update
-        # (threads.stream_ordering), and verifies it was a 'join' membership.
-        #
-        # Note: Due to the threads table only storing the latest update per thread,
-        # this approach has a known limitation: if a thread had multiple updates and
-        # the user left the room between updates, earlier updates that occurred while
-        # they were joined will not be returned. This is an acceptable trade-off to
-        # avoid expensive queries through event_relations.
+        # Filter threads to only those in rooms that the user is currently joined to.
         sql = f"""
             SELECT thread_id, room_id, latest_event_id, stream_ordering
-            FROM threads
-            WHERE EXISTS (
-                SELECT 1
-                FROM room_memberships AS rm
-                WHERE rm.room_id = threads.room_id
-                    AND rm.user_id = ?
-                    AND rm.event_stream_ordering <= threads.stream_ordering
-                    AND rm.membership = ?
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM room_memberships AS rm2
-                        WHERE rm2.room_id = rm.room_id
-                            AND rm2.user_id = rm.user_id
-                            AND rm2.event_stream_ordering > rm.event_stream_ordering
-                            AND rm2.event_stream_ordering <= threads.stream_ordering
-                    )
-            )
-            {pagination_clause}
-            ORDER BY stream_ordering DESC
-            LIMIT ?
+              FROM threads
+              WHERE EXISTS (
+                  SELECT 1
+                  FROM local_current_membership AS lcm
+                  WHERE lcm.room_id = threads.room_id
+                      AND lcm.user_id = ?
+                      AND lcm.membership = ?
+              )
+              {pagination_clause}
+              ORDER BY stream_ordering DESC
+              LIMIT ?
         """
 
         def _get_thread_updates_for_user_txn(
