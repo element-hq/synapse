@@ -187,7 +187,7 @@ class KeyUploadServlet(RestServlet):
             if not isinstance(v, dict):
                 raise TypeError("fallback_keys must be a mapping")
 
-            for k, _ in v.items():
+            for k in v.keys():
                 if not len(k.split(":")) == 2:
                     raise SynapseError(
                         code=HTTPStatus.BAD_REQUEST,
