@@ -43,6 +43,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
+from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
 from synapse.api import errors
@@ -78,7 +79,7 @@ from synapse.http.server import (
 from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
-    defer_to_thread,
+    defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
@@ -1716,6 +1717,7 @@ class ModuleApi:
     async def defer_to_thread(
         self,
         f: Callable[P, T],
+        threadpool: Optional[ThreadPool] = None,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> T:
@@ -1731,7 +1733,14 @@ class ModuleApi:
         Returns:
             The return value of the function once ran in a thread.
         """
-        return await defer_to_thread(self._hs.get_reactor(), f, *args, **kwargs)
+        # If a threadpool is not provided by the module, then use the default
+        # reactor threadpool of the homeserver.
+        if threadpool is None:
+            threadpool = self._hs.get_reactor().getThreadPool()
+
+        return await defer_to_threadpool(
+            self._hs.get_reactor(), threadpool, f, *args, **kwargs
+        )
 
     async def check_username(self, username: str) -> None:
         """Checks if the provided username uses the grammar defined in the Matrix
