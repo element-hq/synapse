@@ -160,6 +160,26 @@ class KeyUploadTestCase(unittest.HomeserverTestCase):
             channel.result,
         )
 
+    def test_upload_keys_succeeds_when_fields_are_explicitly_set_to_null(self) -> None:
+        """
+        This is a regression test for https://github.com/element-hq/synapse/pull/19023.
+        """
+        device_id = "DEVICE_ID"
+        self.register_user("alice", "wonderland")
+        alice_token = self.login("alice", "wonderland", device_id=device_id)
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {
+                "device_keys": None,
+                "one_time_keys": None,
+                "fallback_keys": None,
+            },
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
 
 class KeyQueryTestCase(unittest.HomeserverTestCase):
     servlets = [
