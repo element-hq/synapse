@@ -330,6 +330,22 @@ def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
         config = HomeServerConfig.load_or_generate_config(
             "Synapse Homeserver", argv_options
         )
+
+        if (
+            config.registration.enable_registration
+            and not config.registration.enable_registration_without_verification
+        ):
+            if (
+                not config.captcha.enable_registration_captcha
+                and not config.registration.registrations_require_3pid
+                and not config.registration.registration_requires_token
+            ):
+                raise ConfigError(
+                    "You have enabled open registration without any verification. This is a known vector for "
+                    "spam and abuse. If you would like to allow public registration, please consider adding email, "
+                    "captcha, or token-based verification. Otherwise this check can be removed by setting the "
+                    "`enable_registration_without_verification` config option to `true`."
+                )
     except ConfigError as e:
         sys.stderr.write("\n")
         for f in format_config_error(e):
@@ -379,22 +395,6 @@ def setup(
 
     if config.server.gc_seconds:
         synapse.metrics.MIN_TIME_BETWEEN_GCS = config.server.gc_seconds
-
-    if (
-        config.registration.enable_registration
-        and not config.registration.enable_registration_without_verification
-    ):
-        if (
-            not config.captcha.enable_registration_captcha
-            and not config.registration.registrations_require_3pid
-            and not config.registration.registration_requires_token
-        ):
-            raise ConfigError(
-                "You have enabled open registration without any verification. This is a known vector for "
-                "spam and abuse. If you would like to allow public registration, please consider adding email, "
-                "captcha, or token-based verification. Otherwise this check can be removed by setting the "
-                "`enable_registration_without_verification` config option to `true`."
-            )
 
     hs = SynapseHomeServer(
         config.server.server_name,
