@@ -175,6 +175,7 @@ from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
 from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
+from synapse.util import SYNAPSE_VERSION
 from synapse.util.caches import CACHE_METRIC_REGISTRY
 from synapse.util.clock import Clock
 from synapse.util.distributor import Distributor
@@ -322,7 +323,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         hostname: str,
         config: HomeServerConfig,
         reactor: Optional[ISynapseReactor] = None,
-        version_string: str = "Synapse",
     ):
         """
         Args:
@@ -347,7 +347,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         self._instance_id = random_string(5)
         self._instance_name = config.worker.instance_name
 
-        self.version_string = version_string
+        self.version_string = f"Synapse/{SYNAPSE_VERSION}"
 
         self.datastores: Optional[Databases] = None
 
@@ -612,12 +612,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.start_time = int(self.get_clock().time())
         self.datastores = Databases(self.DATASTORE_CLASS, self)
         logger.info("Finished setting up.")
-
-        # Register background tasks required by this server. This must be done
-        # somewhat manually due to the background tasks not being registered
-        # unless handlers are instantiated.
-        if self.config.worker.run_background_tasks:
-            self.start_background_tasks()
 
     # def __del__(self) -> None:
     #    """
