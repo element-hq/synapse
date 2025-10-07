@@ -199,7 +199,7 @@ class KeyUploadServlet(RestServlet):
 
         one_time_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
         """
-        One-time public keys for “pre-key” messages. The names of the properties
+        One-time public keys for "pre-key" messages. The names of the properties
         should be in the format `<algorithm>:<key_id>`.
 
         The format of the key is determined by the key algorithm, see:
