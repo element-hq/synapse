@@ -354,12 +354,15 @@ def create_homeserver(
     reactor: Optional[ISynapseReactor] = None,
 ) -> SynapseHomeServer:
     """
-    TODO
+    Create a homeserver instance for the Synapse main process.
 
     Args:
         config: The configuration for the homeserver.
         reactor: Optionally provide a reactor to use. Can be useful in different
             scenarios that you want control over the reactor, such as tests.
+
+    Returns:
+        A homeserver instance.
     """
 
     if config.worker.worker_app:
@@ -405,7 +408,7 @@ def setup(
     freeze: bool = True,
 ) -> None:
     """
-    Create and setup a Synapse homeserver instance given a configuration.
+    Setup a Synapse homeserver instance given a configuration.
 
     Args:
         hs: The homeserver to setup.
