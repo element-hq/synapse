@@ -54,7 +54,6 @@ from twisted.internet.interfaces import (
     IOpenSSLContextFactory,
     IReactorCore,
     IReactorPluggableNameResolver,
-    IReactorTime,
     IResolutionReceiver,
     ITCPTransport,
 )
@@ -88,6 +87,7 @@ from synapse.logging.opentracing import set_tag, start_active_span, tags
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.types import ISynapseReactor, StrSequence
 from synapse.util.async_helpers import timeout_deferred
+from synapse.util.clock import Clock
 from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
@@ -165,16 +165,17 @@ def _is_ip_blocked(
 _EPSILON = 0.00000001
 
 
-def _make_scheduler(
-    reactor: IReactorTime,
-) -> Callable[[Callable[[], object]], IDelayedCall]:
+def _make_scheduler(clock: Clock) -> Callable[[Callable[[], object]], IDelayedCall]:
     """Makes a schedular suitable for a Cooperator using the given reactor.
 
     (This is effectively just a copy from `twisted.internet.task`)
     """
 
     def _scheduler(x: Callable[[], object]) -> IDelayedCall:
-        return reactor.callLater(_EPSILON, x)
+        return clock.call_later(
+            _EPSILON,
+            x,
+        )
 
     return _scheduler
 
@@ -367,7 +368,7 @@ class BaseHttpClient:
 
         # We use this for our body producers to ensure that they use the correct
         # reactor.
-        self._cooperator = Cooperator(scheduler=_make_scheduler(hs.get_reactor()))
+        self._cooperator = Cooperator(scheduler=_make_scheduler(hs.get_clock()))
 
     async def request(
         self,
@@ -436,9 +437,9 @@ class BaseHttpClient:
                 # we use our own timeout mechanism rather than treq's as a workaround
                 # for https://twistedmatrix.com/trac/ticket/9534.
                 request_deferred = timeout_deferred(
-                    request_deferred,
-                    60,
-                    self.hs.get_reactor(),
+                    deferred=request_deferred,
+                    timeout=60,
+                    clock=self.hs.get_clock(),
                 )
 
                 # turn timeouts into RequestTimedOutErrors
@@ -763,7 +764,11 @@ class BaseHttpClient:
             d = read_body_with_max_size(response, output_stream, max_size)
 
             # Ensure that the body is not read forever.
-            d = timeout_deferred(d, 30, self.hs.get_reactor())
+            d = timeout_deferred(
+                deferred=d,
+                timeout=30,
+                clock=self.hs.get_clock(),
+            )
 
             length = await make_deferred_yieldable(d)
         except BodyExceededMaxSize:
@@ -957,9 +962,9 @@ class ReplicationClient(BaseHttpClient):
                 # for https://twistedmatrix.com/trac/ticket/9534.
                 # (Updated url https://github.com/twisted/twisted/issues/9534)
                 request_deferred = timeout_deferred(
-                    request_deferred,
-                    60,
-                    self.hs.get_reactor(),
+                    deferred=request_deferred,
+                    timeout=60,
+                    clock=self.hs.get_clock(),
                 )
 
                 # turn timeouts into RequestTimedOutErrors

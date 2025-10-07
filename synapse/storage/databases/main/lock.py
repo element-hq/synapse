@@ -28,7 +28,6 @@ from twisted.internet import defer
 from twisted.internet.task import LoopingCall
 
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.storage._base import SQLBaseStore
@@ -99,15 +98,15 @@ class LockStore(SQLBaseStore):
         # lead to a race, as we may drop the lock while we are still processing.
         # However, a) it should be a small window, b) the lock is best effort
         # anyway and c) we want to really avoid leaking locks when we restart.
-        hs.get_clock().add_system_event_trigger(
-            "before",
-            "shutdown",
-            self._on_shutdown,
+        hs.register_async_shutdown_handler(
+            phase="before",
+            eventType="shutdown",
+            shutdown_func=self._on_shutdown,
         )
 
         self._acquiring_locks: Set[Tuple[str, str]] = set()
 
-        self._clock.looping_call(
+        self.clock.looping_call(
             self._reap_stale_read_write_locks, _LOCK_TIMEOUT_MS / 10.0
         )
 
@@ -153,7 +152,7 @@ class LockStore(SQLBaseStore):
         if lock and await lock.is_still_valid():
             return None
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         token = random_string(6)
 
         def _try_acquire_lock_txn(txn: LoggingTransaction) -> bool:
@@ -202,7 +201,8 @@ class LockStore(SQLBaseStore):
         lock = Lock(
             self.server_name,
             self._reactor,
-            self._clock,
+            self.hs,
+            self.clock,
             self,
             read_write=False,
             lock_name=lock_name,
@@ -251,7 +251,7 @@ class LockStore(SQLBaseStore):
         # constraints. If it doesn't then we have acquired the lock,
         # otherwise we haven't.
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         token = random_string(6)
 
         self.db_pool.simple_insert_txn(
@@ -270,7 +270,8 @@ class LockStore(SQLBaseStore):
         lock = Lock(
             self.server_name,
             self._reactor,
-            self._clock,
+            self.hs,
+            self.clock,
             self,
             read_write=True,
             lock_name=lock_name,
@@ -338,7 +339,7 @@ class LockStore(SQLBaseStore):
         """
 
         def reap_stale_read_write_locks_txn(txn: LoggingTransaction) -> None:
-            txn.execute(delete_sql, (self._clock.time_msec() - _LOCK_TIMEOUT_MS,))
+            txn.execute(delete_sql, (self.clock.time_msec() - _LOCK_TIMEOUT_MS,))
             if txn.rowcount:
                 logger.info("Reaped %d stale locks", txn.rowcount)
 
@@ -374,6 +375,7 @@ class Lock:
         self,
         server_name: str,
         reactor: ISynapseReactor,
+        hs: "HomeServer",
         clock: Clock,
         store: LockStore,
         read_write: bool,
@@ -387,6 +389,7 @@ class Lock:
         """
         self._server_name = server_name
         self._reactor = reactor
+        self._hs = hs
         self._clock = clock
         self._store = store
         self._read_write = read_write
@@ -410,6 +413,7 @@ class Lock:
             _RENEWAL_INTERVAL_MS,
             self._server_name,
             self._store,
+            self._hs,
             self._clock,
             self._read_write,
             self._lock_name,
@@ -421,6 +425,7 @@ class Lock:
     def _renew(
         server_name: str,
         store: LockStore,
+        hs: "HomeServer",
         clock: Clock,
         read_write: bool,
         lock_name: str,
@@ -457,9 +462,8 @@ class Lock:
                 desc="renew_lock",
             )
 
-        return run_as_background_process(
+        return hs.run_as_background_process(
             "Lock._renew",
-            server_name,
             _internal_renew,
             store,
             clock,

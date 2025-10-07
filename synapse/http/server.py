@@ -420,7 +420,14 @@ class DirectServeJsonResource(_AsyncResource):
         """
 
         if clock is None:
-            clock = Clock(
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeJsonResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
                 cast(ISynapseThreadlessReactor, reactor),
                 server_name="synapse_module_running_from_unknown_server",
             )
@@ -608,7 +615,14 @@ class DirectServeHtmlResource(_AsyncResource):
                 Only optional for the Module API.
         """
         if clock is None:
-            clock = Clock(
+            # Ideally we wouldn't ignore the linter error here and instead enforce a
+            # required `Clock` be passed into the `__init__` function.
+            # However, this would change the function signature which is currently being
+            # exported to the module api. Since we don't want to break that api, we have
+            # to settle with ignoring the linter error here.
+            # As of the time of writing this, all Synapse internal usages of
+            # `DirectServeHtmlResource` pass in the existing homeserver clock instance.
+            clock = Clock(  # type: ignore[multiple-internal-clocks]
                 cast(ISynapseThreadlessReactor, reactor),
                 server_name="synapse_module_running_from_unknown_server",
             )

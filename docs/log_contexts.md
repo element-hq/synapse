@@ -548,3 +548,19 @@ chain are dropped. Dropping the the reference to an awaitable you're
 supposed to be awaiting is bad practice, so this doesn't
 actually happen too much. Unfortunately, when it does happen, it will
 lead to leaked logcontexts which are incredibly hard to track down.
+
+
+## Debugging logcontext issues
+
+Debugging logcontext issues can be tricky as leaking or losing a logcontext will surface
+downstream and can point to an unrelated part of the codebase. It's best to enable debug
+logging for `synapse.logging.context.debug` (needs to be explicitly configured) and go
+backwards in the logs from the point where the issue is observed to find the root cause.
+
+`log.config.yaml`
+```yaml
+loggers:
+    # Unlike other loggers, this one needs to be explicitly configured to see debug logs.
+    synapse.logging.context.debug:
+        level: DEBUG
+```

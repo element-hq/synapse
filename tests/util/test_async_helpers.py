@@ -25,7 +25,6 @@ from parameterized import parameterized_class
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
-from twisted.internet.task import Clock
 from twisted.python.failure import Failure
 
 from synapse.logging.context import (
@@ -152,7 +151,7 @@ class ObservableDeferredTest(TestCase):
 
 class TimeoutDeferredTest(TestCase):
     def setUp(self) -> None:
-        self.clock = Clock()
+        self.reactor, self.clock = get_clock()
 
     def test_times_out(self) -> None:
         """Basic test case that checks that the original deferred is cancelled and that
@@ -165,12 +164,16 @@ class TimeoutDeferredTest(TestCase):
             cancelled = True
 
         non_completing_d: Deferred = Deferred(canceller)
-        timing_out_d = timeout_deferred(non_completing_d, 1.0, self.clock)
+        timing_out_d = timeout_deferred(
+            deferred=non_completing_d,
+            timeout=1.0,
+            clock=self.clock,
+        )
 
         self.assertNoResult(timing_out_d)
         self.assertFalse(cancelled, "deferred was cancelled prematurely")
 
-        self.clock.pump((1.0,))
+        self.reactor.pump((1.0,))
 
         self.assertTrue(cancelled, "deferred was not cancelled by timeout")
         self.failureResultOf(timing_out_d, defer.TimeoutError)
@@ -183,11 +186,15 @@ class TimeoutDeferredTest(TestCase):
             raise Exception("can't cancel this deferred")
 
         non_completing_d: Deferred = Deferred(canceller)
-        timing_out_d = timeout_deferred(non_completing_d, 1.0, self.clock)
+        timing_out_d = timeout_deferred(
+            deferred=non_completing_d,
+            timeout=1.0,
+            clock=self.clock,
+        )
 
         self.assertNoResult(timing_out_d)
 
-        self.clock.pump((1.0,))
+        self.reactor.pump((1.0,))
 
         self.failureResultOf(timing_out_d, defer.TimeoutError)
 
@@ -227,7 +234,7 @@ class TimeoutDeferredTest(TestCase):
             timing_out_d = timeout_deferred(
                 deferred=incomplete_d,
                 timeout=1.0,
-                reactor=self.clock,
+                clock=self.clock,
             )
             self.assertNoResult(timing_out_d)
             # We should still be in the logcontext we started in
@@ -243,7 +250,7 @@ class TimeoutDeferredTest(TestCase):
             # we're pumping the reactor in the block and return us back to our current
             # logcontext after the block.
             with PreserveLoggingContext():
-                self.clock.pump(
+                self.reactor.pump(
                     # We only need to pump `1.0` (seconds) as we set
                     # `timeout_deferred(timeout=1.0)` above
                     (1.0,)
@@ -264,7 +271,7 @@ class TimeoutDeferredTest(TestCase):
         self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
 
-class _TestException(Exception):
+class _TestException(Exception):  #
     pass
 
 
@@ -560,8 +567,8 @@ class AwakenableSleeperTests(TestCase):
     "Tests AwakenableSleeper"
 
     def test_sleep(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -575,8 +582,8 @@ class AwakenableSleeperTests(TestCase):
         self.assertTrue(d.called)
 
     def test_explicit_wake(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -592,8 +599,8 @@ class AwakenableSleeperTests(TestCase):
         reactor.advance(0.6)
 
     def test_multiple_sleepers_timeout(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d1 = defer.ensureDeferred(sleeper.sleep("name", 1000))
 
@@ -612,8 +619,8 @@ class AwakenableSleeperTests(TestCase):
         self.assertTrue(d2.called)
 
     def test_multiple_sleepers_wake(self) -> None:
-        reactor, _ = get_clock()
-        sleeper = AwakenableSleeper(reactor)
+        reactor, clock = get_clock()
+        sleeper = AwakenableSleeper(clock)
 
         d1 = defer.ensureDeferred(sleeper.sleep("name", 1000))
 

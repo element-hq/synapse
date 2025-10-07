@@ -63,10 +63,6 @@ def check_logcontext(context: LoggingContextOrSentinel) -> None:
 
 
 class FederationClientTests(HomeserverTestCase):
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver(reactor=reactor, clock=clock)
-        return hs
-
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:

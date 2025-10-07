@@ -651,6 +651,7 @@ class StateResolutionHandler:
             ExpiringCache(
                 cache_name="state_cache",
                 server_name=self.server_name,
+                hs=hs,
                 clock=self.clock,
                 max_len=100000,
                 expiry_ms=EVICTION_TIMEOUT_SECONDS * 1000,
