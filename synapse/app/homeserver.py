@@ -456,21 +456,21 @@ def setup(
 
 
 def start_reactor(
-    hs: HomeServer,
+    config: HomeServerConfig,
 ) -> None:
     """
-    Start the reactor.
+    Start the reactor (Twisted event-loop).
 
     Args:
-        hs: The homeserver to run.
+        config: The configuration for the homeserver.
     """
     _base.start_reactor(
         "synapse-homeserver",
-        soft_file_limit=hs.config.server.soft_file_limit,
-        gc_thresholds=hs.config.server.gc_thresholds,
-        pid_file=hs.config.server.pid_file,
-        daemonize=hs.config.server.daemonize,
-        print_pidfile=hs.config.server.print_pidfile,
+        soft_file_limit=config.server.soft_file_limit,
+        gc_thresholds=config.server.gc_thresholds,
+        pid_file=config.server.pid_file,
+        daemonize=config.server.daemonize,
+        print_pidfile=config.server.print_pidfile,
         logger=logger,
     )
 
@@ -488,7 +488,7 @@ def main() -> None:
         if not hs.config.logging.no_redirect_stdio:
             redirect_stdio_to_logs()
 
-        start_reactor(hs)
+        start_reactor(homeserver_config)
 
 
 if __name__ == "__main__":
