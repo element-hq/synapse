@@ -470,7 +470,7 @@ class RestHelper:
         if txn_id is None:
             txn_id = "m%s" % (str(time.time()))
 
-        path = "/_matrix/client/r0/rooms/%s/send/%s/%s?msc4354_stick_duration_ms=%d" % (
+        path = "/_matrix/client/r0/rooms/%s/send/%s/%s?org.matrix.msc4354.sticky_duration_ms=%d" % (
             room_id,
             type,
             txn_id,
