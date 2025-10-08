@@ -231,6 +231,7 @@ test_packages=(
     ./tests/msc4140
     ./tests/msc4155
     ./tests/msc4306
+    ./tests/msc4354
 )
 
 # Enable dirty runs, so tests will reuse the same container where possible.
