@@ -302,11 +302,8 @@ class BaseAuth:
           (the user_id URI parameter allows an application service to masquerade
           any applicable user in its namespace)
         - what device the application service should be treated as controlling
-          (the device_id[^1] URI parameter allows an application service to masquerade
+          (the device_id URI parameter allows an application service to masquerade
           as any device that exists for the relevant user)
-
-        [^1] Unstable and provided by MSC3202.
-             Must use `org.matrix.msc3202.device_id` in place of `device_id` for now.
 
         Returns:
             the application service `Requester` of that request
@@ -319,7 +316,7 @@ class BaseAuth:
         - The returned device ID, if present, has been checked to be a valid device ID
           for the returned user ID.
         """
-        DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
+        UNSTABLE_DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
 
         app_service = self.store.get_app_service_by_token(access_token)
         if app_service is None:
@@ -343,11 +340,13 @@ class BaseAuth:
 
         effective_device_id: Optional[str] = None
 
-        if (
-            self.hs.config.experimental.msc3202_device_masquerading_enabled
-            and DEVICE_ID_ARG_NAME in request.args
-        ):
-            effective_device_id = request.args[DEVICE_ID_ARG_NAME][0].decode("utf8")
+        if b"device_id" in request.args or UNSTABLE_DEVICE_ID_ARG_NAME in request.args:
+            try:
+                effective_device_id = request.args[b"device_id"][0].decode("utf8")
+            except KeyError:
+                effective_device_id = request.args[UNSTABLE_DEVICE_ID_ARG_NAME][
+                    0
+                ].decode("utf8")
             # We only just set this so it can't be None!
             assert effective_device_id is not None
             device_opt = await self.store.get_device(
