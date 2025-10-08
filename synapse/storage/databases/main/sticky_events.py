@@ -32,7 +32,6 @@ from synapse.api.constants import EventTypes, StickyEvent
 from synapse.api.errors import AuthError
 from synapse.events import EventBase
 from synapse.events.snapshot import EventPersistencePair
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.streams._base import StickyEventsStream
 from synapse.storage.database import (
     DatabasePool,
@@ -75,7 +74,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
 
         # Technically this means we will cleanup N times, once per event persister, maybe put on master?
         if self._can_write_to_sticky_events:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self._run_background_cleanup, DELETE_EXPIRED_STICKY_EVENTS_MS
             )
 
@@ -629,8 +628,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         return round(time.time() * 1000)
 
     def _run_background_cleanup(self) -> Deferred:
-        return run_as_background_process(
+        return self.hs.run_as_background_process(
             "delete_expired_sticky_events",
-            self.server_name,
             self._delete_expired_sticky_events,
         )

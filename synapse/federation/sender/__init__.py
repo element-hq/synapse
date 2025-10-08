@@ -518,9 +518,8 @@ class FederationSender(AbstractFederationSender):
         if not self.hs.config.experimental.msc4354_enabled:
             return
         # fire off a processing loop in the background
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "process_new_server_joined_over_federation",
-            self.server_name,
             self._process_new_server_joined_over_federation,
             server,
             room_id,
