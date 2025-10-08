@@ -55,7 +55,7 @@ class UserMutualRoomsServlet(RestServlet):
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
 
-        user_ids = parse_strings_from_args(args, "user_id", required=True)
+        user_ids = parse_strings_from_args(args, "user_id", required=True, encoding="utf-8")
 
         if len(user_ids) > 1:
             raise SynapseError(
