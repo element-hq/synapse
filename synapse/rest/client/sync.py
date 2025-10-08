@@ -57,6 +57,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
+from synapse.storage.databases.main import DataStore
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util.caches.lrucache import LruCache
@@ -1107,6 +1108,7 @@ class SlidingSyncRestServlet(RestServlet):
                 self.event_serializer,
                 time_now,
                 extensions.threads,
+                self.store,
             )
 
         return serialized_extensions
@@ -1149,6 +1151,7 @@ async def _serialise_threads(
     event_serializer: EventClientSerializer,
     time_now: int,
     threads: SlidingSyncResult.Extensions.ThreadsExtension,
+    store: "DataStore",
 ) -> JsonDict:
     """
     Serialize the threads extension response for sliding sync.
@@ -1157,6 +1160,7 @@ async def _serialise_threads(
         event_serializer: The event serializer to use for serializing thread root events.
         time_now: The current time in milliseconds, used for event serialization.
         threads: The threads extension data containing thread updates and pagination tokens.
+        store: The datastore, needed for serializing stream tokens.
 
     Returns:
         A JSON-serializable dict containing:
@@ -1195,7 +1199,7 @@ async def _serialise_threads(
 
                 # Add prev_batch if present
                 if update.prev_batch is not None:
-                    update_dict["prev_batch"] = str(update.prev_batch)
+                    update_dict["prev_batch"] = await update.prev_batch.to_string(store)
 
                 room_updates[thread_root_id] = update_dict
 
@@ -1204,7 +1208,7 @@ async def _serialise_threads(
         out["updates"] = updates_dict
 
     if threads.prev_batch:
-        out["prev_batch"] = str(threads.prev_batch)
+        out["prev_batch"] = await threads.prev_batch.to_string(store)
 
     return out
 

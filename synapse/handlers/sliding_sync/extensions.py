@@ -996,8 +996,8 @@ class SlidingSyncExtensionHandler:
         """Handle Threads extension (MSC4360)
 
         Args:
-            sync_config: Sync configuration
-            threads_request: The threads extension from the request
+            sync_config: Sync configuration.
+            threads_request: The threads extension from the request.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
 
@@ -1007,24 +1007,30 @@ class SlidingSyncExtensionHandler:
         if not threads_request.enabled:
             return None
 
-        limit = threads_request.limit
-
-        # TODO: is the `room_key` the right thing to use here?
-        # ie. does it translate into /relations
-
-        updates, prev_batch = await self.store.get_thread_updates_for_user(
+        # Fetch thread updates globally across all joined rooms.
+        # The database layer returns a StreamToken (exclusive) for prev_batch if there
+        # are more results.
+        (
+            all_thread_updates,
+            prev_batch_token,
+        ) = await self.store.get_thread_updates_for_user(
             user_id=sync_config.user.to_string(),
-            from_token=from_token.stream_token if from_token else None,
-            to_token=to_token,
-            limit=limit,
+            from_token=from_token.stream_token.room_key if from_token else None,
+            to_token=to_token.room_key,
+            limit=threads_request.limit,
             include_thread_roots=threads_request.include_roots,
         )
 
-        if len(updates) == 0:
+        if len(all_thread_updates) == 0:
             return None
 
-        # Collect thread root events and get bundled aggregations
-        thread_root_events = [event for _, _, event in updates if event]
+        # Collect thread root events and get bundled aggregations.
+        # Only fetch bundled aggregations if we have thread root events to attach them to.
+        thread_root_events = [
+            update.thread_root_event
+            for update in all_thread_updates
+            if update.thread_root_event
+        ]
         aggregations_map = {}
         if thread_root_events:
             aggregations_map = await self.relations_handler.get_bundled_aggregations(
@@ -1033,17 +1039,23 @@ class SlidingSyncExtensionHandler:
             )
 
         thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
-        for thread_root_id, room_id, thread_root_event in updates:
+        for update in all_thread_updates:
+            # Only look up bundled aggregations if we have a thread root event
             bundled_aggs = (
-                aggregations_map.get(thread_root_id) if thread_root_event else None
+                aggregations_map.get(update.thread_id)
+                if update.thread_root_event
+                else None
             )
-            thread_updates.setdefault(room_id, {})[thread_root_id] = _ThreadUpdate(
-                thread_root=thread_root_event,
-                prev_batch=None,
-                bundled_aggregations=bundled_aggs,
+
+            thread_updates.setdefault(update.room_id, {})[update.thread_id] = (
+                _ThreadUpdate(
+                    thread_root=update.thread_root_event,
+                    prev_batch=update.prev_batch,
+                    bundled_aggregations=bundled_aggs,
+                )
             )
 
         return SlidingSyncResult.Extensions.ThreadsExtension(
             updates=thread_updates,
-            prev_batch=prev_batch,
+            prev_batch=prev_batch_token,
         )

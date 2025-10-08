@@ -380,9 +380,9 @@ class SlidingSyncBody(RequestBodyModel):
             """The Threads extension (MSC4360)
 
             Attributes:
-                enabled
+                enabled: Whether the threads extension is enabled.
                 include_roots: whether to include thread root events in the extension response.
-                limit: maximum number of thread updates to return.
+                limit: maximum number of thread updates to return across all joined rooms.
             """
 
             enabled: Optional[StrictBool] = False

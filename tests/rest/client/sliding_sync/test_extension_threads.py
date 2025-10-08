@@ -17,7 +17,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import RelationTypes
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import login, relations, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util.clock import Clock
@@ -43,8 +43,7 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
-        # TODO:
-        # threads.register_servlets,
+        relations.register_servlets,
     ]
 
     def default_config(self) -> JsonDict:
@@ -64,7 +63,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -84,16 +82,13 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
-        initial_sync_body: JsonDict = {
-            "lists": {},
-        }
+        initial_sync_body: JsonDict = {}
 
         # Initial sync
         response_body, sync_pos = self.do_sync(initial_sync_body, tok=user1_tok)
 
         # Incremental sync with extension enabled
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -139,7 +134,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # base = self.store.get_max_thread_subscriptions_stream_id()
 
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -164,7 +158,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         user1_tok = self.login(user1_id, "pass")
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -263,7 +256,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # User2 syncs with threads extension enabled
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -304,7 +296,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Initial sync for user2
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -389,7 +380,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Sync with include_roots=True
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -444,7 +434,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Sync with include_roots=False (explicitly)
         sync_body = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -462,7 +451,6 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
 
         # Also test with include_roots omitted (should behave the same)
         sync_body_no_param = {
-            "lists": {},
             "extensions": {
                 EXT_NAME: {
                     "enabled": True,
@@ -475,3 +463,261 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             "updates"
         ][room_id][thread_root_id]
         self.assertNotIn("thread_root", thread_update_no_param)
+
+    def test_per_thread_prev_batch_single_update(self) -> None:
+        """
+        Test that threads with only a single update do NOT get a prev_batch token.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread root
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # Initial sync to establish baseline
+        sync_body = {
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, sync_pos = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add ONE reply to thread
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Single reply",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # Incremental sync
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+
+        # Assert: Thread update should NOT have prev_batch (only 1 update)
+        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root_id
+        ]
+        self.assertNotIn(
+            "prev_batch",
+            thread_update,
+            "Threads with single update should not have prev_batch",
+        )
+
+    def test_per_thread_prev_batch_multiple_updates(self) -> None:
+        """
+        Test that threads with multiple updates get a prev_batch token that can be
+        used with /relations endpoint to paginate backwards.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread root
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # Initial sync to establish baseline
+        sync_body = {
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        _, sync_pos = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add MULTIPLE replies to thread
+        reply1_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "First reply",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        reply1_id = reply1_resp["event_id"]
+
+        reply2_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Second reply",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        reply2_id = reply2_resp["event_id"]
+
+        reply3_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Third reply",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        reply3_id = reply3_resp["event_id"]
+
+        # Incremental sync
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+
+        # Assert: Thread update SHOULD have prev_batch (3 updates)
+        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root_id
+        ]
+        self.assertIn(
+            "prev_batch",
+            thread_update,
+            "Threads with multiple updates should have prev_batch",
+        )
+
+        prev_batch = thread_update["prev_batch"]
+        self.assertIsNotNone(prev_batch, "prev_batch should not be None")
+
+        # Now use the prev_batch token with /relations endpoint to paginate backwards
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/rooms/{room_id}/relations/{thread_root_id}?from={prev_batch}&dir=b",
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        relations_response = channel.json_body
+        returned_event_ids = [
+            event["event_id"] for event in relations_response["chunk"]
+        ]
+
+        # Assert: Only the older replies should be returned (not the latest one we already saw)
+        # The prev_batch token should be exclusive, pointing just before the latest event
+        self.assertIn(
+            reply1_id,
+            returned_event_ids,
+            "First reply should be in relations response",
+        )
+        self.assertIn(
+            reply2_id,
+            returned_event_ids,
+            "Second reply should be in relations response",
+        )
+        self.assertNotIn(
+            reply3_id,
+            returned_event_ids,
+            "Third reply (latest) should NOT be in relations response - already returned in sliding sync",
+        )
+
+    def test_per_thread_prev_batch_on_initial_sync(self) -> None:
+        """
+        Test that threads with multiple updates get prev_batch tokens on initial sync
+        so clients can paginate through the full thread history.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread with multiple replies BEFORE any sync
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        reply1_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 1",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        reply1_id = reply1_resp["event_id"]
+
+        reply2_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 2",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        reply2_id = reply2_resp["event_id"]
+
+        # Initial sync (no from_token)
+        sync_body = {
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Assert: Thread update SHOULD have prev_batch on initial sync (2+ updates exist)
+        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+            thread_root_id
+        ]
+        self.assertIn(
+            "prev_batch",
+            thread_update,
+            "Threads with multiple updates should have prev_batch even on initial sync",
+        )
+
+        prev_batch = thread_update["prev_batch"]
+        self.assertIsNotNone(prev_batch)
+
+        # Use prev_batch with /relations to fetch the thread history
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/rooms/{room_id}/relations/{thread_root_id}?from={prev_batch}&dir=b",
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        relations_response = channel.json_body
+        returned_event_ids = [
+            event["event_id"] for event in relations_response["chunk"]
+        ]
+
+        # Assert: Only the older reply should be returned (not the latest one we already saw)
+        # The prev_batch token should be exclusive, pointing just before the latest event
+        self.assertIn(
+            reply1_id,
+            returned_event_ids,
+            "First reply should be in relations response",
+        )
+        self.assertNotIn(
+            reply2_id,
+            returned_event_ids,
+            "Second reply (latest) should NOT be in relations response - already returned in sliding sync",
+        )
