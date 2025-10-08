@@ -1115,3 +1115,56 @@ Example response:
   ]
 }
 ```
+
+# Parent Space Search API
+
+This API allows an admin to search for room details about the parent space(s) (if any) of each room in a provided set of rooms, as well as any other children of the found parent spaces. If no parent spaces are found, will return 404.
+
+Request:
+
+```
+    POST /_synapse/admin/v1/rooms/space/spaces_search
+```
+
+with a request body of:
+```json
+{
+    "rooms": ["!roomID1", "!roomID2"]
+}
+```
+
+Response:
+
+```json
+{
+  "found_rooms":
+      [
+        {
+                "room_id": "!parentroomID",
+                "name": "parent space",
+                "join_rules": "public",
+                "is_space": true,
+                "topic": null,
+                "origin_server_ts": 234235,
+                "sender": "@user:somewhere.org",
+                "event_id": "$creationeventID",
+                "power_users": ["@user:somewhere.org"],
+                "deleted": false,
+                "aliases": []
+        },
+        {
+                "room_id": "!otherchildroomID",
+                "name": "other room in space",
+                "join_rules": "invite",
+                "is_space": false,
+                "topic": "dogs",
+                "origin_server_ts": 23523,
+                "sender": "@dogowner42:somewhere.org",
+                "event_id": "$wghhrhrehett",
+                "power_users": ["@dogowner42:somewhere.org", "@user:somewhere.org"],
+                "deleted": false,
+                "aliases": ["#hurrayfordogs:matrix.org"]
+        }
+    ]
+}
+```

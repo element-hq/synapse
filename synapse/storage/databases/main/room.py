@@ -2783,3 +2783,40 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 WHERE stream_id <= ?
             """
             txn.execute(sql, (device_lists_stream_id,))
+
+    async def get_parents_and_siblings_of_rooms(
+        self, room_ids: list[tuple]
+    ) -> list[tuple]:
+        """
+        For each room in the list, get any parents of the room, and any children of the
+        parent room
+
+        Args:
+        room_ids: a list of rooms to check for parent spaces
+        """
+
+        def get_parents_and_children_of_rooms_txn(
+            txn: LoggingTransaction, room_ids: list[str]
+        ) -> list[tuple]:
+            clause, param = make_in_list_sql_clause(
+                self.database_engine, "state_key", room_ids
+            )
+            sql = f"""
+                SELECT room_id AS parent_space_id, state_key AS room_id
+                FROM current_state_events
+                WHERE type = 'm.space.child'
+                AND room_id IN (
+                    SELECT room_id
+                    FROM current_state_events
+                    WHERE {clause}
+                    AND type = 'm.space.child'
+                )
+            """
+            txn.execute(sql, param)
+            return txn.fetchall()
+
+        return await self.db_pool.runInteraction(
+            "get_parents_and_children_of_rooms_txn",
+            get_parents_and_children_of_rooms_txn,
+            room_ids,
+        )
