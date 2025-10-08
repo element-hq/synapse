@@ -587,16 +587,9 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
 
         # Assert: Thread update SHOULD have prev_batch (3 updates)
-        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+        prev_batch = response_body["extensions"][EXT_NAME]["updates"][room_id][
             thread_root_id
-        ]
-        self.assertIn(
-            "prev_batch",
-            thread_update,
-            "Threads with multiple updates should have prev_batch",
-        )
-
-        prev_batch = thread_update["prev_batch"]
+        ]["prev_batch"]
         self.assertIsNotNone(prev_batch, "prev_batch should not be None")
 
         # Now use the prev_batch token with /relations endpoint to paginate backwards
@@ -684,16 +677,9 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # Assert: Thread update SHOULD have prev_batch on initial sync (2+ updates exist)
-        thread_update = response_body["extensions"][EXT_NAME]["updates"][room_id][
+        prev_batch = response_body["extensions"][EXT_NAME]["updates"][room_id][
             thread_root_id
-        ]
-        self.assertIn(
-            "prev_batch",
-            thread_update,
-            "Threads with multiple updates should have prev_batch even on initial sync",
-        )
-
-        prev_batch = thread_update["prev_batch"]
+        ]["prev_batch"]
         self.assertIsNotNone(prev_batch)
 
         # Use prev_batch with /relations to fetch the thread history
@@ -721,3 +707,130 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
             returned_event_ids,
             "Second reply (latest) should NOT be in relations response - already returned in sliding sync",
         )
+
+    def test_thread_in_timeline_omitted_without_include_roots(self) -> None:
+        """
+        Test that threads with events in the room timeline are omitted from the
+        extension response when include_roots=False. When all threads are filtered out,
+        the entire extension should be omitted from the response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread root
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # Initial sync to establish baseline
+        sync_body: JsonDict = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                    "include_roots": False,
+                }
+            },
+        }
+        _, sync_pos = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send a reply to the thread
+        self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 1",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+
+        # Incremental sync - the reply should be in the timeline
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+
+        # Assert: Extension should be omitted entirely since the only thread with updates
+        # is already visible in the timeline (include_roots=False)
+        self.assertNotIn(
+            EXT_NAME,
+            response_body.get("extensions", {}),
+            "Extension should be omitted when all threads are filtered out (in timeline with include_roots=False)",
+        )
+
+    def test_thread_in_timeline_included_with_include_roots(self) -> None:
+        """
+        Test that threads with events in the room timeline are still included in the
+        extension response when include_roots=True, because the client wants the root event.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create thread root
+        thread_root_resp = self.helper.send(room_id, body="Thread root", tok=user1_tok)
+        thread_root_id = thread_root_resp["event_id"]
+
+        # Initial sync to establish baseline
+        sync_body: JsonDict = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            },
+            "extensions": {
+                EXT_NAME: {
+                    "enabled": True,
+                    "include_roots": True,
+                }
+            },
+        }
+        _, sync_pos = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send a reply to the thread
+        reply_resp = self.helper.send_event(
+            room_id,
+            type="m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "Reply 1",
+                "m.relates_to": {
+                    "rel_type": RelationTypes.THREAD,
+                    "event_id": thread_root_id,
+                },
+            },
+            tok=user1_tok,
+        )
+        reply_id = reply_resp["event_id"]
+
+        # Incremental sync - the reply should be in the timeline
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok, since=sync_pos)
+
+        # Assert: The thread reply should be in the room timeline
+        room_response = response_body["rooms"][room_id]
+        timeline_event_ids = [event["event_id"] for event in room_response["timeline"]]
+        self.assertIn(
+            reply_id,
+            timeline_event_ids,
+            "Thread reply should be in the room timeline",
+        )
+
+        # Assert: Thread SHOULD be in extension (include_roots=True)
+        thread_updates = response_body["extensions"][EXT_NAME]["updates"][room_id]
+        self.assertIn(
+            thread_root_id,
+            thread_updates,
+            "Thread should be included in extension when include_roots=True, even if in timeline",
+        )
+        # Verify the thread root event is present
+        self.assertIn("thread_root", thread_updates[thread_root_id])

@@ -24,12 +24,13 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     cast,
 )
 
 from typing_extensions import TypeAlias, assert_never
 
-from synapse.api.constants import AccountDataTypes, EduTypes
+from synapse.api.constants import AccountDataTypes, EduTypes, RelationTypes
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
@@ -185,6 +186,7 @@ class SlidingSyncExtensionHandler:
             threads_coro = self.get_threads_extension_response(
                 sync_config=sync_config,
                 threads_request=sync_config.extensions.threads,
+                actual_room_response_map=actual_room_response_map,
                 to_token=to_token,
                 from_token=from_token,
             )
@@ -990,6 +992,7 @@ class SlidingSyncExtensionHandler:
         self,
         sync_config: SlidingSyncConfig,
         threads_request: SlidingSyncConfig.Extensions.ThreadsExtension,
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
     ) -> Optional[SlidingSyncResult.Extensions.ThreadsExtension]:
@@ -998,6 +1001,9 @@ class SlidingSyncExtensionHandler:
         Args:
             sync_config: Sync configuration.
             threads_request: The threads extension from the request.
+            actual_room_response_map: A map of room ID to room results in the
+                sliding sync response. Used to determine which threads already have
+                events in the room timeline.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
 
@@ -1024,6 +1030,29 @@ class SlidingSyncExtensionHandler:
         if len(all_thread_updates) == 0:
             return None
 
+        # Identify which threads already have events in the room timelines.
+        # If include_roots=False, we'll omit these threads from the extension response
+        # since the client already sees the thread activity in the timeline.
+        # If include_roots=True, we include all threads regardless, because the client
+        # wants the thread root events.
+        threads_in_timeline: Set[Tuple[str, str]] = set()  # (room_id, thread_id)
+        if not threads_request.include_roots:
+            for room_id, room_result in actual_room_response_map.items():
+                if room_result.timeline_events:
+                    for event in room_result.timeline_events:
+                        # Check if this event is part of a thread
+                        relates_to = event.content.get("m.relates_to")
+                        if not isinstance(relates_to, dict):
+                            continue
+
+                        rel_type = relates_to.get("rel_type")
+
+                        # If this is a thread reply, track the thread
+                        if rel_type == RelationTypes.THREAD:
+                            thread_id = relates_to.get("event_id")
+                            if thread_id:
+                                threads_in_timeline.add((room_id, thread_id))
+
         # Collect thread root events and get bundled aggregations.
         # Only fetch bundled aggregations if we have thread root events to attach them to.
         thread_root_events = [
@@ -1040,6 +1069,11 @@ class SlidingSyncExtensionHandler:
 
         thread_updates: Dict[str, Dict[str, _ThreadUpdate]] = {}
         for update in all_thread_updates:
+            # Skip this thread if it already has events in the room timeline
+            # (unless include_roots=True, in which case we always include it)
+            if (update.room_id, update.thread_id) in threads_in_timeline:
+                continue
+
             # Only look up bundled aggregations if we have a thread root event
             bundled_aggs = (
                 aggregations_map.get(update.thread_id)
@@ -1054,6 +1088,10 @@ class SlidingSyncExtensionHandler:
                     bundled_aggregations=bundled_aggs,
                 )
             )
+
+        # If after filtering we have no thread updates, return None to omit the extension
+        if not thread_updates:
+            return None
 
         return SlidingSyncResult.Extensions.ThreadsExtension(
             updates=thread_updates,
