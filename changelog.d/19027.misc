@@ -1,1 +1,1 @@
-Move open registration config validation from `setup(...)` to `load_or_generate_config(...)`.
+Introduce `RootConfig.validate_config()` which can be subclassed in `HomeServerConfig` to do cross-config class validation.
