@@ -126,6 +126,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         from_id: int,
         to_id: int,
         now: int,
+        limit: int,
     ) -> Tuple[int, Dict[str, Set[str]]]:
         """
         Fetch all the sticky events in the given rooms, from the given sticky stream ID.
@@ -135,6 +136,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             from_id: The sticky stream ID that sticky events should be returned from (exclusive).
             to_id: The sticky stream ID that sticky events should end at (inclusive).
             now: The current time in unix millis, used for skipping expired events.
+            limit: Max sticky events to return. If <= 0, no limit is applied.
         Returns:
             A tuple of (to_id, map[room_id, event_ids])
         """
@@ -145,6 +147,7 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
             from_id,
             to_id,
             now,
+            limit,
         )
         new_to_id = from_id
         room_to_events: Dict[str, Set[str]] = {}
@@ -162,19 +165,23 @@ class StickyEventsWorkerStore(StateGroupWorkerStore, CacheInvalidationWorkerStor
         from_id: int,
         to_id: int,
         now: int,
+        limit: int,
     ) -> List[Tuple[int, str, str]]:
         if len(room_ids) == 0:
             return []
         clause, room_id_values = make_in_list_sql_clause(
             txn.database_engine, "room_id", room_ids
         )
-        txn.execute(
-            f"""
+        query = f"""
             SELECT stream_id, room_id, event_id FROM sticky_events
             WHERE soft_failed != ? AND expires_at > ? AND stream_id > ? AND stream_id <= ? AND {clause}
-            """,
-            (True, now, from_id, to_id, *room_id_values),
-        )
+            ORDER BY stream_id ASC
+            """
+        params = (True, now, from_id, to_id, *room_id_values)
+        if limit > 0:
+            query += "LIMIT ?"
+            params += (limit,)
+        txn.execute(query, params)
         return cast(List[Tuple[int, str, str]], txn.fetchall())
 
     async def get_updated_sticky_events(

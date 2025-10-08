@@ -372,3 +372,4 @@ class StickyEvent:
     QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
     FIELD_NAME: Final = "msc4354_sticky"
     MAX_DURATION_MS: Final = 3600000  # 1 hour
+    MAX_EVENTS_IN_SYNC: Final = 100
