@@ -18,8 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import argparse
-from typing import List, Tuple, Type, TypeVar
 
 from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
@@ -66,8 +64,6 @@ from .user_directory import UserDirectoryConfig
 from .user_types import UserTypesConfig
 from .voip import VoipConfig
 from .workers import WorkerConfig
-
-THomeServerConfig = TypeVar("THomeServerConfig", bound="HomeServerConfig")
 
 
 class HomeServerConfig(RootConfig):
@@ -123,27 +119,17 @@ class HomeServerConfig(RootConfig):
         MasConfig,
     ]
 
-    @classmethod
-    def load_config_with_parser(
-        cls: Type[THomeServerConfig],
-        parser: argparse.ArgumentParser,
-        argv_options: List[str],
-    ) -> Tuple[THomeServerConfig, argparse.Namespace]:
-        """
-        See `RootConfig.load_config_with_parser`.
-
-        Note: This is where to put cross-config validation checks.
-        """
-        config, config_args = super().load_config_with_parser(parser, argv_options)
-
+    def validate_config(
+        self,
+    ) -> None:
         if (
-            config.registration.enable_registration
-            and not config.registration.enable_registration_without_verification
+            self.registration.enable_registration
+            and not self.registration.enable_registration_without_verification
         ):
             if (
-                not config.captcha.enable_registration_captcha
-                and not config.registration.registrations_require_3pid
-                and not config.registration.registration_requires_token
+                not self.captcha.enable_registration_captcha
+                and not self.registration.registrations_require_3pid
+                and not self.registration.registration_requires_token
             ):
                 raise ConfigError(
                     "You have enabled open registration without any verification. This is a known vector for "
@@ -151,5 +137,3 @@ class HomeServerConfig(RootConfig):
                     "captcha, or token-based verification. Otherwise this check can be removed by setting the "
                     "`enable_registration_without_verification` config option to `true`."
                 )
-
-        return config, config_args

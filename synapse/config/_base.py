@@ -614,8 +614,8 @@ class RootConfig:
         Used for workers where we want to add extra flags/subcommands.
 
         Note: This is the common denominator for loading config and is also used by
-        `load_config` and `load_or_generate_config`. Which means it's the class to
-        override if you want to add additional config validation logic.
+        `load_config` and `load_or_generate_config`. Which is why we call
+        `validate_config()` here.
 
         Args:
             parser
@@ -649,6 +649,10 @@ class RootConfig:
         )
 
         obj.invoke_all("read_arguments", config_args)
+
+        # Now that we finally have the full config sections parsed, allow subclasses to
+        # do some extra validation across the entire config.
+        obj.validate_config()
 
         return obj, config_args
 
@@ -910,6 +914,16 @@ class RootConfig:
 
         existing_config.root = None
         return existing_config
+
+    def validate_config(self) -> None:
+        """
+        Additional config validation across all config sections.
+
+        Override this in subclasses to add extra validation.
+
+        Raises:
+            ConfigError: if the config is invalid.
+        """
 
 
 def read_config_files(config_files: Iterable[str]) -> Dict[str, Any]:
