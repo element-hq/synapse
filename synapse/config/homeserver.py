@@ -18,7 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Type, TypeVar
+import argparse
+from typing import List, Tuple, Type, TypeVar
 
 from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
@@ -123,15 +124,17 @@ class HomeServerConfig(RootConfig):
     ]
 
     @classmethod
-    def load_config(
-        cls: Type[THomeServerConfig], description: str, argv: List[str]
-    ) -> THomeServerConfig:
+    def load_config_with_parser(
+        cls: Type[THomeServerConfig],
+        parser: argparse.ArgumentParser,
+        argv_options: List[str],
+    ) -> Tuple[THomeServerConfig, argparse.Namespace]:
         """
-        See `RootConfig.load_config`.
+        See `RootConfig.load_config_with_parser`.
 
         Note: This is where to put cross-config validation checks.
         """
-        config = super().load_config(description, argv)
+        config, config_args = super().load_config_with_parser(parser, argv_options)
 
         if (
             config.registration.enable_registration
@@ -149,4 +152,4 @@ class HomeServerConfig(RootConfig):
                     "`enable_registration_without_verification` config option to `true`."
                 )
 
-        return config
+        return config, config_args

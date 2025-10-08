@@ -101,6 +101,10 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
         )
 
     def test_refuse_to_start_if_open_registration_and_no_verification(self) -> None:
+        """
+        Test that our utilities to start the main Synapse homeserver process refuses
+        to start if we detect open registration.
+        """
         self.generate_config()
         self.add_lines_to_config(
             [
@@ -113,7 +117,7 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
         )
 
         # Test that allowing open registration without verification raises an error
-        with self.assertRaises(ConfigError):
+        with self.assertRaises(SystemExit):
             homeserver_config = synapse.app.homeserver.load_or_generate_config(
                 ["-c", self.config_file]
             )
@@ -138,7 +142,7 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
         # Test that allowing open registration without verification raises an error
         with self.assertRaises(ConfigError):
             _homeserver_config = HomeServerConfig.load_config(
-                description="test", argv=["-c", self.config_file]
+                description="test", argv_options=["-c", self.config_file]
             )
 
     def test_load_or_generate_config_error_if_open_registration_and_no_verification(
@@ -162,7 +166,7 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
         # Test that allowing open registration without verification raises an error
         with self.assertRaises(ConfigError):
             _homeserver_config = HomeServerConfig.load_or_generate_config(
-                description="test", argv=["-c", self.config_file]
+                description="test", argv_options=["-c", self.config_file]
             )
 
     def test_load_config_with_parser_error_if_open_registration_and_no_verification(
@@ -189,5 +193,5 @@ class RegistrationConfigTestCase(ConfigFileTestCase):
             HomeServerConfig.add_arguments_to_parser(config_parser)
 
             _homeserver_config = HomeServerConfig.load_config_with_parser(
-                parser=config_parser, argv=["-c", self.config_file]
+                parser=config_parser, argv_options=["-c", self.config_file]
             )

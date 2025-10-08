@@ -545,18 +545,22 @@ class RootConfig:
 
     @classmethod
     def load_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: Type[TRootConfig], description: str, argv_options: List[str]
     ) -> TRootConfig:
         """Parse the commandline and config files
 
         Doesn't support config-file-generation: used by the worker apps.
+
+        Args:
+            description: TODO
+            argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
         Returns:
             Config object.
         """
         config_parser = argparse.ArgumentParser(description=description)
         cls.add_arguments_to_parser(config_parser)
-        obj, _ = cls.load_config_with_parser(config_parser, argv)
+        obj, _ = cls.load_config_with_parser(config_parser, argv_options)
 
         return obj
 
@@ -608,6 +612,10 @@ class RootConfig:
         Doesn't support config-file-generation: used by the worker apps.
 
         Used for workers where we want to add extra flags/subcommands.
+
+        Note: This is the common denominator for loading config and is also used by
+        `load_config` and `load_or_generate_config`. Which means it's the class to
+        override if you want to add additional config validation logic.
 
         Args:
             parser
