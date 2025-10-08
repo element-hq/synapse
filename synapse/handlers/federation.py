@@ -73,7 +73,6 @@ from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.databases.main.lock import Lock
@@ -190,9 +189,8 @@ class FederationHandler:
         # any partial-state-resync operations which were in flight when we
         # were shut down.
         if not hs.config.worker.worker_app:
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "resume_sync_partial_state_room",
-                self.server_name,
                 self._resume_partial_state_room_sync,
             )
 
@@ -320,9 +318,8 @@ class FederationHandler:
             logger.debug(
                 "_maybe_backfill_inner: all backfill points are *after* current depth. Trying again with later backfill points."
             )
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "_maybe_backfill_inner_anyway_with_max_depth",
-                self.server_name,
                 self.maybe_backfill,
                 room_id=room_id,
                 # We use `MAX_DEPTH` so that we find all backfill points next
@@ -837,9 +834,8 @@ class FederationHandler:
             # lots of requests for missing prev_events which we do actually
             # have. Hence we fire off the background task, but don't wait for it.
 
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "handle_queued_pdus",
-                self.server_name,
                 self._handle_queued_pdus,
                 room_queue,
             )
@@ -1912,9 +1908,8 @@ class FederationHandler:
                             room_id=room_id,
                         )
 
-        run_as_background_process(
+        self.hs.run_as_background_process(
             desc="sync_partial_state_room",
-            server_name=self.server_name,
             func=_sync_partial_state_room_wrapper,
         )
 

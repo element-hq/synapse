@@ -56,7 +56,7 @@ class SQLBaseStore(metaclass=ABCMeta):
     ):
         self.hs = hs
         self.server_name = hs.hostname  # nb must be called this for @cached
-        self._clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self.database_engine = database.engine
         self.db_pool = database
 

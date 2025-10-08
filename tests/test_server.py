@@ -55,9 +55,9 @@ class JsonResourceTests(unittest.TestCase):
         reactor, clock = get_clock()
         self.reactor = reactor
         self.homeserver = setup_test_homeserver(
-            self.addCleanup,
-            clock=clock,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
+            clock=clock,
         )
 
     def test_handler_for_request(self) -> None:
@@ -217,9 +217,9 @@ class OptionsResourceTests(unittest.TestCase):
         reactor, clock = get_clock()
         self.reactor = reactor
         self.homeserver = setup_test_homeserver(
-            self.addCleanup,
-            clock=clock,
+            cleanup_func=self.addCleanup,
             reactor=self.reactor,
+            clock=clock,
         )
 
         class DummyResource(Resource):
@@ -236,17 +236,17 @@ class OptionsResourceTests(unittest.TestCase):
         """Create a request from the method/path and return a channel with the response."""
         # Create a site and query for the resource.
         site = SynapseSite(
-            "test",
-            "site_tag",
-            parse_listener_def(
+            logger_name="test",
+            site_tag="site_tag",
+            config=parse_listener_def(
                 0,
                 {
                     "type": "http",
                     "port": 0,
                 },
             ),
-            self.resource,
-            "1.0",
+            resource=self.resource,
+            server_version_string="1",
             max_request_body_size=4096,
             reactor=self.reactor,
             hs=self.homeserver,

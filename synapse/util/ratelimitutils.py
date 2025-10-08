@@ -419,4 +419,7 @@ class _PerHostRatelimiter:
             except KeyError:
                 pass
 
-        self.clock.call_later(0.0, start_next_request)
+        self.clock.call_later(
+            0.0,
+            start_next_request,
+        )

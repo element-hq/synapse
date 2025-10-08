@@ -170,7 +170,7 @@ class EndToEndPerspectivesTests(BaseRemoteKeyResourceTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         # make a second homeserver, configured to use the first one as a key notary
         self.http_client2 = Mock()
-        config = default_config(name="keyclient")
+        config = default_config(server_name="keyclient")
         config["trusted_key_servers"] = [
             {
                 "server_name": self.hs.hostname,

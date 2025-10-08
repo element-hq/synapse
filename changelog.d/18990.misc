@@ -1,0 +1,1 @@
+Switch task scheduler from raw logcontext manipulation to using the dedicated logcontext utils.

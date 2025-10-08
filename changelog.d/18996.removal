@@ -1,0 +1,1 @@
+Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal.

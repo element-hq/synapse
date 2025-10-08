@@ -113,7 +113,6 @@ from synapse.storage.databases.main.transactions import TransactionWorkerStore
 from synapse.storage.databases.main.ui_auth import UIAuthWorkerStore
 from synapse.storage.databases.main.user_directory import UserDirectoryStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.util import SYNAPSE_VERSION
 from synapse.util.httpresourcetree import create_resource_tree
 
 logger = logging.getLogger("synapse.app.generic_worker")
@@ -280,11 +279,13 @@ class GenericWorkerServer(HomeServer):
                 self._listen_http(listener)
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -298,9 +299,11 @@ class GenericWorkerServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -357,7 +360,6 @@ def start(config: HomeServerConfig) -> None:
     hs = GenericWorkerServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{SYNAPSE_VERSION}",
     )
 
     setup_logging(hs, config, use_worker_options=True)

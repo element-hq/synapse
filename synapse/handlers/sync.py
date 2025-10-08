@@ -330,6 +330,7 @@ class SyncHandler:
         ] = ExpiringCache(
             cache_name="lazy_loaded_members_cache",
             server_name=self.server_name,
+            hs=hs,
             clock=self.clock,
             max_len=0,
             expiry_ms=LAZY_LOADED_MEMBERS_CACHE_MAX_AGE,
@@ -559,7 +560,7 @@ class SyncHandler:
         Returns:
             A tuple of the now StreamToken, updated to reflect the which typing
             events are included, and a dict mapping from room_id to a list of
-            typing events for that room.
+            ephemeral events for that room.
         """
 
         sync_config = sync_result_builder.sync_config
@@ -584,12 +585,8 @@ class SyncHandler:
             ephemeral_by_room: JsonDict = {}
 
             for event in typing:
-                # we want to exclude the room_id from the event, but modifying the
-                # result returned by the event source is poor form (it might cache
-                # the object)
                 room_id = event["room_id"]
-                event_copy = {k: v for (k, v) in event.items() if k != "room_id"}
-                ephemeral_by_room.setdefault(room_id, []).append(event_copy)
+                ephemeral_by_room.setdefault(room_id, []).append(event)
 
             receipt_key = (
                 since_token.receipt_key
@@ -609,9 +606,7 @@ class SyncHandler:
 
             for event in receipts:
                 room_id = event["room_id"]
-                # exclude room id, as above
-                event_copy = {k: v for (k, v) in event.items() if k != "room_id"}
-                ephemeral_by_room.setdefault(room_id, []).append(event_copy)
+                ephemeral_by_room.setdefault(room_id, []).append(event)
 
         return now_token, ephemeral_by_room
 
@@ -1024,6 +1019,7 @@ class SyncHandler:
             logger.debug("creating LruCache for %r", cache_key)
             cache = LruCache(
                 max_size=LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE,
+                clock=self.clock,
                 server_name=self.server_name,
             )
             self.lazy_loaded_members_cache[cache_key] = cache
@@ -2789,9 +2785,17 @@ class SyncHandler:
                 )
             )
 
-            ephemeral = await sync_config.filter_collection.filter_room_ephemeral(
-                ephemeral
-            )
+            ephemeral = [
+                # per spec, ephemeral events (typing notifications and read receipts)
+                # should not have a `room_id` field when sent to clients
+                # refs:
+                # - https://spec.matrix.org/v1.16/client-server-api/#mtyping
+                # - https://spec.matrix.org/v1.16/client-server-api/#mreceipt
+                {k: v for (k, v) in event.items() if k != "room_id"}
+                for event in await sync_config.filter_collection.filter_room_ephemeral(
+                    ephemeral
+                )
+            ]
 
             if not (
                 always_include

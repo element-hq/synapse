@@ -62,7 +62,6 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
 from synapse.storage.databases.main.events import DeltaState
@@ -195,6 +194,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
 
     def __init__(
         self,
+        hs: "HomeServer",
         server_name: str,
         per_item_callback: Callable[
             [str, _EventPersistQueueTask],
@@ -207,6 +207,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         and its result will be returned via the Deferreds returned from add_to_queue.
         """
         self.server_name = server_name
+        self.hs = hs
         self._event_persist_queues: Dict[str, Deque[_EventPersistQueueItem]] = {}
         self._currently_persisting_rooms: Set[str] = set()
         self._per_item_callback = per_item_callback
@@ -311,7 +312,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
                 self._currently_persisting_rooms.discard(room_id)
 
         # set handle_queue_loop off in the background
-        run_as_background_process("persist_events", self.server_name, handle_queue_loop)
+        self.hs.run_as_background_process("persist_events", handle_queue_loop)
 
     def _get_drainining_queue(
         self, room_id: str
@@ -354,7 +355,7 @@ class EventsPersistenceStorageController:
         self._instance_name = hs.get_instance_name()
         self.is_mine_id = hs.is_mine_id
         self._event_persist_queue = _EventPeristenceQueue(
-            self.server_name, self._process_event_persist_queue_task
+            hs, self.server_name, self._process_event_persist_queue_task
         )
         self._state_resolution_handler = hs.get_state_resolution_handler()
         self._state_controller = state_controller

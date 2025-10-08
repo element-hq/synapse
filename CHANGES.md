@@ -1,3 +1,38 @@
+# Synapse 1.139.1 (2025-10-07)
+
+## Security Fixes
+
+- Fix [CVE-2025-61672](https://www.cve.org/CVERecord?id=CVE-2025-61672) / [GHSA-fh66-fcv5-jjfr](https://github.com/element-hq/synapse/security/advisories/GHSA-fh66-fcv5-jjfr). Lack of validation for device keys in Synapse before 1.139.1 allows an attacker registered on the victim homeserver to degrade federation functionality, unpredictably breaking outbound federation to other homeservers. ([\#17097](https://github.com/element-hq/synapse/issues/17097))
+
+## Deprecations and Removals
+
+- Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal. This change allows unit tests to pass following the security patch above. ([\#18996](https://github.com/element-hq/synapse/issues/18996))
+
+# Synapse 1.138.3 (2025-10-07)
+
+## Security Fixes
+
+- Fix [CVE-2025-61672](https://www.cve.org/CVERecord?id=CVE-2025-61672) / [GHSA-fh66-fcv5-jjfr](https://github.com/element-hq/synapse/security/advisories/GHSA-fh66-fcv5-jjfr). Lack of validation for device keys in Synapse before 1.139.1 allows an attacker registered on the victim homeserver to degrade federation functionality, unpredictably breaking outbound federation to other homeservers. ([\#17097](https://github.com/element-hq/synapse/issues/17097))
+
+## Deprecations and Removals
+
+- Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal. This change allows unit tests to pass following the security patch above. ([\#18996](https://github.com/element-hq/synapse/issues/18996))
+
+# Synapse 1.139.0 (2025-09-30)
+
+### `/register` requests from old application service implementations may break when using MAS
+
+If you are using Matrix Authentication Service (MAS), as of this release any
+Application Services that do not set `inhibit_login=true` when calling `POST
+/_matrix/client/v3/register` will receive the error
+`IO.ELEMENT.MSC4190.M_APPSERVICE_LOGIN_UNSUPPORTED` in response. Please see [the
+upgrade
+notes](https://element-hq.github.io/synapse/develop/upgrade.html#register-requests-from-old-application-service-implementations-may-break-when-using-mas)
+for more information.
+
+No significant changes since 1.139.0rc3.
+
+
 # Synapse 1.139.0rc3 (2025-09-25)
 
 ## Bugfixes

@@ -251,17 +251,18 @@ class _DummyTagNames:
 try:
     import opentracing
     import opentracing.tags
-    from opentracing.scope_managers.contextvars import ContextVarsScopeManager
 
     tags = opentracing.tags
 except ImportError:
     opentracing = None  # type: ignore[assignment]
     tags = _DummyTagNames  # type: ignore[assignment]
-    ContextVarsScopeManager = None  # type: ignore
 try:
     from jaeger_client import Config as JaegerConfig
+
+    from synapse.logging.scopecontextmanager import LogContextScopeManager
 except ImportError:
     JaegerConfig = None  # type: ignore
+    LogContextScopeManager = None  # type: ignore
 
 
 try:
@@ -483,7 +484,7 @@ def init_tracer(hs: "HomeServer") -> None:
     config = JaegerConfig(
         config=jaeger_config,
         service_name=f"{hs.config.server.server_name} {instance_name_by_type}",
-        scope_manager=ContextVarsScopeManager(),
+        scope_manager=LogContextScopeManager(),
         metrics_factory=PrometheusMetricsFactory(),
     )
 
@@ -683,9 +684,21 @@ def start_active_span_from_edu(
 
 # Opentracing setters for tags, logs, etc
 @only_if_tracing
-def active_span() -> Optional["opentracing.Span"]:
-    """Get the currently active span, if any"""
-    return opentracing.tracer.active_span
+def active_span(
+    *,
+    tracer: Optional["opentracing.Tracer"] = None,
+) -> Optional["opentracing.Span"]:
+    """
+    Get the currently active span, if any
+
+    Args:
+        tracer: override the opentracing tracer. By default the global tracer is used.
+    """
+    if tracer is None:
+        # use the global tracer by default
+        tracer = opentracing.tracer
+
+    return tracer.active_span
 
 
 @ensure_active_span("set a tag")

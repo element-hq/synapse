@@ -79,6 +79,7 @@ STREAMS_MAP = {
 __all__ = [
     "STREAMS_MAP",
     "Stream",
+    "EventsStream",
     "BackfillStream",
     "PresenceStream",
     "PresenceFederationStream",
@@ -89,6 +90,7 @@ __all__ = [
     "CachesStream",
     "DeviceListsStream",
     "ToDeviceStream",
+    "FederationStream",
     "AccountDataStream",
     "StickyEventsStream",
     "ThreadSubscriptionsStream",
