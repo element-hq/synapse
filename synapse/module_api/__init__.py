@@ -1744,7 +1744,8 @@ class ModuleApi:
     ) -> T:
         """Runs the given function in a separate thread from the given thread pool.
 
-        Allows specifying a custom thread pool instead of using the default Synapse one.
+        Allows specifying a custom thread pool instead of using the default Synapse
+        one. To use the default Synapse threadpool, use `defer_to_thread` instead.
 
         Added in Synapse v1.140.0.
 
