@@ -842,15 +842,7 @@ class RootConfig:
         ):
             return None
 
-        obj.parse_config_dict(
-            config_dict,
-            config_dir_path=config_dir_path,
-            data_dir_path=data_dir_path,
-            allow_secrets_in_config=config_args.secrets_in_config,
-        )
-        obj.invoke_all("read_arguments", config_args)
-
-        return obj
+        return cls.load_config(description, argv_options)
 
     def parse_config_dict(
         self,

@@ -18,7 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from ._base import RootConfig
+from typing import List, Type, TypeVar
+
+from ._base import ConfigError, RootConfig
 from .account_validity import AccountValidityConfig
 from .api import ApiConfig
 from .appservice import AppServiceConfig
@@ -64,8 +66,14 @@ from .user_types import UserTypesConfig
 from .voip import VoipConfig
 from .workers import WorkerConfig
 
+THomeServerConfig = TypeVar("THomeServerConfig", bound="HomeServerConfig")
+
 
 class HomeServerConfig(RootConfig):
+    """
+    Top-level config object for Synapse homeserver (main process and workers).
+    """
+
     config_classes = [
         ModulesConfig,
         ServerConfig,
@@ -113,3 +121,32 @@ class HomeServerConfig(RootConfig):
         # This must be last, as it checks for conflicts with other config options.
         MasConfig,
     ]
+
+    @classmethod
+    def load_config(
+        cls: Type[THomeServerConfig], description: str, argv: List[str]
+    ) -> THomeServerConfig:
+        """
+        See `RootConfig.load_config`.
+
+        Note: This is where to put cross-config validation checks.
+        """
+        config = super().load_config(description, argv)
+
+        if (
+            config.registration.enable_registration
+            and not config.registration.enable_registration_without_verification
+        ):
+            if (
+                not config.captcha.enable_registration_captcha
+                and not config.registration.registrations_require_3pid
+                and not config.registration.registration_requires_token
+            ):
+                raise ConfigError(
+                    "You have enabled open registration without any verification. This is a known vector for "
+                    "spam and abuse. If you would like to allow public registration, please consider adding email, "
+                    "captcha, or token-based verification. Otherwise this check can be removed by setting the "
+                    "`enable_registration_without_verification` config option to `true`."
+                )
+
+        return config

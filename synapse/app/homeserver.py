@@ -330,22 +330,6 @@ def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
         config = HomeServerConfig.load_or_generate_config(
             "Synapse Homeserver", argv_options
         )
-
-        if (
-            config.registration.enable_registration
-            and not config.registration.enable_registration_without_verification
-        ):
-            if (
-                not config.captcha.enable_registration_captcha
-                and not config.registration.registrations_require_3pid
-                and not config.registration.registration_requires_token
-            ):
-                raise ConfigError(
-                    "You have enabled open registration without any verification. This is a known vector for "
-                    "spam and abuse. If you would like to allow public registration, please consider adding email, "
-                    "captcha, or token-based verification. Otherwise this check can be removed by setting the "
-                    "`enable_registration_without_verification` config option to `true`."
-                )
     except ConfigError as e:
         sys.stderr.write("\n")
         for f in format_config_error(e):
@@ -367,7 +351,7 @@ def setup(
     freeze: bool = True,
 ) -> SynapseHomeServer:
     """
-    Create and setup a Synapse homeserver instance given a configuration.
+    Create and setup the main Synapse homeserver instance given a configuration.
 
     Args:
         config: The configuration for the homeserver.
@@ -385,10 +369,9 @@ def setup(
 
     if config.worker.worker_app:
         raise ConfigError(
-            "You have specified `worker_app` in the config but are attempting to start a non-worker "
+            "You have specified `worker_app` in the config but are attempting to setup a non-worker "
             "instance. Please use `python -m synapse.app.generic_worker` instead (or remove the option if this is the main process)."
         )
-        sys.exit(1)
 
     events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
     synapse.util.caches.TRACK_MEMORY_USAGE = config.caches.track_memory_usage
