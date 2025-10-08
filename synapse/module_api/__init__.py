@@ -43,6 +43,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
+from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
 from synapse.api import errors
@@ -79,6 +80,7 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
     defer_to_thread,
+    defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
@@ -1732,6 +1734,32 @@ class ModuleApi:
             The return value of the function once ran in a thread.
         """
         return await defer_to_thread(self._hs.get_reactor(), f, *args, **kwargs)
+
+    async def defer_to_threadpool(
+        self,
+        threadpool: ThreadPool,
+        f: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
+        """Runs the given function in a separate thread from the given thread pool.
+
+        Allows specifying a custom thread pool instead of using the default Synapse one.
+
+        Added in Synapse v1.140.0.
+
+        Args:
+            threadpool: The thread pool to use.
+            f: The function to run.
+            args: The function's arguments.
+            kwargs: The function's keyword arguments.
+
+        Returns:
+            The return value of the function once ran in a thread.
+        """
+        return await defer_to_threadpool(
+            self._hs.get_reactor(), threadpool, f, *args, **kwargs
+        )
 
     async def check_username(self, username: str) -> None:
         """Checks if the provided username uses the grammar defined in the Matrix
