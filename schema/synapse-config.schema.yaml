@@ -2884,6 +2884,35 @@ properties:
     default: true
     examples:
       - false
+  matrix_rtc:
+    type: object 
+    description: >-
+      Options related to MatrixRTC.
+    properties:
+      transports:
+        type: array
+        items:
+          type: object
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              description: The type of transport to use to connect to the selective forwarding unit (SFU).
+              example: livekit
+            livekit_service_url:
+              type: string
+              description: >-
+                The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+              example: https://matrix-rtc.example.com/livekit/jwt
+        description:
+          A list of transport types and arguments to use for MatrixRTC connections.
+        default: []
+    default: {}
+    examples:
+      - transports:
+        - type: livekit
+          livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
   enable_registration:
     type: boolean
     description: >-
