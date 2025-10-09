@@ -116,7 +116,7 @@ class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
         self.reactor.advance(FORTY_DAYS)
 
         # I guess we call this one more time for good measure? Perhaps because
-        # previously, it the phone home stats weren't running in tests?
+        # previously, the phone home stats weren't running in tests?
         self.get_success(self.store.reap_monthly_active_users())
 
         active_count = self.get_success(self.store.get_monthly_active_count())
