@@ -367,7 +367,7 @@ def create_homeserver(
 
     if config.worker.worker_app:
         raise ConfigError(
-            "You have specified `worker_app` in the config but are attempting to start a non-worker "
+            "You have specified `worker_app` in the config but are attempting to setup a non-worker "
             "instance. Please use `python -m synapse.app.generic_worker` instead (or remove the option if this is the main process)."
         )
 
@@ -376,22 +376,6 @@ def create_homeserver(
 
     if config.server.gc_seconds:
         synapse.metrics.MIN_TIME_BETWEEN_GCS = config.server.gc_seconds
-
-    if (
-        config.registration.enable_registration
-        and not config.registration.enable_registration_without_verification
-    ):
-        if (
-            not config.captcha.enable_registration_captcha
-            and not config.registration.registrations_require_3pid
-            and not config.registration.registration_requires_token
-        ):
-            raise ConfigError(
-                "You have enabled open registration without any verification. This is a known vector for "
-                "spam and abuse. If you would like to allow public registration, please consider adding email, "
-                "captcha, or token-based verification. Otherwise this check can be removed by setting the "
-                "`enable_registration_without_verification` config option to `true`."
-            )
 
     hs = SynapseHomeServer(
         hostname=config.server.server_name,
