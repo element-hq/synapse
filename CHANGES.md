@@ -1,3 +1,12 @@
+# Synapse 1.139.2 (2025-10-07)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.139.1 where a client could receive an Internal Server Error if they set `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload). ([\#19023](https://github.com/element-hq/synapse/issues/19023))
+
+
+
+
 # Synapse 1.139.1 (2025-10-07)
 
 ## Security Fixes
@@ -7,6 +16,17 @@
 ## Deprecations and Removals
 
 - Drop support for unstable field names from the long-accepted [MSC2732](https://github.com/matrix-org/matrix-spec-proposals/pull/2732) (Olm fallback keys) proposal. This change allows unit tests to pass following the security patch above. ([\#18996](https://github.com/element-hq/synapse/issues/18996))
+
+
+
+# Synapse 1.138.4 (2025-10-07)
+
+## Bugfixes
+
+- Fix a bug introduced in 1.138.3 where a client could receive an Internal Server Error if they set `device_keys: null` in the request to [`POST /_matrix/client/v3/keys/upload`](https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload). ([\#19023](https://github.com/element-hq/synapse/issues/19023))
+
+
+
 
 # Synapse 1.138.3 (2025-10-07)
 
