@@ -62,12 +62,12 @@ from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
 from synapse.app._base import unregister_sighups
+from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
 from synapse.crypto import context_factory
 from synapse.crypto.context_factory import RegularPolicyForHTTPS
-from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.crypto.keyring import Keyring
 from synapse.events.builder import EventBuilderFactory
 from synapse.events.presence_router import PresenceRouter
