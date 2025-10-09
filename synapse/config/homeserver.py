@@ -38,6 +38,7 @@ from .jwt import JWTConfig
 from .key import KeyConfig
 from .logger import LoggingConfig
 from .mas import MasConfig
+from .matrixrtc import MatrixRtcConfig
 from .metrics import MetricsConfig
 from .modules import ModulesConfig
 from .oembed import OembedConfig
@@ -85,6 +86,7 @@ class HomeServerConfig(RootConfig):
         OembedConfig,
         CaptchaConfig,
         VoipConfig,
+        MatrixRtcConfig,
         RegistrationConfig,
         AccountValidityConfig,
         MetricsConfig,

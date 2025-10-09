@@ -37,6 +37,7 @@ from synapse.config import (  # noqa: F401
     key,
     logger,
     mas,
+    matrixrtc,
     metrics,
     modules,
     oembed,
@@ -126,6 +127,7 @@ class RootConfig:
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
     user_types: user_types.UserTypesConfig
     mas: mas.MasConfig
+    matrix_rtc: matrixrtc.MatrixRtcConfig
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]
