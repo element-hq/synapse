@@ -150,6 +150,7 @@ from prometheus_client import Counter
 from twisted.internet import defer
 
 import synapse.metrics
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.presence import UserPresenceState
 from synapse.events import EventBase
 from synapse.federation.sender.per_destination_queue import (
@@ -167,7 +168,6 @@ from synapse.metrics import (
     events_processed_counter,
 )
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.types import (
@@ -177,7 +177,7 @@ from synapse.types import (
     StrCollection,
     get_domain_from_id,
 )
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
 
@@ -199,6 +199,24 @@ sent_pdus_destination_dist_total = Counter(
     labelnames=[SERVER_NAME_LABEL],
 )
 
+transaction_queue_pending_destinations_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_destinations",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_pdus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_pdus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+transaction_queue_pending_edus_gauge = LaterGauge(
+    name="synapse_federation_transaction_queue_pending_edus",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
 # Time (in s) to wait before trying to wake up destinations that have
 # catch-up outstanding.
 # Please note that rate limiting still applies, so while the loop is
@@ -213,6 +231,11 @@ WAKEUP_INTERVAL_BETWEEN_DESTINATIONS_SEC = 5
 
 
 class AbstractFederationSender(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def shutdown(self) -> None:
+        """Stops this federation sender instance from sending further transactions."""
+        raise NotImplementedError()
+
     @abc.abstractmethod
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to
@@ -307,6 +330,7 @@ class _DestinationWakeupQueue:
     _MAX_TIME_IN_QUEUE = 30.0
 
     sender: "FederationSender" = attr.ib()
+    hs: "HomeServer" = attr.ib()
     server_name: str = attr.ib()
     """
     Our homeserver name (used to label metrics) (`hs.hostname`).
@@ -398,11 +422,9 @@ class FederationSender(AbstractFederationSender):
         # map from destination to PerDestinationQueue
         self._per_destination_queues: Dict[str, PerDestinationQueue] = {}
 
-        LaterGauge(
-            name="synapse_federation_transaction_queue_pending_destinations",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        transaction_queue_pending_destinations_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): sum(
                     1
                     for d in self._per_destination_queues.values()
@@ -410,22 +432,17 @@ class FederationSender(AbstractFederationSender):
                 )
             },
         )
-
-        LaterGauge(
-            name="synapse_federation_transaction_queue_pending_pdus",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        transaction_queue_pending_pdus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): sum(
                     d.pending_pdu_count() for d in self._per_destination_queues.values()
                 )
             },
         )
-        LaterGauge(
-            name="synapse_federation_transaction_queue_pending_edus",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        transaction_queue_pending_edus_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): sum(
                     d.pending_edu_count() for d in self._per_destination_queues.values()
                 )
@@ -441,17 +458,29 @@ class FederationSender(AbstractFederationSender):
             1.0 / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
         self._destination_wakeup_queue = _DestinationWakeupQueue(
-            self, self.server_name, self.clock, max_delay_s=rr_txn_interval_per_room_s
+            self,
+            hs,
+            self.server_name,
+            self.clock,
+            max_delay_s=rr_txn_interval_per_room_s,
         )
+
+        # It is important for `_is_shutdown` to be instantiated before the looping call
+        # for `wake_destinations_needing_catchup`.
+        self._is_shutdown = False
 
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call_now(
-            run_as_background_process,
+            self.hs.run_as_background_process,
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
-            self.server_name,
             self._wake_destinations_needing_catchup,
         )
+
+    def shutdown(self) -> None:
+        self._is_shutdown = True
+        for queue in self._per_destination_queues.values():
+            queue.shutdown()
 
     def _get_per_destination_queue(
         self, destination: str
@@ -491,16 +520,15 @@ class FederationSender(AbstractFederationSender):
             return
 
         # fire off a processing loop in the background
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "process_event_queue_for_federation",
-            self.server_name,
             self._process_event_queue_loop,
         )
 
     async def _process_event_queue_loop(self) -> None:
         try:
             self._is_processing = True
-            while True:
+            while not self._is_shutdown:
                 last_token = await self.store.get_federation_out_pos("events")
                 (
                     next_token,
@@ -643,6 +671,31 @@ class FederationSender(AbstractFederationSender):
                                 event.event_id,
                             )
                             return
+
+                    # If we've rescinded an invite then we want to tell the
+                    # other server.
+                    if (
+                        event.type == EventTypes.Member
+                        and event.membership == Membership.LEAVE
+                        and event.sender != event.state_key
+                    ):
+                        # We check if this leave event is rescinding an invite
+                        # by looking if there is an invite event for the user in
+                        # the auth events. It could otherwise be a kick or
+                        # unban, which we don't want to send (if the user wasn't
+                        # already in the room).
+                        auth_events = await self.store.get_events_as_list(
+                            event.auth_event_ids()
+                        )
+                        for auth_event in auth_events:
+                            if (
+                                auth_event.type == EventTypes.Member
+                                and auth_event.state_key == event.state_key
+                                and auth_event.membership == Membership.INVITE
+                            ):
+                                destinations = set(destinations)
+                                destinations.add(get_domain_from_id(event.state_key))
+                                break
 
                     sharded_destinations = {
                         d
@@ -1086,7 +1139,7 @@ class FederationSender(AbstractFederationSender):
 
         last_processed: Optional[str] = None
 
-        while True:
+        while not self._is_shutdown:
             destinations_to_wake = (
                 await self.store.get_catch_up_outstanding_destinations(last_processed)
             )

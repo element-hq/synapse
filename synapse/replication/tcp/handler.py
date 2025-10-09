@@ -41,7 +41,6 @@ from prometheus_client import Counter
 from twisted.internet.protocol import ReconnectingClientFactory
 
 from synapse.metrics import SERVER_NAME_LABEL, LaterGauge
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.tcp.commands import (
     ClearUserSyncsCommand,
     Command,
@@ -106,6 +105,18 @@ user_ip_cache_counter = Counter(
     "synapse_replication_tcp_resource_user_ip_cache", "", labelnames=[SERVER_NAME_LABEL]
 )
 
+tcp_resource_total_connections_gauge = LaterGauge(
+    name="synapse_replication_tcp_resource_total_connections",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+tcp_command_queue_gauge = LaterGauge(
+    name="synapse_replication_tcp_command_queue",
+    desc="Number of inbound RDATA/POSITION commands queued for processing",
+    labelnames=["stream_name", SERVER_NAME_LABEL],
+)
+
 
 # the type of the entries in _command_queues_by_stream
 _StreamCommandQueue = Deque[
@@ -120,6 +131,7 @@ class ReplicationCommandHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self.hs = hs
         self._replication_data_handler = hs.get_replication_data_handler()
         self._presence_handler = hs.get_presence_handler()
         self._store = hs.get_datastores().main
@@ -243,11 +255,9 @@ class ReplicationCommandHandler:
         # outgoing replication commands to.)
         self._connections: List[IReplicationConnection] = []
 
-        LaterGauge(
-            name="synapse_replication_tcp_resource_total_connections",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self._connections)},
+        tcp_resource_total_connections_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self._connections)},
         )
 
         # When POSITION or RDATA commands arrive, we stick them in a queue and process
@@ -266,11 +276,9 @@ class ReplicationCommandHandler:
         # from that connection.
         self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
 
-        LaterGauge(
-            name="synapse_replication_tcp_command_queue",
-            desc="Number of inbound RDATA/POSITION commands queued for processing",
-            labelnames=["stream_name", SERVER_NAME_LABEL],
-            caller=lambda: {
+        tcp_command_queue_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (stream_name, self.server_name): len(queue)
                 for stream_name, queue in self._command_queues_by_stream.items()
             },
@@ -353,9 +361,8 @@ class ReplicationCommandHandler:
             return
 
         # fire off a background process to start processing the queue.
-        run_as_background_process(
+        self.hs.run_as_background_process(
             "process-replication-data",
-            self.server_name,
             self._unsafe_process_queue,
             stream_name,
         )

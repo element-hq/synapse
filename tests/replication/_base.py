@@ -32,14 +32,13 @@ from synapse.config.workers import InstanceTcpLocationConfig, InstanceUnixLocati
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.replication.http import ReplicationRestResource
 from synapse.replication.tcp.client import ReplicationDataHandler
-from synapse.replication.tcp.handler import ReplicationCommandHandler
 from synapse.replication.tcp.protocol import (
     ClientReplicationStreamProtocol,
     ServerReplicationStreamProtocol,
 )
 from synapse.replication.tcp.resource import ReplicationStreamProtocolFactory
 from synapse.server import HomeServer
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests import unittest
 from tests.server import FakeTransport
@@ -97,7 +96,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         self.test_handler = self._build_replication_data_handler()
         self.worker_hs._replication_data_handler = self.test_handler  # type: ignore[attr-defined]
 
-        repl_handler = ReplicationCommandHandler(self.worker_hs)
+        repl_handler = self.worker_hs.get_replication_command_handler()
         self.client = ClientReplicationStreamProtocol(
             self.worker_hs,
             "client",
@@ -174,7 +173,13 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self.site.buildProtocol((host, port))
+        # The type ignore is here because mypy doesn't think the host/port tuple is of
+        # the correct type, even though it is the exact example given for
+        # `twisted.internet.interfaces.IAddress`.
+        # Mypy was happy with the type before we overrode `buildProtocol` in
+        # `SynapseSite`, probably because there was enough inheritance indirection before
+        # withe the argument not having a type associated with it.
+        channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
@@ -186,7 +191,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
             requests.append(request)
             return request
 
-        channel.requestFactory = request_factory
+        channel.requestFactory = request_factory  # type: ignore[method-assign]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -428,7 +433,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self._hs_to_site[hs].buildProtocol((host, port))
+        channel = self._hs_to_site[hs].buildProtocol((host, port))  # type: ignore[arg-type]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(

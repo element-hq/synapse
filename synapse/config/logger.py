@@ -40,7 +40,6 @@ from twisted.logger import (
 )
 
 from synapse.logging.context import LoggingContextFilter
-from synapse.logging.filter import MetadataFilter
 from synapse.synapse_rust import reset_logging_config
 from synapse.types import JsonDict
 
@@ -213,13 +212,11 @@ def _setup_stdlib_logging(
     # writes.
 
     log_context_filter = LoggingContextFilter()
-    log_metadata_filter = MetadataFilter({"server_name": config.server.server_name})
     old_factory = logging.getLogRecordFactory()
 
     def factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
         record = old_factory(*args, **kwargs)
         log_context_filter.filter(record)
-        log_metadata_filter.filter(record)
         return record
 
     logging.setLogRecordFactory(factory)
@@ -348,7 +345,9 @@ def setup_logging(
     # Add a SIGHUP handler to reload the logging configuration, if one is available.
     from synapse.app import _base as appbase
 
-    appbase.register_sighup(_reload_logging_config, log_config_path)
+    appbase.register_sighup(
+        hs.get_instance_id(), _reload_logging_config, log_config_path
+    )
 
     # Log immediately so we can grep backwards.
     logger.warning("***** STARTING SERVER *****")

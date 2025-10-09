@@ -29,7 +29,7 @@ from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.prepare_database import PrepareDatabaseException, prepare_database
 from synapse.storage.schema import SCHEMA_VERSION
 from synapse.types import JsonDict
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.unittest import HomeserverTestCase
 

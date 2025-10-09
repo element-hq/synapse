@@ -22,14 +22,13 @@
 import logging
 import os
 import sys
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
 from twisted.web.server import GzipEncoderFactory
 
 import synapse
-import synapse.config.logger
 from synapse import events
 from synapse.api.urls import (
     CLIENT_API_PREFIX,
@@ -50,6 +49,7 @@ from synapse.app._base import (
 )
 from synapse.config._base import ConfigError, format_config_error
 from synapse.config.homeserver import HomeServerConfig
+from synapse.config.logger import setup_logging
 from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.additional_resource import AdditionalResource
@@ -60,6 +60,7 @@ from synapse.http.server import (
     StaticResource,
 )
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -69,7 +70,8 @@ from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
-from synapse.util.check_dependencies import VERSION, check_requirements
+from synapse.types import ISynapseReactor
+from synapse.util.check_dependencies import check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
 
@@ -276,11 +278,13 @@ class SynapseHomeServer(HomeServer):
                 )
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -293,9 +297,11 @@ class SynapseHomeServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -308,17 +314,21 @@ class SynapseHomeServer(HomeServer):
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
 
-def setup(config_options: List[str]) -> SynapseHomeServer:
+def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     """
+    Parse the commandline and config files
+
+    Supports generation of config files, so is used for the main homeserver app.
+
     Args:
-        config_options_options: The options passed to Synapse. Usually `sys.argv[1:]`.
+        argv_options: The options passed to Synapse. Usually `sys.argv[1:]`.
 
     Returns:
         A homeserver instance.
     """
     try:
         config = HomeServerConfig.load_or_generate_config(
-            "Synapse Homeserver", config_options
+            "Synapse Homeserver", argv_options
         )
     except ConfigError as e:
         sys.stderr.write("\n")
@@ -331,6 +341,31 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
         # If a config isn't returned, and an exception isn't raised, we're just
         # generating config files and shouldn't try to continue.
         sys.exit(0)
+
+    return config
+
+
+def setup(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+    freeze: bool = True,
+) -> SynapseHomeServer:
+    """
+    Create and setup a Synapse homeserver instance given a configuration.
+
+    Args:
+        config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+
+    Returns:
+        A homeserver instance.
+    """
 
     if config.worker.worker_app:
         raise ConfigError(
@@ -364,10 +399,13 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
     hs = SynapseHomeServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{VERSION}",
+        reactor=reactor,
     )
 
-    synapse.config.logger.setup_logging(hs, config, use_worker_options=False)
+    setup_logging(hs, config, use_worker_options=False)
+
+    # Start the tracer
+    init_tracer(hs)  # noqa
 
     logger.info("Setting up server")
 
@@ -383,11 +421,11 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
             # Loading the provider metadata also ensures the provider config is valid.
             await oidc.load_metadata()
 
-        await _base.start(hs)
+        await _base.start(hs, freeze)
 
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
-    register_start(start)
+    register_start(hs, start)
 
     return hs
 
@@ -405,10 +443,12 @@ def run(hs: HomeServer) -> None:
 
 
 def main() -> None:
-    with LoggingContext("main"):
+    homeserver_config = load_or_generate_config(sys.argv[1:])
+
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         # check base requirements
         check_requirements()
-        hs = setup(sys.argv[1:])
+        hs = setup(homeserver_config)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:

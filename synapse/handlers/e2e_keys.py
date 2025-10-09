@@ -44,9 +44,9 @@ from synapse.types import (
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
 )
-from synapse.util import json_decoder
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.cancellation import cancellable
+from synapse.util.json import json_decoder
 from synapse.util.retryutils import (
     NotRetryingDestination,
     filter_destinations_by_retry_limiter,
@@ -56,7 +56,6 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
-
 
 ONE_TIME_KEY_UPLOAD = "one_time_key_upload_lock"
 
@@ -112,8 +111,7 @@ class E2eKeysHandler:
 
         # Limit the number of in-flight requests from a single device.
         self._query_devices_linearizer = Linearizer(
-            name="query_devices",
-            max_count=10,
+            name="query_devices", max_count=10, clock=hs.get_clock()
         )
 
         self._query_appservices_for_otks = (
@@ -848,14 +846,22 @@ class E2eKeysHandler:
         """
         time_now = self.clock.time_msec()
 
-        # TODO: Validate the JSON to make sure it has the right keys.
         device_keys = keys.get("device_keys", None)
         if device_keys:
+            log_kv(
+                {
+                    "message": "Updating device_keys for user.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
             await self.upload_device_keys_for_user(
                 user_id=user_id,
                 device_id=device_id,
                 keys={"device_keys": device_keys},
             )
+        else:
+            log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
 
         one_time_keys = keys.get("one_time_keys", None)
         if one_time_keys:
@@ -873,10 +879,9 @@ class E2eKeysHandler:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
-        fallback_keys = keys.get("fallback_keys") or keys.get(
-            "org.matrix.msc2732.fallback_keys"
-        )
-        if fallback_keys and isinstance(fallback_keys, dict):
+
+        fallback_keys = keys.get("fallback_keys")
+        if fallback_keys:
             log_kv(
                 {
                     "message": "Updating fallback_keys for device.",
@@ -885,8 +890,6 @@ class E2eKeysHandler:
                 }
             )
             await self.store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
-        elif fallback_keys:
-            log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
         else:
             log_kv(
                 {"message": "Did not update fallback_keys", "reason": "no keys given"}
@@ -1765,7 +1768,9 @@ class SigningKeyEduUpdater:
         assert isinstance(device_handler, DeviceWriterHandler)
         self._device_handler = device_handler
 
-        self._remote_edu_linearizer = Linearizer(name="remote_signing_key")
+        self._remote_edu_linearizer = Linearizer(
+            name="remote_signing_key", clock=self.clock
+        )
 
         # user_id -> list of updates waiting to be handled.
         self._pending_updates: Dict[str, List[Tuple[JsonDict, JsonDict]]] = {}

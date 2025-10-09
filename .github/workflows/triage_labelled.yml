@@ -6,43 +6,26 @@ on:
 
 jobs:
   move_needs_info:
-    name: Move X-Needs-Info on the triage board
     runs-on: ubuntu-latest
     if: >
       contains(github.event.issue.labels.*.name, 'X-Needs-Info')
+    permissions:
+      contents: read
+    env:
+      # This token must have the following scopes: ["repo:public_repo", "admin:org->read:org", "user->read:user", "project"]
+      GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
+      PROJECT_OWNER: matrix-org
+      # Backend issue triage board.
+      # https://github.com/orgs/matrix-org/projects/67/views/1
+      PROJECT_NUMBER: 67
+      ISSUE_URL: ${{ github.event.issue.html_url }}
+      # This field is case-sensitive.
+      TARGET_STATUS: Needs info
     steps:
-      - uses: actions/add-to-project@c0c5949b017d0d4a39f7ba888255881bdac2a823 # v1.0.2
-        id: add_project
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          project-url: "https://github.com/orgs/matrix-org/projects/67"
-          github-token: ${{ secrets.ELEMENT_BOT_TOKEN }}
-        # This action will error if the issue already exists on the project. Which is
-        # common as `X-Needs-Info` will often be added to issues that are already in
-        # the triage queue. Prevent the whole job from failing in this case.
-        continue-on-error: true
-      - name: Set status
-        env:
-          GITHUB_TOKEN: ${{ secrets.ELEMENT_BOT_TOKEN }}
-        run: |
-          gh api graphql -f query='
-          mutation(
-              $project: ID!
-              $item: ID!
-              $fieldid: ID!
-              $columnid: String!
-            )  {
-            updateProjectV2ItemFieldValue(
-              input: {
-               projectId: $project
-                itemId: $item
-                fieldId: $fieldid
-                value: { 
-                  singleSelectOptionId: $columnid
-                  }
-              }
-            ) {
-              projectV2Item {
-                id
-              }
-            }
-          }' -f project="PVT_kwDOAIB0Bs4AFDdZ" -f item=${{ steps.add_project.outputs.itemId }} -f fieldid="PVTSSF_lADOAIB0Bs4AFDdZzgC6ZA4" -f columnid=ba22e43c --silent
+          # Only clone the script file we care about, instead of the whole repo.
+          sparse-checkout: .ci/scripts/triage_labelled_issue.sh
+
+      - name: Ensure issue exists on the board, then set Status
+        run: .ci/scripts/triage_labelled_issue.sh

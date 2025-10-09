@@ -438,10 +438,11 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
             cache_name="client_ip_last_seen",
             server_name=self.server_name,
             max_size=50000,
+            clock=hs.get_clock(),
         )
 
         if hs.config.worker.run_background_tasks and self.user_ips_max_age:
-            self._clock.looping_call(self._prune_old_user_ips, 5 * 1000)
+            self.clock.looping_call(self._prune_old_user_ips, 5 * 1000)
 
         if self._update_on_this_worker:
             # This is the designated worker that can write to the client IP
@@ -452,11 +453,11 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
                 Tuple[str, str, str], Tuple[str, Optional[str], int]
             ] = {}
 
-            self._client_ip_looper = self._clock.looping_call(
-                self._update_client_ips_batch, 5 * 1000
-            )
-            self.hs.get_reactor().addSystemEventTrigger(
-                "before", "shutdown", self._update_client_ips_batch
+            self.clock.looping_call(self._update_client_ips_batch, 5 * 1000)
+            hs.register_async_shutdown_handler(
+                phase="before",
+                eventType="shutdown",
+                shutdown_func=self._update_client_ips_batch,
             )
 
     @wrap_as_background_process("prune_old_user_ips")
@@ -492,7 +493,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
             )
         """
 
-        timestamp = self._clock.time_msec() - self.user_ips_max_age
+        timestamp = self.clock.time_msec() - self.user_ips_max_age
 
         def _prune_old_user_ips_txn(txn: LoggingTransaction) -> None:
             txn.execute(sql, (timestamp,))
@@ -628,7 +629,7 @@ class ClientIpWorkerStore(ClientIpBackgroundUpdateStore, MonthlyActiveUsersWorke
             return
 
         if not now:
-            now = int(self._clock.time_msec())
+            now = int(self.clock.time_msec())
         key = (user_id, access_token, ip)
 
         try:

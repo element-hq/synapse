@@ -41,9 +41,9 @@ from synapse.logging.opentracing import (
     start_active_span,
     start_active_span_follows_from,
 )
-from synapse.util import Clock
 from synapse.util.async_helpers import AbstractObservableDeferred, ObservableDeferred
 from synapse.util.caches import EvictionReason, register_cache
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,17 @@ class ResponseCache(Generic[KV]):
             # the should_cache bit, we leave it in the cache for now and schedule
             # its removal later.
             if self.timeout_sec and context.should_cache:
-                self.clock.call_later(self.timeout_sec, self._entry_timeout, key)
+                self.clock.call_later(
+                    self.timeout_sec,
+                    self._entry_timeout,
+                    key,
+                    # We don't need to track these calls since they don't hold any strong
+                    # references which would keep the `HomeServer` in memory after shutdown.
+                    # We don't want to track these because they can get cancelled really
+                    # quickly and thrash the tracking mechanism, ie. during repeated calls
+                    # to /sync.
+                    call_later_cancel_on_shutdown=False,
+                )
             else:
                 # otherwise, remove the result immediately.
                 self.unset(key)

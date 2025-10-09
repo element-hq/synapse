@@ -86,6 +86,24 @@ users_woken_by_stream_counter = Counter(
     labelnames=["stream", SERVER_NAME_LABEL],
 )
 
+
+notifier_listeners_gauge = LaterGauge(
+    name="synapse_notifier_listeners",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+notifier_rooms_gauge = LaterGauge(
+    name="synapse_notifier_rooms",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+notifier_users_gauge = LaterGauge(
+    name="synapse_notifier_users",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
 T = TypeVar("T")
 
 
@@ -281,28 +299,20 @@ class Notifier:
                 )
             }
 
-        LaterGauge(
-            name="synapse_notifier_listeners",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=count_listeners,
+        notifier_listeners_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(), hook=count_listeners
         )
-
-        LaterGauge(
-            name="synapse_notifier_rooms",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {
+        notifier_rooms_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {
                 (self.server_name,): count(
                     bool, list(self.room_to_user_streams.values())
                 )
             },
         )
-        LaterGauge(
-            name="synapse_notifier_users",
-            desc="",
-            labelnames=[SERVER_NAME_LABEL],
-            caller=lambda: {(self.server_name,): len(self.user_to_user_stream)},
+        notifier_users_gauge.register_hook(
+            homeserver_instance_id=hs.get_instance_id(),
+            hook=lambda: {(self.server_name,): len(self.user_to_user_stream)},
         )
 
     def add_replication_callback(self, cb: Callable[[], None]) -> None:
@@ -522,6 +532,7 @@ class Notifier:
             StreamKeyType.TO_DEVICE,
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
+            StreamKeyType.THREAD_SUBSCRIPTIONS,
         ],
         new_token: int,
         users: Optional[Collection[Union[str, UserID]]] = None,
@@ -665,9 +676,16 @@ class Notifier:
                         # is a new token.
                         listener = user_stream.new_listener(prev_token)
                         listener = timeout_deferred(
-                            listener,
-                            (end_time - now) / 1000.0,
-                            self.hs.get_reactor(),
+                            deferred=listener,
+                            timeout=(end_time - now) / 1000.0,
+                            # We don't track these calls since they are constantly being
+                            # overridden by new calls to /sync and they don't hold the
+                            # `HomeServer` in memory on shutdown. It is safe to let them
+                            # timeout of their own accord after shutting down since it
+                            # won't delay shutdown and there won't be any adverse
+                            # behaviour.
+                            cancel_on_shutdown=False,
+                            clock=self.hs.get_clock(),
                         )
 
                         log_kv(

@@ -58,8 +58,8 @@ from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
-from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -730,7 +730,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE ? <= event_id AND event_id <= ?
             """
 
-            txn.execute(sql, (self._clock.time_msec(), last_event_id, upper_event_id))
+            txn.execute(sql, (self.clock.time_msec(), last_event_id, upper_event_id))
 
             self.db_pool.updates._background_update_progress_txn(
                 txn, "redactions_received_ts", {"last_event_id": upper_event_id}

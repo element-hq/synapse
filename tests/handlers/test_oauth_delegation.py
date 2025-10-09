@@ -25,11 +25,11 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
-from typing import Any, Coroutine, Dict, Generator, Optional, TypeVar, Union
+from typing import Any, ClassVar, Coroutine, Dict, Generator, Optional, TypeVar, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
-from parameterized import parameterized_class
+from parameterized.parameterized import parameterized_class
 from signedjson.key import (
     encode_verify_key_base64,
     generate_signing_key,
@@ -46,7 +46,6 @@ from synapse.api.errors import (
     Codes,
     HttpResponseException,
     InvalidClientTokenError,
-    OAuthInsufficientScopeError,
     SynapseError,
 )
 from synapse.appservice import ApplicationService
@@ -55,7 +54,7 @@ from synapse.rest import admin
 from synapse.rest.client import account, devices, keys, login, logout, register
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID, create_requester
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.server import FakeChannel
 from tests.test_utils import get_awaitable_result
@@ -78,11 +77,7 @@ JWKS_URI = ISSUER + ".well-known/jwks.json"
 INTROSPECTION_ENDPOINT = ISSUER + "introspect"
 
 SYNAPSE_ADMIN_SCOPE = "urn:synapse:admin:*"
-MATRIX_USER_SCOPE = "urn:matrix:org.matrix.msc2967.client:api:*"
-MATRIX_GUEST_SCOPE = "urn:matrix:org.matrix.msc2967.client:api:guest"
-MATRIX_DEVICE_SCOPE_PREFIX = "urn:matrix:org.matrix.msc2967.client:device:"
 DEVICE = "AABBCCDD"
-MATRIX_DEVICE_SCOPE = MATRIX_DEVICE_SCOPE_PREFIX + DEVICE
 SUBJECT = "abc-def-ghi"
 USERNAME = "test-user"
 USER_ID = "@" + USERNAME + ":" + SERVER_NAME
@@ -112,7 +107,24 @@ async def get_json(url: str) -> JsonDict:
 
 
 @skip_unless(HAS_AUTHLIB, "requires authlib")
+@parameterized_class(
+    ("device_scope_prefix", "api_scope"),
+    [
+        ("urn:matrix:client:device:", "urn:matrix:client:api:*"),
+        (
+            "urn:matrix:org.matrix.msc2967.client:device:",
+            "urn:matrix:org.matrix.msc2967.client:api:*",
+        ),
+    ],
+)
 class MSC3861OAuthDelegation(HomeserverTestCase):
+    device_scope_prefix: ClassVar[str]
+    api_scope: ClassVar[str]
+
+    @property
+    def device_scope(self) -> str:
+        return self.device_scope_prefix + DEVICE
+
     servlets = [
         account.register_servlets,
         keys.register_servlets,
@@ -212,7 +224,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         """The handler should return a 500 when no subject is present."""
 
         self._set_introspection_returnvalue(
-            {"active": True, "scope": " ".join([MATRIX_USER_SCOPE])}
+            {"active": True, "scope": " ".join([self.api_scope])},
         )
 
         request = Mock(args={})
@@ -235,7 +247,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join([MATRIX_DEVICE_SCOPE]),
+                "scope": " ".join([self.device_scope]),
             }
         )
         request = Mock(args={})
@@ -282,7 +294,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join([SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE]),
+                "scope": " ".join([SYNAPSE_ADMIN_SCOPE, self.api_scope]),
                 "username": USERNAME,
             }
         )
@@ -312,9 +324,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join(
-                    [SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE, MATRIX_GUEST_SCOPE]
-                ),
+                "scope": " ".join([SYNAPSE_ADMIN_SCOPE, self.api_scope]),
                 "username": USERNAME,
             }
         )
@@ -344,7 +354,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join([MATRIX_USER_SCOPE]),
+                "scope": " ".join([self.api_scope]),
                 "username": USERNAME,
             }
         )
@@ -374,7 +384,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "scope": " ".join([self.api_scope, self.device_scope]),
                 "username": USERNAME,
             }
         )
@@ -404,7 +414,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join([MATRIX_USER_SCOPE]),
+                "scope": " ".join([self.api_scope]),
                 "device_id": DEVICE,
                 "username": USERNAME,
             }
@@ -444,9 +454,9 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 "sub": SUBJECT,
                 "scope": " ".join(
                     [
-                        MATRIX_USER_SCOPE,
-                        f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
-                        f"{MATRIX_DEVICE_SCOPE_PREFIX}DDEEFF",
+                        self.api_scope,
+                        f"{self.device_scope_prefix}AABBCC",
+                        f"{self.device_scope_prefix}DDEEFF",
                     ]
                 ),
                 "username": USERNAME,
@@ -456,68 +466,6 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         request.args[b"access_token"] = [b"mockAccessToken"]
         request.requestHeaders.getRawHeaders = mock_getRawHeaders()
         self.get_failure(self.auth.get_user_by_req(request), AuthError)
-
-    def test_active_guest_not_allowed(self) -> None:
-        """The handler should return an insufficient scope error."""
-
-        self._set_introspection_returnvalue(
-            {
-                "active": True,
-                "sub": SUBJECT,
-                "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
-                "username": USERNAME,
-            }
-        )
-        request = Mock(args={})
-        request.args[b"access_token"] = [b"mockAccessToken"]
-        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
-        error = self.get_failure(
-            self.auth.get_user_by_req(request), OAuthInsufficientScopeError
-        )
-        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self._rust_client.post.assert_called_once_with(
-            url=INTROSPECTION_ENDPOINT,
-            response_limit=ANY,
-            request_body=ANY,
-            headers=ANY,
-        )
-        self._assertParams()
-        self.assertEqual(
-            getattr(error.value, "headers", {})["WWW-Authenticate"],
-            'Bearer error="insufficient_scope", scope="urn:matrix:org.matrix.msc2967.client:api:*"',
-        )
-
-    def test_active_guest_allowed(self) -> None:
-        """The handler should return a requester with guest user rights and a device ID."""
-
-        self._set_introspection_returnvalue(
-            {
-                "active": True,
-                "sub": SUBJECT,
-                "scope": " ".join([MATRIX_GUEST_SCOPE, MATRIX_DEVICE_SCOPE]),
-                "username": USERNAME,
-            }
-        )
-        request = Mock(args={})
-        request.args[b"access_token"] = [b"mockAccessToken"]
-        request.requestHeaders.getRawHeaders = mock_getRawHeaders()
-        requester = self.get_success(
-            self.auth.get_user_by_req(request, allow_guest=True)
-        )
-        self.http_client.get_json.assert_called_once_with(WELL_KNOWN)
-        self._rust_client.post.assert_called_once_with(
-            url=INTROSPECTION_ENDPOINT,
-            response_limit=ANY,
-            request_body=ANY,
-            headers=ANY,
-        )
-        self._assertParams()
-        self.assertEqual(requester.user.to_string(), "@%s:%s" % (USERNAME, SERVER_NAME))
-        self.assertEqual(requester.is_guest, True)
-        self.assertEqual(
-            get_awaitable_result(self.auth.is_server_admin(requester)), False
-        )
-        self.assertEqual(requester.device_id, DEVICE)
 
     def test_unavailable_introspection_endpoint(self) -> None:
         """The handler should return an internal server error."""
@@ -562,8 +510,8 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 "sub": SUBJECT,
                 "scope": " ".join(
                     [
-                        MATRIX_USER_SCOPE,
-                        f"{MATRIX_DEVICE_SCOPE_PREFIX}AABBCC",
+                        self.api_scope,
+                        f"{self.device_scope_prefix}AABBCC",
                     ]
                 ),
                 "username": USERNAME,
@@ -611,7 +559,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             {
                 "active": True,
                 "sub": SUBJECT,
-                "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                "scope": " ".join([self.api_scope, self.device_scope]),
                 "username": USERNAME,
             }
         )
@@ -676,7 +624,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
                 return json.dumps(
                     {
                         "active": True,
-                        "scope": MATRIX_USER_SCOPE,
+                        "scope": self.api_scope,
                         "sub": SUBJECT,
                         "username": USERNAME,
                     },
@@ -842,8 +790,24 @@ class FakeMasServer(HTTPServer):
 T = TypeVar("T")
 
 
+@parameterized_class(
+    ("device_scope_prefix", "api_scope"),
+    [
+        ("urn:matrix:client:device:", "urn:matrix:client:api:*"),
+        (
+            "urn:matrix:org.matrix.msc2967.client:device:",
+            "urn:matrix:org.matrix.msc2967.client:api:*",
+        ),
+    ],
+)
 class MasAuthDelegation(HomeserverTestCase):
     server: FakeMasServer
+    device_scope_prefix: ClassVar[str]
+    api_scope: ClassVar[str]
+
+    @property
+    def device_scope(self) -> str:
+        return self.device_scope_prefix + DEVICE
 
     def till_deferred_has_result(
         self,
@@ -914,12 +878,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": " ".join(
-                [
-                    MATRIX_USER_SCOPE,
-                    f"{MATRIX_DEVICE_SCOPE_PREFIX}{DEVICE}",
-                ]
-            ),
+            "scope": " ".join([self.api_scope, self.device_scope]),
             "username": USERNAME,
             "expires_in": 60,
         }
@@ -943,12 +902,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": " ".join(
-                [
-                    MATRIX_USER_SCOPE,
-                    f"{MATRIX_DEVICE_SCOPE_PREFIX}{DEVICE}",
-                ]
-            ),
+            "scope": " ".join([self.api_scope, self.device_scope]),
             "username": USERNAME,
         }
 
@@ -971,12 +925,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": " ".join(
-                [
-                    MATRIX_USER_SCOPE,
-                    f"{MATRIX_DEVICE_SCOPE_PREFIX}ABCDEF",
-                ]
-            ),
+            "scope": " ".join([self.api_scope, f"{self.device_scope_prefix}ABCDEF"]),
             "username": USERNAME,
             "expires_in": 60,
         }
@@ -993,7 +942,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": " ".join([MATRIX_USER_SCOPE]),
+            "scope": " ".join([self.api_scope]),
             "username": "inexistent_user",
             "expires_in": 60,
         }
@@ -1039,7 +988,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": MATRIX_USER_SCOPE,
+            "scope": self.api_scope,
             "username": USERNAME,
             "expires_in": 60,
             "device_id": DEVICE,
@@ -1057,7 +1006,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": " ".join([SYNAPSE_ADMIN_SCOPE, MATRIX_USER_SCOPE]),
+            "scope": " ".join([SYNAPSE_ADMIN_SCOPE, self.api_scope]),
             "username": USERNAME,
             "expires_in": 60,
         }
@@ -1079,12 +1028,7 @@ class MasAuthDelegation(HomeserverTestCase):
         self.server.introspection_response = {
             "active": True,
             "sub": SUBJECT,
-            "scope": " ".join(
-                [
-                    MATRIX_USER_SCOPE,
-                    f"{MATRIX_DEVICE_SCOPE_PREFIX}{DEVICE}",
-                ]
-            ),
+            "scope": " ".join([self.api_scope, self.device_scope]),
             "username": USERNAME,
             "expires_in": 60,
         }
@@ -1275,7 +1219,11 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         channel = self.make_request(
             "POST",
             "/_matrix/client/v3/register",
-            {"username": "alice", "type": "m.login.application_service"},
+            {
+                "username": "alice",
+                "type": "m.login.application_service",
+                "inhibit_login": True,
+            },
             shorthand=False,
             access_token="i_am_an_app_service",
         )

@@ -29,8 +29,8 @@ from synapse.storage.database import (
     make_in_list_sql_clause,  # noqa: F401
 )
 from synapse.types import get_domain_from_id
-from synapse.util import json_decoder
 from synapse.util.caches.descriptors import CachedFunction
+from synapse.util.json import json_decoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -56,7 +56,7 @@ class SQLBaseStore(metaclass=ABCMeta):
     ):
         self.hs = hs
         self.server_name = hs.hostname  # nb must be called this for @cached
-        self._clock = hs.get_clock()
+        self.clock = hs.get_clock()  # nb must be called this for @cached
         self.database_engine = database.engine
         self.db_pool = database
 

@@ -43,6 +43,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
+from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
 from synapse.api import errors
@@ -50,6 +51,7 @@ from synapse.api.constants import ProfileFields
 from synapse.api.errors import SynapseError
 from synapse.api.presence import UserPresenceState
 from synapse.config import ConfigError
+from synapse.config.repository import MediaUploadLimit
 from synapse.events import EventBase
 from synapse.events.presence_router import (
     GET_INTERESTED_USERS_CALLBACK,
@@ -78,6 +80,7 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
     defer_to_thread,
+    defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
@@ -94,7 +97,9 @@ from synapse.module_api.callbacks.account_validity_callbacks import (
 )
 from synapse.module_api.callbacks.media_repository_callbacks import (
     GET_MEDIA_CONFIG_FOR_USER_CALLBACK,
+    GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK,
     IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK,
+    ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK,
 )
 from synapse.module_api.callbacks.ratelimit_callbacks import (
     GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK,
@@ -155,9 +160,9 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import Clock
 from synapse.util.async_helpers import maybe_awaitable
 from synapse.util.caches.descriptors import CachedFunction, cached as _cached
+from synapse.util.clock import Clock
 from synapse.util.frozenutils import freeze
 
 if TYPE_CHECKING:
@@ -205,6 +210,7 @@ __all__ = [
     "RoomAlias",
     "UserProfile",
     "RatelimitOverride",
+    "MediaUploadLimit",
 ]
 
 logger = logging.getLogger(__name__)
@@ -271,7 +277,15 @@ def run_as_background_process(
     # function instead.
     stub_server_name = "synapse_module_running_from_unknown_server"
 
-    return _run_as_background_process(
+    # Ignore the linter error here. Since this is leveraging the
+    # `run_as_background_process` function directly and we don't want to break the
+    # module api, we need to keep the function signature the same. This means we don't
+    # have access to the running `HomeServer` and cannot track this background process
+    # for cleanup during shutdown.
+    # This is not an issue during runtime and is only potentially problematic if the
+    # application cares about being able to garbage collect `HomeServer` instances
+    # during runtime.
+    return _run_as_background_process(  # type: ignore[untracked-background-process]
         desc,
         stub_server_name,
         func,
@@ -462,6 +476,12 @@ class ModuleApi:
         is_user_allowed_to_upload_media_of_size: Optional[
             IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
         ] = None,
+        get_media_upload_limits_for_user: Optional[
+            GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
+        ] = None,
+        on_media_upload_limit_exceeded: Optional[
+            ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
+        ] = None,
     ) -> None:
         """Registers callbacks for media repository capabilities.
         Added in Synapse v1.132.0.
@@ -469,6 +489,8 @@ class ModuleApi:
         return self._callbacks.media_repository.register_callbacks(
             get_media_config_for_user=get_media_config_for_user,
             is_user_allowed_to_upload_media_of_size=is_user_allowed_to_upload_media_of_size,
+            get_media_upload_limits_for_user=get_media_upload_limits_for_user,
+            on_media_upload_limit_exceeded=on_media_upload_limit_exceeded,
         )
 
     def register_third_party_rules_callbacks(
@@ -1390,7 +1412,7 @@ class ModuleApi:
 
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
-                self.run_as_background_process,
+                self._hs.run_as_background_process,
                 msec,
                 desc,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
@@ -1448,7 +1470,7 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            self.run_as_background_process,
+            self._hs.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
@@ -1689,8 +1711,8 @@ class ModuleApi:
             Note that the returned Deferred does not follow the synapse logcontext
             rules.
         """
-        return _run_as_background_process(
-            desc, self.server_name, func, *args, bg_start_span=bg_start_span, **kwargs
+        return self._hs.run_as_background_process(
+            desc, func, *args, bg_start_span=bg_start_span, **kwargs
         )
 
     async def defer_to_thread(
@@ -1712,6 +1734,33 @@ class ModuleApi:
             The return value of the function once ran in a thread.
         """
         return await defer_to_thread(self._hs.get_reactor(), f, *args, **kwargs)
+
+    async def defer_to_threadpool(
+        self,
+        threadpool: ThreadPool,
+        f: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
+        """Runs the given function in a separate thread from the given thread pool.
+
+        Allows specifying a custom thread pool instead of using the default Synapse
+        one. To use the default Synapse threadpool, use `defer_to_thread` instead.
+
+        Added in Synapse v1.140.0.
+
+        Args:
+            threadpool: The thread pool to use.
+            f: The function to run.
+            args: The function's arguments.
+            kwargs: The function's keyword arguments.
+
+        Returns:
+            The return value of the function once ran in a thread.
+        """
+        return await defer_to_threadpool(
+            self._hs.get_reactor(), threadpool, f, *args, **kwargs
+        )
 
     async def check_username(self, username: str) -> None:
         """Checks if the provided username uses the grammar defined in the Matrix

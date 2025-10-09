@@ -57,6 +57,7 @@ from synapse.events import EventBase, relation_from_event
 from synapse.events.builder import EventBuilder
 from synapse.events.snapshot import (
     EventContext,
+    EventPersistencePair,
     UnpersistedEventContext,
     UnpersistedEventContextBase,
 )
@@ -66,7 +67,6 @@ from synapse.handlers.directory import DirectoryHandler
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.send_events import ReplicationSendEventsRestServlet
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
@@ -80,9 +80,10 @@ from synapse.types import (
     create_requester,
 )
 from synapse.types.state import StateFilter
-from synapse.util import json_decoder, json_encoder, log_failure, unwrapFirstError
+from synapse.util import log_failure, unwrapFirstError
 from synapse.util.async_helpers import Linearizer, gather_results
 from synapse.util.caches.expiringcache import ExpiringCache
+from synapse.util.json import json_decoder, json_encoder
 from synapse.util.metrics import measure_func
 from synapse.visibility import get_effective_room_visibility_from_state
 
@@ -97,6 +98,7 @@ class MessageHandler:
 
     def __init__(self, hs: "HomeServer"):
         self.server_name = hs.hostname
+        self.hs = hs
         self.auth = hs.get_auth()
         self.clock = hs.get_clock()
         self.state = hs.get_state_handler()
@@ -111,8 +113,8 @@ class MessageHandler:
         self._scheduled_expiry: Optional[IDelayedCall] = None
 
         if not hs.config.worker.worker_app:
-            run_as_background_process(
-                "_schedule_next_expiry", self.server_name, self._schedule_next_expiry
+            self.hs.run_as_background_process(
+                "_schedule_next_expiry", self._schedule_next_expiry
             )
 
     async def get_room_data(
@@ -442,9 +444,8 @@ class MessageHandler:
 
         self._scheduled_expiry = self.clock.call_later(
             delay,
-            run_as_background_process,
+            self.hs.run_as_background_process,
             "_expire_event",
-            self.server_name,
             self._expire_event,
             event_id,
         )
@@ -511,7 +512,9 @@ class EventCreationHandler:
 
         # We limit concurrent event creation for a room to 1. This prevents state resolution
         # from occurring when sending bursts of events to a local room
-        self.limiter = Linearizer(max_count=1, name="room_event_creation_limit")
+        self.limiter = Linearizer(
+            max_count=1, name="room_event_creation_limit", clock=self.clock
+        )
 
         self._bulk_push_rule_evaluator = hs.get_bulk_push_rule_evaluator()
 
@@ -544,9 +547,8 @@ class EventCreationHandler:
             and self.config.server.cleanup_extremities_with_dummy_events
         ):
             self.clock.looping_call(
-                lambda: run_as_background_process(
+                lambda: self.hs.run_as_background_process(
                     "send_dummy_events_to_fill_extremities",
-                    self.server_name,
                     self._send_dummy_events_to_fill_extremities,
                 ),
                 5 * 60 * 1000,
@@ -566,6 +568,7 @@ class EventCreationHandler:
             self._external_cache_joined_hosts_updates = ExpiringCache(
                 cache_name="_external_cache_joined_hosts_updates",
                 server_name=self.server_name,
+                hs=self.hs,
                 clock=self.clock,
                 expiry_ms=30 * 60 * 1000,
             )
@@ -1012,13 +1015,36 @@ class EventCreationHandler:
             await self.clock.sleep(random.randint(1, 10))
             raise ShadowBanError()
 
-        if ratelimit:
+        room_version = None
+
+        if (
+            event_dict["type"] == EventTypes.Redaction
+            and "redacts" in event_dict["content"]
+            and self.hs.config.experimental.msc4169_enabled
+        ):
             room_id = event_dict["room_id"]
             try:
                 room_version = await self.store.get_room_version(room_id)
             except NotFoundError:
-                # The room doesn't exist.
                 raise AuthError(403, f"User {requester.user} not in room {room_id}")
+
+            if not room_version.updated_redaction_rules:
+                # Legacy room versions need the "redacts" field outside of the event's
+                # content. However clients may still send it within the content, so move
+                # the field if necessary for compatibility.
+                redacts = event_dict.get("redacts") or event_dict["content"].pop(
+                    "redacts", None
+                )
+                if redacts is not None and "redacts" not in event_dict:
+                    event_dict["redacts"] = redacts
+
+        if ratelimit:
+            if room_version is None:
+                room_id = event_dict["room_id"]
+                try:
+                    room_version = await self.store.get_room_version(room_id)
+                except NotFoundError:
+                    raise AuthError(403, f"User {requester.user} not in room {room_id}")
 
             if room_version.updated_redaction_rules:
                 redacts = event_dict["content"].get("redacts")
@@ -1112,6 +1138,12 @@ class EventCreationHandler:
 
                 assert self.hs.is_mine_id(event.sender), "User must be our own: %s" % (
                     event.sender,
+                )
+                # if this room uses a policy server, try to get a signature now.
+                # We use verify=False here as we are about to call is_event_allowed on the same event
+                # which will do sig checks.
+                await self._policy_handler.ask_policy_server_to_sign_event(
+                    event, verify=False
                 )
 
                 policy_allowed = await self._policy_handler.is_event_allowed(event)
@@ -1439,7 +1471,7 @@ class EventCreationHandler:
     async def handle_new_client_event(
         self,
         requester: Requester,
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
         ignore_shadow_ban: bool = False,
@@ -1651,7 +1683,7 @@ class EventCreationHandler:
     async def _persist_events(
         self,
         requester: Requester,
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
     ) -> EventBase:
@@ -1737,7 +1769,7 @@ class EventCreationHandler:
             raise
 
     async def cache_joined_hosts_for_events(
-        self, events_and_context: List[Tuple[EventBase, EventContext]]
+        self, events_and_context: List[EventPersistencePair]
     ) -> None:
         """Precalculate the joined hosts at each of the given events, when using Redis, so that
         external federation senders don't have to recalculate it themselves.
@@ -1843,7 +1875,7 @@ class EventCreationHandler:
     async def persist_and_notify_client_events(
         self,
         requester: Requester,
-        events_and_context: List[Tuple[EventBase, EventContext]],
+        events_and_context: List[EventPersistencePair],
         ratelimit: bool = True,
         extra_users: Optional[List[UserID]] = None,
     ) -> EventBase:
@@ -2080,9 +2112,8 @@ class EventCreationHandler:
             if event.type == EventTypes.Message:
                 # We don't want to block sending messages on any presence code. This
                 # matters as sometimes presence code can take a while.
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "bump_presence_active_time",
-                    self.server_name,
                     self._bump_active_time,
                     requester.user,
                     requester.device_id,

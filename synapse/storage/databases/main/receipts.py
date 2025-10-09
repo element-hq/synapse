@@ -55,10 +55,10 @@ from synapse.types import (
     PersistedPosition,
     StrCollection,
 )
-from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -1073,7 +1073,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
         if event_ts is None:
             return None
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         logger.debug(
             "Receipt %s for event %s in %s (%i ms old)",
             receipt_type,

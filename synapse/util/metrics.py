@@ -42,7 +42,7 @@ from synapse.logging.context import (
     current_context,
 )
 from synapse.metrics import SERVER_NAME_LABEL, InFlightGauge
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +217,11 @@ class Measure:
         else:
             assert isinstance(curr_context, LoggingContext)
             parent_context = curr_context
-        self._logging_context = LoggingContext(str(curr_context), parent_context)
+        self._logging_context = LoggingContext(
+            name=str(curr_context),
+            server_name=self.server_name,
+            parent_context=parent_context,
+        )
         self.start: Optional[float] = None
 
     def __enter__(self) -> "Measure":
@@ -289,21 +293,46 @@ class DynamicCollectorRegistry(CollectorRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        self._pre_update_hooks: Dict[str, Callable[[], None]] = {}
+        self._server_name_to_pre_update_hooks: Dict[
+            str, Dict[str, Callable[[], None]]
+        ] = {}
+        """
+        Mapping of server name to a mapping of metric name to metric pre-update
+        hook
+        """
 
     def collect(self) -> Generator[Metric, None, None]:
         """
         Collects metrics, calling pre-update hooks first.
         """
 
-        for pre_update_hook in self._pre_update_hooks.values():
-            pre_update_hook()
+        for pre_update_hooks in self._server_name_to_pre_update_hooks.values():
+            for pre_update_hook in pre_update_hooks.values():
+                pre_update_hook()
 
         yield from super().collect()
 
-    def register_hook(self, metric_name: str, hook: Callable[[], None]) -> None:
+    def register_hook(
+        self, server_name: str, metric_name: str, hook: Callable[[], None]
+    ) -> None:
         """
         Registers a hook that is called before metric collection.
         """
 
-        self._pre_update_hooks[metric_name] = hook
+        server_hooks = self._server_name_to_pre_update_hooks.setdefault(server_name, {})
+        if server_hooks.get(metric_name) is not None:
+            # TODO: This should be an `assert` since registering the same metric name
+            # multiple times will clobber the old metric.
+            # We currently rely on this behaviour as we instantiate multiple
+            # `SyncRestServlet`, one per listener, and in the `__init__` we setup a new
+            # LruCache.
+            # Once the above behaviour is changed, this should be changed to an `assert`.
+            logger.error(
+                "Metric named %s already registered for server %s",
+                metric_name,
+                server_name,
+            )
+        server_hooks[metric_name] = hook
+
+    def unregister_hooks_for_homeserver(self, server_name: str) -> None:
+        self._server_name_to_pre_update_hooks.pop(server_name, None)

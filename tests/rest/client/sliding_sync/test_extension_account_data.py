@@ -24,7 +24,7 @@ from synapse.api.constants import AccountDataTypes
 from synapse.rest.client import login, room, sendtodevice, sync
 from synapse.server import HomeServer
 from synapse.types import StreamKeyType
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.server import TimedOutException

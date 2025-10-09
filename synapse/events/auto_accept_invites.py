@@ -119,7 +119,6 @@ class InviteAutoAccepter:
             event.state_key,
             event.room_id,
             "join",
-            bg_start_span=False,
         )
 
         if is_direct_message:

@@ -57,7 +57,7 @@ from synapse.events import (
     is_creator,
     relation_from_event,
 )
-from synapse.events.snapshot import EventContext
+from synapse.events.snapshot import EventPersistencePair
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
 from synapse.metrics import SERVER_NAME_LABEL
@@ -83,9 +83,9 @@ from synapse.types import (
 )
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
-from synapse.util import json_encoder
 from synapse.util.events import get_plain_text_topic_from_event_content
 from synapse.util.iterutils import batch_iter, sorted_topologically
+from synapse.util.json import json_encoder
 from synapse.util.stringutils import non_null_str_or_none
 
 if TYPE_CHECKING:
@@ -274,7 +274,7 @@ class PersistEventsStore:
     async def _persist_events_and_state_updates(
         self,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
         *,
         state_delta_for_room: Optional[DeltaState],
         new_forward_extremities: Optional[Set[str]],
@@ -532,7 +532,7 @@ class PersistEventsStore:
     async def _calculate_sliding_sync_table_changes(
         self,
         room_id: str,
-        events_and_contexts: Sequence[Tuple[EventBase, EventContext]],
+        events_and_contexts: Sequence[EventPersistencePair],
         delta_state: DeltaState,
     ) -> SlidingSyncTableChanges:
         """
@@ -1016,7 +1016,7 @@ class PersistEventsStore:
         txn: LoggingTransaction,
         *,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
         inhibit_local_membership_updates: bool,
         state_delta_for_room: Optional[DeltaState],
         new_forward_extremities: Optional[Set[str]],
@@ -1666,7 +1666,7 @@ class PersistEventsStore:
     def _persist_transaction_ids_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Persist the mapping from transaction IDs to event IDs (if defined)."""
 
@@ -2316,7 +2316,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """
         Update the latest `event_stream_ordering`/`bump_stamp` columns in the
@@ -2456,8 +2456,8 @@ class PersistEventsStore:
 
     @classmethod
     def _filter_events_and_contexts_for_duplicates(
-        cls, events_and_contexts: List[Tuple[EventBase, EventContext]]
-    ) -> List[Tuple[EventBase, EventContext]]:
+        cls, events_and_contexts: List[EventPersistencePair]
+    ) -> List[EventPersistencePair]:
         """Ensure that we don't have the same event twice.
 
         Pick the earliest non-outlier if there is one, else the earliest one.
@@ -2468,9 +2468,7 @@ class PersistEventsStore:
         Returns:
             filtered list
         """
-        new_events_and_contexts: OrderedDict[str, Tuple[EventBase, EventContext]] = (
-            OrderedDict()
-        )
+        new_events_and_contexts: OrderedDict[str, EventPersistencePair] = OrderedDict()
         for event, context in events_and_contexts:
             prev_event_context = new_events_and_contexts.get(event.event_id)
             if prev_event_context:
@@ -2488,7 +2486,7 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         room_id: str,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Update min_depth for each room
 
@@ -2530,8 +2528,8 @@ class PersistEventsStore:
     def _update_outliers_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-    ) -> List[Tuple[EventBase, EventContext]]:
+        events_and_contexts: List[EventPersistencePair],
+    ) -> List[EventPersistencePair]:
         """Update any outliers with new event info.
 
         This turns outliers into ex-outliers (unless the new event was rejected), and
@@ -2638,7 +2636,7 @@ class PersistEventsStore:
     def _store_event_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: Collection[Tuple[EventBase, EventContext]],
+        events_and_contexts: Collection[EventPersistencePair],
     ) -> None:
         """Insert new events into the event, event_json, redaction and
         state_events tables.
@@ -2742,8 +2740,8 @@ class PersistEventsStore:
     def _store_rejected_events_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-    ) -> List[Tuple[EventBase, EventContext]]:
+        events_and_contexts: List[EventPersistencePair],
+    ) -> List[EventPersistencePair]:
         """Add rows to the 'rejections' table for received events which were
         rejected
 
@@ -2770,8 +2768,8 @@ class PersistEventsStore:
         self,
         txn: LoggingTransaction,
         *,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-        all_events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
+        all_events_and_contexts: List[EventPersistencePair],
         inhibit_local_membership_updates: bool = False,
     ) -> None:
         """Update all the miscellaneous tables for new events
@@ -2865,7 +2863,7 @@ class PersistEventsStore:
     def _add_to_cache(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
     ) -> None:
         to_prefill: List[EventCacheEntry] = []
 
@@ -3338,8 +3336,8 @@ class PersistEventsStore:
     def _set_push_actions_for_event_and_users_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: List[Tuple[EventBase, EventContext]],
-        all_events_and_contexts: List[Tuple[EventBase, EventContext]],
+        events_and_contexts: List[EventPersistencePair],
+        all_events_and_contexts: List[EventPersistencePair],
     ) -> None:
         """Handles moving push actions from staging table to main
         event_push_actions table for all events in `events_and_contexts`.
@@ -3422,7 +3420,7 @@ class PersistEventsStore:
     def _store_event_state_mappings_txn(
         self,
         txn: LoggingTransaction,
-        events_and_contexts: Collection[Tuple[EventBase, EventContext]],
+        events_and_contexts: Collection[EventPersistencePair],
     ) -> None:
         """
         Raises:

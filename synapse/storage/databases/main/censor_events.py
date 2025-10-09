@@ -32,7 +32,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
-from synapse.util import json_encoder
+from synapse.util.json import json_encoder
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -77,7 +77,7 @@ class CensorEventsStore(EventsWorkerStore, CacheInvalidationWorkerStore, SQLBase
             return
 
         before_ts = (
-            self._clock.time_msec() - self.hs.config.server.redaction_retention_period
+            self.clock.time_msec() - self.hs.config.server.redaction_retention_period
         )
 
         # We fetch all redactions that:

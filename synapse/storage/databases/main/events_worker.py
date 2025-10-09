@@ -70,7 +70,6 @@ from synapse.logging.opentracing import (
 )
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.metrics.background_process_metrics import (
-    run_as_background_process,
     wrap_as_background_process,
 )
 from synapse.replication.tcp.streams import BackfillStream, UnPartialStatedEventStream
@@ -81,6 +80,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
@@ -281,13 +281,14 @@ class EventsWorkerStore(SQLBaseStore):
 
         if hs.config.worker.run_background_tasks:
             # We periodically clean out old transaction ID mappings
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self._cleanup_old_transaction_ids,
                 5 * 60 * 1000,
             )
 
         self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
             AsyncLruCache(
+                clock=hs.get_clock(),
                 server_name=self.server_name,
                 cache_name="*getEvent*",
                 max_size=hs.config.caches.event_cache_size,
@@ -1153,9 +1154,7 @@ class EventsWorkerStore(SQLBaseStore):
                 should_start = False
 
         if should_start:
-            run_as_background_process(
-                "fetch_events", self.server_name, self._fetch_thread
-            )
+            self.hs.run_as_background_process("fetch_events", self._fetch_thread)
 
     async def _fetch_thread(self) -> None:
         """Services requests for events from `_event_fetch_list`."""
@@ -1275,7 +1274,7 @@ class EventsWorkerStore(SQLBaseStore):
                 were not part of this request.
         """
         with Measure(
-            self._clock, name="_fetch_event_list", server_name=self.server_name
+            self.clock, name="_fetch_event_list", server_name=self.server_name
         ):
             try:
                 events_to_fetch = {
@@ -1337,6 +1336,7 @@ class EventsWorkerStore(SQLBaseStore):
         fetched_event_ids: Set[str] = set()
         fetched_events: Dict[str, _EventRow] = {}
 
+        @trace
         async def _fetch_event_ids_and_get_outstanding_redactions(
             event_ids_to_fetch: Collection[str],
         ) -> Collection[str]:
@@ -1344,6 +1344,10 @@ class EventsWorkerStore(SQLBaseStore):
             Fetch all of the given event_ids and return any associated redaction event_ids
             that we still need to fetch in the next iteration.
             """
+            set_tag(
+                SynapseTags.FUNC_ARG_PREFIX + "event_ids_to_fetch.length",
+                str(len(event_ids_to_fetch)),
+            )
             row_map = await self._enqueue_events(event_ids_to_fetch)
 
             # we need to recursively fetch any redactions of those events
@@ -1617,21 +1621,28 @@ class EventsWorkerStore(SQLBaseStore):
             # likely that some of these events may be for the same room/user combo, in
             # which case we don't need to do redundant queries
             to_check_set = set(to_check)
-            for room_and_user in to_check_set:
-                room_redactions_sql = "SELECT redacting_event_id, redact_end_ordering FROM room_ban_redactions WHERE room_id = ? and user_id = ?"
-                txn.execute(room_redactions_sql, room_and_user)
-
-                res = txn.fetchone()
-                # we have a redaction for a room, user_id combo - apply it to matching events
-                if not res:
-                    continue
+            room_redaction_sql = "SELECT room_id, user_id, redacting_event_id, redact_end_ordering FROM room_ban_redactions WHERE "
+            (
+                in_list_clause,
+                room_redaction_args,
+            ) = make_tuple_in_list_sql_clause(
+                self.database_engine, ("room_id", "user_id"), to_check_set
+            )
+            txn.execute(room_redaction_sql + in_list_clause, room_redaction_args)
+            for (
+                returned_room_id,
+                returned_user_id,
+                redacting_event_id,
+                redact_end_ordering,
+            ) in txn:
                 for e_row in events:
                     e_json = json.loads(e_row.json)
                     room_id = e_json.get("room_id")
                     user_id = e_json.get("sender")
+                    room_and_user = (returned_room_id, returned_user_id)
+                    # check if we have a redaction match for this room, user combination
                     if room_and_user != (room_id, user_id):
                         continue
-                    redacting_event_id, redact_end_ordering = res
                     if redact_end_ordering:
                         # Avoid redacting any events arriving *after* the membership event which
                         # ends an active redaction - note that this will always redact
@@ -2122,6 +2133,39 @@ class EventsWorkerStore(SQLBaseStore):
 
         return rows, to_token, True
 
+    async def get_senders_for_event_ids(
+        self, event_ids: Collection[str]
+    ) -> Dict[str, Optional[str]]:
+        """
+        Given a sequence of event IDs, return the sender associated with each.
+
+        Args:
+            event_ids: A collection of event IDs as strings.
+
+        Returns:
+            A dict of event ID -> sender of the event.
+
+        If a given event ID does not exist in the `events` table, then no entry
+        for that event ID will be returned.
+        """
+
+        def _get_senders_for_event_ids(
+            txn: LoggingTransaction,
+        ) -> Dict[str, Optional[str]]:
+            rows = self.db_pool.simple_select_many_txn(
+                txn=txn,
+                table="events",
+                column="event_id",
+                iterable=event_ids,
+                keyvalues={},
+                retcols=["event_id", "sender"],
+            )
+            return dict(rows)
+
+        return await self.db_pool.runInteraction(
+            "get_senders_for_event_ids", _get_senders_for_event_ids
+        )
+
     @cached(max_entries=5000)
     async def get_event_ordering(self, event_id: str, room_id: str) -> Tuple[int, int]:
         res = await self.db_pool.simple_select_one(
@@ -2232,7 +2276,7 @@ class EventsWorkerStore(SQLBaseStore):
         """Cleans out transaction id mappings older than 24hrs."""
 
         def _cleanup_old_transaction_ids_txn(txn: LoggingTransaction) -> None:
-            one_day_ago = self._clock.time_msec() - 24 * 60 * 60 * 1000
+            one_day_ago = self.clock.time_msec() - 24 * 60 * 60 * 1000
             sql = """
                 DELETE FROM event_txn_id_device_id
                 WHERE inserted_ts < ?
@@ -2587,7 +2631,7 @@ class EventsWorkerStore(SQLBaseStore):
                 keyvalues={"event_id": event_id},
                 values={
                     "reason": rejection_reason,
-                    "last_check": self._clock.time_msec(),
+                    "last_check": self.clock.time_msec(),
                 },
             )
         self.db_pool.simple_update_txn(

@@ -25,7 +25,7 @@ from twisted.internet.testing import MemoryReactor
 
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
-from synapse.util import Clock
+from synapse.util.clock import Clock
 from synapse.util.task_scheduler import TaskScheduler
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase

@@ -204,7 +204,7 @@ from twisted.web.http import Request
 from twisted.web.http_headers import Headers
 
 from synapse.config import ConfigError
-from synapse.util import json_decoder, json_encoder
+from synapse.util.json import json_decoder, json_encoder
 
 if TYPE_CHECKING:
     from synapse.http.site import SynapseRequest
@@ -577,7 +577,9 @@ def start_active_span_follows_from(
     operation_name: str,
     contexts: Collection,
     child_of: Optional[Union["opentracing.Span", "opentracing.SpanContext"]] = None,
+    tags: Optional[Dict[str, str]] = None,
     start_time: Optional[float] = None,
+    ignore_active_span: bool = False,
     *,
     inherit_force_tracing: bool = False,
     tracer: Optional["opentracing.Tracer"] = None,
@@ -592,8 +594,15 @@ def start_active_span_follows_from(
            span will be the parent. (If there is no currently active span, the first
            span in `contexts` will be the parent.)
 
+        tags: an optional dictionary of span tags. The caller gives up ownership of that
+            dictionary, because the :class:`Tracer` may use it as-is to avoid extra data
+            copying.
+
         start_time: optional override for the start time of the created span. Seconds
             since the epoch.
+
+        ignore_active_span: an explicit flag that ignores the current active
+            scope and creates a root span.
 
         inherit_force_tracing: if set, and any of the previous contexts have had tracing
            forced, the new span will also have tracing forced.
@@ -607,7 +616,9 @@ def start_active_span_follows_from(
         operation_name,
         child_of=child_of,
         references=references,
+        tags=tags,
         start_time=start_time,
+        ignore_active_span=ignore_active_span,
         tracer=tracer,
     )
 
@@ -673,9 +684,21 @@ def start_active_span_from_edu(
 
 # Opentracing setters for tags, logs, etc
 @only_if_tracing
-def active_span() -> Optional["opentracing.Span"]:
-    """Get the currently active span, if any"""
-    return opentracing.tracer.active_span
+def active_span(
+    *,
+    tracer: Optional["opentracing.Tracer"] = None,
+) -> Optional["opentracing.Span"]:
+    """
+    Get the currently active span, if any
+
+    Args:
+        tracer: override the opentracing tracer. By default the global tracer is used.
+    """
+    if tracer is None:
+        # use the global tracer by default
+        tracer = opentracing.tracer
+
+    return tracer.active_span
 
 
 @ensure_active_span("set a tag")

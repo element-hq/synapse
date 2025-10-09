@@ -37,6 +37,7 @@ Events are replicated via a separate events stream.
 """
 
 import logging
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Dict,
@@ -65,6 +66,25 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class QueueNames(str, Enum):
+    PRESENCE_MAP = "presence_map"
+    KEYED_EDU = "keyed_edu"
+    KEYED_EDU_CHANGED = "keyed_edu_changed"
+    EDUS = "edus"
+    POS_TIME = "pos_time"
+    PRESENCE_DESTINATIONS = "presence_destinations"
+
+
+queue_name_to_gauge_map: Dict[QueueNames, LaterGauge] = {}
+
+for queue_name in QueueNames:
+    queue_name_to_gauge_map[queue_name] = LaterGauge(
+        name=f"synapse_federation_send_queue_{queue_name.value}_size",
+        desc="",
+        labelnames=[SERVER_NAME_LABEL],
+    )
 
 
 class FederationRemoteSendQueue(AbstractFederationSender):
@@ -111,25 +131,21 @@ class FederationRemoteSendQueue(AbstractFederationSender):
         # we make a new function, so we need to make a new function so the inner
         # lambda binds to the queue rather than to the name of the queue which
         # changes. ARGH.
-        def register(name: str, queue: Sized) -> None:
-            LaterGauge(
-                name="synapse_federation_send_queue_%s_size" % (queue_name,),
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {(self.server_name,): len(queue)},
+        def register(queue_name: QueueNames, queue: Sized) -> None:
+            queue_name_to_gauge_map[queue_name].register_hook(
+                homeserver_instance_id=hs.get_instance_id(),
+                hook=lambda: {(self.server_name,): len(queue)},
             )
 
-        for queue_name in [
-            "presence_map",
-            "keyed_edu",
-            "keyed_edu_changed",
-            "edus",
-            "pos_time",
-            "presence_destinations",
-        ]:
-            register(queue_name, getattr(self, queue_name))
+        for queue_name in QueueNames:
+            queue = getattr(self, queue_name.value)
+            assert isinstance(queue, Sized)
+            register(queue_name, queue=queue)
 
         self.clock.looping_call(self._clear_queue, 30 * 1000)
+
+    def shutdown(self) -> None:
+        """Stops this federation sender instance from sending further transactions."""
 
     def _next_pos(self) -> int:
         pos = self.pos

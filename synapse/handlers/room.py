@@ -568,7 +568,7 @@ class RoomCreationHandler:
                 new_room_version,
                 additional_creators=additional_creators,
             )
-        initial_state = {}
+        initial_state: MutableStateMap = {}
 
         # Replicate relevant room events
         types_to_copy: List[Tuple[str, Optional[str]]] = [
@@ -684,14 +684,23 @@ class RoomCreationHandler:
                 additional_creators,
             )
 
-        # We construct what the body of a call to /createRoom would look like for passing
-        # to the spam checker. We don't include a preset here, as we expect the
+        # We construct a subset of what the body of a call to /createRoom would look like
+        # for passing to the spam checker. We don't include a preset here, as we expect the
         # initial state to contain everything we need.
+        # TODO: given we are upgrading, it would make sense to pass the room_version
+        # TODO: the preset might be useful too
         spam_check = await self._spam_checker_module_callbacks.user_may_create_room(
             user_id,
             {
                 "creation_content": creation_content,
-                "initial_state": list(initial_state.items()),
+                "initial_state": [
+                    {
+                        "type": state_key[0],
+                        "state_key": state_key[1],
+                        "content": event_content,
+                    }
+                    for state_key, event_content in initial_state.items()
+                ],
             },
         )
         if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:

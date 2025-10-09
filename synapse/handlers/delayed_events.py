@@ -18,12 +18,12 @@ from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import ShadowBanError
+from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
+from synapse.logging.context import make_deferred_yieldable
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import SERVER_NAME_LABEL, event_processing_positions
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
 )
@@ -45,6 +45,7 @@ from synapse.types import (
 )
 from synapse.util.events import generate_fake_event_id
 from synapse.util.metrics import Measure
+from synapse.util.sentinel import Sentinel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 
 class DelayedEventsHandler:
     def __init__(self, hs: "HomeServer"):
+        self.hs = hs
         self.server_name = hs.hostname
         self._store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
@@ -90,7 +92,10 @@ class DelayedEventsHandler:
                 hs.get_notifier().add_replication_callback(self.notify_new_event)
                 # Kick off again (without blocking) to catch any missed notifications
                 # that may have fired before the callback was added.
-                self._clock.call_later(0, self.notify_new_event)
+                self._clock.call_later(
+                    0,
+                    self.notify_new_event,
+                )
 
                 # Delayed events that are already marked as processed on startup might not have been
                 # sent properly on the last run of the server, so unmark them to send them again.
@@ -108,15 +113,14 @@ class DelayedEventsHandler:
                     self._schedule_next_at(next_send_ts)
 
                 # Can send the events in background after having awaited on marking them as processed
-                run_as_background_process(
+                self.hs.run_as_background_process(
                     "_send_events",
-                    self.server_name,
                     self._send_events,
                     events,
                 )
 
-            self._initialized_from_db = run_as_background_process(
-                "_schedule_db_events", self.server_name, _schedule_db_events
+            self._initialized_from_db = self.hs.run_as_background_process(
+                "_schedule_db_events", _schedule_db_events
             )
         else:
             self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
@@ -141,15 +145,40 @@ class DelayedEventsHandler:
             finally:
                 self._event_processing = False
 
-        run_as_background_process(
-            "delayed_events.notify_new_event", self.server_name, process
-        )
+        self.hs.run_as_background_process("delayed_events.notify_new_event", process)
 
     async def _unsafe_process_new_event(self) -> None:
+        # We purposefully fetch the current max room stream ordering before
+        # doing anything else, as it could increment duing processing of state
+        # deltas. We want to avoid updating `delayed_events_stream_pos` past
+        # the stream ordering of the state deltas we've processed. Otherwise
+        # we'll leave gaps in our processing.
+        room_max_stream_ordering = self._store.get_room_max_stream_ordering()
+
+        # Check that there are actually any delayed events to process. If not, bail early.
+        delayed_events_count = await self._store.get_count_of_delayed_events()
+        if delayed_events_count == 0:
+            # There are no delayed events to process. Update the
+            # `delayed_events_stream_pos` to the latest `events` stream pos and
+            # exit early.
+            self._event_pos = room_max_stream_ordering
+
+            logger.debug(
+                "No delayed events to process. Updating `delayed_events_stream_pos` to max stream ordering (%s)",
+                room_max_stream_ordering,
+            )
+
+            await self._store.update_delayed_events_stream_pos(room_max_stream_ordering)
+
+            event_processing_positions.labels(
+                name="delayed_events", **{SERVER_NAME_LABEL: self.server_name}
+            ).set(room_max_stream_ordering)
+
+            return
+
         # If self._event_pos is None then means we haven't fetched it from the DB yet
         if self._event_pos is None:
             self._event_pos = await self._store.get_delayed_events_stream_pos()
-            room_max_stream_ordering = self._store.get_room_max_stream_ordering()
             if self._event_pos > room_max_stream_ordering:
                 # apparently, we've processed more events than exist in the database!
                 # this can happen if events are removed with history purge or similar.
@@ -167,7 +196,7 @@ class DelayedEventsHandler:
                 self._clock, name="delayed_events_delta", server_name=self.server_name
             ):
                 room_max_stream_ordering = self._store.get_room_max_stream_ordering()
-                if self._event_pos == room_max_stream_ordering:
+                if self._event_pos >= room_max_stream_ordering:
                     return
 
                 logger.debug(
@@ -202,23 +231,81 @@ class DelayedEventsHandler:
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
         """
+        # Get the senders of each delta's state event (as sender information is
+        # not currently stored in the `current_state_deltas` table).
+        event_id_and_sender_dict = await self._store.get_senders_for_event_ids(
+            [delta.event_id for delta in deltas if delta.event_id is not None]
+        )
+
+        # Note: No need to batch as `get_current_state_deltas` will only ever
+        # return 100 rows at a time.
         for delta in deltas:
+            logger.debug(
+                "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
+            )
+
+            # `delta.event_id` and `delta.sender` can be `None` in a few valid
+            # cases (see the docstring of
+            # `get_current_state_delta_membership_changes_for_user` for details).
             if delta.event_id is None:
-                logger.debug(
-                    "Not handling delta for deleted state: %r %r",
+                # TODO: Differentiate between this being caused by a state reset
+                # which removed a user from a room, or the homeserver
+                # purposefully having left the room. We can do so by checking
+                # whether there are any local memberships still left in the
+                # room. If so, then this is the result of a state reset.
+                #
+                # If it is a state reset, we should avoid cancelling new,
+                # delayed state events due to old state resurfacing. So we
+                # should skip and log a warning in this case.
+                #
+                # If the homeserver has left the room, then we should cancel all
+                # delayed state events intended for this room, as there is no
+                # need to try and send a delayed event into a room we've left.
+                logger.warning(
+                    "Skipping state delta (%r, %r) without corresponding event ID. "
+                    "This can happen if the homeserver has left the room (in which "
+                    "case this can be ignored), or if there has been a state reset "
+                    "which has caused the sender to be kicked out of the room",
                     delta.event_type,
                     delta.state_key,
                 )
                 continue
 
-            logger.debug(
-                "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
+            sender_str = event_id_and_sender_dict.get(
+                delta.event_id, Sentinel.UNSET_SENTINEL
             )
+            if sender_str is None:
+                # An event exists, but the `sender` field was "null" and Synapse
+                # incorrectly accepted the event. This is not expected.
+                logger.error(
+                    "Skipping state delta with event ID '%s' as 'sender' was None. "
+                    "This is unexpected - please report it as a bug!",
+                    delta.event_id,
+                )
+                continue
+            if sender_str is Sentinel.UNSET_SENTINEL:
+                # We have an event ID, but the event was not found in the
+                # datastore. This can happen if a room, or its history, is
+                # purged. State deltas related to the room are left behind, but
+                # the event no longer exists.
+                #
+                # As we cannot get the sender of this event, we can't calculate
+                # whether to cancel delayed events related to this one. So we skip.
+                logger.debug(
+                    "Skipping state delta with event ID '%s' - the room, or its history, may have been purged",
+                    delta.event_id,
+                )
+                continue
 
-            event = await self._store.get_event(
-                delta.event_id, check_room_id=delta.room_id
-            )
-            sender = UserID.from_string(event.sender)
+            try:
+                sender = UserID.from_string(sender_str)
+            except SynapseError as e:
+                logger.error(
+                    "Skipping state delta with Matrix User ID '%s' that failed to parse: %s",
+                    sender_str,
+                    e,
+                )
+                continue
 
             next_send_ts = await self._store.cancel_delayed_state_events(
                 room_id=delta.room_id,
@@ -328,7 +415,7 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id=delay_id,
@@ -354,7 +441,7 @@ class DelayedEventsHandler:
             requester,
             (requester.user.to_string(), requester.device_id),
         )
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id=delay_id,
@@ -380,7 +467,7 @@ class DelayedEventsHandler:
         # Use standard request limiter for sending delayed events on-demand,
         # as an on-demand send is similar to sending a regular event.
         await self._request_ratelimiter.ratelimit(requester)
-        await self._initialized_from_db
+        await make_deferred_yieldable(self._initialized_from_db)
 
         event, next_send_ts = await self._store.process_target_delayed_event(
             delay_id=delay_id,
@@ -453,9 +540,8 @@ class DelayedEventsHandler:
         if self._next_delayed_event_call is None:
             self._next_delayed_event_call = self._clock.call_later(
                 delay_sec,
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 "_send_on_timeout",
-                self.server_name,
                 self._send_on_timeout,
             )
         else:

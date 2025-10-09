@@ -68,6 +68,42 @@ PROMETHEUS_METRIC_MISSING_FROM_LIST_TO_CHECK = ErrorCode(
     category="per-homeserver-tenant-metrics",
 )
 
+PREFER_SYNAPSE_CLOCK_CALL_LATER = ErrorCode(
+    "call-later-not-tracked",
+    "Prefer using `synapse.util.Clock.call_later` instead of `reactor.callLater`",
+    category="synapse-reactor-clock",
+)
+
+PREFER_SYNAPSE_CLOCK_LOOPING_CALL = ErrorCode(
+    "prefer-synapse-clock-looping-call",
+    "Prefer using `synapse.util.Clock.looping_call` instead of `task.LoopingCall`",
+    category="synapse-reactor-clock",
+)
+
+PREFER_SYNAPSE_CLOCK_CALL_WHEN_RUNNING = ErrorCode(
+    "prefer-synapse-clock-call-when-running",
+    "Prefer using `synapse.util.Clock.call_when_running` instead of `reactor.callWhenRunning`",
+    category="synapse-reactor-clock",
+)
+
+PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER = ErrorCode(
+    "prefer-synapse-clock-add-system-event-trigger",
+    "Prefer using `synapse.util.Clock.add_system_event_trigger` instead of `reactor.addSystemEventTrigger`",
+    category="synapse-reactor-clock",
+)
+
+MULTIPLE_INTERNAL_CLOCKS_CREATED = ErrorCode(
+    "multiple-internal-clocks",
+    "Only one instance of `clock.Clock` should be created",
+    category="synapse-reactor-clock",
+)
+
+UNTRACKED_BACKGROUND_PROCESS = ErrorCode(
+    "untracked-background-process",
+    "Prefer using `HomeServer.run_as_background_process` method over the bare `run_as_background_process`",
+    category="synapse-tracked-calls",
+)
+
 
 class Sentinel(enum.Enum):
     # defining a sentinel in this way allows mypy to correctly handle the
@@ -210,6 +246,18 @@ class SynapsePlugin(Plugin):
             # callback, let's just pass it in while we have it.
             return lambda ctx: check_prometheus_metric_instantiation(ctx, fullname)
 
+        if fullname == "twisted.internet.task.LoopingCall":
+            return check_looping_call
+
+        if fullname == "synapse.util.clock.Clock":
+            return check_clock_creation
+
+        if (
+            fullname
+            == "synapse.metrics.background_process_metrics.run_as_background_process"
+        ):
+            return check_background_process
+
         return None
 
     def get_method_signature_hook(
@@ -229,7 +277,175 @@ class SynapsePlugin(Plugin):
         ):
             return check_is_cacheable_wrapper
 
+        if fullname in (
+            "twisted.internet.interfaces.IReactorTime.callLater",
+            "synapse.types.ISynapseThreadlessReactor.callLater",
+            "synapse.types.ISynapseReactor.callLater",
+        ):
+            return check_call_later
+
+        if fullname in (
+            "twisted.internet.interfaces.IReactorCore.callWhenRunning",
+            "synapse.types.ISynapseThreadlessReactor.callWhenRunning",
+            "synapse.types.ISynapseReactor.callWhenRunning",
+        ):
+            return check_call_when_running
+
+        if fullname in (
+            "twisted.internet.interfaces.IReactorCore.addSystemEventTrigger",
+            "synapse.types.ISynapseThreadlessReactor.addSystemEventTrigger",
+            "synapse.types.ISynapseReactor.addSystemEventTrigger",
+        ):
+            return check_add_system_event_trigger
+
         return None
+
+
+def check_clock_creation(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the only `clock.Clock` instance is the one used by the `HomeServer`.
+    This is so that the `HomeServer` can cancel any tracked delayed or looping calls
+    during server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected the only `clock.Clock` instance to be the one used by the `HomeServer`. "
+        "This is so that the `HomeServer` can cancel any tracked delayed or looping calls "
+        "during server shutdown",
+        ctx.context,
+        code=MULTIPLE_INTERNAL_CLOCKS_CREATED,
+    )
+
+    return signature
+
+
+def check_call_later(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.callLater` callsites aren't used.
+
+    `synapse.util.Clock.call_later` should always be used instead of `reactor.callLater`.
+    This is because the `synapse.util.Clock` tracks delayed calls in order to cancel any
+    outstanding calls during server shutdown. Delayed calls which are either short lived
+    (<~60s) or frequently called and can be tracked via other means could be candidates for
+    using `synapse.util.Clock.call_later` with `call_later_cancel_on_shutdown` set to
+    `False`. There shouldn't be a need to use `reactor.callLater` outside of tests or the
+    `Clock` class itself. If a need arises, you can use a type ignore comment to disable the
+    check, e.g. `# type: ignore[call-later-not-tracked]`.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all `reactor.callLater` calls to use `synapse.util.Clock.call_later` "
+        "instead. This is so that long lived calls can be tracked for cancellation during "
+        "server shutdown",
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_CALL_LATER,
+    )
+
+    return signature
+
+
+def check_looping_call(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that the `task.LoopingCall` callsites aren't used.
+
+    `synapse.util.Clock.looping_call` should always be used instead of `task.LoopingCall`.
+    `synapse.util.Clock` tracks looping calls in order to cancel any outstanding calls
+    during server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Expected all `task.LoopingCall` instances to use `synapse.util.Clock.looping_call` "
+        "instead. This is so that long lived calls can be tracked for cancellation during "
+        "server shutdown",
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_LOOPING_CALL,
+    )
+
+    return signature
+
+
+def check_call_when_running(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.callWhenRunning` callsites aren't used.
+
+    `synapse.util.Clock.call_when_running` should always be used instead of
+    `reactor.callWhenRunning`.
+
+    Since `reactor.callWhenRunning` is a reactor callback, the callback will start out
+    with the sentinel logcontext. `synapse.util.Clock` starts a default logcontext as we
+    want to know which server the logs came from.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        (
+            "Expected all `reactor.callWhenRunning` calls to use `synapse.util.Clock.call_when_running` instead. "
+            "This is so all Synapse code runs with a logcontext as we want to know which server the logs came from."
+        ),
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_CALL_WHEN_RUNNING,
+    )
+
+    return signature
+
+
+def check_add_system_event_trigger(ctx: MethodSigContext) -> CallableType:
+    """
+    Ensure that the `reactor.addSystemEventTrigger` callsites aren't used.
+
+    `synapse.util.Clock.add_system_event_trigger` should always be used instead of
+    `reactor.addSystemEventTrigger`.
+
+    Since `reactor.addSystemEventTrigger` is a reactor callback, the callback will start out
+    with the sentinel logcontext. `synapse.util.Clock` starts a default logcontext as we
+    want to know which server the logs came from.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        (
+            "Expected all `reactor.addSystemEventTrigger` calls to use `synapse.util.Clock.add_system_event_trigger` instead. "
+            "This is so all Synapse code runs with a logcontext as we want to know which server the logs came from."
+        ),
+        ctx.context,
+        code=PREFER_SYNAPSE_CLOCK_ADD_SYSTEM_EVENT_TRIGGER,
+    )
+
+    return signature
+
+
+def check_background_process(ctx: FunctionSigContext) -> CallableType:
+    """
+    Ensure that calls to `run_as_background_process` use the `HomeServer` method.
+    This is so that the `HomeServer` can cancel any running background processes during
+    server shutdown.
+
+    Args:
+        ctx: The `FunctionSigContext` from mypy.
+    """
+    signature: CallableType = ctx.default_signature
+    ctx.api.fail(
+        "Prefer using `HomeServer.run_as_background_process` method over the bare "
+        "`run_as_background_process`. This is so that the `HomeServer` can cancel "
+        "any background processes during server shutdown",
+        ctx.context,
+        code=UNTRACKED_BACKGROUND_PROCESS,
+    )
+
+    return signature
 
 
 def analyze_prometheus_metric_classes(ctx: ClassDefContext) -> None:

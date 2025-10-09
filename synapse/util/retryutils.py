@@ -24,14 +24,14 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Optional, Type
 
 from synapse.api.errors import CodeMessageException
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage import DataStore
 from synapse.types import StrCollection
-from synapse.util import Clock
+from synapse.util.clock import Clock
 
 if TYPE_CHECKING:
     from synapse.notifier import Notifier
     from synapse.replication.tcp.handler import ReplicationCommandHandler
+    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ async def get_retry_limiter(
     *,
     destination: str,
     our_server_name: str,
+    hs: "HomeServer",
     clock: Clock,
     store: DataStore,
     ignore_backoff: bool = False,
@@ -124,6 +125,7 @@ async def get_retry_limiter(
     return RetryDestinationLimiter(
         destination=destination,
         our_server_name=our_server_name,
+        hs=hs,
         clock=clock,
         store=store,
         failure_ts=failure_ts,
@@ -163,6 +165,7 @@ class RetryDestinationLimiter:
         *,
         destination: str,
         our_server_name: str,
+        hs: "HomeServer",
         clock: Clock,
         store: DataStore,
         failure_ts: Optional[int],
@@ -181,6 +184,7 @@ class RetryDestinationLimiter:
         Args:
             destination
             our_server_name: Our homeserver name (used to label metrics) (`hs.hostname`)
+            hs: The homeserver instance
             clock
             store
             failure_ts: when this destination started failing (in ms since
@@ -197,6 +201,7 @@ class RetryDestinationLimiter:
                 error code.
         """
         self.our_server_name = our_server_name
+        self.hs = hs
         self.clock = clock
         self.store = store
         self.destination = destination
@@ -331,6 +336,4 @@ class RetryDestinationLimiter:
                 logger.exception("Failed to store destination_retry_timings")
 
         # we deliberately do this in the background.
-        run_as_background_process(
-            "store_retry_timings", self.our_server_name, store_retry_timings
-        )
+        self.hs.run_as_background_process("store_retry_timings", store_retry_timings)

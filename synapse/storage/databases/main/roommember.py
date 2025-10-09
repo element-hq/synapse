@@ -84,6 +84,13 @@ _CURRENT_STATE_MEMBERSHIP_UPDATE_NAME = "current_state_events_membership"
 _POPULATE_PARTICIPANT_BG_UPDATE_BATCH_SIZE = 1000
 
 
+federation_known_servers_gauge = LaterGauge(
+    name="synapse_federation_known_servers",
+    desc="",
+    labelnames=[SERVER_NAME_LABEL],
+)
+
+
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class EventIdMembership:
     """Returned by `get_membership_from_event_ids`"""
@@ -116,11 +123,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 1,
                 self._count_known_servers,
             )
-            LaterGauge(
-                name="synapse_federation_known_servers",
-                desc="",
-                labelnames=[SERVER_NAME_LABEL],
-                caller=lambda: {(self.server_name,): self._known_servers_count},
+            federation_known_servers_gauge.register_hook(
+                homeserver_instance_id=hs.get_instance_id(),
+                hook=lambda: {(self.server_name,): self._known_servers_count},
             )
 
     @wrap_as_background_process("_count_known_servers")
@@ -997,7 +1002,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         with Measure(
-            self._clock,
+            self.clock,
             name="get_joined_user_ids_from_state",
             server_name=self.server_name,
         ):

@@ -1,5 +1,5 @@
 $schema: https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json
-$id: https://element-hq.github.io/synapse/schema/synapse/v1.136/synapse-config.schema.json
+$id: https://element-hq.github.io/synapse/schema/synapse/v1.139/synapse-config.schema.json
 type: object
 properties:
   modules:
@@ -2259,9 +2259,8 @@ properties:
       Setting this to a high value allows users to report content quickly, possibly in
       duplicate. This can result in higher database usage.
     default:
-      per_user:
-        per_second: 1.0
-        burst_count: 5.0
+      per_second: 1.0
+      burst_count: 5.0
     examples:
       - per_second: 2.0
         burst_count: 20.0
@@ -2270,9 +2269,8 @@ properties:
     description: >-
       Sets rate limits for how often users are able to create rooms.
     default:
-      per_user:
-        per_second: 0.016
-        burst_count: 10.0
+      per_second: 0.016
+      burst_count: 10.0
     examples:
       - per_second: 1.0
         burst_count: 5.0
@@ -2415,8 +2413,15 @@ properties:
       A list of media upload limits defining how much data a given user can
       upload in a given time period.
 
+      These limits are applied in addition to the `max_upload_size` limit above
+      (which applies to individual uploads).
+
 
       An empty list means no limits are applied.
+
+
+      These settings can be overridden using the `get_media_upload_limits_for_user`
+      module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
       time_period:

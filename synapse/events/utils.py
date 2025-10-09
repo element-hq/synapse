@@ -26,8 +26,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Collection,
     Dict,
-    Iterable,
     List,
     Mapping,
     Match,
@@ -49,6 +49,7 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
+from synapse.logging.opentracing import SynapseTags, set_tag, trace
 from synapse.types import JsonDict, Requester
 
 from . import EventBase, StrippedStateEvent, make_event_from_dict
@@ -710,9 +711,10 @@ class EventClientSerializer:
                 "m.relations", {}
             ).update(serialized_aggregations)
 
+    @trace
     async def serialize_events(
         self,
-        events: Iterable[Union[JsonDict, EventBase]],
+        events: Collection[Union[JsonDict, EventBase]],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -731,6 +733,11 @@ class EventClientSerializer:
         Returns:
             The list of serialized events
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "events.length",
+            str(len(events)),
+        )
+
         return [
             await self.serialize_event(
                 event,
