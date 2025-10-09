@@ -316,6 +316,7 @@ class BaseAuth:
         - The returned device ID, if present, has been checked to be a valid device ID
           for the returned user ID.
         """
+        # TODO: We can drop unstable support after 2026-01-01 (couple months after stable support)
         UNSTABLE_DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
 
         app_service = self.store.get_app_service_by_token(access_token)
