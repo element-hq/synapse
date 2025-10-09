@@ -110,13 +110,13 @@ class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
         self.assertGreater(timestamp, 0)
 
         # Test that users with reserved 3pids are not removed from the MAU table
-        # XXX some of this is redundant. poking things into the config shouldn't
-        # work, and in any case it's not obvious what we expect to happen when
-        # we advance the reactor.
-        self.hs.config.server.max_mau_value = 0
+        #
+        # The `start_phone_stats_home()` looping call will cause us to run
+        # `reap_monthly_active_users` after the time has advanced
         self.reactor.advance(FORTY_DAYS)
-        self.hs.config.server.max_mau_value = 5
 
+        # I guess we call this one more time for good measure? Perhaps because
+        # previously, it the phone home stats weren't running in tests?
         self.get_success(self.store.reap_monthly_active_users())
 
         active_count = self.get_success(self.store.get_monthly_active_count())
