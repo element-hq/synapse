@@ -2347,6 +2347,30 @@ These limits are applied in addition to the <code>max_upload_size</code> limit a
 <pre><code class="language-yaml">turn_allow_guests: false
 </code></pre>
 <hr />
+<h3 id="matrix_rtc"><a class="header" href="#matrix_rtc"><code>matrix_rtc</code></a></h3>
+<p><em>(object)</em> Options related to MatrixRTC. Defaults to <code>{}</code>.</p>
+<p>This setting has the following sub-options:</p>
+<ul>
+<li>
+<p><code>transports</code> (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to <code>[]</code>.</p>
+<p>Options for each entry include:</p>
+<ul>
+<li>
+<p><code>type</code> (string): The type of transport to use to connect to the selective forwarding unit (SFU).</p>
+</li>
+<li>
+<p><code>livekit_service_url</code> (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.</p>
+</li>
+</ul>
+</li>
+</ul>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">matrix_rtc:
+  transports:
+  - type: livekit
+    livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
+</code></pre>
+<hr />
 <h2 id="registration"><a class="header" href="#registration">Registration</a></h2>
 <p>Registration can be rate-limited using the parameters in the <a href="#ratelimiting">Ratelimiting</a> section of this manual.</p>
 <hr />
