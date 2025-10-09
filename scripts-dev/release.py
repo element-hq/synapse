@@ -639,7 +639,16 @@ def _notify(message: str) -> None:
 
 
 @cli.command()
-def merge_back() -> None:
+# Although this option is not used, allow it anyways. Otherwise the user will
+# receive an error when providing it, which is annoying as other commands accept
+# it.
+@click.option(
+    "--gh-token",
+    "_gh_token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+)
+def merge_back(_gh_token: Optional[str]) -> None:
     _merge_back()
 
 
@@ -687,7 +696,16 @@ def _merge_back() -> None:
 
 
 @cli.command()
-def announce() -> None:
+# Although this option is not used, allow it anyways. Otherwise the user will
+# receive an error when providing it, which is annoying as other commands accept
+# it.
+@click.option(
+    "--gh-token",
+    "_gh_token",
+    envvar=["GH_TOKEN", "GITHUB_TOKEN"],
+    required=False,
+)
+def announce(_gh_token: Optional[str]) -> None:
     _announce()
 
 

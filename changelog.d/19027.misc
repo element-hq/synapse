@@ -1,0 +1,1 @@
+Introduce `RootConfig.validate_config()` which can be subclassed in `HomeServerConfig` to do cross-config class validation.
