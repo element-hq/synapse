@@ -919,7 +919,8 @@ class RootConfig:
         """
         Additional config validation across all config sections.
 
-        Override this in subclasses to add extra validation.
+        Override this in subclasses to add extra validation once all
+        config option values have been populated.
 
         Raises:
             ConfigError: if the config is invalid.
