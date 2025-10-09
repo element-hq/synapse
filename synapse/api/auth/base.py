@@ -338,17 +338,11 @@ class BaseAuth:
         else:
             effective_user_id = app_service.sender
 
-        effective_device_id: Optional[str] = None
-
-        if b"device_id" in request.args or UNSTABLE_DEVICE_ID_ARG_NAME in request.args:
-            try:
-                effective_device_id = request.args[b"device_id"][0].decode("utf8")
-            except KeyError:
-                effective_device_id = request.args[UNSTABLE_DEVICE_ID_ARG_NAME][
-                    0
-                ].decode("utf8")
-            # We only just set this so it can't be None!
-            assert effective_device_id is not None
+        effective_device_id_args = request.args.get(
+            b"device_id", request.args.get(UNSTABLE_DEVICE_ID_ARG_NAME)
+        )
+        if effective_device_id_args:
+            effective_device_id = effective_device_id_args[0].decode("utf8")
             device_opt = await self.store.get_device(
                 effective_user_id, effective_device_id
             )
@@ -358,6 +352,8 @@ class BaseAuth:
                     f"Application service trying to use a device that doesn't exist ('{effective_device_id}' for {effective_user_id})",
                     Codes.UNKNOWN_DEVICE,
                 )
+        else:
+            effective_device_id = None
 
         return create_requester(
             effective_user_id, app_service=app_service, device_id=effective_device_id
