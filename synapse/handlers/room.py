@@ -44,6 +44,7 @@ import attr
 
 import synapse.events.snapshot
 from synapse.api.constants import (
+    CANONICALJSON_MAX_INT,
     Direction,
     EventContentFields,
     EventTypes,
@@ -661,21 +662,38 @@ class RoomCreationHandler:
             old_room_create_event.room_version.msc4289_creator_power_enabled
             and not new_room_version.msc4289_creator_power_enabled
         ):
-            # Additionally raise the power levels of all `additional_creators` in the old
-            # room to the `needed_power_level` in the new room.
+            # Raise the power levels of the `creator` and all `additional_creators` from the old
+            # room to the maximum possible power level in the new room *and* if any other users
+            # have the same power level, demote them to one less than that.
+            #
+            # This ensures that creators still remain the highest power level users in the room.
+            #
+            # Room versions that don't support strict canonicaljson can technically
+            # have string-based power levels. This makes them effectively
+            # limitless.
+            #
+            # We choose to ignore this and use CANONICALJSON_MAX_INT for these
+            # room versions as well.
+            max_pl = CANONICALJSON_MAX_INT
+
+            # Promote the room creator.
+            user_power_levels[user_id] = max_pl
+
+            # Promote any additional creators.
             old_room_additional_creators = old_room_create_event.content.get(
                 "additional_creators", []
             )
-            for user_id in old_room_additional_creators:
-                old_power_level = user_power_levels.get(user_id, users_default)
-                try:
-                    old_power_level = int(old_power_level)  # type: ignore[arg-type]
-                except (TypeError, ValueError):
-                    old_power_level = 0
+            for additional_creator_user_id in old_room_additional_creators:
+                user_power_levels[additional_creator_user_id] = max_pl
 
-                # Raise the requester's power level in the new room if necessary
-                if old_power_level < needed_power_level:
-                    user_power_levels[user_id] = needed_power_level
+            # Demote anyone else with the max power level.
+            for other_user_id, power_level in user_power_levels.items():
+                user_is_creator = (
+                    other_user_id == requester.user.to_string()
+                    or other_user_id in old_room_additional_creators
+                )
+                if power_level >= max_pl and not user_is_creator:
+                    user_power_levels[other_user_id] = max_pl - 1
 
         if new_room_version.msc4289_creator_power_enabled:
             self._remove_creators_from_pl_users_map(
