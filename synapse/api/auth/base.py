@@ -343,6 +343,8 @@ class BaseAuth:
         )
         if effective_device_id_args:
             effective_device_id = effective_device_id_args[0].decode("utf8")
+            # We only just set this so it can't be None!
+            assert effective_device_id is not None
             device_opt = await self.store.get_device(
                 effective_user_id, effective_device_id
             )
