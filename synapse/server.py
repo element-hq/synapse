@@ -67,6 +67,7 @@ from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
 from synapse.crypto import context_factory
 from synapse.crypto.context_factory import RegularPolicyForHTTPS
+from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.crypto.keyring import Keyring
 from synapse.events.builder import EventBuilderFactory
 from synapse.events.presence_router import PresenceRouter
@@ -643,6 +644,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         for i in self.REQUIRED_ON_BACKGROUND_TASK_STARTUP:
             getattr(self, "get_" + i + "_handler")()
         self.get_task_scheduler()
+        self.get_common_usage_metrics_manager().setup()
+        start_phone_stats_home(self)
 
     def get_reactor(self) -> ISynapseReactor:
         """
