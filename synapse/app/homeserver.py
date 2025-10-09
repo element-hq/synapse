@@ -83,6 +83,10 @@ def gz_wrap(r: Resource) -> Resource:
 
 
 class SynapseHomeServer(HomeServer):
+    """
+    Homeserver class for the main Synapse process.
+    """
+
     DATASTORE_CLASS = DataStore
 
     def _listener_http(
@@ -345,23 +349,17 @@ def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     return config
 
 
-def setup(
+def create_homeserver(
     config: HomeServerConfig,
     reactor: Optional[ISynapseReactor] = None,
-    freeze: bool = True,
 ) -> SynapseHomeServer:
     """
-    Create and setup a Synapse homeserver instance given a configuration.
+    Create a homeserver instance for the Synapse main process.
 
     Args:
         config: The configuration for the homeserver.
         reactor: Optionally provide a reactor to use. Can be useful in different
             scenarios that you want control over the reactor, such as tests.
-        freeze: whether to freeze the homeserver base objects in the garbage collector.
-            May improve garbage collection performance by marking objects with an effectively
-            static lifetime as frozen so they don't need to be considered for cleanup.
-            If you ever want to `shutdown` the homeserver, this needs to be
-            False otherwise the homeserver cannot be garbage collected after `shutdown`.
 
     Returns:
         A homeserver instance.
@@ -372,7 +370,6 @@ def setup(
             "You have specified `worker_app` in the config but are attempting to start a non-worker "
             "instance. Please use `python -m synapse.app.generic_worker` instead (or remove the option if this is the main process)."
         )
-        sys.exit(1)
 
     events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
     synapse.util.caches.TRACK_MEMORY_USAGE = config.caches.track_memory_usage
@@ -397,24 +394,50 @@ def setup(
             )
 
     hs = SynapseHomeServer(
-        config.server.server_name,
+        hostname=config.server.server_name,
         config=config,
         reactor=reactor,
     )
 
-    setup_logging(hs, config, use_worker_options=False)
+    return hs
+
+
+def setup(
+    hs: SynapseHomeServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Setup a Synapse homeserver instance given a configuration.
+
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+
+    Returns:
+        A homeserver instance.
+    """
+
+    setup_logging(hs, hs.config, use_worker_options=False)
+
+    # Log after we've configured logging.
+    logger.info("Setting up server")
 
     # Start the tracer
     init_tracer(hs)  # noqa
-
-    logger.info("Setting up server")
 
     try:
         hs.setup()
     except Exception as e:
         handle_startup_exception(e)
 
-    async def start() -> None:
+    async def _start_when_reactor_running() -> None:
+        # TODO: Feels like this should be moved somewhere else.
+        #
         # Load the OIDC provider metadatas, if OIDC is enabled.
         if hs.config.oidc.oidc_enabled:
             oidc = hs.get_oidc_handler()
@@ -423,21 +446,31 @@ def setup(
 
         await _base.start(hs, freeze)
 
+        # TODO: This should be moved to `SynapseHomeServer.start_background_tasks` (not
+        # `HomeServer.start_background_tasks`) (this way it matches the behavior of only
+        # running on `main`)
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
-    register_start(hs, start)
+    # Register a callback to be invoked once the reactor is running
+    register_start(hs, _start_when_reactor_running)
 
-    return hs
 
+def start_reactor(
+    config: HomeServerConfig,
+) -> None:
+    """
+    Start the reactor (Twisted event-loop).
 
-def run(hs: HomeServer) -> None:
+    Args:
+        config: The configuration for the homeserver.
+    """
     _base.start_reactor(
         "synapse-homeserver",
-        soft_file_limit=hs.config.server.soft_file_limit,
-        gc_thresholds=hs.config.server.gc_thresholds,
-        pid_file=hs.config.server.pid_file,
-        daemonize=hs.config.server.daemonize,
-        print_pidfile=hs.config.server.print_pidfile,
+        soft_file_limit=config.server.soft_file_limit,
+        gc_thresholds=config.server.gc_thresholds,
+        pid_file=config.server.pid_file,
+        daemonize=config.server.daemonize,
+        print_pidfile=config.server.print_pidfile,
         logger=logger,
     )
 
@@ -448,13 +481,14 @@ def main() -> None:
     with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         # check base requirements
         check_requirements()
-        hs = setup(homeserver_config)
+        hs = create_homeserver(homeserver_config)
+        setup(hs)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:
             redirect_stdio_to_logs()
 
-        run(hs)
+        start_reactor(homeserver_config)
 
 
 if __name__ == "__main__":
