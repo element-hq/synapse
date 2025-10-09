@@ -595,7 +595,7 @@ class SlidingSyncThreadsExtensionTestCase(SlidingSyncBase):
         # Now use the prev_batch token with /relations endpoint to paginate backwards
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/v1/rooms/{room_id}/relations/{thread_root_id}?from={prev_batch}&dir=b",
+            f"/_matrix/client/v1/rooms/{room_id}/relations/{thread_root_id}?from={prev_batch}&to={sync_pos}&dir=b",
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
