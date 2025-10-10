@@ -1,5 +1,14 @@
 # Synapse 1.140.0rc1 (2025-10-10)
 
+## Compatibility notice for users of `synapse-s3-storage-provider`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider)
+module must upgrade to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0).
+Using older versions of the module with this release of Synapse will prevent
+users from being able to upload or download media.
+
 ## Features
 
 - Add [a new Media Query by ID Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/media_admin_api.html#query-a-piece-of-media-by-id) that allows server admins to query and investigate the metadata of local or cached remote media via

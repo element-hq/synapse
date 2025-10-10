@@ -117,6 +117,16 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.140.0
+
+## Users of `synapse-s3-storage-provider` must update the module to `v1.6.0`
+
+Deployments that make use of the
+[synapse-s3-storage-provider](https://github.com/matrix-org/synapse-s3-storage-provider/)
+module must update it to
+[v1.6.0](https://github.com/matrix-org/synapse-s3-storage-provider/releases/tag/v1.6.0),
+otherwise users will be unable to upload or download media.
+
 # Upgrading to v1.139.0
 
 ## `/register` requests from old application service implementations may break when using MAS
