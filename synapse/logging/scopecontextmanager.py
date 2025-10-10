@@ -155,7 +155,9 @@ class _LogContextScope(Scope):
         if self._finish_on_close:
             self.span.finish()
 
-        self.logcontext.scope = None
+            # The tracing scope/span should stick to the logcontext if it's active
+            # so we only clear if we're finishing the span.
+            self.logcontext.scope = None
 
         if self._enter_logcontext:
             self.logcontext.__exit__(None, None, None)
