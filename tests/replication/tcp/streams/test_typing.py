@@ -74,10 +74,11 @@ class TypingStreamTestCase(BaseStreamTestCase):
         self.assertIsInstance(row, TypingStream.ROW_TYPE)
         self.assertEqual(row.room_id, ROOM_ID)
         self.assertEqual(row.user_ids, [USER_ID])
+        # Clear out the received rows that we've checked so we can check for new ones later
+        self.test_handler.received_rdata_rows.clear()
 
         # Now let's disconnect and insert some data.
         self.disconnect()
-        self.test_handler.received_rdata_rows.clear()
 
         typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=False)
 

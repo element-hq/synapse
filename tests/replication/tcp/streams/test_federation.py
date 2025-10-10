@@ -84,7 +84,7 @@ class FederationStreamTestCase(BaseStreamTestCase):
         self.assertEqual(edurow.edu.origin, self.hs.hostname)
         self.assertEqual(edurow.edu.destination, "testdest")
         self.assertEqual(edurow.edu.content, {"a": "b"})
-
+        # Clear out the received rows that we've checked so we can check for new ones later
         self.test_handler.received_rdata_rows.clear()
 
         # additional updates should be transferred without an HTTP hit

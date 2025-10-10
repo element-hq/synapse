@@ -46,7 +46,12 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
+        self.assertEqual([], received_account_data_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
@@ -93,7 +98,12 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual([], self.test_handler.received_rdata_rows)
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
+        self.assertEqual([], received_account_data_rows)
 
         # now reconnect to pull the updates
         self.reconnect()
