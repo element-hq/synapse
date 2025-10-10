@@ -38,24 +38,39 @@ class FederationStreamTestCase(BaseStreamTestCase):
         Makes sure that updates sent while we are offline are received later.
         """
         fed_sender = self.hs.get_federation_sender()
-        received_rows = self.test_handler.received_rdata_rows
 
         fed_sender.build_and_send_edu("testdest", "m.test_edu", {"a": "b"})
 
+        # Now reconnect and pull the updates
         self.reconnect()
-        self.reactor.advance(0)
+        self.replicate()
 
         # check we're testing what we think we are: no rows should yet have been
         # received
-        self.assertEqual(received_rows, [])
+        received_federation_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == FederationStream.NAME
+        ]
+        self.assertEqual(received_federation_rows, [])
 
         # We should now see an attempt to connect to the master
         request = self.handle_http_replication_attempt()
-        self.assert_request_is_get_repl_stream_updates(request, "federation")
+        self.assert_request_is_get_repl_stream_updates(request, FederationStream.NAME)
 
         # we should have received an update row
-        stream_name, token, row = received_rows.pop()
-        self.assertEqual(stream_name, "federation")
+        received_federation_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == FederationStream.NAME
+        ]
+        self.assertEqual(
+            len(received_federation_rows),
+            1,
+            "Expected exactly one call for the federation stream",
+        )
+        (stream_name, token, row) = received_federation_rows[0]
+        self.assertEqual(stream_name, FederationStream.NAME)
         self.assertIsInstance(row, FederationStream.FederationStreamRow)
         self.assertEqual(row.type, EduRow.TypeId)
         edurow = EduRow.from_data(row.data)
@@ -64,18 +79,29 @@ class FederationStreamTestCase(BaseStreamTestCase):
         self.assertEqual(edurow.edu.destination, "testdest")
         self.assertEqual(edurow.edu.content, {"a": "b"})
 
-        self.assertEqual(received_rows, [])
+        self.test_handler.received_rdata_rows.clear()
 
         # additional updates should be transferred without an HTTP hit
         fed_sender.build_and_send_edu("testdest", "m.test1", {"c": "d"})
-        self.reactor.advance(0)
+        # Pull in the updates
+        self.replicate()
+
         # there should be no http hit
         self.assertEqual(len(self.reactor.tcpClients), 0)
-        # ... but we should have a row
-        self.assertEqual(len(received_rows), 1)
 
-        stream_name, token, row = received_rows.pop()
-        self.assertEqual(stream_name, "federation")
+        # ... but we should have a row
+        received_federation_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == FederationStream.NAME
+        ]
+        self.assertEqual(
+            len(received_federation_rows),
+            1,
+            "Expected exactly one call for the federation stream",
+        )
+        (stream_name, token, row) = received_federation_rows[0]
+        self.assertEqual(stream_name, FederationStream.NAME)
         self.assertIsInstance(row, FederationStream.FederationStreamRow)
         self.assertEqual(row.type, EduRow.TypeId)
         edurow = EduRow.from_data(row.data)
