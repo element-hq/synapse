@@ -1,0 +1,1 @@
+Rename `serialize_and_filter_pdus` to `filter_and_serialize_pdus` and perform filtering prior to serialization.

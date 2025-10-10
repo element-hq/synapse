@@ -127,7 +127,16 @@ def filter_pdus_for_valid_depth(pdus: Sequence[JsonDict]) -> List[JsonDict]:
     return filtered_pdus
 
 
-def serialize_and_filter_pdus(
+def is_pdu_valid(pdu: EventBase) -> bool:
+    return (
+        # Drop PDUs that have a depth that is outside of the range allowed
+        # by canonical json.
+        isinstance(pdu.depth, int)
+        and CANONICALJSON_MIN_INT <= pdu.depth <= CANONICALJSON_MAX_INT
+    )
+
+
+def filter_and_serialize_pdus(
     pdus: Sequence[EventBase], time_now: Optional[int] = None
 ) -> List[JsonDict]:
-    return filter_pdus_for_valid_depth([pdu.get_pdu_json(time_now) for pdu in pdus])
+    return [pdu.get_pdu_json(time_now) for pdu in pdus if is_pdu_valid(pdu)]
