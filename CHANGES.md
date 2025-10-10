@@ -2,10 +2,9 @@
 
 ## Features
 
-- Cleanly shutdown `SynapseHomeServer` object, allowing artifacts of embedded small hosts to be properly garbage collected. ([\#18828](https://github.com/element-hq/synapse/issues/18828))
 - Add [a new Media Query by ID Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/media_admin_api.html#query-a-piece-of-media-by-id) that allows server admins to query and investigate the metadata of local or cached remote media via
   the `origin/media_id` identifier found in a [Matrix Content URI](https://spec.matrix.org/v1.14/client-server-api/#matrix-content-mxc-uris). ([\#18911](https://github.com/element-hq/synapse/issues/18911))
-- Add [a new Event Fetch Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/fetch_events.html) to fetch an event by ID. ([\#18963](https://github.com/element-hq/synapse/issues/18963))
+- Add [a new Fetch Event Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/fetch_event.html) to fetch an event by ID. ([\#18963](https://github.com/element-hq/synapse/issues/18963))
 - Update [MSC4284: Policy Servers](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) implementation to support signatures when available. ([\#18934](https://github.com/element-hq/synapse/issues/18934))
 - Add experimental implementation of the `GET /_matrix/client/v1/rtc/transports` endpoint for the latest draft of [MSC4143: MatrixRTC](https://github.com/matrix-org/matrix-spec-proposals/pull/4143). ([\#18967](https://github.com/element-hq/synapse/issues/18967))
 - Expose a `defer_to_threadpool` function in the Synapse Module API that allows modules to run a function on a separate thread in a custom threadpool. ([\#19032](https://github.com/element-hq/synapse/issues/19032))
@@ -19,7 +18,7 @@
 
 ## Improved Documentation
 
-- Explain how Deferred callbacks interact with logcontexts. ([\#18914](https://github.com/element-hq/synapse/issues/18914))
+- Explain how `Deferred` callbacks interact with logcontexts. ([\#18914](https://github.com/element-hq/synapse/issues/18914))
 - Fix documentation for `rc_room_creation` and `rc_reports` to clarify that a `per_user` rate limit is not supported. ([\#18998](https://github.com/element-hq/synapse/issues/18998))
 
 ## Deprecations and Removals
@@ -29,6 +28,7 @@
 
 ## Internal Changes
 
+- Cleanly shutdown `SynapseHomeServer` object, allowing artifacts of embedded small hosts to be properly garbage collected. ([\#18828](https://github.com/element-hq/synapse/issues/18828))
 - Update OEmbed providers to use 'X' instead of 'Twitter' in URL previews, following a rebrand. Contributed by @HammyHavoc. ([\#18767](https://github.com/element-hq/synapse/issues/18767))
 - Fix `server_name` in logging context for multiple Synapse instances in one process. ([\#18868](https://github.com/element-hq/synapse/issues/18868))
 - Wrap the Rust HTTP client with `make_deferred_yieldable` so it follows Synapse logcontext rules. ([\#18903](https://github.com/element-hq/synapse/issues/18903))
