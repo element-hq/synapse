@@ -136,13 +136,11 @@ class TypingStreamTestCase(BaseStreamTestCase):
             # Not yet connected: no rows should yet have been received
             self.assertEqual([], self.test_handler.received_rdata_rows)
 
+            # Now reconnect to pull the updates
             self.reconnect()
             self.replicate()
 
             typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=True)
-
-            # TODO: is this necessary?
-            self.reactor.advance(0)
 
             # We should now see an attempt to connect to the master
             request = self.handle_http_replication_attempt()
@@ -169,8 +167,6 @@ class TypingStreamTestCase(BaseStreamTestCase):
                 typing._push_update(
                     member=RoomMember(ROOM_ID, "@test%s:blue" % i), typing=True
                 )
-            # TODO: is this necessary?
-            self.reactor.advance(0)
 
             # Disconnect.
             self.disconnect()
@@ -187,11 +183,9 @@ class TypingStreamTestCase(BaseStreamTestCase):
             )
             typing._reset()
 
-            # Reconnect.
+            # Now reconnect to pull the updates
             self.reconnect()
             self.replicate()
-            # TODO: is this necessary?
-            self.pump(0.1)
 
             # We should now see an attempt to connect to the master
             request = self.handle_http_replication_attempt()
@@ -199,8 +193,7 @@ class TypingStreamTestCase(BaseStreamTestCase):
 
             # Push additional data.
             typing._push_update(member=RoomMember(ROOM_ID_2, USER_ID_2), typing=False)
-            # TODO: is this necessary?
-            self.reactor.advance(0)
+            self.replicate()
 
             received_typing_rows = [
                 row
