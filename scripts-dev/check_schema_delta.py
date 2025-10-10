@@ -11,9 +11,13 @@ import click
 import git
 
 SCHEMA_FILE_REGEX = re.compile(r"^synapse/storage/schema/(.*)/delta/(.*)/(.*)$")
-INDEX_CREATION_REGEX = re.compile(r"CREATE .*INDEX .*ON ([a-z_]+)", flags=re.IGNORECASE)
-INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_]+)", flags=re.IGNORECASE)
-TABLE_CREATION_REGEX = re.compile(r"CREATE .*TABLE ([a-z_]+)", flags=re.IGNORECASE)
+INDEX_CREATION_REGEX = re.compile(
+    r"CREATE .*INDEX .*ON ([a-z_0-9]+)", flags=re.IGNORECASE
+)
+INDEX_DELETION_REGEX = re.compile(r"DROP .*INDEX ([a-z_0-9]+)", flags=re.IGNORECASE)
+TABLE_CREATION_REGEX = re.compile(
+    r"CREATE .*TABLE.* ([a-z_0-9]+)\s*\(", flags=re.IGNORECASE
+)
 
 # The base branch we want to check against. We use the main development branch
 # on the assumption that is what we are developing against.
@@ -173,10 +177,13 @@ def main(force_colors: bool) -> None:
                 clause = match.group()
 
                 click.secho(
-                    f"Found delta with index deletion: '{clause}' in {delta_file}\nThese should be in background updates.",
+                    f"Found delta with index deletion: '{clause}' in {delta_file}",
                     fg="red",
                     bold=True,
                     color=force_colors,
+                )
+                click.secho(
+                    " ↪ These should be in background updates.",
                 )
                 return_code = 1
 
@@ -188,10 +195,13 @@ def main(force_colors: bool) -> None:
                 table_name = match.group(1)
                 if table_name not in created_tables:
                     click.secho(
-                        f"Found delta with index creation: '{clause}' in {delta_file}\nThese should be in background updates.",
+                        f"Found delta with index creation for existing table: '{clause}' in {delta_file}",
                         fg="red",
                         bold=True,
                         color=force_colors,
+                    )
+                    click.secho(
+                        " ↪ These should be in background updates (or the table should be created in the same delta).",
                     )
                     return_code = 1
 
