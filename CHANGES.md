@@ -3,9 +3,9 @@
 ## Features
 
 - Cleanly shutdown `SynapseHomeServer` object, allowing artifacts of embedded small hosts to be properly garbage collected. ([\#18828](https://github.com/element-hq/synapse/issues/18828))
-- Add [a new Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/media_admin_api.html#query-a-piece-of-media-by-id) that allows server admins to query and investigate the metadata of local or cached remote media via
-- Add [a new Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/fetch_events.html) to fetch an event by ID. ([\#18963](https://github.com/element-hq/synapse/issues/18963))
+- Add [a new Media Query by ID Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/media_admin_api.html#query-a-piece-of-media-by-id) that allows server admins to query and investigate the metadata of local or cached remote media via
   the `origin/media_id` identifier found in a [Matrix Content URI](https://spec.matrix.org/v1.14/client-server-api/#matrix-content-mxc-uris). ([\#18911](https://github.com/element-hq/synapse/issues/18911))
+- Add [a new Event Fetch Admin API](https://element-hq.github.io/synapse/v1.140/admin_api/fetch_events.html) to fetch an event by ID. ([\#18963](https://github.com/element-hq/synapse/issues/18963))
 - Update [MSC4284: Policy Servers](https://github.com/matrix-org/matrix-spec-proposals/pull/4284) implementation to support signatures when available. ([\#18934](https://github.com/element-hq/synapse/issues/18934))
 - Add experimental implementation of the `GET /_matrix/client/v1/rtc/transports` endpoint for the latest draft of [MSC4143: MatrixRTC](https://github.com/matrix-org/matrix-spec-proposals/pull/4143). ([\#18967](https://github.com/element-hq/synapse/issues/18967))
 - Expose a `defer_to_threadpool` function in the Synapse Module API that allows modules to run a function on a separate thread in a custom threadpool. ([\#19032](https://github.com/element-hq/synapse/issues/19032))
