@@ -302,11 +302,8 @@ class BaseAuth:
           (the user_id URI parameter allows an application service to masquerade
           any applicable user in its namespace)
         - what device the application service should be treated as controlling
-          (the device_id[^1] URI parameter allows an application service to masquerade
+          (the device_id URI parameter allows an application service to masquerade
           as any device that exists for the relevant user)
-
-        [^1] Unstable and provided by MSC3202.
-             Must use `org.matrix.msc3202.device_id` in place of `device_id` for now.
 
         Returns:
             the application service `Requester` of that request
@@ -319,7 +316,8 @@ class BaseAuth:
         - The returned device ID, if present, has been checked to be a valid device ID
           for the returned user ID.
         """
-        DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
+        # TODO: We can drop unstable support after 2026-01-01 (couple months after stable support)
+        UNSTABLE_DEVICE_ID_ARG_NAME = b"org.matrix.msc3202.device_id"
 
         app_service = self.store.get_app_service_by_token(access_token)
         if app_service is None:
@@ -341,13 +339,11 @@ class BaseAuth:
         else:
             effective_user_id = app_service.sender
 
-        effective_device_id: Optional[str] = None
-
-        if (
-            self.hs.config.experimental.msc3202_device_masquerading_enabled
-            and DEVICE_ID_ARG_NAME in request.args
-        ):
-            effective_device_id = request.args[DEVICE_ID_ARG_NAME][0].decode("utf8")
+        effective_device_id_args = request.args.get(
+            b"device_id", request.args.get(UNSTABLE_DEVICE_ID_ARG_NAME)
+        )
+        if effective_device_id_args:
+            effective_device_id = effective_device_id_args[0].decode("utf8")
             # We only just set this so it can't be None!
             assert effective_device_id is not None
             device_opt = await self.store.get_device(
@@ -359,6 +355,8 @@ class BaseAuth:
                     f"Application service trying to use a device that doesn't exist ('{effective_device_id}' for {effective_user_id})",
                     Codes.UNKNOWN_DEVICE,
                 )
+        else:
+            effective_device_id = None
 
         return create_requester(
             effective_user_id, app_service=app_service, device_id=effective_device_id

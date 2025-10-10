@@ -412,11 +412,6 @@ class ExperimentalConfig(Config):
             "msc2409_to_device_messages_enabled", False
         )
 
-        # The portion of MSC3202 which is related to device masquerading.
-        self.msc3202_device_masquerading_enabled: bool = experimental.get(
-            "msc3202_device_masquerading", False
-        )
-
         # The portion of MSC3202 related to transaction extensions:
         # sending device list changes, one-time key counts and fallback key
         # usage to application services.
