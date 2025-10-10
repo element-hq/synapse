@@ -2180,7 +2180,11 @@ Options for each entry include:
 
 * `max_size` (byte size): Amount of data that can be uploaded in the time period by the user. Required.
 
-* `msc4335_info_url` (string): Experimental MSC4335 URL to a page with more information about the upload limit. Optional.
+* `msc4335_info_uri` (string): Experimental MSC4335 URI to where the user can find information about the upload limit. Optional.
+
+* `msc4335_soft_limit` (boolean): Experimental MSC4335 value to say if the limit can be increased. Optional.
+
+* `msc4335_increase_uri` (string): Experimental MSC4335 URI to where the user can increase the upload limit. Required if msc4335_soft_limit is true.
 
 Example configuration:
 ```yaml
@@ -2189,7 +2193,9 @@ media_upload_limits:
   max_size: 100M
 - time_period: 1w
   max_size: 500M
-  msc4335_info_url: https://example.com/quota
+  msc4335_info_uri: https://example.com/quota
+  msc4335_soft_limit: true
+  msc4335_increase_uri: https://example.com/increase-quota
 ```
 ---
 ### `max_image_pixels`

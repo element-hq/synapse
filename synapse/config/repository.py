@@ -134,7 +134,13 @@ class MediaUploadLimit:
     time_period_ms: int
     """The time period in milliseconds."""
 
-    msc4335_info_url: Optional[str] = None
+    msc4335_info_uri: Optional[str] = None
+    """Used for experimental MSC4335 error code feature"""
+
+    msc4335_soft_limit: Optional[bool] = None
+    """Used for experimental MSC4335 error code feature"""
+
+    msc4335_increase_uri: Optional[str] = None
     """Used for experimental MSC4335 error code feature"""
 
 
@@ -305,10 +311,33 @@ class ContentRepositoryConfig(Config):
         for limit_config in config.get("media_upload_limits", []):
             time_period_ms = self.parse_duration(limit_config["time_period"])
             max_bytes = self.parse_size(limit_config["max_size"])
-            msc4335_info_url = limit_config.get("msc4335_info_url", None)
+            msc4335_info_uri = limit_config.get("msc4335_info_uri", None)
+            msc4335_soft_limit = limit_config.get("msc4335_soft_limit", None)
+            msc4335_increase_uri = limit_config.get("msc4335_increase_uri", None)
+
+            if (
+                msc4335_info_uri is not None
+                or msc4335_soft_limit is not None
+                or msc4335_increase_uri is not None
+            ) and (not (msc4335_info_uri and msc4335_soft_limit is not None)):
+                raise ConfigError(
+                    "If any of msc4335_info_uri, msc4335_soft_limit or "
+                    "msc4335_increase_uri are set, then both msc4335_info_uri and "
+                    "msc4335_soft_limit must be set."
+                )
+            if msc4335_soft_limit and not msc4335_increase_uri:
+                raise ConfigError(
+                    "msc4335_increase_uri must be set if msc4335_soft_limit is true."
+                )
 
             self.media_upload_limits.append(
-                MediaUploadLimit(max_bytes, time_period_ms, msc4335_info_url)
+                MediaUploadLimit(
+                    max_bytes,
+                    time_period_ms,
+                    msc4335_info_uri,
+                    msc4335_soft_limit,
+                    msc4335_increase_uri,
+                )
             )
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
