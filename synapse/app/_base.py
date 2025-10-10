@@ -421,17 +421,26 @@ def listen_http(
     context_factory: Optional[IOpenSSLContextFactory],
     reactor: ISynapseReactor = reactor,
 ) -> List[Port]:
+    """
+    Args:
+        listener_config: TODO
+        root_resource: TODO
+        version_string: A string to present for the Server header
+        max_request_body_size: TODO
+        context_factory: TODO
+        reactor: TODO
+    """
     assert listener_config.http_options is not None
 
     site_tag = listener_config.get_site_tag()
 
     site = SynapseSite(
-        "synapse.access.%s.%s"
+        logger_name="synapse.access.%s.%s"
         % ("https" if listener_config.is_tls() else "http", site_tag),
-        site_tag,
-        listener_config,
-        root_resource,
-        version_string,
+        site_tag=site_tag,
+        config=listener_config,
+        resource=root_resource,
+        server_version_string=version_string,
         max_request_body_size=max_request_body_size,
         reactor=reactor,
         hs=hs,

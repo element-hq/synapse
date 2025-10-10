@@ -23,10 +23,19 @@
 import logging
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
+from typing_extensions import Self
+
+from synapse._pydantic_compat import (
+    StrictBool,
+    StrictStr,
+    validator,
+)
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
+    Codes,
     InteractiveAuthIncompleteError,
     InvalidAPICallError,
     SynapseError,
@@ -37,11 +46,13 @@ from synapse.http.servlet import (
     parse_integer,
     parse_json_object_from_request,
     parse_string,
+    validate_json_object,
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
+from synapse.types.rest import RequestBodyModel
 from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
@@ -59,7 +70,6 @@ class KeyUploadServlet(RestServlet):
         "device_keys": {
             "user_id": "<user_id>",
             "device_id": "<device_id>",
-            "valid_until_ts": <millisecond_timestamp>,
             "algorithms": [
                 "m.olm.curve25519-aes-sha2",
             ]
@@ -111,12 +121,123 @@ class KeyUploadServlet(RestServlet):
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
 
+    class KeyUploadRequestBody(RequestBodyModel):
+        """
+        The body of a `POST /_matrix/client/v3/keys/upload` request.
+
+        Based on https://spec.matrix.org/v1.16/client-server-api/#post_matrixclientv3keysupload.
+        """
+
+        class DeviceKeys(RequestBodyModel):
+            algorithms: List[StrictStr]
+            """The encryption algorithms supported by this device."""
+
+            device_id: StrictStr
+            """The ID of the device these keys belong to. Must match the device ID used when logging in."""
+
+            keys: Mapping[StrictStr, StrictStr]
+            """
+            Public identity keys. The names of the properties should be in the
+            format `<algorithm>:<device_id>`. The keys themselves should be encoded as
+            specified by the key algorithm.
+            """
+
+            signatures: Mapping[StrictStr, Mapping[StrictStr, StrictStr]]
+            """Signatures for the device key object. A map from user ID, to a map from "<algorithm>:<device_id>" to the signature."""
+
+            user_id: StrictStr
+            """The ID of the user the device belongs to. Must match the user ID used when logging in."""
+
+        class KeyObject(RequestBodyModel):
+            key: StrictStr
+            """The key, encoded using unpadded base64."""
+
+            fallback: Optional[StrictBool] = False
+            """Whether this is a fallback key. Only used when handling fallback keys."""
+
+            signatures: Mapping[StrictStr, Mapping[StrictStr, StrictStr]]
+            """Signature for the device. Mapped from user ID to another map of key signing identifier to the signature itself.
+
+            See the following for more detail: https://spec.matrix.org/v1.16/appendices/#signing-details
+            """
+
+        device_keys: Optional[DeviceKeys] = None
+        """Identity keys for the device. May be absent if no new identity keys are required."""
+
+        fallback_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]]
+        """
+        The public key which should be used if the device's one-time keys are
+        exhausted. The fallback key is not deleted once used, but should be
+        replaced when additional one-time keys are being uploaded. The server
+        will notify the client of the fallback key being used through `/sync`.
+
+        There can only be at most one key per algorithm uploaded, and the server
+        will only persist one key per algorithm.
+
+        When uploading a signed key, an additional fallback: true key should be
+        included to denote that the key is a fallback key.
+
+        May be absent if a new fallback key is not required.
+        """
+
+        @validator("fallback_keys", pre=True)
+        def validate_fallback_keys(cls: Self, v: Any) -> Any:
+            if v is None:
+                return v
+            if not isinstance(v, dict):
+                raise TypeError("fallback_keys must be a mapping")
+
+            for k in v.keys():
+                if not len(k.split(":")) == 2:
+                    raise SynapseError(
+                        code=HTTPStatus.BAD_REQUEST,
+                        errcode=Codes.BAD_JSON,
+                        msg=f"Invalid fallback_keys key {k!r}. "
+                        'Expected "<algorithm>:<device_id>".',
+                    )
+            return v
+
+        one_time_keys: Optional[Mapping[StrictStr, Union[StrictStr, KeyObject]]] = None
+        """
+        One-time public keys for "pre-key" messages. The names of the properties
+        should be in the format `<algorithm>:<key_id>`.
+
+        The format of the key is determined by the key algorithm, see:
+        https://spec.matrix.org/v1.16/client-server-api/#key-algorithms.
+        """
+
+        @validator("one_time_keys", pre=True)
+        def validate_one_time_keys(cls: Self, v: Any) -> Any:
+            if v is None:
+                return v
+            if not isinstance(v, dict):
+                raise TypeError("one_time_keys must be a mapping")
+
+            for k, _ in v.items():
+                if not len(k.split(":")) == 2:
+                    raise SynapseError(
+                        code=HTTPStatus.BAD_REQUEST,
+                        errcode=Codes.BAD_JSON,
+                        msg=f"Invalid one_time_keys key {k!r}. "
+                        'Expected "<algorithm>:<device_id>".',
+                    )
+            return v
+
     async def on_POST(
         self, request: SynapseRequest, device_id: Optional[str]
     ) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
+
+        # Parse the request body. Validate separately, as the handler expects a
+        # plain dict, rather than any parsed object.
+        #
+        # Note: It would be nice to work with a parsed object, but the handler
+        # needs to encode portions of the request body as canonical JSON before
+        # storing the result in the DB. There's little point in converted to a
+        # parsed object and then back to a dict.
         body = parse_json_object_from_request(request)
+        validate_json_object(body, self.KeyUploadRequestBody)
 
         if device_id is not None:
             # Providing the device_id should only be done for setting keys
@@ -149,8 +270,31 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
+        if "device_keys" in body and isinstance(body["device_keys"], dict):
+            # Validate the provided `user_id` and `device_id` fields in
+            # `device_keys` match that of the requesting user. We can't do
+            # this directly in the pydantic model as we don't have access
+            # to the requester yet.
+            #
+            # TODO: We could use ValidationInfo when we switch to Pydantic v2.
+            # https://docs.pydantic.dev/latest/concepts/validators/#validation-info
+            if body["device_keys"].get("user_id") != user_id:
+                raise SynapseError(
+                    code=HTTPStatus.BAD_REQUEST,
+                    errcode=Codes.BAD_JSON,
+                    msg="Provided `user_id` in `device_keys` does not match that of the authenticated user",
+                )
+            if body["device_keys"].get("device_id") != device_id:
+                raise SynapseError(
+                    code=HTTPStatus.BAD_REQUEST,
+                    errcode=Codes.BAD_JSON,
+                    msg="Provided `device_id` in `device_keys` does not match that of the authenticated user device",
+                )
+
         result = await self.e2e_keys_handler.upload_keys_for_user(
-            user_id=user_id, device_id=device_id, keys=body
+            user_id=user_id,
+            device_id=device_id,
+            keys=body,
         )
 
         return 200, result
