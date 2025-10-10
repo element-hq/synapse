@@ -30,11 +30,11 @@ from synapse.replication.tcp.commands import RdataCommand
 from synapse.replication.tcp.streams._base import _STREAM_UPDATE_TARGET_ROW_COUNT
 from synapse.replication.tcp.streams.events import (
     _MAX_STATE_UPDATES_PER_ROOM,
+    EventsStream,
     EventsStreamAllStateRow,
     EventsStreamCurrentStateRow,
     EventsStreamEventRow,
     EventsStreamRow,
-    EventsStream,
 )
 from synapse.rest import admin
 from synapse.rest.client import login, room

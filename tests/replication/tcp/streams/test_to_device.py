@@ -27,7 +27,6 @@ from synapse.replication.tcp.streams._base import (
 )
 from synapse.types import JsonDict
 
-
 from tests.replication._base import BaseStreamTestCase
 
 logger = logging.getLogger(__name__)
