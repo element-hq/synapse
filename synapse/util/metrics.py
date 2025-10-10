@@ -323,9 +323,13 @@ class DynamicCollectorRegistry(CollectorRegistry):
         if server_hooks.get(metric_name) is not None:
             # TODO: This should be an `assert` since registering the same metric name
             # multiple times will clobber the old metric.
-            # We currently rely on this behaviour as we instantiate multiple
-            # `SyncRestServlet`, one per listener, and in the `__init__` we setup a new
-            # LruCache.
+            #
+            # We currently rely on this behaviour in a few places:
+            #  - We instantiate multiple `SyncRestServlet`, one per listener, and in the
+            #   `__init__` we setup a new `LruCache`.
+            #  - We instantiate multiple `ApplicationService` (one per configured
+            #    application service) which use the `@cached` decorator on some methods.
+            #
             # Once the above behaviour is changed, this should be changed to an `assert`.
             logger.error(
                 "Metric named %s already registered for server %s",
