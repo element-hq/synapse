@@ -42,32 +42,42 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         conn_pool = Mock(spec=["runInteraction", "runWithConnection"])
         self.mock_txn = Mock()
         if USE_POSTGRES_FOR_TESTS:
-            # To avoid testing psycopg2 itself, patch execute_batch/execute_values
-            # to assert how it is called.
-            from psycopg2 import extras
+            conn_attributes = [
+                "cursor",
+                "rollback",
+                "commit",
+                "closed",
+                "reconnect",
+                "set_session",
+                "encoding",
+            ]
 
-            self.mock_execute_batch = Mock()
-            self.execute_batch_patcher = patch.object(
-                extras, "execute_batch", new=self.mock_execute_batch
-            )
-            self.execute_batch_patcher.start()
-            self.mock_execute_values = Mock()
-            self.execute_values_patcher = patch.object(
-                extras, "execute_values", new=self.mock_execute_values
-            )
-            self.execute_values_patcher.start()
+            if USE_POSTGRES_FOR_TESTS == "psycopg":
+                conn_attributes += ["autocommit"]
 
-            self.mock_conn = Mock(
-                spec_set=[
-                    "cursor",
-                    "rollback",
-                    "commit",
-                    "closed",
-                    "reconnect",
-                    "set_session",
-                    "encoding",
-                ]
-            )
+                # copy returns a context manager which needs assertions.
+                self.mock_copy = Mock(spec_set=["write_row", "rows"])
+                self.mock_txn.copy.return_value.__enter__ = Mock(
+                    return_value=self.mock_copy
+                )
+                self.mock_txn.copy.return_value.__exit__ = Mock()
+            else:
+                # To avoid testing psycopg2 itself, patch execute_batch/execute_values
+                # to assert how it is called.
+                from psycopg2 import extras
+
+                self.mock_execute_batch = Mock()
+                self.execute_batch_patcher = patch.object(
+                    extras, "execute_batch", new=self.mock_execute_batch
+                )
+                self.execute_batch_patcher.start()
+                self.mock_execute_values = Mock()
+                self.execute_values_patcher = patch.object(
+                    extras, "execute_values", new=self.mock_execute_values
+                )
+                self.execute_values_patcher.start()
+
+            self.mock_conn = Mock(spec_set=conn_attributes)
             self.mock_conn.encoding = "UNICODE"
         else:
             self.mock_conn = Mock(spec_set=["cursor", "rollback", "commit"])
@@ -89,7 +99,9 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         config = default_config(server_name="test", parse=True)
         hs = TestHomeServer("test", config=config)
 
-        if USE_POSTGRES_FOR_TESTS:
+        if USE_POSTGRES_FOR_TESTS == "psycopg":
+            db_config = {"name": "psycopg", "args": {}}
+        elif USE_POSTGRES_FOR_TESTS:
             db_config = {"name": "psycopg2", "args": {}}
         else:
             db_config = {"name": "sqlite3"}
@@ -111,7 +123,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         self.datastore = SQLBaseStore(db, None, hs)  # type: ignore[arg-type]
 
     def tearDown(self) -> None:
-        if USE_POSTGRES_FOR_TESTS:
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.execute_batch_patcher.stop()
             self.execute_values_patcher.stop()
 
@@ -165,7 +177,14 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         )
 
-        if USE_POSTGRES_FOR_TESTS:
+        if USE_POSTGRES_FOR_TESTS == "psycopg":
+            self.mock_txn.copy.assert_called_once_with(
+                "COPY tablename (col1, col2) FROM STDIN", ()
+            )
+            self.mock_copy.write_row.assert_has_calls(
+                [call(("val1", "val2")), call(("val3", "val4"))]
+            )
+        elif USE_POSTGRES_FOR_TESTS:
             self.mock_execute_values.assert_called_once_with(
                 self.mock_txn,
                 "INSERT INTO tablename (col1, col2) VALUES ?",
@@ -195,7 +214,9 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         )
 
-        if USE_POSTGRES_FOR_TESTS:
+        if USE_POSTGRES_FOR_TESTS == "psycopg":
+            self.mock_txn.copy.assert_not_called()
+        elif USE_POSTGRES_FOR_TESTS:
             self.mock_execute_values.assert_not_called()
         else:
             self.mock_txn.executemany.assert_not_called()
@@ -366,7 +387,8 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         )
 
-        if USE_POSTGRES_FOR_TESTS:
+        # execute_batch is only used on psycopg2.
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_batch.assert_called_once_with(
                 self.mock_txn,
                 "UPDATE tablename SET col3 = ? WHERE col1 = ? AND col2 = ?",
@@ -406,7 +428,8 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         )
 
-        if USE_POSTGRES_FOR_TESTS:
+        # execute_batch is only used on psycopg2.
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_batch.assert_not_called()
         else:
             self.mock_txn.executemany.assert_not_called()
@@ -577,7 +600,8 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         )
 
-        if USE_POSTGRES_FOR_TESTS:
+        # execute_values is only used on psycopg2.
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_values.assert_called_once_with(
                 self.mock_txn,
                 "INSERT INTO tablename (keycol1, keycol2, valuecol3) VALUES ? ON CONFLICT (keycol1, keycol2) DO UPDATE SET valuecol3=EXCLUDED.valuecol3",
@@ -606,7 +630,8 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             )
         )
 
-        if USE_POSTGRES_FOR_TESTS:
+        # execute_values is only used on psycopg2.
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_values.assert_called_once_with(
                 self.mock_txn,
                 "INSERT INTO tablename (columnname) VALUES ? ON CONFLICT (columnname) DO NOTHING",
