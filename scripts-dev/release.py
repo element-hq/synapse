@@ -37,6 +37,7 @@ from typing import Any, List, Match, Optional, Union
 import attr
 import click
 import git
+import github
 from click.exceptions import ClickException
 from git import GitCommandError, Repo
 from github import BadCredentialsException, Github
@@ -397,7 +398,7 @@ def _tag(gh_token: Optional[str]) -> None:
         return
 
     # Create a new draft release
-    gh = Github(gh_token)
+    gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     release = gh_repo.create_git_release(
         tag=tag_name,
