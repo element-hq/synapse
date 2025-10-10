@@ -214,7 +214,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         client_to_server_transport.loseConnection()
 
         # there should have been exactly one request
-        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            len(requests),
+            1,
+            "Expected to handle exactly one HTTP replication request but saw %d - requests=%s"
+            % (len(requests), requests),
+        )
 
         return requests[0]
 

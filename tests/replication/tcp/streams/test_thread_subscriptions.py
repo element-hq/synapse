@@ -88,15 +88,15 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
 
         # We should have received all the expected rows in the right order
         # Filter the updates to only include thread subscription changes
-        received_rows = [
-            upd
-            for upd in self.test_handler.received_rdata_rows
-            if upd[0] == ThreadSubscriptionsStream.NAME
+        received_thread_subscription_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ThreadSubscriptionsStream.NAME
         ]
 
         # Verify all the thread subscription updates
         for thread_id in updates:
-            (stream_name, token, row) = received_rows.pop(0)
+            (stream_name, token, row) = received_thread_subscription_rows.pop(0)
             self.assertEqual(stream_name, ThreadSubscriptionsStream.NAME)
             self.assertIsInstance(row, ThreadSubscriptionsStream.ROW_TYPE)
             self.assertEqual(row.user_id, "@test_user:example.org")
@@ -104,14 +104,14 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
             self.assertEqual(row.event_id, thread_id)
 
         # Verify the last update in the different room
-        (stream_name, token, row) = received_rows.pop(0)
+        (stream_name, token, row) = received_thread_subscription_rows.pop(0)
         self.assertEqual(stream_name, ThreadSubscriptionsStream.NAME)
         self.assertIsInstance(row, ThreadSubscriptionsStream.ROW_TYPE)
         self.assertEqual(row.user_id, "@test_user:example.org")
         self.assertEqual(row.room_id, other_room_id)
         self.assertEqual(row.event_id, other_thread_root_id)
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_thread_subscription_rows)
 
     def test_multiple_users_thread_subscription_updates(self) -> None:
         """Test replication with thread subscription updates for multiple users"""
@@ -138,18 +138,18 @@ class ThreadSubscriptionsStreamTestCase(BaseStreamTestCase):
 
         # We should have received all the expected rows
         # Filter the updates to only include thread subscription changes
-        received_rows = [
-            upd
-            for upd in self.test_handler.received_rdata_rows
-            if upd[0] == ThreadSubscriptionsStream.NAME
+        received_thread_subscription_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == ThreadSubscriptionsStream.NAME
         ]
 
         # Should have one update per user
-        self.assertEqual(len(received_rows), len(users))
+        self.assertEqual(len(received_thread_subscription_rows), len(users))
 
         # Verify all updates
         for i, user_id in enumerate(users):
-            (stream_name, token, row) = received_rows[i]
+            (stream_name, token, row) = received_thread_subscription_rows[i]
             self.assertEqual(stream_name, ThreadSubscriptionsStream.NAME)
             self.assertIsInstance(row, ThreadSubscriptionsStream.ROW_TYPE)
             self.assertEqual(row.user_id, user_id)

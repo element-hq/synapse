@@ -1,0 +1,1 @@
+Move unique snowflake homeserver background tasks to `start_background_tasks` (the standard pattern for this kind of thing).

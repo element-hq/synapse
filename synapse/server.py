@@ -62,6 +62,7 @@ from synapse.api.auth_blocking import AuthBlocking
 from synapse.api.filtering import Filtering
 from synapse.api.ratelimiting import Ratelimiter, RequestRatelimiter
 from synapse.app._base import unregister_sighups
+from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.appservice.api import ApplicationServiceApi
 from synapse.appservice.scheduler import ApplicationServiceScheduler
 from synapse.config.homeserver import HomeServerConfig
@@ -643,6 +644,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         for i in self.REQUIRED_ON_BACKGROUND_TASK_STARTUP:
             getattr(self, "get_" + i + "_handler")()
         self.get_task_scheduler()
+        self.get_common_usage_metrics_manager().setup()
+        start_phone_stats_home(self)
 
     def get_reactor(self) -> ISynapseReactor:
         """
