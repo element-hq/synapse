@@ -205,6 +205,7 @@ class SsoHandler:
         self.server_name = hs.hostname
         self._is_mine_server_name = hs.is_mine_server_name
         self._registration_handler = hs.get_registration_handler()
+        self._auth = hs.get_auth()
         self._auth_handler = hs.get_auth_handler()
         self._device_handler = hs.get_device_handler()
         self._error_template = hs.config.sso.sso_error_template
@@ -505,12 +506,13 @@ class SsoHandler:
                         auth_provider_session_id,
                     )
 
+                ip_address = self._auth.get_ip_address_from_request(request)
                 user_id = await self._register_mapped_user(
                     attributes,
                     auth_provider_id,
                     remote_user_id,
                     get_request_user_agent(request),
-                    request.getClientAddress().host,
+                    ip_address,
                 )
                 new_user = True
             elif self._sso_update_profile_information:
@@ -1080,6 +1082,8 @@ class SsoHandler:
         if session.use_avatar:
             attributes.picture = session.avatar_url
 
+        ip_address = self._auth.get_ip_address_from_request(request)
+
         # the following will raise a 400 error if the username has been taken in the
         # meantime.
         user_id = await self._register_mapped_user(
@@ -1087,7 +1091,7 @@ class SsoHandler:
             session.auth_provider_id,
             session.remote_user_id,
             get_request_user_agent(request),
-            request.getClientAddress().host,
+            ip_address,
         )
 
         logger.info(

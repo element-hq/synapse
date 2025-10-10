@@ -49,6 +49,7 @@ class DownloadResource(RestServlet):
 
     def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
         super().__init__()
+        self._auth = hs.get_auth()
         self.media_repo = media_repo
         self._is_mine_server_name = hs.is_mine_server_name
 
@@ -97,7 +98,7 @@ class DownloadResource(RestServlet):
                 respond_404(request)
                 return
 
-            ip_address = request.getClientAddress().host
+            ip_address = self._auth.get_ip_address_from_request(request)
             await self.media_repo.get_remote_media(
                 request,
                 server_name,
