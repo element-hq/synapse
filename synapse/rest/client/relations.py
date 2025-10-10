@@ -153,7 +153,6 @@ class ThreadUpdatesServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.hs = hs
         self.clock = hs.get_clock()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
@@ -173,7 +172,6 @@ class ThreadUpdatesServlet(RestServlet):
         Args:
             thread_updates: List of thread update info from storage
             bundled_aggregations: Map of event_id to bundled aggregations
-            event_serializer: Event serializer instance
             time_now: Current time in milliseconds
             serialize_options: Serialization configuration
 
