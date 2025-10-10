@@ -24,7 +24,7 @@
 """Contains constants from the specification."""
 
 import enum
-from typing import Final
+from typing import Final, TypedDict
 
 # the max size of a (canonical-json-encoded) event
 MAX_PDU_SIZE = 65536
@@ -279,6 +279,8 @@ class EventUnsignedContentFields:
     # Requesting user's membership, per MSC4115
     MEMBERSHIP: Final = "membership"
 
+    STICKY_TTL: Final = "msc4354_sticky_duration_ttl_ms"
+
 
 class MTextFields:
     """Fields found inside m.text content blocks."""
@@ -360,3 +362,14 @@ class Direction(enum.Enum):
 class ProfileFields:
     DISPLAYNAME: Final = "displayname"
     AVATAR_URL: Final = "avatar_url"
+
+
+class StickyEventField(TypedDict):
+    duration_ms: int
+
+
+class StickyEvent:
+    QUERY_PARAM_NAME: Final = "org.matrix.msc4354.sticky_duration_ms"
+    FIELD_NAME: Final = "msc4354_sticky"
+    MAX_DURATION_MS: Final = 3600000  # 1 hour
+    MAX_EVENTS_IN_SYNC: Final = 100

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes
+from synapse.api.constants import MAX_DEPTH, EventTypes, StickyEvent, StickyEventField
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -89,6 +89,7 @@ class EventBuilder:
 
     content: JsonDict = attr.Factory(dict)
     unsigned: JsonDict = attr.Factory(dict)
+    sticky: Optional[StickyEventField] = None
 
     # These only exist on a subset of events, so they raise AttributeError if
     # someone tries to get them when they don't exist.
@@ -269,6 +270,9 @@ class EventBuilder:
         if self._origin_server_ts is not None:
             event_dict["origin_server_ts"] = self._origin_server_ts
 
+        if self.sticky is not None:
+            event_dict[StickyEvent.FIELD_NAME] = self.sticky
+
         return create_local_event_from_event_dict(
             clock=self._clock,
             hostname=self._hostname,
@@ -318,6 +322,7 @@ class EventBuilderFactory:
             unsigned=key_values.get("unsigned", {}),
             redacts=key_values.get("redacts", None),
             origin_server_ts=key_values.get("origin_server_ts", None),
+            sticky=key_values.get(StickyEvent.FIELD_NAME, None),
         )
 
 

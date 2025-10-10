@@ -376,6 +376,15 @@ class SlidingSyncBody(RequestBodyModel):
             enabled: Optional[StrictBool] = False
             limit: StrictInt = 100
 
+        class StickyEventsExtension(RequestBodyModel):
+            """The Sticky Events extension (MSC4354)
+
+            Attributes:
+                enabled
+            """
+
+            enabled: Optional[StrictBool] = False
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
@@ -383,6 +392,9 @@ class SlidingSyncBody(RequestBodyModel):
         typing: Optional[TypingExtension] = None
         thread_subscriptions: Optional[ThreadSubscriptionsExtension] = Field(
             alias="io.element.msc4308.thread_subscriptions"
+        )
+        sticky_events: Optional[StickyEventsExtension] = Field(
+            alias="org.matrix.msc4354.sticky_events"
         )
 
     conn_id: Optional[StrictStr]

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
 from twisted.internet.interfaces import IDelayedCall
 
-from synapse.api.constants import EventTypes
+from synapse.api.constants import EventTypes, StickyEvent
 from synapse.api.errors import ShadowBanError, SynapseError
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
@@ -331,6 +331,7 @@ class DelayedEventsHandler:
         origin_server_ts: Optional[int],
         content: JsonDict,
         delay: int,
+        sticky_duration_ms: Optional[int],
     ) -> str:
         """
         Creates a new delayed event and schedules its delivery.
@@ -344,7 +345,7 @@ class DelayedEventsHandler:
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
             delay: How long (in milliseconds) to wait before automatically sending the event.
-
+            sticky_duration_ms: The sticky duration if any, see MSC4354.
         Returns: The ID of the added delayed event.
 
         Raises:
@@ -380,6 +381,7 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
+            sticky_duration_ms=sticky_duration_ms,
         )
 
         if self._repl_client is not None:
@@ -487,6 +489,7 @@ class DelayedEventsHandler:
                 origin_server_ts=event.origin_server_ts,
                 content=event.content,
                 device_id=event.device_id,
+                sticky_duration_ms=event.sticky_duration_ms,
             )
         )
 
@@ -596,7 +599,10 @@ class DelayedEventsHandler:
 
                 if event.state_key is not None:
                     event_dict["state_key"] = event.state_key
-
+                if event.sticky_duration_ms is not None:
+                    event_dict[StickyEvent.FIELD_NAME] = {
+                        "duration_ms": event.sticky_duration_ms,
+                    }
                 (
                     sent_event,
                     _,

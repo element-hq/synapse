@@ -209,6 +209,15 @@ async def filter_events_for_client(
         # to the cache!
         cloned = clone_event(filtered)
         cloned.unsigned[EventUnsignedContentFields.MEMBERSHIP] = user_membership
+        if storage.main.config.experimental.msc4354_enabled:
+            sticky_duration = cloned.sticky_duration()
+            if sticky_duration:
+                now = storage.main.clock.time_msec()
+                expires_at = min(cloned.origin_server_ts, now) + sticky_duration
+                if sticky_duration and expires_at > now:
+                    cloned.unsigned[EventUnsignedContentFields.STICKY_TTL] = (
+                        expires_at - now
+                    )
 
         return cloned
 

@@ -1,3 +1,4 @@
+import time
 from typing import Callable, Collection, List, Optional, Tuple
 from unittest import mock
 from unittest.mock import AsyncMock, Mock
@@ -19,6 +20,7 @@ from synapse.types import JsonDict
 from synapse.util.clock import Clock
 from synapse.util.retryutils import NotRetryingDestination
 
+from tests import unittest
 from tests.test_utils import event_injection
 from tests.unittest import FederatingHomeserverTestCase
 
@@ -451,6 +453,60 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         # wake up is called regularly and we don't ack in this test that a transaction
         # has been successfully sent.
         self.assertCountEqual(woken, set(server_names[:-1]))
+
+    @unittest.override_config({"experimental_features": {"msc4354_enabled": True}})
+    def test_sends_sticky_events(self) -> None:
+        """Test that we send sticky events in addition to the latest event in the room when catching up."""
+        # make the clock used when generating origin_server_ts the same as the clock used to check expiry
+        self.reactor.advance(time.time())
+        per_dest_queue, sent_pdus = self.make_fake_destination_queue()
+
+        # Make a room with a local user, and two servers. One will go offline
+        # and one will send some events.
+        self.register_user("u1", "you the one")
+        u1_token = self.login("u1", "you the one")
+        room_1 = self.helper.create_room_as("u1", tok=u1_token)
+
+        self.get_success(
+            event_injection.inject_member_event(self.hs, room_1, "@user:host2", "join")
+        )
+        event_1 = self.get_success(
+            event_injection.inject_member_event(self.hs, room_1, "@user:host3", "join")
+        )
+
+        # now we send a sticky event that we expect to be bundled with the fwd extrem event
+        sticky_event_id = self.helper.send_sticky_event(
+            room_1, "m.room.sticky", 60000, tok=u1_token
+        )["event_id"]
+        # ..and other uninteresting events
+        self.helper.send(room_1, "you hear me!!", tok=u1_token)
+
+        # Now simulate us receiving an event from the still online remote.
+        fwd_extrem_event = self.get_success(
+            event_injection.inject_event(
+                self.hs,
+                type=EventTypes.Message,
+                sender="@user:host3",
+                room_id=room_1,
+                content={"msgtype": "m.text", "body": "Hello"},
+            )
+        )
+
+        assert event_1.internal_metadata.stream_ordering is not None
+        self.get_success(
+            self.hs.get_datastores().main.set_destination_last_successful_stream_ordering(
+                "host2", event_1.internal_metadata.stream_ordering
+            )
+        )
+
+        self.get_success(per_dest_queue._catch_up_transmission_loop())
+
+        # We expect the sticky event and the fwd extrem to be sent
+        self.assertEqual(len(sent_pdus), 2)
+        # We expect the sticky event to appear before the fwd extrem
+        self.assertEqual(sent_pdus[0].event_id, sticky_event_id)
+        self.assertEqual(sent_pdus[1].event_id, fwd_extrem_event.event_id)
+        self.assertFalse(per_dest_queue._catching_up)
 
     def test_not_latest_event(self) -> None:
         """Test that we send the latest event in the room even if its not ours."""

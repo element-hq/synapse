@@ -135,6 +135,7 @@ BOOLEAN_COLUMNS = {
         "has_known_state",
         "is_encrypted",
     ],
+    "sticky_events": ["soft_failed"],
     "thread_subscriptions": ["subscribed", "automatic"],
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],

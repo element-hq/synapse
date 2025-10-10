@@ -67,6 +67,7 @@ from synapse.events import EventBase
 from synapse.events.snapshot import EventContext, UnpersistedEventContextBase
 from synapse.events.validator import EventValidator
 from synapse.federation.federation_client import InvalidResponseError
+from synapse.federation.federation_server import _INBOUND_EVENT_HANDLING_LOCK_NAME
 from synapse.handlers.pagination import PURGE_PAGINATION_LOCK_NAME
 from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
@@ -74,6 +75,7 @@ from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.storage.databases.main.lock import Lock
 from synapse.storage.invite_rule import InviteRule
 from synapse.types import JsonDict, StrCollection, get_domain_from_id
 from synapse.types.state import StateFilter
@@ -644,125 +646,158 @@ class FederationHandler:
             except ValueError:
                 pass
 
+            lock: Optional[Lock] = None
             async with self._is_partial_state_room_linearizer.queue(room_id):
-                already_partial_state_room = await self.store.is_partial_state_room(
-                    room_id
-                )
-
-                ret = await self.federation_client.send_join(
-                    host_list,
-                    event,
-                    room_version_obj,
-                    # Perform a full join when we are already in the room and it is a
-                    # full state room, since we are not allowed to persist a partial
-                    # state join event in a full state room. In the future, we could
-                    # optimize this by always performing a partial state join and
-                    # computing the state ourselves or retrieving it from the remote
-                    # homeserver if necessary.
-                    #
-                    # There's a race where we leave the room, then perform a full join
-                    # anyway. This should end up being fast anyway, since we would
-                    # already have the full room state and auth chain persisted.
-                    partial_state=not is_host_joined or already_partial_state_room,
-                )
-
-                event = ret.event
-                origin = ret.origin
-                state = ret.state
-                auth_chain = ret.auth_chain
-                auth_chain.sort(key=lambda e: e.depth)
-
-                logger.debug("do_invite_join auth_chain: %s", auth_chain)
-                logger.debug("do_invite_join state: %s", state)
-
-                logger.debug("do_invite_join event: %s", event)
-
-                # if this is the first time we've joined this room, it's time to add
-                # a row to `rooms` with the correct room version. If there's already a
-                # row there, we should override it, since it may have been populated
-                # based on an invite request which lied about the room version.
-                #
-                # federation_client.send_join has already checked that the room
-                # version in the received create event is the same as room_version_obj,
-                # so we can rely on it now.
-                #
-                await self.store.upsert_room_on_join(
-                    room_id=room_id,
-                    room_version=room_version_obj,
-                    state_events=state,
-                )
-
-                if ret.partial_state and not already_partial_state_room:
-                    # Mark the room as having partial state.
-                    # The background process is responsible for unmarking this flag,
-                    # even if the join fails.
-                    # TODO(faster_joins):
-                    #     We may want to reset the partial state info if it's from an
-                    #     old, failed partial state join.
-                    #     https://github.com/matrix-org/synapse/issues/13000
-
-                    # FIXME: Ideally, we would store the full stream token here
-                    # not just the minimum stream ID, so that we can compute an
-                    # accurate list of device changes when un-partial-ing the
-                    # room. The only side effect of this is that we may send
-                    # extra unecessary device list outbound pokes through
-                    # federation, which is harmless.
-                    device_lists_stream_id = self.store.get_device_stream_token().stream
-
-                    await self.store.store_partial_state_room(
-                        room_id=room_id,
-                        servers=ret.servers_in_room,
-                        device_lists_stream_id=device_lists_stream_id,
-                        joined_via=origin,
-                    )
-
                 try:
-                    max_stream_id = (
-                        await self._federation_event_handler.process_remote_join(
-                            origin,
-                            room_id,
-                            auth_chain,
-                            state,
-                            event,
-                            room_version_obj,
-                            partial_state=ret.partial_state,
+                    # MSC4354: Sticky Events causes existing servers in the room to send sticky events
+                    # to the newly joined server as soon as they realise the new server is in the room.
+                    # If they do this before we've persisted the /send_join response we will be unable to
+                    # process those PDUs. Therefore, we take a lock out now for this room, and release it
+                    # once we have processed the /send_join response, to buffer up these inbound messages.
+                    # This may be useful to do even without MSC4354, but it's gated behind an
+                    # experimental flag check to reduce the chance of this having unintended side-effects
+                    # e.g accidental deadlocks. Once we're confident of this behaviour, we can probably
+                    # drop the flag check. We take the lock AFTER we have been queued by the linearizer
+                    # else we would just hold the lock for no reason whilst in the queue: we want to hold
+                    # the lock for the smallest amount of time possible.
+                    if self.config.experimental.msc4354_enabled:
+                        lock = await self.store.try_acquire_lock(
+                            _INBOUND_EVENT_HANDLING_LOCK_NAME, room_id
                         )
-                    )
-                except PartialStateConflictError:
-                    # This should be impossible, since we hold the lock on the room's
-                    # partial statedness.
-                    logger.error(
-                        "Room %s was un-partial stated while processing remote join.",
-                        room_id,
-                    )
-                    raise
-                else:
-                    # Record the join event id for future use (when we finish the full
-                    # join). We have to do this after persisting the event to keep
-                    # foreign key constraints intact.
-                    if ret.partial_state and not already_partial_state_room:
-                        # TODO(faster_joins):
-                        #     We may want to reset the partial state info if it's from
-                        #     an old, failed partial state join.
-                        #     https://github.com/matrix-org/synapse/issues/13000
-                        await self.store.write_partial_state_rooms_join_event_id(
-                            room_id, event.event_id
-                        )
-                finally:
-                    # Always kick off the background process that asynchronously fetches
-                    # state for the room.
-                    # If the join failed, the background process is responsible for
-                    # cleaning up — including unmarking the room as a partial state
-                    # room.
-                    if ret.partial_state:
-                        # Kick off the process of asynchronously fetching the state for
-                        # this room.
-                        self._start_partial_state_room_sync(
-                            initial_destination=origin,
-                            other_destinations=ret.servers_in_room,
+                        # Insert the room into the rooms table now so we can process potential incoming
+                        # /send transactions enough to be able to insert into the federation staging
+                        # area. We won't process the staging area until we release the lock above.
+                        await self.store.upsert_room_on_join(
                             room_id=room_id,
+                            room_version=room_version_obj,
+                            state_events=None,
                         )
 
+                    already_partial_state_room = await self.store.is_partial_state_room(
+                        room_id
+                    )
+
+                    ret = await self.federation_client.send_join(
+                        host_list,
+                        event,
+                        room_version_obj,
+                        # Perform a full join when we are already in the room and it is a
+                        # full state room, since we are not allowed to persist a partial
+                        # state join event in a full state room. In the future, we could
+                        # optimize this by always performing a partial state join and
+                        # computing the state ourselves or retrieving it from the remote
+                        # homeserver if necessary.
+                        #
+                        # There's a race where we leave the room, then perform a full join
+                        # anyway. This should end up being fast anyway, since we would
+                        # already have the full room state and auth chain persisted.
+                        partial_state=not is_host_joined or already_partial_state_room,
+                    )
+
+                    event = ret.event
+                    origin = ret.origin
+                    state = ret.state
+                    auth_chain = ret.auth_chain
+                    auth_chain.sort(key=lambda e: e.depth)
+
+                    logger.debug("do_invite_join auth_chain: %s", auth_chain)
+                    logger.debug("do_invite_join state: %s", state)
+
+                    logger.debug("do_invite_join event: %s", event)
+
+                    # if this is the first time we've joined this room, it's time to add
+                    # a row to `rooms` with the correct room version. If there's already a
+                    # row there, we should override it, since it may have been populated
+                    # based on an invite request which lied about the room version.
+                    #
+                    # federation_client.send_join has already checked that the room
+                    # version in the received create event is the same as room_version_obj,
+                    # so we can rely on it now.
+                    #
+                    await self.store.upsert_room_on_join(
+                        room_id=room_id,
+                        room_version=room_version_obj,
+                        state_events=state,
+                    )
+
+                    if ret.partial_state and not already_partial_state_room:
+                        # Mark the room as having partial state.
+                        # The background process is responsible for unmarking this flag,
+                        # even if the join fails.
+                        # TODO(faster_joins):
+                        #     We may want to reset the partial state info if it's from an
+                        #     old, failed partial state join.
+                        #     https://github.com/matrix-org/synapse/issues/13000
+
+                        # FIXME: Ideally, we would store the full stream token here
+                        # not just the minimum stream ID, so that we can compute an
+                        # accurate list of device changes when un-partial-ing the
+                        # room. The only side effect of this is that we may send
+                        # extra unecessary device list outbound pokes through
+                        # federation, which is harmless.
+                        device_lists_stream_id = (
+                            self.store.get_device_stream_token().stream
+                        )
+
+                        await self.store.store_partial_state_room(
+                            room_id=room_id,
+                            servers=ret.servers_in_room,
+                            device_lists_stream_id=device_lists_stream_id,
+                            joined_via=origin,
+                        )
+
+                    try:
+                        max_stream_id = (
+                            await self._federation_event_handler.process_remote_join(
+                                origin,
+                                room_id,
+                                auth_chain,
+                                state,
+                                event,
+                                room_version_obj,
+                                partial_state=ret.partial_state,
+                            )
+                        )
+                    except PartialStateConflictError:
+                        # This should be impossible, since we hold the lock on the room's
+                        # partial statedness.
+                        logger.error(
+                            "Room %s was un-partial stated while processing remote join.",
+                            room_id,
+                        )
+                        raise
+                    else:
+                        # Record the join event id for future use (when we finish the full
+                        # join). We have to do this after persisting the event to keep
+                        # foreign key constraints intact.
+                        if ret.partial_state and not already_partial_state_room:
+                            # TODO(faster_joins):
+                            #     We may want to reset the partial state info if it's from
+                            #     an old, failed partial state join.
+                            #     https://github.com/matrix-org/synapse/issues/13000
+                            await self.store.write_partial_state_rooms_join_event_id(
+                                room_id, event.event_id
+                            )
+                    finally:
+                        # Always kick off the background process that asynchronously fetches
+                        # state for the room.
+                        # If the join failed, the background process is responsible for
+                        # cleaning up — including unmarking the room as a partial state
+                        # room.
+                        if ret.partial_state:
+                            # Kick off the process of asynchronously fetching the state for
+                            # this room.
+                            self._start_partial_state_room_sync(
+                                initial_destination=origin,
+                                other_destinations=ret.servers_in_room,
+                                room_id=room_id,
+                            )
+                finally:
+                    # allow inbound events which happened during the join to be processed.
+                    # Also ensures we release the lock on unexpected errors e.g db errors from
+                    # upsert_room_on_join or network errors from send_join.
+                    if lock:
+                        await lock.release()
             # We wait here until this instance has seen the events come down
             # replication (if we're using replication) as the below uses caches.
             await self._replication.wait_for_stream_position(
