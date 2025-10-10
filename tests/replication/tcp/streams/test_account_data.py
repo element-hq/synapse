@@ -91,11 +91,6 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
             store.add_account_data_to_room("test_user", "test_room", "m.per_room", {})
         )
 
-        # tell the notifier to catch up to avoid duplicate rows.
-        # workaround for https://github.com/matrix-org/synapse/issues/7360
-        # FIXME remove this when the above is fixed
-        self.replicate()
-
         # check we're testing what we think we are: no rows should yet have been
         # received
         self.assertEqual([], self.test_handler.received_rdata_rows)
