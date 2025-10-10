@@ -556,6 +556,21 @@ class ExperimentalConfig(Config):
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
+        # MSC4140: How many delayed events a user is allowed to have scheduled at a time.
+        self.msc4140_max_delayed_events_per_user = experimental.get(
+            "msc4140_max_delayed_events_per_user", 100
+        )
+
+        # MSC4140: How long to keep finalised delayed events in the database before deleting them.
+        self.msc4140_finalised_retention_period = self.parse_duration(
+            config.get("msc4140_finalised_retention_period", "7d")
+        )
+
+        # MSC4140: How many finalised delayed events to keep per user before deleting them.
+        self.msc4140_finalised_retention_limit = experimental.get(
+            "msc4140_finalised_retention_limit", 1000
+        )
+
         # MSC4143: Matrix RTC Transport using Livekit Backend
         self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 

@@ -13,13 +13,17 @@
 #
 
 import logging
-from typing import List, NewType, Optional, Tuple
+from http import HTTPStatus
+from typing import List, NewType, Optional, Tuple, Union
 
 import attr
 
-from synapse.api.errors import NotFoundError
+from synapse.api.errors import NotFoundError, SynapseError, cs_error
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import LoggingTransaction, StoreError
+from synapse.storage.database import (
+    LoggingTransaction,
+    make_in_list_sql_clause,
+)
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import stringutils
@@ -58,7 +62,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_delayed_events_stream_pos(self) -> int:
         """
         Gets the stream position of the background process to watch for state events
-        that target the same piece of state as any pending delayed events.
+        that target the same piece of state as any scheduled delayed events.
         """
         return await self.db_pool.simple_select_one_onecol(
             table="delayed_events_stream_pos",
@@ -70,7 +74,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def update_delayed_events_stream_pos(self, stream_id: Optional[int]) -> None:
         """
         Updates the stream position of the background process to watch for state events
-        that target the same piece of state as any pending delayed events.
+        that target the same piece of state as any scheduled delayed events.
 
         Must only be used by the worker running the background process.
         """
@@ -93,6 +97,7 @@ class DelayedEventsStore(SQLBaseStore):
         origin_server_ts: Optional[int],
         content: JsonDict,
         delay: int,
+        limit: int,
     ) -> Tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
@@ -100,11 +105,36 @@ class DelayedEventsStore(SQLBaseStore):
         Returns: The generated ID assigned to the added delayed event,
             and the send time of the next delayed event to be sent,
             which is either the event just added or one added earlier.
+
+        Raises:
+            SynapseError: if the user has reached the limit of how many
+                delayed events they may have scheduled at a time.
         """
         delay_id = _generate_delay_id()
         send_ts = Timestamp(creation_ts + delay)
 
         def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
+            txn.execute(
+                """
+                SELECT COUNT(*) FROM delayed_events
+                WHERE user_localpart = ?
+                    AND (delay_id, user_localpart) NOT IN (
+                        SELECT delay_id, user_localpart
+                        FROM finalised_delayed_events
+                    )
+                """,
+                (user_localpart,),
+            )
+            num_existing: int = txn.fetchall()[0][0]
+            if num_existing >= limit:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "The maximum number of delayed events has been reached.",
+                    additional_fields={
+                        "org.matrix.msc4140.errcode": "M_MAX_DELAY_UNSUPPORTED",
+                    },
+                )
+
             self.db_pool.simple_insert_txn(
                 txn,
                 table="delayed_events",
@@ -154,6 +184,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         Raises:
             NotFoundError: if there is no matching delayed event.
+            SynapseError: if the delayed event has already been finalised.
         """
 
         def restart_delayed_event_txn(
@@ -165,6 +196,10 @@ class DelayedEventsStore(SQLBaseStore):
                 SET send_ts = ? + delay
                 WHERE delay_id = ? AND user_localpart = ?
                     AND NOT is_processed
+                    AND (delay_id, user_localpart) NOT IN (
+                        SELECT delay_id, user_localpart
+                        FROM finalised_delayed_events
+                    )
                 """,
                 (
                     current_ts,
@@ -173,7 +208,19 @@ class DelayedEventsStore(SQLBaseStore):
                 ),
             )
             if txn.rowcount == 0:
-                raise NotFoundError("Delayed event not found")
+                sent = self.db_pool.simple_select_one_onecol_txn(
+                    txn,
+                    "finalised_delayed_events",
+                    keyvalues={"delay_id": delay_id, "user_localpart": user_localpart},
+                    retcol="event_id IS NOT NULL",
+                    allow_none=True,
+                )
+                if sent is None:
+                    raise NotFoundError("Delayed event not found")
+                raise SynapseError(
+                    HTTPStatus.CONFLICT,
+                    f"Delayed event has already been {'sent' if sent else 'cancelled'}",
+                )
 
             next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
             assert next_send_ts is not None
@@ -183,30 +230,123 @@ class DelayedEventsStore(SQLBaseStore):
             "restart_delayed_event", restart_delayed_event_txn
         )
 
-    async def get_count_of_delayed_events(self) -> int:
-        """Returns the number of pending delayed events in the DB."""
+    async def has_scheduled_delayed_events(self) -> bool:
+        """Returns whether there are any scheduled delayed events in the DB."""
 
-        def _get_count_of_delayed_events(txn: LoggingTransaction) -> int:
-            sql = "SELECT count(*) FROM delayed_events"
+        rows = await self.db_pool.execute(
+            "has_scheduled_delayed_events",
+            """
+            SELECT 1 WHERE EXISTS (
+                SELECT * FROM delayed_events
+                WHERE (delay_id, user_localpart) NOT IN (
+                    SELECT delay_id, user_localpart
+                    FROM finalised_delayed_events
+                )
+            )
+            """,
+        )
+        return bool(rows)
 
-            txn.execute(sql)
-            resp = txn.fetchone()
-            return resp[0] if resp is not None else 0
+    async def prune_finalised_delayed_events(
+        self,
+        current_ts: Timestamp,
+        retention_period: int,
+        retention_limit: int,
+    ) -> None:
+        def prune_finalised_delayed_events(txn: LoggingTransaction) -> None:
+            self._prune_expired_finalised_delayed_events(
+                txn, current_ts, retention_period
+            )
 
-        return await self.db_pool.runInteraction(
-            "get_count_of_delayed_events",
-            _get_count_of_delayed_events,
+            for user_localpart in self.db_pool.simple_select_onecol_txn(
+                txn,
+                "finalised_delayed_events",
+                keyvalues={},
+                retcol="DISTINCT(user_localpart)",
+            ):
+                self._prune_excess_finalised_delayed_events_for_user(
+                    txn, user_localpart, retention_limit
+                )
+
+        await self.db_pool.runInteraction(
+            "prune_finalised_delayed_events", prune_finalised_delayed_events
         )
 
-    async def get_all_delayed_events_for_user(
+    def _prune_expired_finalised_delayed_events(
+        self, txn: LoggingTransaction, current_ts: Timestamp, retention_period: int
+    ) -> None:
+        """
+        Delete all finalised delayed events that had finalised
+        before the end of the given retention period.
+        """
+        txn.execute(
+            """
+            DELETE FROM delayed_events
+            WHERE (delay_id, user_localpart) IN (
+                SELECT delay_id, user_localpart
+                FROM finalised_delayed_events
+                WHERE ? - finalised_ts > ?
+            )
+            """,
+            (
+                current_ts,
+                retention_period,
+            ),
+        )
+
+    def _prune_excess_finalised_delayed_events_for_user(
+        self, txn: LoggingTransaction, user_localpart: str, retention_limit: int
+    ) -> None:
+        """
+        Delete the oldest finalised delayed events for the given user,
+        such that no more of them remain than the given retention limit.
+        """
+        num_existing = self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            "finalised_delayed_events",
+            keyvalues={"user_localpart": user_localpart},
+            retcol="COUNT(*)",
+        )
+        if num_existing > retention_limit:
+            txn.execute(
+                """
+                DELETE FROM delayed_events
+                WHERE (delay_id, user_localpart) IN (
+                    SELECT delay_id, user_localpart
+                    FROM finalised_delayed_events
+                    WHERE user_localpart = ?
+                    ORDER BY finalised_ts
+                    LIMIT ?
+                )
+                """,
+                (
+                    user_localpart,
+                    num_existing - retention_limit,
+                ),
+            )
+
+    async def get_scheduled_delayed_events_for_user(
         self,
         user_localpart: str,
+        delay_ids: Optional[List[str]],
     ) -> List[JsonDict]:
-        """Returns all pending delayed events owned by the given user."""
+        """Returns all scheduled delayed events for the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
+        sql_where = """WHERE user_localpart = ?
+            AND (delay_id, user_localpart) NOT IN (
+                SELECT delay_id, user_localpart
+                FROM finalised_delayed_events
+            )"""
+        sql_args = [user_localpart]
+        if delay_ids:
+            delay_id_clause_sql, delay_id_clause_args = make_in_list_sql_clause(
+                self.database_engine, "delay_id", delay_ids
+            )
+            sql_where += f" AND {delay_id_clause_sql}"
+            sql_args.extend(delay_id_clause_args)
         rows = await self.db_pool.execute(
-            "get_all_delayed_events_for_user",
-            """
+            "get_scheduled_delayed_events_for_user",
+            f"""
             SELECT
                 delay_id,
                 room_id,
@@ -216,10 +356,10 @@ class DelayedEventsStore(SQLBaseStore):
                 send_ts,
                 content
             FROM delayed_events
-            WHERE user_localpart = ? AND NOT is_processed
+            {sql_where}
             ORDER BY send_ts
             """,
-            user_localpart,
+            *sql_args,
         )
         return [
             {
@@ -233,6 +373,92 @@ class DelayedEventsStore(SQLBaseStore):
             }
             for row in rows
         ]
+
+    async def get_finalised_delayed_events_for_user(
+        self,
+        user_localpart: str,
+        delay_ids: Optional[List[str]],
+        current_ts: Timestamp,
+        retention_period: int,
+        retention_limit: int,
+    ) -> List[JsonDict]:
+        """Returns all finalised delayed events for the given user."""
+        # TODO: Support Pagination stream API ("next_batch" field)
+
+        def get_finalised_delayed_events_for_user(
+            txn: LoggingTransaction,
+        ) -> List[JsonDict]:
+            # Clear up some space in the DB before returning any results.
+            self._prune_expired_finalised_delayed_events(
+                txn, current_ts, retention_period
+            )
+            self._prune_excess_finalised_delayed_events_for_user(
+                txn, user_localpart, retention_limit
+            )
+
+            sql_where = "WHERE user_localpart = ?"
+            sql_args = [user_localpart]
+            if delay_ids:
+                delay_id_clause_sql, delay_id_clause_args = make_in_list_sql_clause(
+                    self.database_engine, "delay_id", delay_ids
+                )
+                sql_where += f" AND {delay_id_clause_sql}"
+                sql_args.extend(delay_id_clause_args)
+            txn.execute(
+                f"""
+                SELECT
+                    delay_id,
+                    room_id,
+                    event_type,
+                    state_key,
+                    delay,
+                    send_ts,
+                    content,
+                    error,
+                    event_id,
+                    finalised_ts
+                FROM delayed_events
+                JOIN finalised_delayed_events
+                USING (delay_id, user_localpart)
+                {sql_where}
+                ORDER BY finalised_ts
+                """,
+                sql_args,
+            )
+            return [
+                {
+                    "delayed_event": {
+                        "delay_id": DelayID(row[0]),
+                        "room_id": str(RoomID.from_string(row[1])),
+                        "type": EventType(row[2]),
+                        **(
+                            {"state_key": StateKey(row[3])}
+                            if row[3] is not None
+                            else {}
+                        ),
+                        "delay": Delay(row[4]),
+                        "running_since": Timestamp(row[5] - row[4]),
+                        "content": db_to_json(row[6]),
+                    },
+                    "outcome": "cancel" if row[8] is None else "send",
+                    "reason": (
+                        "error"
+                        if row[7] is not None
+                        else "action"
+                        if row[9] < row[5]
+                        else "delay"
+                    ),
+                    **({"error": db_to_json(row[7])} if row[7] is not None else {}),
+                    **({"event_id": str(row[8])} if row[8] is not None else {}),
+                    "origin_server_ts": Timestamp(row[9]),
+                }
+                for row in txn
+            ]
+
+        return await self.db_pool.runInteraction(
+            "get_finalised_delayed_events_for_user",
+            get_finalised_delayed_events_for_user,
+        )
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp
@@ -268,7 +494,12 @@ class DelayedEventsStore(SQLBaseStore):
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = "WHERE send_ts <= ? AND NOT is_processed"
+            sql_where = """WHERE send_ts <= ?
+                AND NOT is_processed
+                AND (delay_id, user_localpart) NOT IN (
+                    SELECT delay_id, user_localpart
+                    FROM finalised_delayed_events
+                )"""
             sql_args = (current_ts,)
             sql_order = "ORDER BY send_ts"
             if isinstance(self.database_engine, PostgresEngine):
@@ -323,7 +554,7 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id: str,
         user_localpart: str,
     ) -> Tuple[
-        EventDetails,
+        Optional[EventDetails],
         Optional[Timestamp],
     ]:
         """
@@ -339,12 +570,13 @@ class DelayedEventsStore(SQLBaseStore):
 
         Raises:
             NotFoundError: if there is no matching delayed event.
+            SynapseError: if the delayed event has already been cancelled.
         """
 
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
         ) -> Tuple[
-            EventDetails,
+            Optional[EventDetails],
             Optional[Timestamp],
         ]:
             sql_cols = ", ".join(
@@ -358,7 +590,12 @@ class DelayedEventsStore(SQLBaseStore):
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
-            sql_where = "WHERE delay_id = ? AND user_localpart = ? AND NOT is_processed"
+            sql_where = """WHERE delay_id = ? AND user_localpart = ?
+                AND NOT is_processed
+                AND (delay_id, user_localpart) NOT IN (
+                    SELECT delay_id, user_localpart
+                    FROM finalised_delayed_events
+                )"""
             sql_args = (delay_id, user_localpart)
             txn.execute(
                 (
@@ -370,7 +607,21 @@ class DelayedEventsStore(SQLBaseStore):
             )
             row = txn.fetchone()
             if row is None:
-                raise NotFoundError("Delayed event not found")
+                sent = self.db_pool.simple_select_one_onecol_txn(
+                    txn,
+                    "finalised_delayed_events",
+                    keyvalues={"delay_id": delay_id, "user_localpart": user_localpart},
+                    retcol="event_id IS NOT NULL",
+                    allow_none=True,
+                )
+                if sent is None:
+                    raise NotFoundError("Delayed event not found")
+                elif not sent:
+                    raise SynapseError(
+                        HTTPStatus.CONFLICT,
+                        "Delayed event has already been cancelled",
+                    )
+                return None, None
             elif not self.database_engine.supports_returning:
                 txn.execute(f"{sql_update} {sql_where}", sql_args)
                 assert txn.rowcount == 1
@@ -395,6 +646,7 @@ class DelayedEventsStore(SQLBaseStore):
         *,
         delay_id: str,
         user_localpart: str,
+        finalised_ts: Timestamp,
     ) -> Optional[Timestamp]:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
@@ -407,27 +659,56 @@ class DelayedEventsStore(SQLBaseStore):
 
         Raises:
             NotFoundError: if there is no matching delayed event.
+            SynapseError: if the delayed event has already been sent.
         """
 
         def cancel_delayed_event_txn(
             txn: LoggingTransaction,
         ) -> Optional[Timestamp]:
-            try:
-                self.db_pool.simple_delete_one_txn(
-                    txn,
-                    table="delayed_events",
-                    keyvalues={
-                        "delay_id": delay_id,
-                        "user_localpart": user_localpart,
-                        "is_processed": False,
-                    },
+            txn.execute(
+                """
+                WITH matching_delayed_events AS (
+                    SELECT * FROM delayed_events
+                    WHERE delay_id = ? AND user_localpart = ?
+                        AND NOT is_processed
+                        AND (delay_id, user_localpart) NOT IN (
+                            SELECT delay_id, user_localpart
+                            FROM finalised_delayed_events
+                        )
                 )
-            except StoreError:
-                if txn.rowcount == 0:
+                INSERT INTO finalised_delayed_events (
+                    delay_id,
+                    user_localpart,
+                    finalised_ts
+                )
+                SELECT
+                    delay_id,
+                    user_localpart,
+                    ?
+                FROM matching_delayed_events
+                RETURNING 1
+                """,
+                (
+                    delay_id,
+                    user_localpart,
+                    finalised_ts,
+                ),
+            )
+            if not txn.fetchall():
+                sent = self.db_pool.simple_select_one_onecol_txn(
+                    txn,
+                    "finalised_delayed_events",
+                    keyvalues={"delay_id": delay_id, "user_localpart": user_localpart},
+                    retcol="event_id IS NOT NULL",
+                )
+                if sent is None:
                     raise NotFoundError("Delayed event not found")
-                else:
-                    raise
-
+                elif sent:
+                    raise SynapseError(
+                        HTTPStatus.CONFLICT,
+                        "Delayed event has already been sent",
+                    )
+                return None
             return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(
@@ -441,6 +722,7 @@ class DelayedEventsStore(SQLBaseStore):
         event_type: str,
         state_key: str,
         not_from_localpart: str,
+        finalised_ts: Timestamp,
     ) -> Optional[Timestamp]:
         """
         Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
@@ -460,16 +742,36 @@ class DelayedEventsStore(SQLBaseStore):
         ) -> Optional[Timestamp]:
             txn.execute(
                 """
-                DELETE FROM delayed_events
-                WHERE room_id = ? AND event_type = ? AND state_key = ?
-                    AND user_localpart <> ?
-                    AND NOT is_processed
+                WITH matching_delayed_events AS (
+                    SELECT * FROM delayed_events
+                    WHERE room_id = ? AND event_type = ? AND state_key = ?
+                        AND user_localpart <> ?
+                        AND NOT is_processed
+                        AND (delay_id, user_localpart) NOT IN (
+                            SELECT delay_id, user_localpart
+                            FROM finalised_delayed_events
+                        )
+                )
+                INSERT INTO finalised_delayed_events (
+                    delay_id,
+                    user_localpart,
+                    error,
+                    finalised_ts
+                )
+                SELECT
+                    delay_id,
+                    user_localpart,
+                    ?,
+                    ?
+                FROM matching_delayed_events
                 """,
                 (
                     room_id,
                     event_type,
                     state_key,
                     not_from_localpart,
+                    _generate_cancelled_by_state_update_json(),
+                    finalised_ts,
                 ),
             )
             return self._get_next_delayed_event_send_ts_txn(txn)
@@ -478,57 +780,118 @@ class DelayedEventsStore(SQLBaseStore):
             "cancel_delayed_state_events", cancel_delayed_state_events_txn
         )
 
-    async def delete_processed_delayed_event(
+    async def finalise_processed_delayed_event(
         self,
         delay_id: DelayID,
         user_localpart: UserLocalpart,
+        result_or_error: Union[str, JsonDict],
+        finalised_ts: Timestamp,
     ) -> None:
         """
-        Delete the matching delayed event, as long as it has been marked as processed.
+        Finalise the matching delayed event, as long as it has been marked as processed.
 
         Throws:
             StoreError: if there is no matching delayed event, or if it has not yet been processed.
         """
-        return await self.db_pool.simple_delete_one(
-            table="delayed_events",
-            keyvalues={
-                "delay_id": delay_id,
-                "user_localpart": user_localpart,
-                "is_processed": True,
-            },
-            desc="delete_processed_delayed_event",
+        if isinstance(result_or_error, str):
+            event_id = result_or_error
+            send_error = None
+        else:
+            event_id = None
+            send_error = result_or_error
+
+        await self.db_pool.execute(
+            "finalise_processed_delayed_event",
+            """
+            WITH matching_delayed_events AS (
+                SELECT * FROM delayed_events
+                WHERE delay_id = ? AND user_localpart = ?
+                    AND is_processed
+                    AND (delay_id, user_localpart) NOT IN (
+                        SELECT delay_id, user_localpart
+                        FROM finalised_delayed_events
+                    )
+            )
+            INSERT INTO finalised_delayed_events (
+                delay_id,
+                user_localpart,
+                error,
+                event_id,
+                finalised_ts
+            )
+            SELECT
+                delay_id,
+                user_localpart,
+                ?,
+                ?,
+                ?
+            FROM matching_delayed_events
+            """,
+            delay_id,
+            user_localpart,
+            json_encoder.encode(send_error) if send_error else None,
+            event_id,
+            finalised_ts,
         )
 
-    async def delete_processed_delayed_state_events(
+    async def finalise_processed_delayed_state_events(
         self,
         *,
         room_id: str,
         event_type: str,
         state_key: str,
+        finalised_ts: Timestamp,
     ) -> None:
         """
-        Delete the matching delayed state events that have been marked as processed.
+        Finalise the matching delayed state events that have been marked as processed.
         """
-        await self.db_pool.simple_delete(
-            table="delayed_events",
-            keyvalues={
-                "room_id": room_id,
-                "event_type": event_type,
-                "state_key": state_key,
-                "is_processed": True,
-            },
-            desc="delete_processed_delayed_state_events",
+        await self.db_pool.execute(
+            "finalise_processed_delayed_state_events",
+            """
+            WITH matching_delayed_events AS (
+                SELECT * FROM delayed_events
+                WHERE room_id = ? AND event_type = ? AND state_key = ?
+                    AND user_localpart <> ?
+                    AND is_processed
+                    AND (delay_id, user_localpart) NOT IN (
+                        SELECT delay_id, user_localpart
+                        FROM finalised_delayed_events
+                    )
+            )
+            INSERT INTO finalised_delayed_events (
+                delay_id,
+                user_localpart,
+                error,
+                finalised_ts
+            )
+            SELECT
+                delay_id,
+                user_localpart,
+                ?,
+                ?
+            FROM matching_delayed_events
+            """,
+            room_id,
+            event_type,
+            state_key,
+            _generate_cancelled_by_state_update_json(),
+            finalised_ts,
         )
 
     async def unprocess_delayed_events(self) -> None:
         """
         Unmark all delayed events for processing.
         """
-        await self.db_pool.simple_update(
-            table="delayed_events",
-            keyvalues={"is_processed": True},
-            updatevalues={"is_processed": False},
-            desc="unprocess_delayed_events",
+        await self.db_pool.execute(
+            "unprocess_delayed_events",
+            """
+            UPDATE delayed_events SET is_processed = FALSE
+            WHERE is_processed
+                AND (delay_id, user_localpart) NOT IN (
+                    SELECT delay_id, user_localpart
+                    FROM finalised_delayed_events
+                )
+            """,
         )
 
     async def get_next_delayed_event_send_ts(self) -> Optional[Timestamp]:
@@ -544,14 +907,18 @@ class DelayedEventsStore(SQLBaseStore):
     def _get_next_delayed_event_send_ts_txn(
         self, txn: LoggingTransaction
     ) -> Optional[Timestamp]:
-        result = self.db_pool.simple_select_one_onecol_txn(
-            txn,
-            table="delayed_events",
-            keyvalues={"is_processed": False},
-            retcol="MIN(send_ts)",
-            allow_none=True,
+        txn.execute(
+            """
+            SELECT MIN(send_ts) FROM delayed_events
+            WHERE NOT is_processed
+                AND (delay_id, user_localpart) NOT IN (
+                    SELECT delay_id, user_localpart
+                    FROM finalised_delayed_events
+                )
+            """
         )
-        return Timestamp(result) if result is not None else None
+        resp = txn.fetchone()
+        return Timestamp(resp[0]) if resp is not None else None
 
 
 def _generate_delay_id() -> DelayID:
@@ -563,3 +930,15 @@ def _generate_delay_id() -> DelayID:
     # the same ID to exist for multiple users.
 
     return DelayID(f"syd_{stringutils.random_string(20)}")
+
+
+def _generate_cancelled_by_state_update_json() -> str:
+    return json_encoder.encode(
+        cs_error(
+            "The delayed event did not get sent because a different user updated the same state event. "
+            + "So the scheduled event might change it in an undesired way.",
+            **{
+                "org.matrix.msc4140.errcode": "M_CANCELLED_BY_STATE_UPDATE",
+            },
+        )
+    )
