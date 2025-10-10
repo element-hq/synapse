@@ -21,7 +21,7 @@
 
 import logging
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import attr
 
@@ -30,7 +30,7 @@ from synapse.types import JsonDict
 from synapse.util.check_dependencies import check_requirements
 from synapse.util.module_loader import load_module
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, read_file
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,9 @@ class MediaUploadLimit:
 class ContentRepositoryConfig(Config):
     section = "media"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         # Only enable the media repo if either the media repo is enabled or the
         # current worker app is the media repo.
         if (
@@ -297,6 +299,55 @@ class ContentRepositoryConfig(Config):
             )
 
         self.enable_authenticated_media = config.get("enable_authenticated_media", True)
+
+        redirect_config = config.get("media_redirect", {})
+        if redirect_config is None:
+            redirect_config = {}
+        if not isinstance(redirect_config, dict):
+            raise ConfigError(
+                "`media_redirect` must be a dictionary",
+                ("media_redirect",),
+            )
+
+        # Whether we should use a redirect to /_synapse/media/* when serving
+        # media for better caching. This requires this endpoint to be routed to
+        # the media worker.
+        self.use_redirect = redirect_config.get("enabled", False)
+
+        redirect_secret = redirect_config.get("secret")
+        if redirect_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("media_redirect", "secret"),
+            )
+        if redirect_secret is not None and not isinstance(redirect_secret, str):
+            raise ConfigError(
+                "`media_redirect.secret` must be a string.",
+                ("media_redirect", "secret"),
+            )
+
+        redirect_secret_path = redirect_config.get("secret_path")
+        if redirect_secret_path:
+            if redirect_secret:
+                raise ConfigError(
+                    "You have configured both `media_redirect.secret` and `media_redirect.secret_path`.\n"
+                    "These are mutually incompatible.",
+                    ("media_redirect", "secret_path"),
+                )
+            redirect_secret = read_file(
+                redirect_secret_path, ("media_redirect", "secret_path")
+            ).strip()
+
+        self.redirect_secret: Optional[bytes] = (
+            redirect_secret.encode("utf-8") if redirect_secret else None
+        )
+
+        if self.use_redirect and self.redirect_secret is None:
+            raise ConfigError(
+                "You have configured `media_redirect.enabled` but not set `media_redirect.secret` or `media_redirect.secret_path`."
+            )
+
+        self.redirect_ttl_ms = self.parse_duration(redirect_config.get("ttl", "10m"))
 
         self.media_upload_limits: List[MediaUploadLimit] = []
         for limit_config in config.get("media_upload_limits", []):
