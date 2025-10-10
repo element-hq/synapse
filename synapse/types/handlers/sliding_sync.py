@@ -40,6 +40,9 @@ import attr
 from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
+
+if TYPE_CHECKING:
+    from synapse.handlers.relations import BundledAggregations
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
@@ -396,12 +399,60 @@ class SlidingSyncResult:
                     or bool(self.prev_batch)
                 )
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ThreadsExtension:
+            """The Threads extension (MSC4360)
+
+            Provides thread updates for threads that have new activity across all of the
+            user's joined rooms within the sync window.
+
+            Attributes:
+                updates: A nested mapping of room_id -> thread_root_id -> ThreadUpdate.
+                    Each ThreadUpdate contains information about a thread that has new activity,
+                    including the thread root event (if requested) and a pagination token
+                    for fetching older events in that specific thread.
+                prev_batch: A pagination token for fetching more thread updates across all rooms.
+                    If present, indicates there are more thread updates available beyond what
+                    was returned in this response. This token can be used with a future request
+                    to paginate through older thread updates.
+            """
+
+            @attr.s(slots=True, frozen=True, auto_attribs=True)
+            class ThreadUpdate:
+                """Information about a single thread that has new activity.
+
+                Attributes:
+                    thread_root: The thread root event, if requested via include_roots in the
+                        request. This is the event that started the thread.
+                    prev_batch: A pagination token (exclusive) for fetching older events in this
+                        specific thread. Only present if the thread has multiple updates in the
+                        sync window. This token can be used with the /relations endpoint with
+                        dir=b to paginate backwards through the thread's history.
+                    bundled_aggregations: Bundled aggregations for the thread root event,
+                        including the latest_event in the thread (found in
+                        unsigned.m.relations.m.thread). Only present if thread_root is included.
+                """
+
+                thread_root: Optional[EventBase]
+                prev_batch: Optional[StreamToken]
+                bundled_aggregations: Optional["BundledAggregations"] = None
+
+                def __bool__(self) -> bool:
+                    return bool(self.thread_root) or bool(self.prev_batch)
+
+            updates: Optional[Mapping[str, Mapping[str, ThreadUpdate]]]
+            prev_batch: Optional[StreamToken]
+
+            def __bool__(self) -> bool:
+                return bool(self.updates) or bool(self.prev_batch)
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
         thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
+        threads: Optional[ThreadsExtension] = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -411,6 +462,7 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.threads
             )
 
     next_pos: SlidingSyncStreamToken
@@ -860,6 +912,7 @@ class PerConnectionState:
     Attributes:
         rooms: The status of each room for the events stream.
         receipts: The status of each room for the receipts stream.
+        account_data: The status of each room for the account data stream.
         room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
     """
