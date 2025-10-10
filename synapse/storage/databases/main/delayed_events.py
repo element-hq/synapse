@@ -800,9 +800,7 @@ class DelayedEventsStore(SQLBaseStore):
             event_id = None
             send_error = result_or_error
 
-        await self.db_pool.execute(
-            "finalise_processed_delayed_event",
-            """
+        sql = """
             WITH matching_delayed_events AS (
                 SELECT * FROM delayed_events
                 WHERE delay_id = ? AND user_localpart = ?
@@ -826,10 +824,16 @@ class DelayedEventsStore(SQLBaseStore):
                 ?,
                 ?
             FROM matching_delayed_events
-            """,
+        """
+        # TODO: Find why this is needed. An error gets thrown othersie
+        if isinstance(self.database_engine, PostgresEngine):
+            sql += "RETURNING *"
+        await self.db_pool.execute(
+            "finalise_processed_delayed_event",
+            sql,
             delay_id,
             user_localpart,
-            json_encoder.encode(send_error) if send_error else None,
+            json_encoder.encode(send_error) if send_error is not None else None,
             event_id,
             finalised_ts,
         )
