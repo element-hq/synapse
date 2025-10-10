@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.server import Request
 
@@ -66,6 +66,11 @@ class AuthRestServlet(RestServlet):
         session = parse_string(request, "session")
         if not session:
             raise SynapseError(400, "No session supplied")
+
+        # Unstable query parameter which allows clients to specify the IDP
+        # they wish to use for SSO.
+        # XXX: This needs an MSC and an experimental flag.
+        idp_id: Optional[str] = parse_string(request, "io.element.idp_id")
 
         if stagetype == "org.matrix.cross_signing_reset":
             if self.hs.config.mas.enabled:
@@ -114,7 +119,7 @@ class AuthRestServlet(RestServlet):
         elif stagetype == LoginType.SSO:
             # Display a confirmation page which prompts the user to
             # re-authenticate with their SSO provider.
-            html = await self.auth_handler.start_sso_ui_auth(request, session)
+            html = await self.auth_handler.start_sso_ui_auth(request, session, idp_id)
 
         elif stagetype == LoginType.REGISTRATION_TOKEN:
             html = self.registration_token_template.render(
