@@ -44,9 +44,9 @@ class FederationStreamTestCase(BaseStreamTestCase):
 
         # Now reconnect and pull the updates
         self.reconnect()
-        # FIXME: This seems sus, why aren't we calling `self.replicate()` here? As far
-        # as I can tell, this just causes another replication request to be made
-        # (`/_synapse/replication/get_repl_stream_updates/federation/xxx`)
+        # FIXME: This seems odd, why aren't we calling `self.replicate()` here? but also
+        # doing so, causes other assumptions to fail (multiple HTTP replication attempts
+        # are made).
         self.reactor.advance(0)
 
         # Check we're testing what we think we are: no rows should yet have been

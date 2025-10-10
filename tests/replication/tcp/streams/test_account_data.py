@@ -54,7 +54,7 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
 
         # We should have received all the expected rows in the right order
         #
-        # Filter the updates to only include typing changes
+        # Filter the updates to only include account data changes
         received_account_data_rows = [
             row
             for row in self.test_handler.received_rdata_rows

@@ -58,6 +58,7 @@ class TypingStreamTestCase(BaseStreamTestCase):
         request = self.handle_http_replication_attempt()
         self.assert_request_is_get_repl_stream_updates(request, TypingStream.NAME)
 
+        # Filter the updates to only include typing changes
         received_typing_rows = [
             row
             for row in self.test_handler.received_rdata_rows
