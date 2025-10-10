@@ -52,22 +52,28 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
         self.reconnect()
         self.replicate()
 
-        # we should have received all the expected rows in the right order
-        received_rows = self.test_handler.received_rdata_rows
+        # We should have received all the expected rows in the right order
+        #
+        # Filter the updates to only include typing changes
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
 
         for t in updates:
-            (stream_name, token, row) = received_rows.pop(0)
+            (stream_name, token, row) = received_account_data_rows.pop(0)
             self.assertEqual(stream_name, AccountDataStream.NAME)
             self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
             self.assertEqual(row.data_type, t)
             self.assertEqual(row.room_id, "test_room")
 
-        (stream_name, token, row) = received_rows.pop(0)
+        (stream_name, token, row) = received_account_data_rows.pop(0)
         self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
         self.assertEqual(row.data_type, "m.global")
         self.assertIsNone(row.room_id)
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_account_data_rows)
 
     def test_update_function_global_account_data_limit(self) -> None:
         """Test replication with many global account data updates"""
@@ -99,18 +105,24 @@ class AccountDataStreamTestCase(BaseStreamTestCase):
         self.replicate()
 
         # we should have received all the expected rows in the right order
-        received_rows = self.test_handler.received_rdata_rows
+        #
+        # Filter the updates to only include typing changes
+        received_account_data_rows = [
+            row
+            for row in self.test_handler.received_rdata_rows
+            if row[0] == AccountDataStream.NAME
+        ]
 
         for t in updates:
-            (stream_name, token, row) = received_rows.pop(0)
+            (stream_name, token, row) = received_account_data_rows.pop(0)
             self.assertEqual(stream_name, AccountDataStream.NAME)
             self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
             self.assertEqual(row.data_type, t)
             self.assertIsNone(row.room_id)
 
-        (stream_name, token, row) = received_rows.pop(0)
+        (stream_name, token, row) = received_account_data_rows.pop(0)
         self.assertIsInstance(row, AccountDataStream.AccountDataStreamRow)
         self.assertEqual(row.data_type, "m.per_room")
         self.assertEqual(row.room_id, "test_room")
 
-        self.assertEqual([], received_rows)
+        self.assertEqual([], received_account_data_rows)
