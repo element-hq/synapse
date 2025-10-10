@@ -67,7 +67,7 @@ class TypingStreamTestCase(BaseStreamTestCase):
         self.assertEqual(
             len(received_typing_rows),
             1,
-            "Expected exactly one call for the typing stream",
+            "Expected exactly one row for the typing stream",
         )
         (stream_name, token, row) = received_typing_rows[0]
         self.assertEqual(stream_name, TypingStream.NAME)
@@ -104,7 +104,7 @@ class TypingStreamTestCase(BaseStreamTestCase):
         self.assertEqual(
             len(received_typing_rows),
             1,
-            "Expected exactly one call for the typing stream",
+            "Expected exactly one row for the typing stream",
         )
         (stream_name, token, row) = received_typing_rows[0]
         self.assertEqual(stream_name, TypingStream.NAME)
@@ -157,7 +157,7 @@ class TypingStreamTestCase(BaseStreamTestCase):
             self.assertEqual(
                 len(received_typing_rows),
                 1,
-                "Expected exactly one call for the typing stream",
+                "Expected exactly one row for the typing stream",
             )
             (stream_name, token, row) = received_typing_rows[0]
             self.assertEqual(stream_name, TypingStream.NAME)
@@ -209,7 +209,7 @@ class TypingStreamTestCase(BaseStreamTestCase):
             self.assertEqual(
                 len(received_typing_rows),
                 1,
-                "Expected exactly one call for the typing stream",
+                "Expected exactly one row for the typing stream",
             )
             (stream_name, token, row) = received_typing_rows[0]
             self.assertEqual(stream_name, TypingStream.NAME)

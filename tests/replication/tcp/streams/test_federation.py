@@ -73,7 +73,7 @@ class FederationStreamTestCase(BaseStreamTestCase):
         self.assertEqual(
             len(received_federation_rows),
             1,
-            "Expected exactly one call for the federation stream",
+            "Expected exactly one row for the federation stream",
         )
         (stream_name, token, row) = received_federation_rows[0]
         self.assertEqual(stream_name, FederationStream.NAME)
@@ -104,7 +104,7 @@ class FederationStreamTestCase(BaseStreamTestCase):
         self.assertEqual(
             len(received_federation_rows),
             1,
-            "Expected exactly one call for the federation stream",
+            "Expected exactly one row for the federation stream",
         )
         (stream_name, token, row) = received_federation_rows[0]
         self.assertEqual(stream_name, FederationStream.NAME)
