@@ -1,1 +1,0 @@
-Wrap the Rust HTTP client with `make_deferred_yieldable` so it follows Synapse logcontext rules.
