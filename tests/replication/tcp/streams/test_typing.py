@@ -53,9 +53,6 @@ class TypingStreamTestCase(BaseStreamTestCase):
 
         typing._push_update(member=RoomMember(ROOM_ID, USER_ID), typing=True)
 
-        # TODO: is this necessary?
-        self.reactor.advance(0)
-
         # We should now see an attempt to connect to the master
         request = self.handle_http_replication_attempt()
         self.assert_request_is_get_repl_stream_updates(request, TypingStream.NAME)
@@ -88,8 +85,6 @@ class TypingStreamTestCase(BaseStreamTestCase):
         # Now reconnect to pull the updates
         self.reconnect()
         self.replicate()
-        # TODO: is this necessary?
-        self.pump(0.1)
 
         # We should now see an attempt to connect to the master
         request = self.handle_http_replication_attempt()
