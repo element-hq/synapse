@@ -39,14 +39,20 @@ class FederationStreamTestCase(BaseStreamTestCase):
         """
         fed_sender = self.hs.get_federation_sender()
 
+        # Send an update before we connect
         fed_sender.build_and_send_edu("testdest", "m.test_edu", {"a": "b"})
 
         # Now reconnect and pull the updates
         self.reconnect()
-        self.replicate()
+        # FIXME: This seems sus, why aren't we calling `self.replicate()` here? As far
+        # as I can tell, this just causes another replication request to be made
+        # (`/_synapse/replication/get_repl_stream_updates/federation/xxx`)
+        self.reactor.advance(0)
 
-        # check we're testing what we think we are: no rows should yet have been
+        # Check we're testing what we think we are: no rows should yet have been
         # received
+        #
+        # Filter the updates to only include typing changes
         received_federation_rows = [
             row
             for row in self.test_handler.received_rdata_rows
