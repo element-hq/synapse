@@ -44,6 +44,7 @@ import attr
 
 import synapse.events.snapshot
 from synapse.api.constants import (
+    CANONICALJSON_MAX_INT,
     Direction,
     EventContentFields,
     EventTypes,
@@ -419,34 +420,27 @@ class RoomCreationHandler:
             old_room_id, new_room_id
         )
 
-        # finally, shut down the PLs in the old room, and update them in the new
-        # room.
-        await self._update_upgraded_room_pls(
+        # finally, shut down the PLs in the old room
+        await self._shutdown_power_levels_in_upgraded_room(
             requester,
             old_room_id,
-            new_room_id,
             old_room_state,
-            additional_creators,
         )
 
         return new_room_id
 
-    async def _update_upgraded_room_pls(
+    async def _shutdown_power_levels_in_upgraded_room(
         self,
         requester: Requester,
         old_room_id: str,
-        new_room_id: str,
         old_room_state: StateMap[str],
-        additional_creators: Optional[List[str]],
     ) -> None:
-        """Send updated power levels in both rooms after an upgrade
+        """Send updated power levels in the old room after it has been upgraded
 
         Args:
             requester: the user requesting the upgrade
             old_room_id: the id of the room to be replaced
-            new_room_id: the id of the replacement room
             old_room_state: the state map for the old room
-            additional_creators: Additional creators in the new room.
         Raises:
             ShadowBanError if the requester is shadow-banned.
         """
@@ -501,28 +495,6 @@ class RoomCreationHandler:
                 )
             except AuthError as e:
                 logger.warning("Unable to update PLs in old room: %s", e)
-
-        new_room_version = await self.store.get_room_version(new_room_id)
-        if new_room_version.msc4289_creator_power_enabled:
-            self._remove_creators_from_pl_users_map(
-                old_room_pl_state.content.get("users", {}),
-                requester.user.to_string(),
-                additional_creators,
-            )
-
-        await self.event_creation_handler.create_and_send_nonmember_event(
-            requester,
-            {
-                "type": EventTypes.PowerLevels,
-                "state_key": "",
-                "room_id": new_room_id,
-                "sender": requester.user.to_string(),
-                "content": copy_and_fixup_power_levels_contents(
-                    old_room_pl_state.content
-                ),
-            },
-            ratelimit=False,
-        )
 
     def _calculate_upgraded_room_creation_content(
         self,
@@ -685,8 +657,45 @@ class RoomCreationHandler:
         if current_power_level_int < needed_power_level:
             user_power_levels[user_id] = needed_power_level
 
+        # If downgrading from a room that supports MSC4289 to one that doesn't...
+        if (
+            old_room_create_event.room_version.msc4289_creator_power_enabled
+            and not new_room_version.msc4289_creator_power_enabled
+        ):
+            # Raise the power levels of the `creator` and all `additional_creators` from the old
+            # room to the maximum possible power level in the new room *and* if any other users
+            # have the same power level, demote them to one less than that.
+            #
+            # This ensures that creators still remain the highest power level users in the room.
+            #
+            # Room versions that don't support strict canonicaljson can technically
+            # have string-based power levels. This makes them effectively
+            # limitless.
+            #
+            # We choose to ignore this and use CANONICALJSON_MAX_INT for these
+            # room versions as well.
+            max_pl = CANONICALJSON_MAX_INT
+
+            # Promote the room creator.
+            user_power_levels[user_id] = max_pl
+
+            # Promote any additional creators.
+            old_room_additional_creators = old_room_create_event.content.get(
+                "additional_creators", []
+            )
+            for additional_creator_user_id in old_room_additional_creators:
+                user_power_levels[additional_creator_user_id] = max_pl
+
+            # Demote anyone else with the max power level.
+            for other_user_id, power_level in user_power_levels.items():
+                user_is_creator = (
+                    other_user_id == requester.user.to_string()
+                    or other_user_id in old_room_additional_creators
+                )
+                if power_level >= max_pl and not user_is_creator:
+                    user_power_levels[other_user_id] = max_pl - 1
+
         if new_room_version.msc4289_creator_power_enabled:
-            # the creator(s) cannot be in the users map
             self._remove_creators_from_pl_users_map(
                 user_power_levels,
                 user_id,
