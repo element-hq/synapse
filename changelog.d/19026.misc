@@ -1,0 +1,3 @@
+Reduces the SRV DNS record lookup timeout to 15 seconds.
+This fixes issues when DNS lookups hang, as the default timeout of 60 seconds matches the timeout for the federation request itself,
+thus we see the HTTP request timeout and not the actual DNS error.

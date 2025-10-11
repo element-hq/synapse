@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List
 
 import attr
 
+from twisted.internet import defer
 from twisted.internet.error import ConnectError
 from twisted.names import client, dns
 from twisted.names.error import DNSNameError, DNSNotImplementedError, DomainError
@@ -145,7 +146,37 @@ class SrvResolver:
 
         try:
             answers, _, _ = await make_deferred_yieldable(
-                self._dns_client.lookupService(service_name)
+                self._dns_client.lookupService(
+                    service_name,
+                    # This is a sequence of ints that represent the "number of seconds
+                    # after which to reissue the query. When the last timeout expires,
+                    # the query is considered failed." The default value in Twisted is
+                    # `timeout=(1, 3, 11, 45)` (60s total) which is an "arbitrary"
+                    # exponential backoff sequence and is too long (see below).
+                    #
+                    # We want the total timeout to be below the overarching HTTP request
+                    # timeout (60s for federation requests) that spurred on this lookup.
+                    # This way, we can see the underlying DNS failure and move on
+                    # instead of the user ending up with a generic HTTP request timeout.
+                    #
+                    # Since these DNS queries are done over UDP (unreliable transport),
+                    # by it's nature, it's bound to occasionally fail (dropped packets,
+                    # etc). We want a list that starts small and re-issues DNS queries
+                    # multiple times until we get a response or timeout.
+                    timeout=(
+                        1,  # Quick retry for packet loss/scenarios
+                        3,  # Still reasonable for slow responders
+                        3,  # ...
+                        3,  # Already catching 99.9% of successful queries at 10s
+                        # Final attempt for extreme edge cases.
+                        #
+                        # TODO: In the future, we could consider removing this extra
+                        # time if we don't see complaints. For comparison, The Windows
+                        # DNS resolver gives up after 10s using `(1, 1, 2, 4, 2)`, see
+                        # https://learn.microsoft.com/en-us/troubleshoot/windows-server/networking/dns-client-resolution-timeouts
+                        5,
+                    ),
+                )
             )
         except DNSNameError:
             # TODO: cache this. We can get the SOA out of the exception, and use
@@ -165,6 +196,10 @@ class SrvResolver:
                 return list(cache_entry)
             else:
                 raise e
+        except defer.TimeoutError as e:
+            raise defer.TimeoutError(
+                f"Could not resolve DNS for SRV record {service_name!r} due to timeout (50s total)"
+            ) from e
 
         if (
             len(answers) == 1
