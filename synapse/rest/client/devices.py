@@ -112,7 +112,7 @@ class DeleteDevicesRestServlet(RestServlet):
             else:
                 raise e
 
-        if requester.app_service and requester.app_service.msc4190_device_management:
+        if requester.app_service:
             # MSC4190 can skip UIA for this endpoint
             pass
         else:
@@ -192,7 +192,7 @@ class DeviceRestServlet(RestServlet):
             else:
                 raise
 
-        if requester.app_service and requester.app_service.msc4190_device_management:
+        if requester.app_service:
             # MSC4190 allows appservices to delete devices through this endpoint without UIA
             # It's also allowed with MSC3861 enabled
             pass
@@ -227,7 +227,7 @@ class DeviceRestServlet(RestServlet):
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
 
         # MSC4190 allows appservices to create devices through this endpoint
-        if requester.app_service and requester.app_service.msc4190_device_management:
+        if requester.app_service:
             created = await self.device_handler.upsert_device(
                 user_id=requester.user.to_string(),
                 device_id=device_id,
