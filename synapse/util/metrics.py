@@ -25,11 +25,9 @@ from types import TracebackType
 from typing import (
     Awaitable,
     Callable,
-    Dict,
     Generator,
     Optional,
     Protocol,
-    Type,
     TypeVar,
 )
 
@@ -238,7 +236,7 @@ class Measure:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
@@ -293,8 +291,8 @@ class DynamicCollectorRegistry(CollectorRegistry):
 
     def __init__(self) -> None:
         super().__init__()
-        self._server_name_to_pre_update_hooks: Dict[
-            str, Dict[str, Callable[[], None]]
+        self._server_name_to_pre_update_hooks: dict[
+            str, dict[str, Callable[[], None]]
         ] = {}
         """
         Mapping of server name to a mapping of metric name to metric pre-update

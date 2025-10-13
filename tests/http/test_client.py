@@ -20,7 +20,7 @@
 #
 
 from io import BytesIO
-from typing import Tuple, Union
+from typing import Union
 from unittest.mock import Mock
 
 from netaddr import IPSet
@@ -59,7 +59,7 @@ class ReadMultipartResponseTests(TestCase):
 
     def _build_multipart_response(
         self, response_length: Union[int, str], max_length: int
-    ) -> Tuple[
+    ) -> tuple[
         BytesIO,
         "Deferred[MultipartResponse]",
         _MultipartParserProtocol,
@@ -209,7 +209,7 @@ class ReadMultipartResponseTests(TestCase):
 class ReadBodyWithMaxSizeTests(TestCase):
     def _build_response(
         self, length: Union[int, str] = UNKNOWN_LENGTH
-    ) -> Tuple[
+    ) -> tuple[
         BytesIO,
         "Deferred[int]",
         _DiscardBodyWithMaxSizeProtocol,

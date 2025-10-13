@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, List, Set
+from typing import Any
 
 from synapse.config.sso import SsoAttributeRequirement
 from synapse.types import JsonDict
@@ -191,7 +191,7 @@ class SAML2Config(Config):
         )
 
     def _default_saml_config_dict(
-        self, required_attributes: Set[str], optional_attributes: Set[str]
+        self, required_attributes: set[str], optional_attributes: set[str]
     ) -> JsonDict:
         """Generate a configuration dictionary with required and optional attributes that
         will be needed to process new user registration
@@ -239,7 +239,7 @@ ATTRIBUTE_REQUIREMENTS_SCHEMA = {
 
 def _parse_attribute_requirements_def(
     attribute_requirements: Any,
-) -> List[SsoAttributeRequirement]:
+) -> list[SsoAttributeRequirement]:
     validate_config(
         ATTRIBUTE_REQUIREMENTS_SCHEMA,
         attribute_requirements,

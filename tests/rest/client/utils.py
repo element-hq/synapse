@@ -37,7 +37,6 @@ from typing import (
     MutableMapping,
     Optional,
     Sequence,
-    Tuple,
     overload,
 )
 from urllib.parse import urlencode
@@ -88,7 +87,7 @@ class RestHelper:
         tok: Optional[str] = ...,
         expect_code: Literal[200] = ...,
         extra_content: Optional[Dict] = ...,
-        custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = ...,
+        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = ...,
     ) -> str: ...
 
     @overload
@@ -100,7 +99,7 @@ class RestHelper:
         tok: Optional[str] = ...,
         expect_code: int = ...,
         extra_content: Optional[Dict] = ...,
-        custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = ...,
+        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = ...,
     ) -> Optional[str]: ...
 
     def create_room_as(
@@ -111,7 +110,7 @@ class RestHelper:
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         extra_content: Optional[Dict] = None,
-        custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
     ) -> Optional[str]:
         """
         Create a room.
@@ -310,7 +309,7 @@ class RestHelper:
         self.auth_user_id = src
 
         path = f"/_matrix/client/r0/rooms/{room}/state/m.room.member/{targ}"
-        url_params: Dict[str, str] = {}
+        url_params: dict[str, str] = {}
 
         if tok:
             url_params["access_token"] = tok
@@ -378,7 +377,7 @@ class RestHelper:
         txn_id: Optional[str] = None,
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
-        custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
         type: str = "m.room.message",
     ) -> JsonDict:
         if body is None:
@@ -430,7 +429,7 @@ class RestHelper:
         txn_id: Optional[str] = None,
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
-        custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+        custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
     ) -> JsonDict:
         if txn_id is None:
             txn_id = "m%s" % (str(time.time()))
@@ -497,7 +496,7 @@ class RestHelper:
         self,
         room_id: str,
         event_type: str,
-        body: Optional[Dict[str, Any]],
+        body: Optional[dict[str, Any]],
         tok: Optional[str],
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
@@ -575,7 +574,7 @@ class RestHelper:
         self,
         room_id: str,
         event_type: str,
-        body: Dict[str, Any],
+        body: dict[str, Any],
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         state_key: str = "",
@@ -684,7 +683,7 @@ class RestHelper:
         with_sid: bool = False,
         idp_id: Optional[str] = None,
         expected_status: int = 200,
-    ) -> Tuple[JsonDict, FakeAuthorizationGrant]:
+    ) -> tuple[JsonDict, FakeAuthorizationGrant]:
         """Log in (as a new user) via OIDC
 
         Returns the result of the final token login and the fake authorization grant.
@@ -757,7 +756,7 @@ class RestHelper:
         ui_auth_session_id: Optional[str] = None,
         with_sid: bool = False,
         idp_id: Optional[str] = None,
-    ) -> Tuple[FakeChannel, FakeAuthorizationGrant]:
+    ) -> tuple[FakeChannel, FakeAuthorizationGrant]:
         """Perform an OIDC authentication flow via a mock OIDC provider.
 
         This can be used for either login or user-interactive auth.
@@ -790,7 +789,7 @@ class RestHelper:
             went.
         """
 
-        cookies: Dict[str, str] = {}
+        cookies: dict[str, str] = {}
 
         with fake_server.patch_homeserver(hs=self.hs):
             # if we're doing a ui auth, hit the ui auth redirect endpoint
@@ -824,7 +823,7 @@ class RestHelper:
         cookies: Mapping[str, str],
         user_info_dict: JsonDict,
         with_sid: bool = False,
-    ) -> Tuple[FakeChannel, FakeAuthorizationGrant]:
+    ) -> tuple[FakeChannel, FakeAuthorizationGrant]:
         """Mock out an OIDC authentication flow
 
         Assumes that an OIDC auth has been initiated by one of initiate_sso_login or

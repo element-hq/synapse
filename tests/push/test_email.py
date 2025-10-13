@@ -21,7 +21,7 @@ import email.message
 import importlib.resources as importlib_resources
 import os
 from http import HTTPStatus
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, Sequence
 
 import attr
 from parameterized import parameterized
@@ -83,8 +83,8 @@ class EmailPusherTests(HomeserverTestCase):
 
         hs = self.setup_test_homeserver(config=config)
 
-        # List[Tuple[Deferred, args, kwargs]]
-        self.email_attempts: List[Tuple[Deferred, Sequence, Dict]] = []
+        # List[tuple[Deferred, args, kwargs]]
+        self.email_attempts: list[tuple[Deferred, Sequence, Dict]] = []
 
         def sendmail(*args: Any, **kwargs: Any) -> Deferred:
             # This mocks out synapse.reactor.send_email._sendmail.
@@ -510,7 +510,7 @@ class EmailPusherTests(HomeserverTestCase):
         )
         self.assertEqual(len(pushers), 0)
 
-    def _check_for_mail(self) -> Tuple[Sequence, Dict]:
+    def _check_for_mail(self) -> tuple[Sequence, Dict]:
         """
         Assert that synapse sent off exactly one email notification.
 

@@ -36,14 +36,10 @@ from typing import (
     Awaitable,
     Callable,
     Deque,
-    Dict,
     Iterable,
-    List,
     MutableMapping,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -124,7 +120,7 @@ R = TypeVar("R")
 P = ParamSpec("P")
 
 # the type of thing that can be passed into `make_request` in the headers list
-CustomHeaderType = Tuple[Union[str, bytes], Union[str, bytes]]
+CustomHeaderType = tuple[Union[str, bytes], Union[str, bytes]]
 
 # A pre-prepared SQLite DB that is used as a template when creating new SQLite
 # DB each test run. This dramatically speeds up test set up when using SQLite.
@@ -172,7 +168,7 @@ class FakeChannel:
         return body
 
     @property
-    def json_list(self) -> List[JsonDict]:
+    def json_list(self) -> list[JsonDict]:
         body = json.loads(self.text_body)
         assert isinstance(body, list)
         return body
@@ -211,7 +207,7 @@ class FakeChannel:
         version: bytes,
         code: bytes,
         reason: bytes,
-        headers: Union[Headers, List[Tuple[bytes, bytes]]],
+        headers: Union[Headers, list[tuple[bytes, bytes]]],
     ) -> None:
         self.result["version"] = version
         self.result["code"] = code
@@ -367,7 +363,7 @@ def make_request(
     path: Union[bytes, str],
     content: Union[bytes, str, JsonDict] = b"",
     access_token: Optional[str] = None,
-    request: Type[Request] = SynapseRequest,
+    request: type[Request] = SynapseRequest,
     shorthand: bool = True,
     federation_auth_origin: Optional[bytes] = None,
     content_type: Optional[bytes] = None,
@@ -492,9 +488,9 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
     def __init__(self) -> None:
         self.threadpool = ThreadPool(self)
 
-        self._tcp_callbacks: Dict[Tuple[str, int], Callable] = {}
-        self._udp: List[udp.Port] = []
-        self.lookups: Dict[str, str] = {}
+        self._tcp_callbacks: dict[tuple[str, int], Callable] = {}
+        self._udp: list[udp.Port] = []
+        self.lookups: dict[str, str] = {}
         self._thread_callbacks: Deque[Callable[..., R]] = deque()
 
         lookups = self.lookups
@@ -622,7 +618,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         port: int,
         factory: ClientFactory,
         timeout: float = 30,
-        bindAddress: Optional[Tuple[str, int]] = None,
+        bindAddress: Optional[tuple[str, int]] = None,
     ) -> IConnector:
         """Fake L{IReactorTCP.connectTCP}."""
 
@@ -814,7 +810,7 @@ class ThreadPool:
         return d
 
 
-def get_clock() -> Tuple[ThreadedMemoryReactorClock, Clock]:
+def get_clock() -> tuple[ThreadedMemoryReactorClock, Clock]:
     # Ignore the linter error since this is an expected usage of creating a `Clock` for
     # testing purposes.
     reactor = ThreadedMemoryReactorClock()
@@ -1041,7 +1037,7 @@ class FakeTransport:
 
 def connect_client(
     reactor: ThreadedMemoryReactorClock, client_id: int
-) -> Tuple[IProtocol, AccumulatingProtocol]:
+) -> tuple[IProtocol, AccumulatingProtocol]:
     """
     Connect a client to a fake TCP transport.
 
@@ -1068,7 +1064,7 @@ def setup_test_homeserver(
     server_name: str = "test",
     config: Optional[HomeServerConfig] = None,
     reactor: Optional[ISynapseReactor] = None,
-    homeserver_to_use: Type[HomeServer] = TestHomeServer,
+    homeserver_to_use: type[HomeServer] = TestHomeServer,
     db_txn_limit: Optional[int] = None,
     **extra_homeserver_attributes: Any,
 ) -> HomeServer:

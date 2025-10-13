@@ -22,7 +22,7 @@ import logging
 import random
 import time
 from io import BytesIO
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Optional
 
 import attr
 
@@ -188,7 +188,7 @@ class WellKnownResolver:
 
         return WellKnownLookupResult(delegated_server=result)
 
-    async def _fetch_well_known(self, server_name: bytes) -> Tuple[bytes, float]:
+    async def _fetch_well_known(self, server_name: bytes) -> tuple[bytes, float]:
         """Actually fetch and parse a .well-known, without checking the cache
 
         Args:
@@ -251,7 +251,7 @@ class WellKnownResolver:
 
     async def _make_well_known_request(
         self, server_name: bytes, retry: bool
-    ) -> Tuple[IResponse, bytes]:
+    ) -> tuple[IResponse, bytes]:
         """Make the well known request.
 
         This will retry the request if requested and it fails (with unable
@@ -348,7 +348,7 @@ def _cache_period_from_headers(
     return None
 
 
-def _parse_cache_control(headers: Headers) -> Dict[bytes, Optional[bytes]]:
+def _parse_cache_control(headers: Headers) -> dict[bytes, Optional[bytes]]:
     cache_controls = {}
     cache_control_headers = headers.getRawHeaders(b"cache-control") or []
     for hdr in cache_control_headers:

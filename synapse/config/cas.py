@@ -20,7 +20,7 @@
 #
 #
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from synapse.config.sso import SsoAttributeRequirement
 from synapse.types import JsonDict
@@ -107,7 +107,7 @@ REQUIRED_ATTRIBUTES_SCHEMA = {
 
 def _parsed_required_attributes_def(
     required_attributes: Any,
-) -> List[SsoAttributeRequirement]:
+) -> list[SsoAttributeRequirement]:
     validate_config(
         REQUIRED_ATTRIBUTES_SCHEMA,
         required_attributes,

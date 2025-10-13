@@ -163,7 +163,7 @@ class BaseReplicationStreamProtocol(LineOnlyReceiver):
         self.conn_id = random_string(5)  # To dedupe in case of name clashes.
 
         # List of pending commands to send once we've established the connection
-        self.pending_commands: List[Command] = []
+        self.pending_commands: list[Command] = []
 
         # The LoopingCall for sending pings.
         self._send_ping_loop: Optional[task.LoopingCall] = None

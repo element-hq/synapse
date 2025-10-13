@@ -20,7 +20,7 @@
 #
 
 import unittest
-from typing import Any, Collection, Dict, Iterable, List, Optional
+from typing import Any, Collection, Iterable, List, Optional
 
 from parameterized import parameterized
 
@@ -39,7 +39,7 @@ class _StubEventSourceStore:
     """A stub implementation of the EventSourceStore"""
 
     def __init__(self) -> None:
-        self._store: Dict[str, EventBase] = {}
+        self._store: dict[str, EventBase] = {}
 
     def add_event(self, event: EventBase) -> None:
         self._store[event.event_id] = event
@@ -54,7 +54,7 @@ class _StubEventSourceStore:
         redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
-    ) -> Dict[str, EventBase]:
+    ) -> dict[str, EventBase]:
         assert allow_rejected
         assert not get_prev_content
         assert redact_behaviour == EventRedactBehaviour.as_is
@@ -745,7 +745,7 @@ class EventAuthTestCase(unittest.TestCase):
         test_room_v10_rejects_string_power_levels above handles the string case.
         """
 
-        def create_event(pl_event_content: Dict[str, Any]) -> EventBase:
+        def create_event(pl_event_content: dict[str, Any]) -> EventBase:
             return make_event_from_dict(
                 {
                     "room_id": TEST_ROOM_ID,
@@ -759,7 +759,7 @@ class EventAuthTestCase(unittest.TestCase):
                 room_version=RoomVersions.V10,
             )
 
-        contents: Iterable[Dict[str, Any]] = [
+        contents: Iterable[dict[str, Any]] = [
             {"notifications": {"room": None}},
             {"users": {"@alice:wonderland": []}},
             {"users_default": {}},

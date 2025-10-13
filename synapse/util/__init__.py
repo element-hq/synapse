@@ -23,12 +23,10 @@ import collections.abc
 import logging
 import typing
 from typing import (
-    Dict,
     Iterator,
     Mapping,
     Optional,
     Sequence,
-    Set,
     TypeVar,
 )
 
@@ -119,8 +117,8 @@ class MutableOverlayMapping(collections.abc.MutableMapping[K, V]):
     """
 
     _underlying_map: Mapping[K, V]
-    _mutable_map: Dict[K, V] = attr.ib(factory=dict)
-    _deletions: Set[K] = attr.ib(factory=set)
+    _mutable_map: dict[K, V] = attr.ib(factory=dict)
+    _deletions: set[K] = attr.ib(factory=set)
 
     def __getitem__(self, key: K) -> V:
         if key in self._deletions:

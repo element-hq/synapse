@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -32,7 +32,7 @@ from tests.unittest import default_config, override_config
 FORTY_DAYS = 40 * 24 * 60 * 60
 
 
-def gen_3pids(count: int) -> List[Dict[str, Any]]:
+def gen_3pids(count: int) -> list[dict[str, Any]]:
     """Generate `count` threepids as a list."""
     return [
         {"medium": "email", "address": "user%i@matrix.org" % i} for i in range(count)
@@ -40,7 +40,7 @@ def gen_3pids(count: int) -> List[Dict[str, Any]]:
 
 
 class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = default_config("test")
 
         config.update({"limit_usage_by_mau": True, "max_mau_value": 50})

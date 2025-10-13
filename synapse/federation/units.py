@@ -24,7 +24,7 @@ server protocol.
 """
 
 import logging
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 
 import attr
 
@@ -70,7 +70,7 @@ class Edu:
         getattr(self, "content", {})["org.matrix.opentracing_context"] = "{}"
 
 
-def _none_to_list(edus: Optional[List[JsonDict]]) -> List[JsonDict]:
+def _none_to_list(edus: Optional[list[JsonDict]]) -> list[JsonDict]:
     if edus is None:
         return []
     return edus
@@ -98,8 +98,8 @@ class Transaction:
     origin: str
     destination: str
     origin_server_ts: int
-    pdus: List[JsonDict] = attr.ib(factory=list, converter=_none_to_list)
-    edus: List[JsonDict] = attr.ib(factory=list, converter=_none_to_list)
+    pdus: list[JsonDict] = attr.ib(factory=list, converter=_none_to_list)
+    edus: list[JsonDict] = attr.ib(factory=list, converter=_none_to_list)
 
     def get_dict(self) -> JsonDict:
         """A JSON-ready dictionary of valid keys which aren't internal."""
@@ -113,7 +113,7 @@ class Transaction:
         return result
 
 
-def filter_pdus_for_valid_depth(pdus: Sequence[JsonDict]) -> List[JsonDict]:
+def filter_pdus_for_valid_depth(pdus: Sequence[JsonDict]) -> list[JsonDict]:
     filtered_pdus = []
     for pdu in pdus:
         # Drop PDUs that have a depth that is outside of the range allowed
@@ -129,5 +129,5 @@ def filter_pdus_for_valid_depth(pdus: Sequence[JsonDict]) -> List[JsonDict]:
 
 def serialize_and_filter_pdus(
     pdus: Sequence[EventBase], time_now: Optional[int] = None
-) -> List[JsonDict]:
+) -> list[JsonDict]:
     return filter_pdus_for_valid_depth([pdu.get_pdu_json(time_now) for pdu in pdus])

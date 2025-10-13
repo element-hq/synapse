@@ -24,7 +24,7 @@ import logging
 import re
 from collections import Counter
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
 
 from typing_extensions import Self
 
@@ -129,7 +129,7 @@ class KeyUploadServlet(RestServlet):
         """
 
         class DeviceKeys(RequestBodyModel):
-            algorithms: List[StrictStr]
+            algorithms: list[StrictStr]
             """The encryption algorithms supported by this device."""
 
             device_id: StrictStr
@@ -225,7 +225,7 @@ class KeyUploadServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, device_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
 
@@ -343,7 +343,7 @@ class KeyQueryServlet(RestServlet):
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
     @cancellable
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
         device_id = requester.device_id
@@ -388,7 +388,7 @@ class KeyChangesServlet(RestServlet):
         self.store = hs.get_datastores().main
 
     @cancellable
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         from_token_string = parse_string(request, "from", required=True)
@@ -442,13 +442,13 @@ class OneTimeKeyServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         timeout = parse_integer(request, "timeout", 10 * 1000)
         body = parse_json_object_from_request(request)
 
         # Generate a count for each algorithm, which is hard-coded to 1.
-        query: Dict[str, Dict[str, Dict[str, int]]] = {}
+        query: dict[str, dict[str, dict[str, int]]] = {}
         for user_id, one_time_keys in body.get("one_time_keys", {}).items():
             for device_id, algorithm in one_time_keys.items():
                 query.setdefault(user_id, {})[device_id] = {algorithm: 1}
@@ -490,13 +490,13 @@ class UnstableOneTimeKeyServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         timeout = parse_integer(request, "timeout", 10 * 1000)
         body = parse_json_object_from_request(request)
 
         # Generate a count for each algorithm.
-        query: Dict[str, Dict[str, Dict[str, int]]] = {}
+        query: dict[str, dict[str, dict[str, int]]] = {}
         for user_id, one_time_keys in body.get("one_time_keys", {}).items():
             for device_id, algorithms in one_time_keys.items():
                 query.setdefault(user_id, {})[device_id] = Counter(algorithms)
@@ -526,7 +526,7 @@ class SigningKeyUploadServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
         body = parse_json_object_from_request(request)
@@ -663,7 +663,7 @@ class SignaturesUploadServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user_id = requester.user.to_string()
         body = parse_json_object_from_request(request)

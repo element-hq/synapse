@@ -32,7 +32,7 @@ import time
 import urllib.request
 from os import path
 from tempfile import TemporaryDirectory
-from typing import Any, List, Match, Optional, Union
+from typing import Any, Match, Optional, Union
 
 import attr
 import click
@@ -879,7 +879,7 @@ def get_changes_for_version(wanted_version: version.Version) -> str:
         start_line: int
         end_line: Optional[int] = None  # Is none if its the last entry
 
-    headings: List[VersionSection] = []
+    headings: list[VersionSection] = []
     for i, token in enumerate(tokens):
         # We look for level 1 headings (h1 tags).
         if token.type != "heading_open" or token.tag != "h1":

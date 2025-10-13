@@ -25,7 +25,7 @@ import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from io import BytesIO
-from typing import Any, ClassVar, Coroutine, Dict, Generator, Optional, TypeVar, Union
+from typing import Any, ClassVar, Coroutine, Generator, Optional, TypeVar, Union
 from unittest.mock import ANY, AsyncMock, Mock
 from urllib.parse import parse_qs
 
@@ -130,7 +130,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         keys.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         config["disable_registration"] = True
@@ -834,7 +834,7 @@ class MasAuthDelegation(HomeserverTestCase):
 
         return deferred
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         config["disable_registration"] = True
@@ -1100,9 +1100,9 @@ class DisabledEndpointsTestCase(HomeserverTestCase):
         admin.register_servlets,
     ]
 
-    config: Dict[str, Any]
+    config: dict[str, Any]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["public_baseurl"] = BASE_URL
         config["disable_registration"] = True

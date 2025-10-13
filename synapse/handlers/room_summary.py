@@ -22,7 +22,7 @@
 import itertools
 import logging
 import re
-from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
 import attr
 
@@ -83,9 +83,9 @@ class _PaginationSession:
     # The time the pagination session was created, in milliseconds.
     creation_time_ms: int
     # The queue of rooms which are still to process.
-    room_queue: List["_RoomQueueEntry"]
+    room_queue: list["_RoomQueueEntry"]
     # A set of rooms which have been processed.
-    processed_rooms: Set[str]
+    processed_rooms: set[str]
 
 
 class RoomSummaryHandler:
@@ -112,14 +112,14 @@ class RoomSummaryHandler:
         # If a user tries to fetch the same page multiple times in quick succession,
         # only process the first attempt and return its result to subsequent requests.
         self._pagination_response_cache: ResponseCache[
-            Tuple[
+            tuple[
                 str,
                 str,
                 bool,
                 Optional[int],
                 Optional[int],
                 Optional[str],
-                Optional[Tuple[str, ...]],
+                Optional[tuple[str, ...]],
             ]
         ] = ResponseCache(
             clock=hs.get_clock(),
@@ -136,7 +136,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str, ...]] = None,
+        remote_room_hosts: Optional[tuple[str, ...]] = None,
     ) -> JsonDict:
         """
         Implementation of the room hierarchy C-S API.
@@ -196,7 +196,7 @@ class RoomSummaryHandler:
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
-        remote_room_hosts: Optional[Tuple[str, ...]] = None,
+        remote_room_hosts: Optional[tuple[str, ...]] = None,
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
@@ -262,7 +262,7 @@ class RoomSummaryHandler:
             # Rooms we have already processed.
             processed_rooms = set()
 
-        rooms_result: List[JsonDict] = []
+        rooms_result: list[JsonDict] = []
 
         # Cap the limit to a server-side maximum.
         if limit is None:
@@ -286,12 +286,12 @@ class RoomSummaryHandler:
             # federation. The rationale for caching these and *maybe* using them
             # is to prefer any information local to the homeserver before trusting
             # data received over federation.
-            children_room_entries: Dict[str, JsonDict] = {}
+            children_room_entries: dict[str, JsonDict] = {}
             # A set of room IDs which are children that did not have information
             # returned over federation and are known to be inaccessible to the
             # current server. We should not reach out over federation to try to
             # summarise these rooms.
-            inaccessible_children: Set[str] = set()
+            inaccessible_children: set[str] = set()
 
             # If the room is known locally, summarise it!
             is_in_room = await self._store.is_host_joined(room_id, self._server_name)
@@ -418,8 +418,8 @@ class RoomSummaryHandler:
             # Room is inaccessible to the requesting server.
             raise SynapseError(404, "Unknown room: %s" % (requested_room_id,))
 
-        children_rooms_result: List[JsonDict] = []
-        inaccessible_children: List[str] = []
+        children_rooms_result: list[JsonDict] = []
+        inaccessible_children: list[str] = []
 
         # Iterate through each child and potentially add it, but not its children,
         # to the response.
@@ -496,7 +496,7 @@ class RoomSummaryHandler:
             # we only care about suggested children
             child_events = filter(_is_suggested_child_event, child_events)
 
-        stripped_events: List[JsonDict] = [
+        stripped_events: list[JsonDict] = [
             {
                 "type": e.type,
                 "state_key": e.state_key,
@@ -510,7 +510,7 @@ class RoomSummaryHandler:
 
     async def _summarize_remote_room_hierarchy(
         self, room: "_RoomQueueEntry", suggested_only: bool
-    ) -> Tuple[Optional["_RoomEntry"], Dict[str, JsonDict], Set[str]]:
+    ) -> tuple[Optional["_RoomEntry"], dict[str, JsonDict], set[str]]:
         """
         Request room entries and a list of event entries for a given room by querying a remote server.
 
@@ -835,7 +835,7 @@ class RoomSummaryHandler:
         self,
         requester: Optional[str],
         room_id: str,
-        remote_room_hosts: Optional[List[str]] = None,
+        remote_room_hosts: Optional[list[str]] = None,
     ) -> JsonDict:
         """
         Implementation of the room summary C-S API from MSC3266
@@ -995,7 +995,7 @@ _INVALID_ORDER_CHARS_RE = re.compile(r"[^\x20-\x7E]")
 
 def _child_events_comparison_key(
     child: EventBase,
-) -> Tuple[bool, Optional[str], int, str]:
+) -> tuple[bool, Optional[str], int, str]:
     """
     Generate a value for comparing two child events for ordering.
 

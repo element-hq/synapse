@@ -21,7 +21,7 @@
 
 import logging
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Generic, List, Optional, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Optional, Type, TypeVar, cast
 
 import attr
 from txredisapi import (
@@ -72,7 +72,7 @@ class ConstantProperty(Generic[T, V]):
 
     constant: V = attr.ib()
 
-    def __get__(self, obj: Optional[T], objtype: Optional[Type[T]] = None) -> V:
+    def __get__(self, obj: Optional[T], objtype: Optional[type[T]] = None) -> V:
         return self.constant
 
     def __set__(self, obj: Optional[T], value: V) -> None:
@@ -111,7 +111,7 @@ class RedisSubscriber(SubscriberProtocol):
     hs: "HomeServer"
     synapse_handler: "ReplicationCommandHandler"
     synapse_stream_prefix: str
-    synapse_channel_names: List[str]
+    synapse_channel_names: list[str]
     synapse_outbound_redis_connection: ConnectionHandler
 
     def __init__(self, *args: Any, **kwargs: Any):
@@ -381,7 +381,7 @@ class RedisDirectTcpReplicationClientFactory(SynapseRedisFactory):
         self,
         hs: "HomeServer",
         outbound_redis_connection: ConnectionHandler,
-        channel_names: List[str],
+        channel_names: list[str],
     ):
         super().__init__(
             hs,

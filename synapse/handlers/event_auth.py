@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Mapping, Optional, Union
 
 from synapse import event_auth
 from synapse.api.constants import (
@@ -92,7 +92,7 @@ class EventAuthHandler:
         event: Union[EventBase, EventBuilder],
         current_state_ids: StateMap[str],
         for_verification: bool = False,
-    ) -> List[str]:
+    ) -> list[str]:
         """Given an event and current state return the list of event IDs used
         to auth an event.
 

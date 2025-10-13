@@ -20,10 +20,10 @@
 
 from typing import TYPE_CHECKING
 
-import saml2.metadata
-
 from twisted.web.resource import Resource
 from twisted.web.server import Request
+
+import saml2.metadata
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

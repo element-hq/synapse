@@ -19,7 +19,7 @@
 #
 #
 
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
@@ -34,7 +34,7 @@ from synapse.util.json import json_encoder
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-ScheduledTaskRow = Tuple[str, str, str, int, str, str, str, str]
+ScheduledTaskRow = tuple[str, str, str, int, str, str, str, str]
 
 
 class TaskSchedulerWorkerStore(SQLBaseStore):
@@ -63,12 +63,12 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
     async def get_scheduled_tasks(
         self,
         *,
-        actions: Optional[List[str]] = None,
+        actions: Optional[list[str]] = None,
         resource_id: Optional[str] = None,
-        statuses: Optional[List[TaskStatus]] = None,
+        statuses: Optional[list[TaskStatus]] = None,
         max_timestamp: Optional[int] = None,
         limit: Optional[int] = None,
-    ) -> List[ScheduledTask]:
+    ) -> list[ScheduledTask]:
         """Get a list of scheduled tasks from the DB.
 
         Args:
@@ -82,9 +82,9 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
         Returns: a list of `ScheduledTask`, ordered by increasing timestamps
         """
 
-        def get_scheduled_tasks_txn(txn: LoggingTransaction) -> List[ScheduledTaskRow]:
-            clauses: List[str] = []
-            args: List[Any] = []
+        def get_scheduled_tasks_txn(txn: LoggingTransaction) -> list[ScheduledTaskRow]:
+            clauses: list[str] = []
+            args: list[Any] = []
             if resource_id:
                 clauses.append("resource_id = ?")
                 args.append(resource_id)
@@ -115,7 +115,7 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
                 args.append(limit)
 
             txn.execute(sql, args)
-            return cast(List[ScheduledTaskRow], txn.fetchall())
+            return cast(list[ScheduledTaskRow], txn.fetchall())
 
         rows = await self.db_pool.runInteraction(
             "get_scheduled_tasks", get_scheduled_tasks_txn

@@ -26,7 +26,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    List,
     Optional,
     Tuple,
     TypeVar,
@@ -66,7 +65,7 @@ StreamRow = TypeVar("StreamRow", bound=Tuple)
 #   * `new_last_token` is the new position in stream.
 #   * `limited` is whether there are more updates to fetch.
 #
-StreamUpdateResult = Tuple[List[Tuple[Token, StreamRow]], Token, bool]
+StreamUpdateResult = tuple[list[tuple[Token, StreamRow]], Token, bool]
 
 # The type of an update_function for a stream
 #
@@ -400,7 +399,7 @@ class TypingStream(Stream):
         room_id: str
 
         # All the users that are 'typing' right now in the specified room.
-        user_ids: List[str]
+        user_ids: list[str]
 
     NAME = "typing"
     ROW_TYPE = TypingStreamRow
@@ -410,7 +409,7 @@ class TypingStream(Stream):
             # On the writer, query the typing handler
             typing_writer_handler = hs.get_typing_writer_handler()
             update_function: Callable[
-                [str, int, int, int], Awaitable[Tuple[List[Tuple[int, Any]], int, bool]]
+                [str, int, int, int], Awaitable[tuple[list[tuple[int, Any]], int, bool]]
             ] = typing_writer_handler.get_all_typing_updates
             self.current_token_function = typing_writer_handler.get_current_token
         else:
@@ -512,7 +511,7 @@ class CachesStream(Stream):
         """
 
         cache_func: str
-        keys: Optional[List[Any]]
+        keys: Optional[list[Any]]
         invalidation_ts: int
 
     NAME = "caches"

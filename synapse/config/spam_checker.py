@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict
 
 from synapse.config import ConfigError
 from synapse.types import JsonDict
@@ -41,7 +41,7 @@ class SpamCheckerConfig(Config):
     section = "spamchecker"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        self.spam_checkers: List[Tuple[Any, Dict]] = []
+        self.spam_checkers: list[tuple[Any, Dict]] = []
 
         spam_checkers = config.get("spam_checker") or []
         if isinstance(spam_checkers, dict):

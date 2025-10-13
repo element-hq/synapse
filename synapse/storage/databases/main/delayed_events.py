@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import List, NewType, Optional, Tuple
+from typing import NewType, Optional
 
 import attr
 
@@ -93,7 +93,7 @@ class DelayedEventsStore(SQLBaseStore):
         origin_server_ts: Optional[int],
         content: JsonDict,
         delay: int,
-    ) -> Tuple[DelayID, Timestamp]:
+    ) -> tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
@@ -201,7 +201,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def get_all_delayed_events_for_user(
         self,
         user_localpart: str,
-    ) -> List[JsonDict]:
+    ) -> list[JsonDict]:
         """Returns all pending delayed events owned by the given user."""
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.execute(
@@ -236,8 +236,8 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def process_timeout_delayed_events(
         self, current_ts: Timestamp
-    ) -> Tuple[
-        List[DelayedEventDetails],
+    ) -> tuple[
+        list[DelayedEventDetails],
         Optional[Timestamp],
     ]:
         """
@@ -250,8 +250,8 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_timeout_delayed_events_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[
-            List[DelayedEventDetails],
+        ) -> tuple[
+            list[DelayedEventDetails],
             Optional[Timestamp],
         ]:
             sql_cols = ", ".join(
@@ -322,7 +322,7 @@ class DelayedEventsStore(SQLBaseStore):
         *,
         delay_id: str,
         user_localpart: str,
-    ) -> Tuple[
+    ) -> tuple[
         EventDetails,
         Optional[Timestamp],
     ]:
@@ -343,7 +343,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[
+        ) -> tuple[
             EventDetails,
             Optional[Timestamp],
         ]:
