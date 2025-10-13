@@ -426,7 +426,8 @@ def setup(
 
     async def _start_when_reactor_running() -> None:
         """
-        Specific to the `SynapseHomeServer` (main homeserver process).
+        Things that should run when starting the `SynapseHomeServer` (main homeserver
+        process) should live here.
 
         Should be called once the reactor is running.
         """
