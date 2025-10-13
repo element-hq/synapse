@@ -107,6 +107,11 @@ P = ParamSpec("P")
 R = TypeVar("R")
 S = TypeVar("S")
 
+BACKGROUND_UPDATE_TIMEOUT_SECONDS = 5
+"""
+We expect this to be pretty immediate as we're working with an empty database.
+"""
+
 
 class _TypedFailure(Generic[_ExcType], Protocol):
     """Extension to twisted.Failure, where the 'value' has a certain type."""
@@ -489,7 +494,11 @@ class HomeserverTestCase(TestCase):
 
     def wait_for_background_updates(self) -> None:
         """Block until all background database updates have completed."""
-        store = self.hs.get_datastores().main
+        self._wait_for_background_updates(self.hs)
+
+    def _wait_for_background_updates(self, hs: HomeServer) -> None:
+        """Block until all background database updates have completed."""
+        store = hs.get_datastores().main
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
@@ -687,10 +696,23 @@ class HomeserverTestCase(TestCase):
 
         # Wait for the database background updates to complete. This is important
         # because tests assume that the database is using the latest schema.
-        self.wait_for_background_updates()
+        #
+        # We could use `self._wait_for_background_updates(hs)` to accomplish the same
+        # thing but we don't want to start or drive the background updates here. We want
+        # to ensure the homeserver itself is doing that.
+        start_time_s = time.time()
+        store = hs.get_datastores().main
+        while not self.get_success(
+            store.db_pool.updates.has_completed_background_updates()
+        ):
+            current_time_s = time.time()
+            if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT_SECONDS:
+                raise AssertionError(
+                    f"Timed out waiting for background updates to complete ({BACKGROUND_UPDATE_TIMEOUT_SECONDS}s). "
+                    "Did you forget to `start_doing_background_updates()`?"
+                )
 
-        # TODO: How can we concretely know that the database background updates were
-        # scheduled and now complete?
+            self.pump(by=0.1)
 
         return hs
 
