@@ -1,0 +1,1 @@
+Only include latest membership events for each user/room combination in a single incremental legacy sync response.
