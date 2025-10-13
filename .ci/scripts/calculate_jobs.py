@@ -53,7 +53,7 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.10", "3.11", "3.12", "3.13")
+        for version in ("3.10", "3.11", "3.12", "3.13", "3.14")
     )
 
 trial_postgres_tests = [
@@ -68,7 +68,7 @@ trial_postgres_tests = [
 if not IS_PR:
     trial_postgres_tests.append(
         {
-            "python-version": "3.13",
+            "python-version": "3.14",
             "database": "postgres",
             "postgres-version": "17",
             "extras": "all",

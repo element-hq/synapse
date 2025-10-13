@@ -641,7 +641,7 @@ jobs:
           - python-version: "3.9"
             postgres-version: "13"
 
-          - python-version: "3.13"
+          - python-version: "3.14"
             postgres-version: "17"
 
     services:
