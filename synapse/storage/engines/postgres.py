@@ -193,11 +193,6 @@ class PostgresEngine(
         """Do we support using `a = ANY(?)` and passing a list"""
         return True
 
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
-        return True
-
     def is_deadlock(self, error: Exception) -> bool:
         if isinstance(error, psycopg2.DatabaseError):
             # https://www.postgresql.org/docs/current/static/errcodes-appendix.html

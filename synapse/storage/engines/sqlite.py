@@ -68,11 +68,6 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
         """Do we support using `a = ANY(?)` and passing a list"""
         return False
 
-    @property
-    def supports_returning(self) -> bool:
-        """Do we support the `RETURNING` clause in insert/update/delete?"""
-        return sqlite3.sqlite_version_info >= (3, 35, 0)
-
     def check_database(
         self, db_conn: sqlite3.Connection, allow_outdated_version: bool = False
     ) -> None:

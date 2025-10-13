@@ -2544,31 +2544,13 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             )
             args.append(user_id)
 
-            if self.database_engine.supports_returning:
-                sql = f"""
-                    DELETE FROM access_tokens
-                    WHERE {clause} AND user_id = ?
-                    RETURNING token, id, device_id
-                """
-                txn.execute(sql, args)
-                tokens_and_devices = txn.fetchall()
-            else:
-                tokens_and_devices = self.db_pool.simple_select_many_txn(
-                    txn,
-                    table="access_tokens",
-                    column="device_id",
-                    iterable=batch_device_ids,
-                    keyvalues={"user_id": user_id},
-                    retcols=("token", "id", "device_id"),
-                )
-
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table="access_tokens",
-                    keyvalues={"user_id": user_id},
-                    column="device_id",
-                    values=batch_device_ids,
-                )
+            sql = f"""
+                DELETE FROM access_tokens
+                WHERE {clause} AND user_id = ?
+                RETURNING token, id, device_id
+            """
+            txn.execute(sql, args)
+            tokens_and_devices = txn.fetchall()
 
             self._invalidate_cache_and_stream_bulk(
                 txn,

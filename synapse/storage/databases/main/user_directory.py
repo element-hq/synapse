@@ -356,27 +356,19 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
         def _populate_user_directory_process_users_txn(
             txn: LoggingTransaction,
         ) -> Optional[int]:
-            if self.database_engine.supports_returning:
-                # Note: we use an ORDER BY in the SELECT to force usage of an
-                # index. Otherwise, postgres does a sequential scan that is
-                # surprisingly slow (I think due to the fact it will read/skip
-                # over lots of already deleted rows).
-                sql = f"""
-                    DELETE FROM {TEMP_TABLE + "_users"}
-                    WHERE user_id IN (
-                        SELECT user_id FROM {TEMP_TABLE + "_users"} ORDER BY user_id LIMIT ?
-                    )
-                    RETURNING user_id
-                """
-                txn.execute(sql, (batch_size,))
-                user_result = cast(List[Tuple[str]], txn.fetchall())
-            else:
-                sql = "SELECT user_id FROM %s ORDER BY user_id LIMIT %s" % (
-                    TEMP_TABLE + "_users",
-                    str(batch_size),
+            # Note: we use an ORDER BY in the SELECT to force usage of an
+            # index. Otherwise, postgres does a sequential scan that is
+            # surprisingly slow (I think due to the fact it will read/skip
+            # over lots of already deleted rows).
+            sql = f"""
+                DELETE FROM {TEMP_TABLE + "_users"}
+                WHERE user_id IN (
+                    SELECT user_id FROM {TEMP_TABLE + "_users"} ORDER BY user_id LIMIT ?
                 )
-                txn.execute(sql)
-                user_result = cast(List[Tuple[str]], txn.fetchall())
+                RETURNING user_id
+            """
+            txn.execute(sql, (batch_size,))
+            user_result = cast(List[Tuple[str]], txn.fetchall())
 
             if not user_result:
                 return None
