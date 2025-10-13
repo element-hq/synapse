@@ -425,14 +425,6 @@ def setup(
         handle_startup_exception(e)
 
     async def _start_when_reactor_running() -> None:
-        # TODO: Feels like this should be moved somewhere else.
-        #
-        # Load the OIDC provider metadatas, if OIDC is enabled.
-        if hs.config.oidc.oidc_enabled:
-            oidc = hs.get_oidc_handler()
-            # Loading the provider metadata also ensures the provider config is valid.
-            await oidc.load_metadata()
-
         await _base.start(hs, freeze)
 
     # Register a callback to be invoked once the reactor is running
