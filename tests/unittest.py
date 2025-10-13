@@ -79,6 +79,7 @@ from synapse.logging.context import (
 from synapse.rest import RegisterServletsFunc
 from synapse.server import HomeServer
 from synapse.storage.keys import FetchKeyResult
+from synapse.storage.background_updates import UpdaterStatus
 from synapse.types import ISynapseReactor, JsonDict, Requester, UserID, create_requester
 from synapse.util.clock import Clock
 from synapse.util.httpresourcetree import create_resource_tree
@@ -705,11 +706,28 @@ class HomeserverTestCase(TestCase):
         while not self.get_success(
             store.db_pool.updates.has_completed_background_updates()
         ):
+            # Timeout if it takes too long. This should be pretty immediate as we're
+            # working with an empty database.
             current_time_s = time.time()
             if current_time_s - start_time_s > BACKGROUND_UPDATE_TIMEOUT_SECONDS:
+                background_update_status = store.db_pool.updates.get_status()
+
+                # Add some better context when we give up
+                extra_message = ""
+                if background_update_status == UpdaterStatus.NOT_STARTED:
+                    extra_message = (
+                        "Did you forget to `start_doing_background_updates()`?"
+                    )
+                elif background_update_status == UpdaterStatus.RUNNING_UPDATE:
+                    extra_message = "Background updates were still running when we gave up. Are they stuck?"
+                else:
+                    extra_message = (
+                        f"Background update status was {background_update_status}."
+                    )
+
                 raise AssertionError(
                     f"Timed out waiting for background updates to complete ({BACKGROUND_UPDATE_TIMEOUT_SECONDS}s). "
-                    "Did you forget to `start_doing_background_updates()`?"
+                    + extra_message
                 )
 
             self.pump(by=0.1)
