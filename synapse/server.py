@@ -640,12 +640,16 @@ class HomeServer(metaclass=abc.ABCMeta):
         Some handlers have side effects on instantiation (like registering
         background updates). This function causes them to be fetched, and
         therefore instantiated, to run those side effects.
+
+        We assume these background tasks are only run on a single Synapse instance at a
+        time.
         """
         for i in self.REQUIRED_ON_BACKGROUND_TASK_STARTUP:
             getattr(self, "get_" + i + "_handler")()
         self.get_task_scheduler()
         self.get_common_usage_metrics_manager().setup()
         start_phone_stats_home(self)
+        self.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     def get_reactor(self) -> ISynapseReactor:
         """
