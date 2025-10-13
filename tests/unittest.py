@@ -679,7 +679,7 @@ class HomeserverTestCase(TestCase):
 
         async def run_bg_updates() -> None:
             with LoggingContext(name="run_bg_updates", server_name=server_name):
-                self.get_success(stor.db_pool.updates.run_background_updates(False))
+                await stor.db_pool.updates.run_background_updates(False)
 
         hs = setup_test_homeserver(
             cleanup_func=self.addCleanup,
