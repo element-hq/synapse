@@ -1,1 +1,0 @@
-Fix `server_name` in logging context for multiple Synapse instances in one process.
