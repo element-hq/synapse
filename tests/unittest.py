@@ -73,7 +73,6 @@ from synapse.http.server import JsonResource, OptionsResource
 from synapse.http.site import SynapseRequest, SynapseSite
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
-    LoggingContext,
     current_context,
     set_current_context,
 )
