@@ -425,6 +425,12 @@ def setup(
         handle_startup_exception(e)
 
     async def _start_when_reactor_running() -> None:
+        """
+        Specific to the `SynapseHomeServer` (main homeserver process).
+
+        Should be called once the reactor is running.
+        """
+
         await _base.start(hs, freeze)
 
     # Register a callback to be invoked once the reactor is running
