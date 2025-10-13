@@ -20,10 +20,8 @@
 #
 from typing import List, Optional, Tuple
 
-from twisted.internet.task import deferLater
 from twisted.internet.testing import MemoryReactor
 
-from synapse.logging.context import make_deferred_yieldable
 from synapse.server import HomeServer
 from synapse.types import JsonMapping, ScheduledTask, TaskStatus
 from synapse.util.clock import Clock
@@ -88,7 +86,7 @@ class TestTaskScheduler(HomeserverTestCase):
         self, task: ScheduledTask
     ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         # Sleep for a second
-        await make_deferred_yieldable(deferLater(self.reactor, 1, lambda: None))
+        await self.hs.get_clock().sleep(1)
         return TaskStatus.COMPLETE, None, None
 
     def test_schedule_lot_of_tasks(self) -> None:
@@ -172,7 +170,7 @@ class TestTaskScheduler(HomeserverTestCase):
         else:
             await self.task_scheduler.update_task(task.id, result={"in_progress": True})
             # Await forever to simulate an aborted task because of a restart
-            await make_deferred_yieldable(deferLater(self.reactor, 2**16, lambda: None))
+            await self.hs.get_clock().sleep(2**16)
             # This should never been called
             return TaskStatus.ACTIVE, None, None
 
