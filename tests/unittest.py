@@ -677,10 +677,6 @@ class HomeserverTestCase(TestCase):
         # construct a homeserver with a matching name.
         server_name = config_obj.server.server_name
 
-        async def run_bg_updates() -> None:
-            with LoggingContext(name="run_bg_updates", server_name=server_name):
-                await stor.db_pool.updates.run_background_updates(False)
-
         hs = setup_test_homeserver(
             cleanup_func=self.addCleanup,
             server_name=server_name,
@@ -689,11 +685,10 @@ class HomeserverTestCase(TestCase):
             clock=clock,
             **extra_homeserver_attributes,
         )
-        stor = hs.get_datastores().main
 
-        # Run the database background updates, when running against "master".
-        if hs.__class__.__name__ == "TestHomeServer":
-            self.get_success(run_bg_updates())
+        # Wait for the database background updates to complete. This is important
+        # because tests assume that the database is using the latest schema.
+        self.wait_for_background_updates()
 
         return hs
 
