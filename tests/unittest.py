@@ -704,6 +704,11 @@ class HomeserverTestCase(TestCase):
         start_time_s = time.time()
         store = hs.get_datastores().main
         while not self.get_success(
+            # This check is slightly naive. It only checks if there is anything left in
+            # the `background_updates` database table so it is possible that the
+            # homeserver mistakenly never registered any background updates to be run.
+            # Since `register_background_xxx(...)` is done across the codebase, we can't
+            # really assert that everything was registered as expected.
             store.db_pool.updates.has_completed_background_updates()
         ):
             # Timeout if it takes too long. This should be pretty immediate as we're
