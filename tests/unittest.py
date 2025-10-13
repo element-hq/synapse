@@ -690,6 +690,9 @@ class HomeserverTestCase(TestCase):
         # because tests assume that the database is using the latest schema.
         self.wait_for_background_updates()
 
+        # TODO: How can we concretely know that the database background updates were
+        # scheduled and now complete?
+
         return hs
 
     def pump(self, by: float = 0.0) -> None:
