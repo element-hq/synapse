@@ -3087,7 +3087,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["org.matrix.msc4335.info_uri"], "https://example.com"
         )
-        self.assertEqual(channel.json_body["org.matrix.msc4335.soft_limit"], False)
+        self.assertEquals(hasattr(channel.json_body, "org.matrix.msc4335.increase_uri"), False)
 
     @override_config(
         {
