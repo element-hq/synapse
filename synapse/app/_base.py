@@ -61,7 +61,6 @@ from twisted.web.resource import Resource
 import synapse.util.caches
 from synapse.api.constants import MAX_PDU_SIZE
 from synapse.app import check_bind_error
-from synapse.app.phone_stats_home import start_phone_stats_home
 from synapse.config import ConfigError
 from synapse.config._base import format_config_error
 from synapse.config.homeserver import HomeServerConfig
@@ -679,15 +678,6 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
     # the forked process.
     if hs.config.worker.run_background_tasks:
         hs.start_background_tasks()
-
-        # TODO: This should be moved to same pattern we use for other background tasks:
-        # Add to `REQUIRED_ON_BACKGROUND_TASK_STARTUP` and rely on
-        # `start_background_tasks` to start it.
-        await hs.get_common_usage_metrics_manager().setup()
-
-        # TODO: This feels like another pattern that should refactored as one of the
-        # `REQUIRED_ON_BACKGROUND_TASK_STARTUP`
-        start_phone_stats_home(hs)
 
     if freeze:
         # We now freeze all allocated objects in the hopes that (almost)
