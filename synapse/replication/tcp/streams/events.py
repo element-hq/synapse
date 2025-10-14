@@ -20,7 +20,7 @@
 #
 import heapq
 from collections import defaultdict
-from typing import TYPE_CHECKING, Iterable, Optional, Tuple, TypeVar, cast
+from typing import TYPE_CHECKING, Iterable, Optional, TypeVar, cast
 
 import attr
 
@@ -237,7 +237,7 @@ class EventsStream(_StreamFromIdGen):
         # distinguish the row type). At the same time, we can limit the event_rows
         # to the max stream_id from state_rows.
 
-        event_updates: Iterable[tuple[int, Tuple]] = (
+        event_updates: Iterable[tuple[int, tuple]] = (
             (stream_id, (EventsStreamEventRow.TypeId, rest))
             for (stream_id, *rest) in event_rows
             if stream_id <= upper_limit
@@ -254,20 +254,20 @@ class EventsStream(_StreamFromIdGen):
             for room_id, stream_ids in state_updates_by_room.items()
             if len(stream_ids) >= _MAX_STATE_UPDATES_PER_ROOM
         ]
-        state_all_updates: Iterable[tuple[int, Tuple]] = (
+        state_all_updates: Iterable[tuple[int, tuple]] = (
             (max_stream_id, (EventsStreamAllStateRow.TypeId, (room_id,)))
             for (max_stream_id, room_id) in state_all_rows
         )
 
         # Any remaining state updates are sent individually.
         state_all_rooms = {room_id for _, room_id in state_all_rows}
-        state_updates: Iterable[tuple[int, Tuple]] = (
+        state_updates: Iterable[tuple[int, tuple]] = (
             (stream_id, (EventsStreamCurrentStateRow.TypeId, rest))
             for (stream_id, *rest) in state_rows
             if rest[0] not in state_all_rooms
         )
 
-        ex_outliers_updates: Iterable[tuple[int, Tuple]] = (
+        ex_outliers_updates: Iterable[tuple[int, tuple]] = (
             (stream_id, (EventsStreamEventRow.TypeId, rest))
             for (stream_id, *rest) in ex_outliers_rows
         )

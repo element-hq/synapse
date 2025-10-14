@@ -20,11 +20,11 @@
 #
 #
 import logging
+from collections import deque
 from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
-    Deque,
     Iterable,
     Iterator,
     Optional,
@@ -115,7 +115,7 @@ tcp_command_queue_gauge = LaterGauge(
 
 
 # the type of the entries in _command_queues_by_stream
-_StreamCommandQueue = Deque[
+_StreamCommandQueue = deque[
     tuple[Union[RdataCommand, PositionCommand], IReplicationConnection]
 ]
 

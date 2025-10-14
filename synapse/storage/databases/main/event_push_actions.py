@@ -86,7 +86,6 @@ from typing import (
     Collection,
     Mapping,
     Optional,
-    Tuple,
     Union,
     cast,
 )
@@ -1467,7 +1466,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 continue
 
             thread_clause = ""
-            thread_args: Tuple = ()
+            thread_args: tuple = ()
             if thread_id is not None:
                 thread_clause = "AND thread_id = ?"
                 thread_args = (thread_id,)

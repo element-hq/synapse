@@ -24,10 +24,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
     Optional,
-    Set,
     TypeVar,
     Union,
 )
@@ -173,7 +171,7 @@ class PresenceRouter:
                 logger.warning("Failed to run module API callback %s: %s", callback, e)
                 continue
 
-            if not isinstance(result, Dict):
+            if not isinstance(result, dict):
                 logger.warning(
                     "Wrong type returned by module API callback %s: %s, expected Dict",
                     callback,
@@ -182,7 +180,7 @@ class PresenceRouter:
                 continue
 
             for key, new_entries in result.items():
-                if not isinstance(new_entries, Set):
+                if not isinstance(new_entries, set):
                     logger.warning(
                         "Wrong type returned by module API callback %s: %s, expected Set",
                         callback,
@@ -233,7 +231,7 @@ class PresenceRouter:
             if result == PresenceRouter.ALL_USERS:
                 return PresenceRouter.ALL_USERS
 
-            if not isinstance(result, Set):
+            if not isinstance(result, set):
                 logger.warning(
                     "Wrong type returned by module API callback %s: %s, expected set",
                     callback,

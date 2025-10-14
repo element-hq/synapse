@@ -32,7 +32,6 @@ from typing import (
     Callable,
     Collection,
     Container,
-    Dict,
     Iterable,
     Mapping,
     Optional,
@@ -1566,7 +1565,7 @@ class FederationClient(FederationBase):
         remote_server: str,
         limit: Optional[int] = None,
         since_token: Optional[str] = None,
-        search_filter: Optional[Dict] = None,
+        search_filter: Optional[dict] = None,
         include_all_networks: bool = False,
         third_party_instance_id: Optional[str] = None,
     ) -> JsonDict:

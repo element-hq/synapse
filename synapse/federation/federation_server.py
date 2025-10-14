@@ -27,7 +27,6 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Mapping,
     Optional,
     Union,
@@ -1361,13 +1360,13 @@ class FederationServer(FederationBase):
             lock = new_lock
 
     async def exchange_third_party_invite(
-        self, sender_user_id: str, target_user_id: str, room_id: str, signed: Dict
+        self, sender_user_id: str, target_user_id: str, room_id: str, signed: dict
     ) -> None:
         await self.handler.exchange_third_party_invite(
             sender_user_id, target_user_id, room_id, signed
         )
 
-    async def on_exchange_third_party_invite_request(self, event_dict: Dict) -> None:
+    async def on_exchange_third_party_invite_request(self, event_dict: dict) -> None:
         await self.handler.on_exchange_third_party_invite_request(event_dict)
 
     async def check_server_matches_acl(self, server_name: str, room_id: str) -> None:

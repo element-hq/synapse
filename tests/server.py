@@ -35,7 +35,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Deque,
     Iterable,
     MutableMapping,
     Optional,
@@ -491,7 +490,7 @@ class ThreadedMemoryReactorClock(MemoryReactorClock):
         self._tcp_callbacks: dict[tuple[str, int], Callable] = {}
         self._udp: list[udp.Port] = []
         self.lookups: dict[str, str] = {}
-        self._thread_callbacks: Deque[Callable[..., R]] = deque()
+        self._thread_callbacks: deque[Callable[..., R]] = deque()
 
         lookups = self.lookups
 

@@ -31,11 +31,9 @@ from typing import (
     Callable,
     ClassVar,
     Collection,
-    Deque,
     Generator,
     Generic,
     Iterable,
-    List,
     Optional,
     TypeVar,
     Union,
@@ -175,7 +173,7 @@ class _EventPersistQueueItem(Generic[_PersistResult]):
     task: _EventPersistQueueTask
     deferred: ObservableDeferred[_PersistResult]
 
-    parent_opentracing_span_contexts: List = attr.ib(factory=list)
+    parent_opentracing_span_contexts: list = attr.ib(factory=list)
     """A list of opentracing spans waiting for this batch"""
 
     opentracing_span_context: Any = None
@@ -205,7 +203,7 @@ class _EventPeristenceQueue(Generic[_PersistResult]):
         """
         self.server_name = server_name
         self.hs = hs
-        self._event_persist_queues: dict[str, Deque[_EventPersistQueueItem]] = {}
+        self._event_persist_queues: dict[str, deque[_EventPersistQueueItem]] = {}
         self._currently_persisting_rooms: set[str] = set()
         self._per_item_callback = per_item_callback
 

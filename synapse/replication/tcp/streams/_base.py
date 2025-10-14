@@ -27,7 +27,6 @@ from typing import (
     Awaitable,
     Callable,
     Optional,
-    Tuple,
     TypeVar,
 )
 
@@ -55,7 +54,7 @@ Token = int
 # parsing with Stream.parse_row (which turns it into a `ROW_TYPE`). Normally it's
 # just a row from a database query, though this is dependent on the stream in question.
 #
-StreamRow = TypeVar("StreamRow", bound=Tuple)
+StreamRow = TypeVar("StreamRow", bound=tuple)
 
 # The type returned by the update_function of a stream, as well as get_updates(),
 # get_updates_since, etc.

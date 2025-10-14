@@ -19,7 +19,7 @@
 #
 #
 from collections import OrderedDict
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from twisted.internet.testing import MemoryReactor
 
@@ -161,8 +161,8 @@ class KnockingStrippedStateEventHelperMixin(HomeserverTestCase):
 
     def check_knock_room_state_against_room_state(
         self,
-        knock_room_state: list[Dict],
-        expected_room_state: Dict,
+        knock_room_state: list[dict],
+        expected_room_state: dict,
     ) -> None:
         """Test a list of stripped room state events received over federation against a
         dict of expected state events.

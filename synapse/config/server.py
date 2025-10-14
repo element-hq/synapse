@@ -25,7 +25,7 @@ import logging
 import os.path
 import urllib.parse
 from textwrap import indent
-from typing import Any, Iterable, List, Optional, TypedDict, Union
+from typing import Any, Iterable, Optional, TypedDict, Union
 from urllib.request import getproxies_environment
 
 import attr
@@ -239,7 +239,7 @@ class TCPListenerConfig:
     """Object describing the configuration of a single TCP listener."""
 
     port: int = attr.ib(validator=attr.validators.instance_of(int))
-    bind_addresses: list[str] = attr.ib(validator=attr.validators.instance_of(List))
+    bind_addresses: list[str] = attr.ib(validator=attr.validators.instance_of(list))
     type: str = attr.ib(validator=attr.validators.in_(KNOWN_LISTENER_TYPES))
     tls: bool = False
 

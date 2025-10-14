@@ -21,7 +21,7 @@
 #
 
 from collections import Counter
-from typing import Any, Collection, Iterable, Mapping, Optional, Type
+from typing import Any, Collection, Iterable, Mapping, Optional
 
 import attr
 
@@ -491,7 +491,7 @@ class OidcProviderConfig:
     allow_existing_users: bool
 
     # the class of the user mapping provider
-    user_mapping_provider_class: Type
+    user_mapping_provider_class: type
 
     # the config of the user mapping provider
     user_mapping_provider_config: Any

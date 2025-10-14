@@ -26,7 +26,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    DefaultDict,
     Mapping,
     Optional,
     Sequence,
@@ -660,7 +659,7 @@ class StateResolutionHandler:
         #
 
         # tracks the amount of work done on state res per room
-        self._state_res_metrics: DefaultDict[str, _StateResMetrics] = defaultdict(
+        self._state_res_metrics: defaultdict[str, _StateResMetrics] = defaultdict(
             _StateResMetrics
         )
 

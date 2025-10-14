@@ -30,7 +30,6 @@ from typing import (
     Any,
     AnyStr,
     Callable,
-    Dict,
     Iterable,
     Literal,
     Mapping,
@@ -86,7 +85,7 @@ class RestHelper:
         room_version: Optional[str] = ...,
         tok: Optional[str] = ...,
         expect_code: Literal[200] = ...,
-        extra_content: Optional[Dict] = ...,
+        extra_content: Optional[dict] = ...,
         custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = ...,
     ) -> str: ...
 
@@ -98,7 +97,7 @@ class RestHelper:
         room_version: Optional[str] = ...,
         tok: Optional[str] = ...,
         expect_code: int = ...,
-        extra_content: Optional[Dict] = ...,
+        extra_content: Optional[dict] = ...,
         custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = ...,
     ) -> Optional[str]: ...
 
@@ -109,7 +108,7 @@ class RestHelper:
         room_version: Optional[str] = None,
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
-        extra_content: Optional[Dict] = None,
+        extra_content: Optional[dict] = None,
         custom_headers: Optional[Iterable[tuple[AnyStr, AnyStr]]] = None,
     ) -> Optional[str]:
         """

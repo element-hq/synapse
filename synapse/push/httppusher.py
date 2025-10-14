@@ -21,7 +21,7 @@
 import logging
 import random
 import urllib.parse
-from typing import TYPE_CHECKING, Dict, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from prometheus_client import Counter
 
@@ -68,7 +68,7 @@ http_badges_failed_counter = Counter(
 )
 
 
-def tweaks_for_actions(actions: list[Union[str, Dict]]) -> JsonMapping:
+def tweaks_for_actions(actions: list[Union[str, dict]]) -> JsonMapping:
     """
     Converts a list of actions into a `tweaks` dict (which can then be passed to
         the push gateway).

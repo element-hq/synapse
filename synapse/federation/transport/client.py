@@ -28,10 +28,8 @@ from typing import (
     BinaryIO,
     Callable,
     Collection,
-    Dict,
     Generator,
     Iterable,
-    List,
     Mapping,
     Optional,
     Union,
@@ -237,7 +235,7 @@ class TransportLayerClient:
 
     async def timestamp_to_event(
         self, destination: str, room_id: str, timestamp: int, direction: Direction
-    ) -> Union[JsonDict, List]:
+    ) -> Union[JsonDict, list]:
         """
         Calls a remote federating server at `destination` asking for their
         closest event to the given timestamp in the given direction.
@@ -532,7 +530,7 @@ class TransportLayerClient:
         remote_server: str,
         limit: Optional[int] = None,
         since_token: Optional[str] = None,
-        search_filter: Optional[Dict] = None,
+        search_filter: Optional[dict] = None,
         include_all_networks: bool = False,
         third_party_instance_id: Optional[str] = None,
     ) -> JsonDict:

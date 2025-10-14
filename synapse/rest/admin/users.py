@@ -349,14 +349,14 @@ class UserRestServletV2(RestServlet):
                     "'approved' parameter is not of type boolean",
                 )
 
-        # convert List[dict[str, str]] into List[tuple[str, str]]
+        # convert list[dict[str, str]] into list[tuple[str, str]]
         if external_ids is not None:
             new_external_ids = [
                 (external_id["auth_provider"], external_id["external_id"])
                 for external_id in external_ids
             ]
 
-        # convert List[dict[str, str]] into Set[tuple[str, str]]
+        # convert list[dict[str, str]] into set[tuple[str, str]]
         if threepids is not None:
             new_threepids = {
                 (threepid["medium"], threepid["address"]) for threepid in threepids

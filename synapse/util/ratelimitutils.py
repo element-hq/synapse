@@ -28,7 +28,6 @@ from typing import (
     Any,
     Callable,
     ContextManager,
-    DefaultDict,
     Iterator,
     Mapping,
     MutableSet,
@@ -187,7 +186,7 @@ class FederationRateLimiter:
                 metrics_name=metrics_name,
             )
 
-        self.ratelimiters: DefaultDict[str, "_PerHostRatelimiter"] = (
+        self.ratelimiters: collections.defaultdict[str, "_PerHostRatelimiter"] = (
             collections.defaultdict(new_limiter)
         )
 

@@ -21,7 +21,7 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Callable, Iterable, Optional
 
 import attr
 from signedjson.key import (
@@ -644,7 +644,7 @@ class PerspectivesKeyFetcher(BaseV2KeyFetcher):
     ) -> dict[str, dict[str, FetchKeyResult]]:
         """see KeyFetcher._fetch_keys"""
 
-        async def get_key(key_server: TrustedKeyServer) -> Dict:
+        async def get_key(key_server: TrustedKeyServer) -> dict:
             try:
                 return await self.get_server_verify_key_v2_indirect(
                     keys_to_fetch, key_server

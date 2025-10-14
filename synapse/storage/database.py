@@ -37,7 +37,6 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
-    Tuple,
     TypeVar,
     cast,
     overload,
@@ -380,16 +379,16 @@ class LoggingTransaction:
         assert self.exception_callbacks is not None
         self.exception_callbacks.append((callback, args, kwargs))
 
-    def fetchone(self) -> Optional[Tuple]:
+    def fetchone(self) -> Optional[tuple]:
         return self.txn.fetchone()
 
-    def fetchmany(self, size: Optional[int] = None) -> list[Tuple]:
+    def fetchmany(self, size: Optional[int] = None) -> list[tuple]:
         return self.txn.fetchmany(size=size)
 
-    def fetchall(self) -> list[Tuple]:
+    def fetchall(self) -> list[tuple]:
         return self.txn.fetchall()
 
-    def __iter__(self) -> Iterator[Tuple]:
+    def __iter__(self) -> Iterator[tuple]:
         return self.txn.__iter__()
 
     @property
@@ -432,7 +431,7 @@ class LoggingTransaction:
         values: Iterable[Iterable[Any]],
         template: Optional[str] = None,
         fetch: bool = True,
-    ) -> list[Tuple]:
+    ) -> list[tuple]:
         """Corresponds to psycopg2.extras.execute_values. Only available when
         using postgres.
 

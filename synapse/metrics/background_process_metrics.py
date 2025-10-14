@@ -33,7 +33,6 @@ from typing import (
     Iterable,
     Optional,
     Protocol,
-    Set,
     TypeVar,
     Union,
 )
@@ -142,7 +141,7 @@ _background_process_counts: dict[str, int] = {}
 # background processes stacking up behind a lock or linearizer, where we then
 # only need to iterate over and update metrics for the process that have
 # actually been active and can ignore the idle ones.
-_background_processes_active_since_last_scrape: "Set[_BackgroundProcess]" = set()
+_background_processes_active_since_last_scrape: "set[_BackgroundProcess]" = set()
 
 # A lock that covers the above set and dict
 _bg_metrics_lock = threading.Lock()

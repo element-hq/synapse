@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Type
+from typing import Any
 
 from synapse.types import JsonDict
 from synapse.util.module_loader import load_module
@@ -56,7 +56,7 @@ class PasswordAuthProviderConfig(Config):
         for backwards compatibility.
         """
 
-        self.password_providers: list[tuple[Type, Any]] = []
+        self.password_providers: list[tuple[type, Any]] = []
         providers = []
 
         # We want to be backwards compatible with the old `ldap_config`

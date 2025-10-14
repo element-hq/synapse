@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict
+from typing import Any
 
 from synapse.config._base import Config, ConfigError
 from synapse.types import JsonDict
@@ -29,7 +29,7 @@ class ModulesConfig(Config):
     section = "modules"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        self.loaded_modules: list[tuple[Any, Dict]] = []
+        self.loaded_modules: list[tuple[Any, dict]] = []
 
         configured_modules = config.get("modules") or []
         for i, module in enumerate(configured_modules):

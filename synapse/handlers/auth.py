@@ -31,12 +31,9 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
     Mapping,
     Optional,
-    Tuple,
-    Type,
     Union,
     cast,
 )
@@ -1926,7 +1923,7 @@ def load_legacy_password_auth_providers(hs: "HomeServer") -> None:
 
 
 def load_single_legacy_password_auth_provider(
-    module: Type,
+    module: type,
     config: JsonDict,
     api: "ModuleApi",
 ) -> None:
@@ -2011,7 +2008,7 @@ def load_single_legacy_password_auth_provider(
 
             return wrapped_check_3pid_auth
 
-        def run(*args: Tuple, **kwargs: Dict) -> Awaitable:
+        def run(*args: tuple, **kwargs: dict) -> Awaitable:
             # mypy doesn't do well across function boundaries so we need to tell it
             # f is definitely not None.
             assert f is not None

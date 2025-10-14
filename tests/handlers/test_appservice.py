@@ -24,7 +24,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Iterable,
     Optional,
     TypeVar,
@@ -1022,7 +1021,7 @@ class ApplicationServicesHandlerSendEventsTestCase(unittest.HomeserverTestCase):
 
     def _register_application_service(
         self,
-        namespaces: Optional[dict[str, Iterable[Dict]]] = None,
+        namespaces: Optional[dict[str, Iterable[dict]]] = None,
     ) -> ApplicationService:
         """
         Register a new application service, with the given namespaces of interest.

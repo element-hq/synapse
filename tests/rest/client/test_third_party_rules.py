@@ -19,7 +19,7 @@
 #
 #
 import threading
-from typing import TYPE_CHECKING, Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 from unittest.mock import AsyncMock, Mock
 
 from twisted.internet.testing import MemoryReactor
@@ -48,7 +48,7 @@ thread_local = threading.local()
 
 
 class LegacyThirdPartyRulesTestModule:
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
         # keep a record of the "current" rules module, so that the test can patch
         # it if desired.
         thread_local.rules_module = self
@@ -70,7 +70,7 @@ class LegacyThirdPartyRulesTestModule:
 
 
 class LegacyDenyNewRooms(LegacyThirdPartyRulesTestModule):
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
         super().__init__(config, module_api)
 
     async def on_create_room(
@@ -80,7 +80,7 @@ class LegacyDenyNewRooms(LegacyThirdPartyRulesTestModule):
 
 
 class LegacyChangeEvents(LegacyThirdPartyRulesTestModule):
-    def __init__(self, config: Dict, module_api: "ModuleApi") -> None:
+    def __init__(self, config: dict, module_api: "ModuleApi") -> None:
         super().__init__(config, module_api)
 
     async def check_event_allowed(

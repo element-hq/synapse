@@ -18,7 +18,7 @@
 #
 #
 import itertools
-from typing import Dict, Optional, Sequence
+from typing import Optional, Sequence
 
 from twisted.internet import defer
 from twisted.test.proto_helpers import MemoryReactor
@@ -475,7 +475,7 @@ class StateResV21TestCase(unittest.HomeserverTestCase):
         event_type: str,
         state_key: Optional[str],
         sender: str,
-        content: Dict,
+        content: dict,
         auth_events: list[str],
         prev_events: Optional[list[str]] = None,
         room_id: Optional[str] = None,

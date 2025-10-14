@@ -20,7 +20,7 @@
 #
 
 import unittest
-from typing import Any, Collection, Iterable, List, Optional
+from typing import Any, Collection, Iterable, Optional
 
 from parameterized import parameterized
 
@@ -861,7 +861,7 @@ def _alias_event(room_version: RoomVersion, sender: str, **kwargs: Any) -> Event
 
 def _build_auth_dict_for_room_version(
     room_version: RoomVersion, auth_events: Iterable[EventBase]
-) -> List:
+) -> list:
     if room_version.event_format == EventFormatVersions.ROOM_V1_V2:
         return [(e.event_id, "not_used") for e in auth_events]
     else:

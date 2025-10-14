@@ -22,7 +22,7 @@
 
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import SynapseError
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
@@ -99,7 +99,7 @@ class ExperimentalFeaturesRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
-    ) -> tuple[HTTPStatus, Dict]:
+    ) -> tuple[HTTPStatus, dict]:
         """
         Enable or disable the provided features for the requester
         """

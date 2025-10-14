@@ -44,7 +44,6 @@ from typing import (
     Iterable,
     Optional,
     Sized,
-    Tuple,
 )
 
 import attr
@@ -292,7 +291,7 @@ class FederationRemoteSendQueue(AbstractFederationSender):
 
     async def get_replication_rows(
         self, instance_name: str, from_token: int, to_token: int, target_row_count: int
-    ) -> tuple[list[tuple[int, Tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get rows to be sent over federation between the two tokens
 
         Args:

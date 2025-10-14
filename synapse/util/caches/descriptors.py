@@ -26,7 +26,6 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Generic,
     Hashable,
     Iterable,
@@ -34,8 +33,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -56,7 +53,7 @@ from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
-CacheKey = Union[Tuple, Any]
+CacheKey = Union[tuple, Any]
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -246,7 +243,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[HasServerNameAndClock], owner: Optional[Type]
+        self, obj: Optional[HasServerNameAndClock], owner: Optional[type]
     ) -> Callable[..., "defer.Deferred[Any]"]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
@@ -331,7 +328,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
 
     def __init__(
         self,
-        orig: Callable[..., Awaitable[Dict]],
+        orig: Callable[..., Awaitable[dict]],
         cached_method_name: str,
         list_name: str,
         num_args: Optional[int] = None,
@@ -362,7 +359,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
     def __get__(
-        self, obj: Optional[Any], objtype: Optional[Type] = None
+        self, obj: Optional[Any], objtype: Optional[type] = None
     ) -> Callable[..., "defer.Deferred[dict[Hashable, Any]]"]:
         cached_method = getattr(obj, self.cached_method_name)
         cache: DeferredCache[CacheKey, Any] = cached_method.cache
@@ -375,7 +372,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
         @functools.wraps(self.orig)
-        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[Dict]":
+        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[dict]":
             # If we're passed a cache_context then we'll want to call its
             # invalidate() whenever we are invalidated
             invalidate_callback = kwargs.pop("on_invalidate", None)
@@ -414,7 +411,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             cached_defers: list["defer.Deferred[Any]"] = []
             if pending_deferred:
 
-                def update_results(r: Dict) -> None:
+                def update_results(r: dict) -> None:
                     for k, v in r.items():
                         results[cache_key_to_arg(k)] = v
 
