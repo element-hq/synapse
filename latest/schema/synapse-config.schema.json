@@ -1,6 +1,6 @@
 {
   "$schema": "https://element-hq.github.io/synapse/latest/schema/v1/meta.schema.json",
-  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.139/synapse-config.schema.json",
+  "$id": "https://element-hq.github.io/synapse/schema/synapse/v1.140/synapse-config.schema.json",
   "type": "object",
   "properties": {
     "modules": {
@@ -1954,10 +1954,8 @@
       "$ref": "#/$defs/rc",
       "description": "Ratelimiting settings for reporting content.\nThis is a ratelimiting option that ratelimits reports made by users about content they see.\nSetting this to a high value allows users to report content quickly, possibly in duplicate. This can result in higher database usage.",
       "default": {
-        "per_user": {
-          "per_second": 1.0,
-          "burst_count": 5.0
-        }
+        "per_second": 1.0,
+        "burst_count": 5.0
       },
       "examples": [
         {
@@ -1970,10 +1968,8 @@
       "$ref": "#/$defs/rc",
       "description": "Sets rate limits for how often users are able to create rooms.",
       "default": {
-        "per_user": {
-          "per_second": 0.016,
-          "burst_count": 10.0
-        }
+        "per_second": 0.016,
+        "burst_count": 10.0
       },
       "examples": [
         {
@@ -2518,6 +2514,46 @@
       "default": true,
       "examples": [
         false
+      ]
+    },
+    "matrix_rtc": {
+      "type": "object",
+      "description": "Options related to MatrixRTC.",
+      "properties": {
+        "transports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "The type of transport to use to connect to the selective forwarding unit (SFU).",
+                "example": "livekit"
+              },
+              "livekit_service_url": {
+                "type": "string",
+                "description": "The base URL of the LiveKit service. Should only be used with LiveKit-based transports.",
+                "example": "https://matrix-rtc.example.com/livekit/jwt"
+              }
+            }
+          },
+          "description": "A list of transport types and arguments to use for MatrixRTC connections.",
+          "default": []
+        }
+      },
+      "default": {},
+      "examples": [
+        {
+          "transports": [
+            {
+              "type": "livekit",
+              "livekit_service_url": "https://matrix-rtc.example.com/livekit/jwt"
+            }
+          ]
+        }
       ]
     },
     "enable_registration": {
