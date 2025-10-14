@@ -22,9 +22,9 @@
 import logging
 from io import BytesIO
 from types import TracebackType
-from typing import TYPE_CHECKING, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, List, Optional, Tuple, Type, cast
 
-from PIL import Image
+from PIL import Image, ImageSequence
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.config.repository import THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP
@@ -152,20 +152,24 @@ class Thumbnailer:
         else:
             return max((max_height * self.width) // self.height, 1), max_height
 
-    def _resize(self, width: int, height: int) -> Image.Image:
+    def _resize_image(self, image: Image.Image, width: int, height: int) -> Image.Image:
         # 1-bit or 8-bit color palette images need converting to RGB
         # otherwise they will be scaled using nearest neighbour which
         # looks awful.
         #
         # If the image has transparency, use RGBA instead.
-        if self.image.mode in ["1", "L", "P"]:
-            if self.image.info.get("transparency", None) is not None:
-                with self.image:
-                    self.image = self.image.convert("RGBA")
+        if image.mode in ["1", "L", "P"]:
+            if image.info.get("transparency", None) is not None:
+                converted = image.convert("RGBA")
             else:
-                with self.image:
-                    self.image = self.image.convert("RGB")
-        return self.image.resize((width, height), Image.LANCZOS)
+                converted = image.convert("RGB")
+        else:
+            converted = image
+        return converted.resize((width, height), Image.LANCZOS)
+
+    def _resize(self, width: int, height: int) -> Image.Image:
+        # Backwards-compatible single-image resize: operate on self.image
+        return self._resize_image(self.image, width, height)
 
     @trace
     def scale(self, width: int, height: int, output_type: str) -> BytesIO:
@@ -174,8 +178,34 @@ class Thumbnailer:
         Returns:
             The bytes of the encoded image ready to be written to disk
         """
-        with self._resize(width, height) as scaled:
-            return self._encode_image(scaled, output_type)
+        # If it's an animated image, generate an animated thumbnail (preserve
+        # animation). Otherwise, fall back to static processing using the first
+        # frame.
+        if getattr(self.image, "is_animated", False):
+            frames = []
+            durations = []
+            loop = self.image.info.get("loop", 0)
+            transparency = self.image.info.get("transparency", None)
+            for frame in ImageSequence.Iterator(self.image):
+                # Copy the frame to avoid referencing the original image memory
+                f = frame.copy()
+                if f.mode != "RGBA":
+                    f = f.convert("RGBA")
+                resized = self._resize_image(f, width, height)
+                frames.append(resized)
+                durations.append(
+                    frame.info.get("duration") or self.image.info.get("duration") or 100
+                )
+            return self._encode_animated(frames, durations, loop, transparency)
+        else:
+            # Static processing
+            first = next(ImageSequence.Iterator(self.image))
+            if first is not self.image:
+                base = first.copy()
+            else:
+                base = self.image
+            with self._resize_image(base, width, height) as scaled:
+                return self._encode_image(scaled, output_type)
 
     @trace
     def crop(self, width: int, height: int, output_type: str) -> BytesIO:
@@ -205,9 +235,35 @@ class Thumbnailer:
             crop_right = width + crop_left
             crop = (crop_left, 0, crop_right, height)
 
-        with self._resize(scaled_width, scaled_height) as scaled_image:
-            with scaled_image.crop(crop) as cropped:
-                return self._encode_image(cropped, output_type)
+        # If it's an animated image, generate an animated thumbnail (preserve
+        # animation). Otherwise, fall back to static processing using the first
+        # frame.
+        if getattr(self.image, "is_animated", False):
+            frames = []
+            durations = []
+            loop = self.image.info.get("loop", 0)
+            transparency = self.image.info.get("transparency", None)
+            for frame in ImageSequence.Iterator(self.image):
+                f = frame.copy()
+                if f.mode != "RGBA":
+                    f = f.convert("RGBA")
+                scaled = self._resize_image(f, scaled_width, scaled_height)
+                cropped = scaled.crop(crop)
+                frames.append(cropped)
+                durations.append(
+                    frame.info.get("duration") or self.image.info.get("duration") or 100
+                )
+            return self._encode_animated(frames, durations, loop, transparency)
+        else:
+            # Static processing
+            first = next(ImageSequence.Iterator(self.image))
+            if first is not self.image:
+                base = first.copy()
+            else:
+                base = self.image
+            with self._resize_image(base, scaled_width, scaled_height) as scaled_image:
+                with scaled_image.crop(crop) as cropped:
+                    return self._encode_image(cropped, output_type)
 
     def _encode_image(self, output_image: Image.Image, output_type: str) -> BytesIO:
         output_bytes_io = BytesIO()
@@ -215,6 +271,45 @@ class Thumbnailer:
         if fmt == "JPEG" or fmt == "PNG" and output_image.mode == "CMYK":
             output_image = output_image.convert("RGB")
         output_image.save(output_bytes_io, fmt, quality=80)
+        output_bytes_io.seek(0)
+        return output_bytes_io
+
+    def _encode_animated(
+        self,
+        frames: List[Image.Image],
+        durations: List[int],
+        loop: int,
+        transparency: Optional[int],
+    ) -> BytesIO:
+        """
+        Encode a list of RGBA frames into an animated GIF, attempting to
+        preserve durations, loop count and transparency where possible.
+        """
+        output_bytes_io = BytesIO()
+        if not frames:
+            raise ThumbnailError("No frames to encode for animated GIF")
+
+        # Ensure all frames are in 'P' mode with adaptive palette.
+        paletted_frames = []
+        for _idx, f in enumerate(frames):
+            if f.mode != "RGBA":
+                f = f.convert("RGBA")
+            p = f.convert("P", palette=Image.ADAPTIVE)
+            paletted_frames.append(p)
+
+        save_kwargs = {
+            "format": "GIF",
+            "save_all": True,
+            "append_images": paletted_frames[1:],
+            "loop": loop,
+            "duration": durations,
+            "disposal": 2,
+        }
+        if transparency is not None:
+            save_kwargs["transparency"] = transparency
+
+        paletted_frames[0].save(output_bytes_io, **cast(dict, save_kwargs))
+        output_bytes_io.seek(0)
         return output_bytes_io
 
     def close(self) -> None:
