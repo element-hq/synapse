@@ -1,3 +1,10 @@
+# Synapse 1.140.0 (2025-10-14)
+
+No significant changes since 1.140.0rc1.
+
+
+
+
 # Synapse 1.140.0rc1 (2025-10-10)
 
 ## Compatibility notice for users of `synapse-s3-storage-provider`
