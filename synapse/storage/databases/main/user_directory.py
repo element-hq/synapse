@@ -427,17 +427,6 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
             # Actually insert the users with their profiles into the directory.
             self._update_profiles_in_user_dir_txn(txn, profiles_to_insert)
 
-            # We've finished processing the users. Delete it from the table, if
-            # we haven't already.
-            if not self.database_engine.supports_returning:
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table=TEMP_TABLE + "_users",
-                    column="user_id",
-                    values=users_to_work_on,
-                    keyvalues={},
-                )
-
             # Update the remaining counter.
             progress["remaining"] -= len(users_to_work_on)
             self.db_pool.updates._background_update_progress_txn(
