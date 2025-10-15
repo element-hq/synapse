@@ -2,8 +2,8 @@
 
 ARG SYNAPSE_VERSION=latest
 ARG FROM=matrixdotorg/synapse:$SYNAPSE_VERSION
-ARG DEBIAN_VERSION=bookworm
-ARG PYTHON_VERSION=3.12
+ARG DEBIAN_VERSION=trixie
+ARG PYTHON_VERSION=3.13
 
 # first of all, we create a base image with dependencies which we can copy into the
 # target image. For repeated rebuilds, this is much faster than apt installing

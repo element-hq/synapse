@@ -9,7 +9,7 @@
 ARG SYNAPSE_VERSION=latest
 # This is an intermediate image, to be built locally (not pulled from a registry).
 ARG FROM=matrixdotorg/synapse-workers:$SYNAPSE_VERSION
-ARG DEBIAN_VERSION=bookworm
+ARG DEBIAN_VERSION=trixie
 
 FROM docker.io/library/postgres:13-${DEBIAN_VERSION} AS postgres_base
 
