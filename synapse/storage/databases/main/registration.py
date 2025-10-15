@@ -212,7 +212,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             )
 
             if hs.config.worker.run_background_tasks:
-                self._clock.call_later(
+                self.clock.call_later(
                     0.0,
                     self._set_expiration_date_when_missing,
                 )
@@ -226,7 +226,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
 
         # Create a background job for culling expired 3PID validity tokens
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self.cull_expired_threepid_validation_tokens, THIRTY_MINUTES_IN_MS
             )
 
@@ -298,7 +298,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
     ) -> None:
         user_id_obj = UserID.from_string(user_id)
 
-        now = int(self._clock.time())
+        now = int(self.clock.time())
 
         user_approved = approved or not self._require_approval
 
@@ -457,7 +457,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         if not info:
             return False
 
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         days = self.config.server.mau_appservice_trial_days.get(
             info.appservice_id, self.config.server.mau_trial_days
         )
@@ -640,7 +640,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_users_expiring_soon",
             select_users_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
             self.config.account_validity.account_validity_renew_at,
         )
 
@@ -1084,7 +1084,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         """
 
         def _count_daily_user_type(txn: LoggingTransaction) -> Dict[str, int]:
-            yesterday = int(self._clock.time()) - (60 * 60 * 24)
+            yesterday = int(self.clock.time()) - (60 * 60 * 24)
 
             sql = """
                 SELECT user_type, COUNT(*) AS count FROM (
@@ -1496,7 +1496,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         await self.db_pool.runInteraction(
             "cull_expired_threepid_validation_tokens",
             cull_expired_threepid_validation_tokens_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
         )
 
     @wrap_as_background_process("account_validity_set_expiration_dates")
@@ -1537,7 +1537,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 random value in the [now + period - d ; now + period] range, d being a
                 delta equal to 10% of the validity period.
         """
-        now_ms = self._clock.time_msec()
+        now_ms = self.clock.time_msec()
         assert self._account_validity_period is not None
         expiration_ts = now_ms + self._account_validity_period
 
@@ -1608,7 +1608,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         Raises:
             StoreError if there was a problem updating this.
         """
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
 
         await self.db_pool.simple_update_one(
             "access_tokens",
@@ -1639,7 +1639,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         uses_allowed, pending, completed, expiry_time = res
 
         # Check if the token has expired
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         if expiry_time and expiry_time < now:
             return False
 
@@ -1771,7 +1771,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "select_registration_tokens",
             select_registration_tokens_txn,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
             valid,
         )
 
@@ -2251,7 +2251,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             "consume_login_token",
             self._consume_login_token,
             token,
-            self._clock.time_msec(),
+            self.clock.time_msec(),
         )
 
     async def invalidate_login_tokens_by_session_id(
@@ -2271,7 +2271,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
                 "auth_provider_id": auth_provider_id,
                 "auth_provider_session_id": auth_provider_session_id,
             },
-            updatevalues={"used_ts": self._clock.time_msec()},
+            updatevalues={"used_ts": self.clock.time_msec()},
             desc="invalidate_login_tokens_by_session_id",
         )
 
@@ -2640,7 +2640,6 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self._clock = hs.get_clock()
         self.config = hs.config
 
         self.db_pool.updates.register_background_index_update(
@@ -2761,7 +2760,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # Create a background job for removing expired login tokens
         if hs.config.worker.run_background_tasks:
-            self._clock.looping_call(
+            self.clock.looping_call(
                 self._delete_expired_login_tokens, THIRTY_MINUTES_IN_MS
             )
 
@@ -2790,7 +2789,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
             The token ID
         """
         next_id = self._access_tokens_id_gen.get_next()
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
 
         await self.db_pool.simple_insert(
             "access_tokens",
@@ -2874,7 +2873,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
                 keyvalues={"name": user_id},
                 updatevalues={
                     "consent_version": consent_version,
-                    "consent_ts": self._clock.time_msec(),
+                    "consent_ts": self.clock.time_msec(),
                 },
             )
             self._invalidate_cache_and_stream(txn, self.get_user_by_id, (user_id,))
@@ -2986,7 +2985,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
                 txn,
                 table="threepid_validation_session",
                 keyvalues={"session_id": session_id},
-                updatevalues={"validated_at": self._clock.time_msec()},
+                updatevalues={"validated_at": self.clock.time_msec()},
             )
 
             return next_link
@@ -3064,7 +3063,7 @@ class RegistrationStore(RegistrationBackgroundUpdateStore):
 
         # We keep the expired tokens for an extra 5 minutes so we can measure how many
         # times a token is being used after its expiry
-        now = self._clock.time_msec()
+        now = self.clock.time_msec()
         await self.db_pool.runInteraction(
             "delete_expired_login_tokens",
             _delete_expired_login_tokens_txn,

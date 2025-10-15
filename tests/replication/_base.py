@@ -173,7 +173,13 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self.site.buildProtocol((host, port))
+        # The type ignore is here because mypy doesn't think the host/port tuple is of
+        # the correct type, even though it is the exact example given for
+        # `twisted.internet.interfaces.IAddress`.
+        # Mypy was happy with the type before we overrode `buildProtocol` in
+        # `SynapseSite`, probably because there was enough inheritance indirection before
+        # withe the argument not having a type associated with it.
+        channel = self.site.buildProtocol((host, port))  # type: ignore[arg-type]
 
         # hook into the channel's request factory so that we can keep a record
         # of the requests
@@ -185,7 +191,7 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
             requests.append(request)
             return request
 
-        channel.requestFactory = request_factory
+        channel.requestFactory = request_factory  # type: ignore[method-assign]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(
@@ -208,7 +214,12 @@ class BaseStreamTestCase(unittest.HomeserverTestCase):
         client_to_server_transport.loseConnection()
 
         # there should have been exactly one request
-        self.assertEqual(len(requests), 1)
+        self.assertEqual(
+            len(requests),
+            1,
+            "Expected to handle exactly one HTTP replication request but saw %d - requests=%s"
+            % (len(requests), requests),
+        )
 
         return requests[0]
 
@@ -427,7 +438,7 @@ class BaseMultiWorkerStreamTestCase(unittest.HomeserverTestCase):
 
         # Set up the server side protocol
         server_address = IPv4Address("TCP", host, port)
-        channel = self._hs_to_site[hs].buildProtocol((host, port))
+        channel = self._hs_to_site[hs].buildProtocol((host, port))  # type: ignore[arg-type]
 
         # Connect client to server and vice versa.
         client_to_server_transport = FakeTransport(

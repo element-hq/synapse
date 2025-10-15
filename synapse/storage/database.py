@@ -62,7 +62,6 @@ from synapse.logging.context import (
     make_deferred_yieldable,
 )
 from synapse.metrics import SERVER_NAME_LABEL, register_threadpool
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.background_updates import BackgroundUpdater
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
@@ -146,7 +145,7 @@ def make_pool(
     def _on_new_connection(conn: Connection) -> None:
         # Ensure we have a logging context so we can correctly track queries,
         # etc.
-        with LoggingContext("db.on_new_connection"):
+        with LoggingContext(name="db.on_new_connection", server_name=server_name):
             engine.on_new_connection(
                 LoggingDatabaseConnection(
                     conn=conn,
@@ -638,11 +637,16 @@ class DatabasePool:
         # background updates of tables that aren't safe to update.
         self._clock.call_later(
             0.0,
-            run_as_background_process,
+            self.hs.run_as_background_process,
             "upsert_safety_check",
-            self.server_name,
             self._check_safe_to_upsert,
         )
+
+    def stop_background_updates(self) -> None:
+        """
+        Stops the database from running any further background updates.
+        """
+        self.updates.shutdown()
 
     def name(self) -> str:
         "Return the name of this database"
@@ -681,9 +685,8 @@ class DatabasePool:
         if background_update_names:
             self._clock.call_later(
                 15.0,
-                run_as_background_process,
+                self.hs.run_as_background_process,
                 "upsert_safety_check",
-                self.server_name,
                 self._check_safe_to_upsert,
             )
 
@@ -1043,7 +1046,9 @@ class DatabasePool:
             assert not self.engine.in_transaction(conn)
 
             with LoggingContext(
-                str(curr_context), parent_context=parent_context
+                name=str(curr_context),
+                server_name=self.server_name,
+                parent_context=parent_context,
             ) as context:
                 with opentracing.start_active_span(
                     operation_name="db.connection",

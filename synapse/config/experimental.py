@@ -412,11 +412,6 @@ class ExperimentalConfig(Config):
             "msc2409_to_device_messages_enabled", False
         )
 
-        # The portion of MSC3202 which is related to device masquerading.
-        self.msc3202_device_masquerading_enabled: bool = experimental.get(
-            "msc3202_device_masquerading", False
-        )
-
         # The portion of MSC3202 related to transaction extensions:
         # sending device list changes, one-time key counts and fallback key
         # usage to application services.
@@ -555,6 +550,9 @@ class ExperimentalConfig(Config):
 
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        # MSC4143: Matrix RTC Transport using Livekit Backend
+        self.msc4143_enabled: bool = experimental.get("msc4143_enabled", False)
 
         # MSC4169: Backwards-compatible redaction sending using `/send`
         self.msc4169_enabled: bool = experimental.get("msc4169_enabled", False)

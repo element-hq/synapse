@@ -43,6 +43,7 @@ from typing_extensions import Concatenate, ParamSpec
 
 from twisted.internet import defer
 from twisted.internet.interfaces import IDelayedCall
+from twisted.python.threadpool import ThreadPool
 from twisted.web.resource import Resource
 
 from synapse.api import errors
@@ -79,6 +80,7 @@ from synapse.http.servlet import parse_json_object_from_request
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
     defer_to_thread,
+    defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
@@ -275,7 +277,15 @@ def run_as_background_process(
     # function instead.
     stub_server_name = "synapse_module_running_from_unknown_server"
 
-    return _run_as_background_process(
+    # Ignore the linter error here. Since this is leveraging the
+    # `run_as_background_process` function directly and we don't want to break the
+    # module api, we need to keep the function signature the same. This means we don't
+    # have access to the running `HomeServer` and cannot track this background process
+    # for cleanup during shutdown.
+    # This is not an issue during runtime and is only potentially problematic if the
+    # application cares about being able to garbage collect `HomeServer` instances
+    # during runtime.
+    return _run_as_background_process(  # type: ignore[untracked-background-process]
         desc,
         stub_server_name,
         func,
@@ -1402,7 +1412,7 @@ class ModuleApi:
 
         if self._hs.config.worker.run_background_tasks or run_on_all_instances:
             self._clock.looping_call(
-                self.run_as_background_process,
+                self._hs.run_as_background_process,
                 msec,
                 desc,
                 lambda: maybe_awaitable(f(*args, **kwargs)),
@@ -1460,7 +1470,7 @@ class ModuleApi:
         return self._clock.call_later(
             # convert ms to seconds as needed by call_later.
             msec * 0.001,
-            self.run_as_background_process,
+            self._hs.run_as_background_process,
             desc,
             lambda: maybe_awaitable(f(*args, **kwargs)),
         )
@@ -1701,8 +1711,8 @@ class ModuleApi:
             Note that the returned Deferred does not follow the synapse logcontext
             rules.
         """
-        return _run_as_background_process(
-            desc, self.server_name, func, *args, bg_start_span=bg_start_span, **kwargs
+        return self._hs.run_as_background_process(
+            desc, func, *args, bg_start_span=bg_start_span, **kwargs
         )
 
     async def defer_to_thread(
@@ -1724,6 +1734,33 @@ class ModuleApi:
             The return value of the function once ran in a thread.
         """
         return await defer_to_thread(self._hs.get_reactor(), f, *args, **kwargs)
+
+    async def defer_to_threadpool(
+        self,
+        threadpool: ThreadPool,
+        f: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
+        """Runs the given function in a separate thread from the given thread pool.
+
+        Allows specifying a custom thread pool instead of using the default Synapse
+        one. To use the default Synapse threadpool, use `defer_to_thread` instead.
+
+        Added in Synapse v1.140.0.
+
+        Args:
+            threadpool: The thread pool to use.
+            f: The function to run.
+            args: The function's arguments.
+            kwargs: The function's keyword arguments.
+
+        Returns:
+            The return value of the function once ran in a thread.
+        """
+        return await defer_to_threadpool(
+            self._hs.get_reactor(), threadpool, f, *args, **kwargs
+        )
 
     async def check_username(self, username: str) -> None:
         """Checks if the provided username uses the grammar defined in the Matrix

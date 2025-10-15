@@ -57,6 +57,9 @@ from synapse.rest.admin.event_reports import (
     EventReportDetailRestServlet,
     EventReportsRestServlet,
 )
+from synapse.rest.admin.events import (
+    EventRestServlet,
+)
 from synapse.rest.admin.experimental_features import ExperimentalFeaturesRestServlet
 from synapse.rest.admin.federation import (
     DestinationMembershipRestServlet,
@@ -341,6 +344,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SuspendAccountRestServlet(hs).register(http_server)
     ScheduledTasksRestServlet(hs).register(http_server)
     AdminRoomHierarchy(hs).register(http_server)
+    EventRestServlet(hs).register(http_server)
 
 
 def register_servlets_for_client_rest_resource(

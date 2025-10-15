@@ -65,7 +65,6 @@ from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.databases.main.tags import TagsWorkerStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
 from synapse.types import JsonMapping, StateMap
-from synapse.util import SYNAPSE_VERSION
 from synapse.util.logcontext import LoggingContext
 
 logger = logging.getLogger("synapse.app.admin_cmd")
@@ -316,7 +315,6 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
     ss = AdminCmdServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{SYNAPSE_VERSION}",
     )
 
     setup_logging(ss, config, use_worker_options=True)
@@ -329,7 +327,7 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
     # command.
 
     async def run() -> None:
-        with LoggingContext(name="command"):
+        with LoggingContext(name="command", server_name=config.server.server_name):
             await _base.start(ss)
             await args.func(ss, args)
 
@@ -342,5 +340,5 @@ def start(config: HomeServerConfig, args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     homeserver_config, args = load_config(sys.argv[1:])
-    with LoggingContext(name="main"):
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         start(homeserver_config, args)

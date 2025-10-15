@@ -37,6 +37,7 @@ from synapse.config import (  # noqa: F401
     key,
     logger,
     mas,
+    matrixrtc,
     metrics,
     modules,
     oembed,
@@ -126,6 +127,7 @@ class RootConfig:
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
     user_types: user_types.UserTypesConfig
     mas: mas.MasConfig
+    matrix_rtc: matrixrtc.MatrixRtcConfig
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]
@@ -156,11 +158,11 @@ class RootConfig:
     ) -> str: ...
     @classmethod
     def load_or_generate_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: Type[TRootConfig], description: str, argv_options: List[str]
     ) -> Optional[TRootConfig]: ...
     @classmethod
     def load_config(
-        cls: Type[TRootConfig], description: str, argv: List[str]
+        cls: Type[TRootConfig], description: str, argv_options: List[str]
     ) -> TRootConfig: ...
     @classmethod
     def add_arguments_to_parser(
@@ -168,7 +170,7 @@ class RootConfig:
     ) -> None: ...
     @classmethod
     def load_config_with_parser(
-        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv: List[str]
+        cls: Type[TRootConfig], parser: argparse.ArgumentParser, argv_options: List[str]
     ) -> Tuple[TRootConfig, argparse.Namespace]: ...
     def generate_missing_files(
         self, config_dict: dict, config_dir_path: str

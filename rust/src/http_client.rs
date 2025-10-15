@@ -12,7 +12,7 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
-use std::{collections::HashMap, future::Future};
+use std::{collections::HashMap, future::Future, sync::OnceLock};
 
 use anyhow::Context;
 use futures::TryStreamExt;
@@ -299,5 +299,22 @@ where
         });
     });
 
-    Ok(deferred)
+    // Make the deferred follow the Synapse logcontext rules
+    make_deferred_yieldable(py, &deferred)
+}
+
+static MAKE_DEFERRED_YIELDABLE: OnceLock<pyo3::Py<pyo3::PyAny>> = OnceLock::new();
+
+/// Given a deferred, make it follow the Synapse logcontext rules
+fn make_deferred_yieldable<'py>(
+    py: Python<'py>,
+    deferred: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let make_deferred_yieldable = MAKE_DEFERRED_YIELDABLE.get_or_init(|| {
+        let sys = PyModule::import(py, "synapse.logging.context").unwrap();
+        let func = sys.getattr("make_deferred_yieldable").unwrap().unbind();
+        func
+    });
+
+    make_deferred_yieldable.call1(py, (deferred,))?.extract(py)
 }

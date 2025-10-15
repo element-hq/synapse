@@ -149,6 +149,9 @@ class Codes(str, Enum):
     )
     MSC4306_NOT_IN_THREAD = "IO.ELEMENT.MSC4306.M_NOT_IN_THREAD"
 
+    # Part of MSC4326
+    UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.

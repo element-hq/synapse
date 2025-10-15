@@ -2006,9 +2006,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_reports:
-  per_user:
-    per_second: 1.0
-    burst_count: 5.0
+  per_second: 1.0
+  burst_count: 5.0
 ```
 
 Example configuration:
@@ -2031,9 +2030,8 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_room_creation:
-  per_user:
-    per_second: 0.016
-    burst_count: 10.0
+  per_second: 0.016
+  burst_count: 10.0
 ```
 
 Example configuration:
@@ -2573,6 +2571,28 @@ turn_user_lifetime: 2h
 Example configuration:
 ```yaml
 turn_allow_guests: false
+```
+---
+### `matrix_rtc`
+
+*(object)* Options related to MatrixRTC. Defaults to `{}`.
+
+This setting has the following sub-options:
+
+* `transports` (array): A list of transport types and arguments to use for MatrixRTC connections. Defaults to `[]`.
+
+  Options for each entry include:
+
+  * `type` (string): The type of transport to use to connect to the selective forwarding unit (SFU).
+
+  * `livekit_service_url` (string): The base URL of the LiveKit service. Should only be used with LiveKit-based transports.
+
+Example configuration:
+```yaml
+matrix_rtc:
+  transports:
+  - type: livekit
+    livekit_service_url: https://matrix-rtc.example.com/livekit/jwt
 ```
 ---
 ## Registration

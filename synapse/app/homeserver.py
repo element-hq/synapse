@@ -22,14 +22,13 @@
 import logging
 import os
 import sys
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from twisted.internet.tcp import Port
 from twisted.web.resource import EncodingResourceWrapper, Resource
 from twisted.web.server import GzipEncoderFactory
 
 import synapse
-import synapse.config.logger
 from synapse import events
 from synapse.api.urls import (
     CLIENT_API_PREFIX,
@@ -50,6 +49,7 @@ from synapse.app._base import (
 )
 from synapse.config._base import ConfigError, format_config_error
 from synapse.config.homeserver import HomeServerConfig
+from synapse.config.logger import setup_logging
 from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.additional_resource import AdditionalResource
@@ -60,6 +60,7 @@ from synapse.http.server import (
     StaticResource,
 )
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -69,7 +70,8 @@ from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
 from synapse.storage import DataStore
-from synapse.util.check_dependencies import VERSION, check_requirements
+from synapse.types import ISynapseReactor
+from synapse.util.check_dependencies import check_requirements
 from synapse.util.httpresourcetree import create_resource_tree
 from synapse.util.module_loader import load_module
 
@@ -81,6 +83,10 @@ def gz_wrap(r: Resource) -> Resource:
 
 
 class SynapseHomeServer(HomeServer):
+    """
+    Homeserver class for the main Synapse process.
+    """
+
     DATASTORE_CLASS = DataStore
 
     def _listener_http(
@@ -276,11 +282,13 @@ class SynapseHomeServer(HomeServer):
                 )
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -293,9 +301,11 @@ class SynapseHomeServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -306,6 +316,11 @@ class SynapseHomeServer(HomeServer):
                 # this shouldn't happen, as the listener type should have been checked
                 # during parsing
                 logger.warning("Unrecognized listener type: %s", listener.type)
+
+    def start_background_tasks(self) -> None:
+        super().start_background_tasks()
+
+        self.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
 
 def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
@@ -339,12 +354,17 @@ def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     return config
 
 
-def setup(config: HomeServerConfig) -> SynapseHomeServer:
+def create_homeserver(
+    config: HomeServerConfig,
+    reactor: Optional[ISynapseReactor] = None,
+) -> SynapseHomeServer:
     """
-    Create and setup a Synapse homeserver instance given a configuration.
+    Create a homeserver instance for the Synapse main process.
 
     Args:
         config: The configuration for the homeserver.
+        reactor: Optionally provide a reactor to use. Can be useful in different
+            scenarios that you want control over the reactor, such as tests.
 
     Returns:
         A homeserver instance.
@@ -352,10 +372,9 @@ def setup(config: HomeServerConfig) -> SynapseHomeServer:
 
     if config.worker.worker_app:
         raise ConfigError(
-            "You have specified `worker_app` in the config but are attempting to start a non-worker "
+            "You have specified `worker_app` in the config but are attempting to setup a non-worker "
             "instance. Please use `python -m synapse.app.generic_worker` instead (or remove the option if this is the main process)."
         )
-        sys.exit(1)
 
     events.USE_FROZEN_DICTS = config.server.use_frozen_dicts
     synapse.util.caches.TRACK_MEMORY_USAGE = config.caches.track_memory_usage
@@ -363,61 +382,79 @@ def setup(config: HomeServerConfig) -> SynapseHomeServer:
     if config.server.gc_seconds:
         synapse.metrics.MIN_TIME_BETWEEN_GCS = config.server.gc_seconds
 
-    if (
-        config.registration.enable_registration
-        and not config.registration.enable_registration_without_verification
-    ):
-        if (
-            not config.captcha.enable_registration_captcha
-            and not config.registration.registrations_require_3pid
-            and not config.registration.registration_requires_token
-        ):
-            raise ConfigError(
-                "You have enabled open registration without any verification. This is a known vector for "
-                "spam and abuse. If you would like to allow public registration, please consider adding email, "
-                "captcha, or token-based verification. Otherwise this check can be removed by setting the "
-                "`enable_registration_without_verification` config option to `true`."
-            )
-
     hs = SynapseHomeServer(
-        config.server.server_name,
+        hostname=config.server.server_name,
         config=config,
-        version_string=f"Synapse/{VERSION}",
+        reactor=reactor,
     )
 
-    synapse.config.logger.setup_logging(hs, config, use_worker_options=False)
+    return hs
 
+
+def setup(
+    hs: SynapseHomeServer,
+    *,
+    freeze: bool = True,
+) -> None:
+    """
+    Setup a Synapse homeserver instance given a configuration.
+
+    Args:
+        hs: The homeserver to setup.
+        freeze: whether to freeze the homeserver base objects in the garbage collector.
+            May improve garbage collection performance by marking objects with an effectively
+            static lifetime as frozen so they don't need to be considered for cleanup.
+            If you ever want to `shutdown` the homeserver, this needs to be
+            False otherwise the homeserver cannot be garbage collected after `shutdown`.
+
+    Returns:
+        A homeserver instance.
+    """
+
+    setup_logging(hs, hs.config, use_worker_options=False)
+
+    # Log after we've configured logging.
     logger.info("Setting up server")
+
+    # Start the tracer
+    init_tracer(hs)  # noqa
 
     try:
         hs.setup()
     except Exception as e:
         handle_startup_exception(e)
 
-    async def start() -> None:
+    async def _start_when_reactor_running() -> None:
+        # TODO: Feels like this should be moved somewhere else.
+        #
         # Load the OIDC provider metadatas, if OIDC is enabled.
         if hs.config.oidc.oidc_enabled:
             oidc = hs.get_oidc_handler()
             # Loading the provider metadata also ensures the provider config is valid.
             await oidc.load_metadata()
 
-        await _base.start(hs)
+        await _base.start(hs, freeze)
 
-        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
-
-    register_start(hs, start)
-
-    return hs
+    # Register a callback to be invoked once the reactor is running
+    register_start(hs, _start_when_reactor_running)
 
 
-def run(hs: HomeServer) -> None:
+def start_reactor(
+    config: HomeServerConfig,
+) -> None:
+    """
+    Start the reactor (Twisted event-loop).
+
+    Args:
+        config: The configuration for the homeserver.
+    """
     _base.start_reactor(
         "synapse-homeserver",
-        soft_file_limit=hs.config.server.soft_file_limit,
-        gc_thresholds=hs.config.server.gc_thresholds,
-        pid_file=hs.config.server.pid_file,
-        daemonize=hs.config.server.daemonize,
-        print_pidfile=hs.config.server.print_pidfile,
+        soft_file_limit=config.server.soft_file_limit,
+        gc_thresholds=config.server.gc_thresholds,
+        pid_file=config.server.pid_file,
+        daemonize=config.server.daemonize,
+        print_pidfile=config.server.print_pidfile,
         logger=logger,
     )
 
@@ -425,16 +462,17 @@ def run(hs: HomeServer) -> None:
 def main() -> None:
     homeserver_config = load_or_generate_config(sys.argv[1:])
 
-    with LoggingContext("main"):
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         # check base requirements
         check_requirements()
-        hs = setup(homeserver_config)
+        hs = create_homeserver(homeserver_config)
+        setup(hs)
 
         # redirect stdio to the logs, if configured.
         if not hs.config.logging.no_redirect_stdio:
             redirect_stdio_to_logs()
 
-        run(hs)
+        start_reactor(homeserver_config)
 
 
 if __name__ == "__main__":

@@ -143,8 +143,7 @@ cares about.
 The following sections describe pitfalls and helpful patterns when
 implementing these rules.
 
-Always await your awaitables
-----------------------------
+## Always await your awaitables
 
 Whenever you get an awaitable back from a function, you should `await` on
 it as soon as possible. Do not pass go; do not do any logging; do not
@@ -202,6 +201,171 @@ That doesn't follow the rules, but we can fix it by calling it through
 async def sleep(seconds):
     return await context.make_deferred_yieldable(get_sleep_deferred(seconds))
 ```
+
+## Deferred callbacks
+
+When a deferred callback is called, it inherits the current logcontext. The deferred
+callback chain can resume a coroutine, which if following our logcontext rules, will
+restore its own logcontext, then run:
+
+ - until it yields control back to the reactor, setting the sentinel logcontext
+ - or until it finishes, restoring the logcontext it was started with (calling context)
+
+This behavior creates two specific issues:
+
+**Issue 1:** The first issue is that the callback may have reset the logcontext to the
+sentinel before returning. This means our calling function will continue with the
+sentinel logcontext instead of the logcontext it was started with (bad).
+
+**Issue 2:** The second issue is that the current logcontext that called the deferred
+callback could finish before the callback finishes (bad).
+
+In the following example, the deferred callback is called with the "main" logcontext and
+runs until we yield control back to the reactor in the `await` inside `clock.sleep(0)`.
+Since `clock.sleep(0)` follows our logcontext rules, it sets the logcontext to the
+sentinel before yielding control back to the reactor. Our `main` function continues with
+the sentinel logcontext (first bad thing) instead of the "main" logcontext. Then the
+`with LoggingContext("main")` block exits, finishing the "main" logcontext and yielding
+control back to the reactor again. Finally, later on when `clock.sleep(0)` completes,
+our `with LoggingContext("competing")` block exits, and restores the previous "main"
+logcontext which has already finished, resulting in `WARNING: Re-starting finished log
+context main` and leaking the `main` logcontext into the reactor which will then
+erronously be associated with the next task the reactor picks up.
+
+```python
+async def competing_callback():
+    # Since this is run with the "main" logcontext, when the "competing"
+    # logcontext exits, it will restore the previous "main" logcontext which has
+    # already finished and results in "WARNING: Re-starting finished log context main"
+    # and leaking the `main` logcontext into the reactor.
+    with LoggingContext("competing"):
+        await clock.sleep(0)
+
+def main():
+    with LoggingContext("main"):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        # Call the callback within the "main" logcontext.
+        d.callback(None)
+        # Bad: This will be logged against sentinel logcontext
+        logger.debug("ugh")
+
+main()
+```
+
+**Solution 1:** We could of course fix this by following the general rule of "always
+await your awaitables":
+
+```python
+async def main():
+    with LoggingContext("main"):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        # Wait for `d` to finish before continuing so the "main" logcontext is
+        # still active. This works because `d` already follows our logcontext
+        # rules. If not, we would also have to use `make_deferred_yieldable(d)`.
+        await d
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
+``` 
+
+**Solution 2:** We could also fix this by surrounding the call to `d.callback` with a
+`PreserveLoggingContext`, which will reset the logcontext to the sentinel before calling
+the callback, and restore the "main" logcontext afterwards before continuing the `main`
+function. This solves the problem because when the "competing" logcontext exits, it will
+restore the sentinel logcontext which is never finished by its nature, so there is no
+warning and no leakage into the reactor.
+
+```python
+async def main():
+    with LoggingContext("main"):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        d.callback(None)
+        with PreserveLoggingContext():
+            # Call the callback with the sentinel logcontext.
+            d.callback(None)
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
+```
+
+**Solution 3:** But let's say you *do* want to run (fire-and-forget) the deferred
+callback in the current context without running into issues:
+
+We can solve the first issue by using `run_in_background(...)` to run the callback in
+the current logcontext and it handles the magic behind the scenes of a) restoring the
+calling logcontext before returning to the caller and b) resetting the logcontext to the
+sentinel after the deferred completes and we yield control back to the reactor to avoid
+leaking the logcontext into the reactor.
+
+To solve the second issue, we can extend the lifetime of the "main" logcontext by
+avoiding the `LoggingContext`'s context manager lifetime methods
+(`__enter__`/`__exit__`). We can still set "main" as the current logcontext by using
+`PreserveLoggingContext` and passing in the "main" logcontext.
+
+
+```python
+async def main():
+    main_context = LoggingContext("main")
+    with PreserveLoggingContext(main_context):
+        d = defer.Deferred()
+        d.addCallback(lambda _: defer.ensureDeferred(competing_callback()))
+        # The whole lambda will be run in the "main" logcontext. But we're using
+        # a trick to return the deferred `d` itself so that `run_in_background`
+        # will wait on that to complete and reset the logcontext to the sentinel
+        # when it does to avoid leaking the "main" logcontext into the reactor.
+        run_in_background(lambda: (d.callback(None), d)[1])
+        # Good: This will be logged against the "main" logcontext
+        logger.debug("phew")
+
+...
+
+# Wherever possible, it's best to finish the logcontext by calling `__exit__` at some
+# point. This allows us to catch bugs if we later try to erroneously restart a finished
+# logcontext.
+#
+# Since the "main" logcontext stores the `LoggingContext.previous_context` when it is
+# created, we can wrap this call in `PreserveLoggingContext()` to restore the correct
+# previous logcontext. Our goal is to have the calling context remain unchanged after
+# finishing the "main" logcontext.
+with PreserveLoggingContext():
+    # Finish the "main" logcontext
+    with main_context:
+        # Empty block - We're just trying to call `__exit__` on the "main" context
+        # manager to finish it. We can't call `__exit__` directly as the code expects us
+        # to `__enter__` before calling `__exit__` to `start`/`stop` things
+        # appropriately. And in any case, it's probably best not to call the internal
+        # methods directly.
+        pass
+```
+
+The same thing applies if you have some deferreds stored somewhere which you want to
+callback in the current logcontext.
+
+
+### Deferred errbacks and cancellations
+
+The same care should be taken when calling errbacks on deferreds. An errback and
+callback act the same in this regard (see section above).
+
+```python
+d = defer.Deferred()
+d.addErrback(some_other_function)
+d.errback(failure)
+```
+
+Additionally, cancellation is the same as directly calling the errback with a
+`twisted.internet.defer.CancelledError`:
+
+```python
+d = defer.Deferred()
+d.addErrback(some_other_function)
+d.cancel()
+```
+
+
+
 
 ## Fire-and-forget
 
@@ -384,3 +548,19 @@ chain are dropped. Dropping the the reference to an awaitable you're
 supposed to be awaiting is bad practice, so this doesn't
 actually happen too much. Unfortunately, when it does happen, it will
 lead to leaked logcontexts which are incredibly hard to track down.
+
+
+## Debugging logcontext issues
+
+Debugging logcontext issues can be tricky as leaking or losing a logcontext will surface
+downstream and can point to an unrelated part of the codebase. It's best to enable debug
+logging for `synapse.logging.context.debug` (needs to be explicitly configured) and go
+backwards in the logs from the point where the issue is observed to find the root cause.
+
+`log.config.yaml`
+```yaml
+loggers:
+    # Unlike other loggers, this one needs to be explicitly configured to see debug logs.
+    synapse.logging.context.debug:
+        level: DEBUG
+```

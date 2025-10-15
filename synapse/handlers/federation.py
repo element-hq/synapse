@@ -72,7 +72,6 @@ from synapse.http.servlet import assert_params_in_dict
 from synapse.logging.context import nested_logging_context
 from synapse.logging.opentracing import SynapseTags, set_tag, tag_args, trace
 from synapse.metrics import SERVER_NAME_LABEL
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.module_api import NOT_SPAM
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.invite_rule import InviteRule
@@ -160,7 +159,7 @@ class FederationHandler:
         self._notifier = hs.get_notifier()
         self._worker_locks = hs.get_worker_locks_handler()
 
-        self._room_backfill = Linearizer("room_backfill")
+        self._room_backfill = Linearizer(name="room_backfill", clock=self.clock)
 
         self._third_party_event_rules = (
             hs.get_module_api_callbacks().third_party_event_rules
@@ -180,16 +179,16 @@ class FederationHandler:
         # When the lock is held for a given room, no other concurrent code may
         # partial state or un-partial state the room.
         self._is_partial_state_room_linearizer = Linearizer(
-            name="_is_partial_state_room_linearizer"
+            name="_is_partial_state_room_linearizer",
+            clock=self.clock,
         )
 
         # if this is the main process, fire off a background process to resume
         # any partial-state-resync operations which were in flight when we
         # were shut down.
         if not hs.config.worker.worker_app:
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "resume_sync_partial_state_room",
-                self.server_name,
                 self._resume_partial_state_room_sync,
             )
 
@@ -317,9 +316,8 @@ class FederationHandler:
             logger.debug(
                 "_maybe_backfill_inner: all backfill points are *after* current depth. Trying again with later backfill points."
             )
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "_maybe_backfill_inner_anyway_with_max_depth",
-                self.server_name,
                 self.maybe_backfill,
                 room_id=room_id,
                 # We use `MAX_DEPTH` so that we find all backfill points next
@@ -801,9 +799,8 @@ class FederationHandler:
             # lots of requests for missing prev_events which we do actually
             # have. Hence we fire off the background task, but don't wait for it.
 
-            run_as_background_process(
+            self.hs.run_as_background_process(
                 "handle_queued_pdus",
-                self.server_name,
                 self._handle_queued_pdus,
                 room_queue,
             )
@@ -1876,9 +1873,8 @@ class FederationHandler:
                             room_id=room_id,
                         )
 
-        run_as_background_process(
+        self.hs.run_as_background_process(
             desc="sync_partial_state_room",
-            server_name=self.server_name,
             func=_sync_partial_state_room_wrapper,
         )
 

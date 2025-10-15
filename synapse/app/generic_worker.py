@@ -49,6 +49,7 @@ from synapse.config.server import ListenerConfig, TCPListenerConfig
 from synapse.federation.transport.server import TransportLayerServer
 from synapse.http.server import JsonResource, OptionsResource
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import init_tracer
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource, admin
@@ -111,7 +112,6 @@ from synapse.storage.databases.main.transactions import TransactionWorkerStore
 from synapse.storage.databases.main.ui_auth import UIAuthWorkerStore
 from synapse.storage.databases.main.user_directory import UserDirectoryStore
 from synapse.storage.databases.main.user_erasure_store import UserErasureWorkerStore
-from synapse.util import SYNAPSE_VERSION
 from synapse.util.httpresourcetree import create_resource_tree
 
 logger = logging.getLogger("synapse.app.generic_worker")
@@ -277,11 +277,13 @@ class GenericWorkerServer(HomeServer):
                 self._listen_http(listener)
             elif listener.type == "manhole":
                 if isinstance(listener, TCPListenerConfig):
-                    _base.listen_manhole(
-                        listener.bind_addresses,
-                        listener.port,
-                        manhole_settings=self.config.server.manhole_settings,
-                        manhole_globals={"hs": self},
+                    self._listening_services.extend(
+                        _base.listen_manhole(
+                            listener.bind_addresses,
+                            listener.port,
+                            manhole_settings=self.config.server.manhole_settings,
+                            manhole_globals={"hs": self},
+                        )
                     )
                 else:
                     raise ConfigError(
@@ -295,9 +297,11 @@ class GenericWorkerServer(HomeServer):
                     )
                 else:
                     if isinstance(listener, TCPListenerConfig):
-                        _base.listen_metrics(
-                            listener.bind_addresses,
-                            listener.port,
+                        self._metrics_listeners.extend(
+                            _base.listen_metrics(
+                                listener.bind_addresses,
+                                listener.port,
+                            )
                         )
                     else:
                         raise ConfigError(
@@ -354,10 +358,12 @@ def start(config: HomeServerConfig) -> None:
     hs = GenericWorkerServer(
         config.server.server_name,
         config=config,
-        version_string=f"Synapse/{SYNAPSE_VERSION}",
     )
 
     setup_logging(hs, config, use_worker_options=True)
+
+    # Start the tracer
+    init_tracer(hs)  # noqa
 
     try:
         hs.setup()
@@ -382,7 +388,7 @@ def start(config: HomeServerConfig) -> None:
 
 def main() -> None:
     homeserver_config = load_config(sys.argv[1:])
-    with LoggingContext(name="main"):
+    with LoggingContext(name="main", server_name=homeserver_config.server.server_name):
         start(homeserver_config)
 
 

@@ -63,10 +63,6 @@ def check_logcontext(context: LoggingContextOrSentinel) -> None:
 
 
 class FederationClientTests(HomeserverTestCase):
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver(reactor=reactor, clock=clock)
-        return hs
-
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
     ) -> None:
@@ -80,7 +76,10 @@ class FederationClientTests(HomeserverTestCase):
 
         @defer.inlineCallbacks
         def do_request() -> Generator["Deferred[Any]", object, object]:
-            with LoggingContext("one") as context:
+            with LoggingContext(
+                name="one",
+                server_name=self.hs.hostname,
+            ) as context:
                 fetch_d = defer.ensureDeferred(
                     self.cl.get_json("testserv:8008", "foo/bar")
                 )
