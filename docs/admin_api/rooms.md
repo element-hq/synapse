@@ -1116,55 +1116,76 @@ Example response:
 }
 ```
 
-# Parent Space Search API
+# Admin Room Hierarchy Endpoint
 
-This API allows an admin to search for room details about the parent space(s) (if any) of each room in a provided set of rooms, as well as any other children of the found parent spaces. If no parent spaces are found, will return 404.
+This API allows an admin to fetch the room hierarchy for a given room, returning details about that room and any children
+the room may have. This is functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not return information about any remote
+rooms that the server is not currently participating in and does not check for room membership when returning room summaries.
+
+**Parameters**
+
+The following query parameters are available:
+
+* `from` - An optional pagination token, provided when there are more rooms to return than the limit. 
+* `limit` - Maximum amount of rooms to return. Must be a non-negative integer, defaults to `50`.
+* `max_depth` - The maximum depth in the tree to explore, must be a non-negative integer. If not provided will recurse
+  into the space tree without limit.
 
 Request:
 
-```
-    POST /_synapse/admin/v1/rooms/space/spaces_search
-```
-
-with a request body of:
-```json
-{
-    "rooms": ["!roomID1", "!roomID2"]
-}
+```http
+GET /_synapse/admin/v1/rooms/<room_id>/hierarchy
 ```
 
 Response:
 
 ```json
 {
-  "found_rooms":
+  "rooms":
       [
-        {
-                "room_id": "!parentroomID",
-                "name": "parent space",
-                "join_rules": "public",
-                "is_space": true,
-                "topic": null,
-                "origin_server_ts": 234235,
-                "sender": "@user:somewhere.org",
-                "event_id": "$creationeventID",
-                "power_users": ["@user:somewhere.org"],
-                "deleted": false,
-                "aliases": []
-        },
-        {
-                "room_id": "!otherchildroomID",
-                "name": "other room in space",
-                "join_rules": "invite",
-                "is_space": false,
-                "topic": "dogs",
-                "origin_server_ts": 23523,
-                "sender": "@dogowner42:somewhere.org",
-                "event_id": "$wghhrhrehett",
-                "power_users": ["@dogowner42:somewhere.org", "@user:somewhere.org"],
-                "deleted": false,
-                "aliases": ["#hurrayfordogs:matrix.org"]
-        }
-    ]
+        {"aliases": [],
+        "children_state": [
+            {
+              "content": {
+                "via": ["local_test_server"]
+              },
+              "origin_server_ts": 1500,
+              "sender": "@user:test",
+              "state_key": "!QrMkkqBSwYRIFNFCso:test",
+              "type": "m.space.child"
+            }
+        ],
+        "creation_event_id": "$bVkNVtm4aDw4c0LRf_U5Ad7mZSo4WKzzQKImrk_rQcg",
+        "creator": "@user:test",
+        "guest_can_join": false,
+        "is_space": true,
+        "join_rule": "public",
+        "name": null,
+        "num_joined_members": 1,
+        "power_users": ["@user:test"],
+        "room_creation_ts": 1400,
+        "room_id": "!sPOpNyMHbZAoAOsOFL:test",
+        "room_type": "m.space",
+        "topic": null, 
+        "world_readable": false
+      },
+
+      {
+        "aliases": [],
+        "children_state": [],
+        "creation_event_id": "$kymNeN-gA5kzLwZ6FEQUu0_2MfeenYKINSO3dUuLYf8",
+        "creator": "@user:test",
+        "guest_can_join": true,
+        "is_space": false,
+        "join_rule": "invite",
+        "name": "nefarious",
+        "num_joined_members": 1,
+        "power_users": ["@user:test"],
+        "room_creation_ts": 999,
+        "room_id": "!QrMkkqBSwYRIFNFCso:test",
+        "topic": "being bad",
+        "world_readable": false}
+    ],
+  "next_batch": "KUYmRbeSpAoaAIgOKGgyaCEn"
 }
 ```
