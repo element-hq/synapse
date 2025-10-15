@@ -139,9 +139,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - sytest-tag: bullseye
+          - sytest-tag: bookworm
 
-          - sytest-tag: bullseye
+          - sytest-tag: bookworm
             postgres: postgres
             workers: workers
             redis: redis
