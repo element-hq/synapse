@@ -23,10 +23,10 @@ import re
 from typing import TYPE_CHECKING, Callable, Optional
 
 import attr
-
 import saml2
 import saml2.response
 from saml2.client import Saml2Client
+
 from synapse.api.errors import SynapseError
 from synapse.config import ConfigError
 from synapse.handlers.sso import MappingException, UserAttributes
