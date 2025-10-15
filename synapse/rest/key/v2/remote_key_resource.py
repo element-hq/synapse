@@ -23,7 +23,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Dict, Mapping, Optional, Set, Tuple
 
-from pydantic import Extra, StrictInt, StrictStr
+from pydantic import ConfigDict, StrictInt, StrictStr
 from signedjson.sign import sign_json
 
 from twisted.web.server import Request
@@ -48,8 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 class _KeyQueryCriteriaDataModel(RequestBodyModel):
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     minimum_valid_until_ts: Optional[StrictInt]
 

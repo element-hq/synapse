@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 from pydantic import (
     BaseModel,
-    Extra,
+    ConfigDict,
     StrictBool,
     StrictInt,
     StrictStr,
@@ -64,8 +64,7 @@ STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 
 
 class ServerMetadata(BaseModel):
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     issuer: StrictStr
     account_management_uri: StrictStr
@@ -74,14 +73,12 @@ class ServerMetadata(BaseModel):
 class IntrospectionResponse(BaseModel):
     retrieved_at_ms: StrictInt
     active: StrictBool
-    scope: Optional[StrictStr]
-    username: Optional[StrictStr]
-    sub: Optional[StrictStr]
-    device_id: Optional[StrictStr]
-    expires_in: Optional[StrictInt]
-
-    class Config:
-        extra = Extra.allow
+    scope: Optional[StrictStr] = None
+    username: Optional[StrictStr] = None
+    sub: Optional[StrictStr] = None
+    device_id: Optional[StrictStr] = None
+    expires_in: Optional[StrictInt] = None
+    model_config = ConfigDict(extra="allow")
 
     def get_scope_set(self) -> set[str]:
         if not self.scope:

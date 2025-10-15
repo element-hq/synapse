@@ -15,7 +15,7 @@
 
 from typing import Any, List, Optional
 
-from pydantic import Field, StrictStr, ValidationError, validator
+from pydantic import Field, StrictStr, ValidationError, field_validator
 
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
@@ -41,7 +41,7 @@ class MTextRepresentation(ParseModel):
     """
 
     body: StrictStr
-    mimetype: Optional[StrictStr]
+    mimetype: Optional[StrictStr] = None
 
 
 class MTopic(ParseModel):
@@ -53,7 +53,7 @@ class MTopic(ParseModel):
     See `TopicContentBlock` in the Matrix specification.
     """
 
-    m_text: Optional[List[MTextRepresentation]] = Field(alias="m.text")
+    m_text: Optional[List[MTextRepresentation]] = Field(None, alias="m.text")
     """
     An ordered array of textual representations in different mimetypes.
     """
@@ -61,7 +61,8 @@ class MTopic(ParseModel):
     # Because "Receivers SHOULD use the first representation in the array that they
     # understand.", we ignore invalid representations in the `m.text` field and use
     # what we can.
-    @validator("m_text", pre=True)
+    @field_validator("m_text", mode="before")
+    @classmethod
     def ignore_invalid_representations(
         cls, m_text: Any
     ) -> Optional[List[MTextRepresentation]]:
@@ -86,14 +87,15 @@ class TopicContent(ParseModel):
     The topic in plain text.
     """
 
-    m_topic: Optional[MTopic] = Field(alias="m.topic")
+    m_topic: Optional[MTopic] = Field(None, alias="m.topic")
     """
     Textual representation of the room topic in different mimetypes.
     """
 
     # We ignore invalid `m.topic` fields as we can always fall back to the plain-text
     # `topic` field.
-    @validator("m_topic", pre=True)
+    @field_validator("m_topic", mode="before")
+    @classmethod
     def ignore_invalid_m_topic(cls, m_topic: Any) -> Optional[MTopic]:
         try:
             return MTopic.parse_obj(m_topic)

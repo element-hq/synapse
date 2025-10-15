@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import attr
-from pydantic import StrictBool, StrictStr, constr
+from pydantic import StrictBool, StrictStr, StringConstraints
+from typing_extensions import Annotated
 
 from twisted.web.server import Request
 
@@ -166,7 +167,7 @@ class PasswordRestServlet(RestServlet):
             # workaround for https://github.com/samuelcolvin/pydantic/issues/156
             new_password: Optional[StrictStr] = None
         else:
-            new_password: Optional[constr(max_length=512, strict=True)] = None
+            new_password: Optional[Annotated[str, StringConstraints(max_length=512, strict=True)]] = None
 
     @interactive_auth_handler
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
