@@ -23,11 +23,11 @@ import logging
 import re
 from typing import TYPE_CHECKING, Dict, Mapping, Optional, Set, Tuple
 
+from pydantic import Extra, StrictInt, StrictStr
 from signedjson.sign import sign_json
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import Extra, StrictInt, StrictStr
 from synapse.crypto.keyring import ServerKeyFetcher
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (

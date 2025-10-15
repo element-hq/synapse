@@ -21,7 +21,8 @@
 import unittest as stdlib_unittest
 from typing import Literal
 
-from synapse._pydantic_compat import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError
+
 from synapse.types.rest.client import EmailRequestTokenBody
 
 

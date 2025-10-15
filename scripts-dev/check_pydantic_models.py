@@ -56,9 +56,7 @@ from typing import (
 )
 
 from parameterized import parameterized
-from typing_extensions import ParamSpec
-
-from synapse._pydantic_compat import (
+from pydantic import (
     BaseModel as PydanticBaseModel,
     conbytes,
     confloat,
@@ -66,6 +64,7 @@ from synapse._pydantic_compat import (
     constr,
     get_args,
 )
+from typing_extensions import ParamSpec
 
 logger = logging.getLogger(__name__)
 

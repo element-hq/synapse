@@ -38,15 +38,16 @@ from typing import (
     overload,
 )
 
-from twisted.web.server import Request
-
-from synapse._pydantic_compat import (
+from pydantic import (
     BaseModel,
     ErrorWrapper,
     MissingError,
     PydanticValueError,
     ValidationError,
 )
+
+from twisted.web.server import Request
+
 from synapse.api.errors import Codes, SynapseError
 from synapse.http import redact_uri
 from synapse.http.server import HttpServer

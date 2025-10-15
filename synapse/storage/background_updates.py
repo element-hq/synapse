@@ -39,8 +39,8 @@ from typing import (
 )
 
 import attr
+from pydantic import BaseModel
 
-from synapse._pydantic_compat import BaseModel
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
 from synapse.types import JsonDict, StrCollection

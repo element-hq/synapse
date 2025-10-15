@@ -20,7 +20,7 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from synapse._pydantic_compat import (
+from pydantic import (
     Extra,
     Field,
     StrictBool,
@@ -30,6 +30,7 @@ from synapse._pydantic_compat import (
     constr,
     validator,
 )
+
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 

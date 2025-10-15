@@ -16,7 +16,8 @@
 import re
 from typing import Any, Callable, Generator
 
-from synapse._pydantic_compat import BaseModel, Extra, StrictStr
+from pydantic import BaseModel, Extra, StrictStr
+
 from synapse.types import EventID
 
 

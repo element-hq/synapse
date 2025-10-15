@@ -17,9 +17,8 @@
 
 from typing import Any, Optional
 
-from pydantic import ValidationError
+from pydantic import Field, StrictStr, ValidationError, validator
 
-from synapse._pydantic_compat import Field, StrictStr, validator
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 

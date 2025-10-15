@@ -26,13 +26,13 @@ from collections import Counter
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
-from typing_extensions import Self
-
-from synapse._pydantic_compat import (
+from pydantic import (
     StrictBool,
     StrictStr,
     validator,
 )
+from typing_extensions import Self
+
 from synapse.api.auth.mas import MasDelegatedAuth
 from synapse.api.errors import (
     Codes,

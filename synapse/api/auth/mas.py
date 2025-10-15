@@ -16,7 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Optional, Set
 from urllib.parse import urlencode
 
-from synapse._pydantic_compat import (
+from pydantic import (
     BaseModel,
     Extra,
     StrictBool,
@@ -24,6 +24,7 @@ from synapse._pydantic_compat import (
     StrictStr,
     ValidationError,
 )
+
 from synapse.api.auth.base import BaseAuth
 from synapse.api.errors import (
     AuthError,

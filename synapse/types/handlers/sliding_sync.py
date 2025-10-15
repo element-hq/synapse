@@ -36,8 +36,8 @@ from typing import (
 )
 
 import attr
+from pydantic import Extra
 
-from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
 from synapse.types import (

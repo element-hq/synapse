@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 import attr
+from pydantic import StrictBool, StrictStr, constr
 
 from twisted.web.server import Request
 
-from synapse._pydantic_compat import StrictBool, StrictStr, constr
 from synapse.api.constants import LoginType
 from synapse.api.errors import (
     Codes,

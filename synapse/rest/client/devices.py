@@ -24,7 +24,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from synapse._pydantic_compat import Extra, StrictStr
+from pydantic import Extra, StrictStr
+
 from synapse.api import errors
 from synapse.api.errors import NotFoundError, SynapseError, UnrecognizedRequestError
 from synapse.http.server import HttpServer

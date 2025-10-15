@@ -21,8 +21,8 @@
 from typing import Any, Dict, Type, TypeVar
 
 import jsonschema
+from pydantic import BaseModel, ValidationError, parse_obj_as
 
-from synapse._pydantic_compat import BaseModel, ValidationError, parse_obj_as
 from synapse.config._base import ConfigError
 from synapse.types import JsonDict, StrSequence
 

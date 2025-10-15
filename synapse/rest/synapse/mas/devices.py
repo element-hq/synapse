@@ -17,7 +17,8 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional, Tuple
 
-from synapse._pydantic_compat import StrictStr
+from pydantic import StrictStr
+
 from synapse.api.errors import NotFoundError
 from synapse.http.servlet import parse_and_validate_json_object_from_request
 from synapse.types import JsonDict, UserID

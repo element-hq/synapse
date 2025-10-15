@@ -15,7 +15,8 @@
 
 from typing import Any, List, Optional
 
-from synapse._pydantic_compat import Field, StrictStr, ValidationError, validator
+from pydantic import Field, StrictStr, ValidationError, validator
+
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
 from synapse.util.stringutils import random_string

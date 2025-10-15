@@ -15,7 +15,7 @@
 
 from typing import Any, Optional
 
-from synapse._pydantic_compat import (
+from pydantic import (
     AnyHttpUrl,
     Field,
     FilePath,
@@ -24,6 +24,7 @@ from synapse._pydantic_compat import (
     ValidationError,
     validator,
 )
+
 from synapse.config.experimental import read_secret_from_file_once
 from synapse.types import JsonDict
 from synapse.util.pydantic_models import ParseModel
