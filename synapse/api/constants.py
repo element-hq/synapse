@@ -272,6 +272,9 @@ class EventContentFields:
     M_TOPIC: Final = "m.topic"
     M_TEXT: Final = "m.text"
 
+    # Event relations
+    RELATIONS: Final = "m.relates_to"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
@@ -360,3 +363,10 @@ class Direction(enum.Enum):
 class ProfileFields:
     DISPLAYNAME: Final = "displayname"
     AVATAR_URL: Final = "avatar_url"
+
+
+class MRelatesToFields:
+    """Fields found inside m.relates_to content blocks."""
+
+    EVENT_ID: Final = "event_id"
+    REL_TYPE: Final = "rel_type"

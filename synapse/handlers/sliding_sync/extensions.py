@@ -30,7 +30,13 @@ from typing import (
 
 from typing_extensions import TypeAlias, assert_never
 
-from synapse.api.constants import AccountDataTypes, EduTypes, RelationTypes
+from synapse.api.constants import (
+    AccountDataTypes,
+    EduTypes,
+    EventContentFields,
+    MRelatesToFields,
+    RelationTypes,
+)
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
@@ -1041,15 +1047,15 @@ class SlidingSyncExtensionHandler:
                 if room_result.timeline_events:
                     for event in room_result.timeline_events:
                         # Check if this event is part of a thread
-                        relates_to = event.content.get("m.relates_to")
+                        relates_to = event.content.get(EventContentFields.RELATIONS)
                         if not isinstance(relates_to, dict):
                             continue
 
-                        rel_type = relates_to.get("rel_type")
+                        rel_type = relates_to.get(MRelatesToFields.REL_TYPE)
 
                         # If this is a thread reply, track the thread
                         if rel_type == RelationTypes.THREAD:
-                            thread_id = relates_to.get("event_id")
+                            thread_id = relates_to.get(MRelatesToFields.EVENT_ID)
                             if thread_id:
                                 threads_in_timeline.add((room_id, thread_id))
 
