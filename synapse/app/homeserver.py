@@ -430,9 +430,7 @@ def setup(
 
         await _base.start(hs, freeze)
 
-        # TODO: This should be moved to `SynapseHomeServer.start_background_tasks` (not
-        # `HomeServer.start_background_tasks`) (this way it matches the behavior of only
-        # running on `main`)
+        # TODO: Feels like this should be moved somewhere else.
         hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     # Register a callback to be invoked once the reactor is running
