@@ -163,11 +163,9 @@ class PasswordRestServlet(RestServlet):
     class PostBody(RequestBodyModel):
         auth: Optional[AuthenticationData] = None
         logout_devices: StrictBool = True
-        if TYPE_CHECKING:
-            # workaround for https://github.com/samuelcolvin/pydantic/issues/156
-            new_password: Optional[StrictStr] = None
-        else:
-            new_password: Optional[Annotated[str, StringConstraints(max_length=512, strict=True)]] = None
+        new_password: Optional[
+            Annotated[str, StringConstraints(max_length=512, strict=True)]
+        ] = None
 
     @interactive_auth_handler
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:

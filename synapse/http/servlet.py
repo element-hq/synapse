@@ -38,13 +38,7 @@ from typing import (
     overload,
 )
 
-from pydantic import (
-    BaseModel,
-    ErrorWrapper,
-    MissingError,
-    PydanticValueError,
-    ValidationError,
-)
+from pydantic import BaseModel, ValidationError
 
 from twisted.web.server import Request
 
@@ -903,18 +897,18 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
     try:
         instance = model_type.parse_obj(content)
     except ValidationError as e:
+        err_type = e.errors()[0]["type"]
+
         # Choose a matrix error code. The catch-all is BAD_JSON, but we try to find a
         # more specific error if possible (which occasionally helps us to be spec-
         # compliant) This is a bit awkward because the spec's error codes aren't very
         # clear-cut: BAD_JSON arguably overlaps with MISSING_PARAM and INVALID_PARAM.
         errcode = Codes.BAD_JSON
 
-        raw_errors = e.raw_errors
-        if len(raw_errors) == 1 and isinstance(raw_errors[0], ErrorWrapper):
-            raw_error = raw_errors[0].exc
-            if isinstance(raw_error, MissingError):
+        if e.error_count() == 1:
+            if err_type == "missing":
                 errcode = Codes.MISSING_PARAM
-            elif isinstance(raw_error, PydanticValueError):
+            elif err_type == "value_error":
                 errcode = Codes.INVALID_PARAM
 
         raise SynapseError(HTTPStatus.BAD_REQUEST, str(e), errcode=errcode)

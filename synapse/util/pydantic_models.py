@@ -13,11 +13,11 @@
 #
 #
 
-import re
-from typing import Any, Callable, Generator
+from typing import Annotated, Union
 
-from pydantic import BaseModel, Extra, StrictStr
+from pydantic import AfterValidator, BaseModel, ConfigDict, StrictStr, StringConstraints
 
+from synapse.api.errors import SynapseError
 from synapse.types import EventID
 
 
@@ -37,48 +37,19 @@ class ParseModel(BaseModel):
     https://pydantic-docs.helpmanual.io/usage/model_config/#change-behaviour-globally
     """
 
-    class Config:
-        # By default, ignore fields that we don't recognise.
-        extra = Extra.ignore
-        # By default, don't allow fields to be reassigned after parsing.
-        allow_mutation = False
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
 
-class AnyEventId(StrictStr):
-    """
-    A validator for strings that need to be an Event ID.
+def validate_event_id_v1_and_2(value: str) -> str:
+    try:
+        EventID.from_string(value)
+    except SynapseError as e:
+        raise ValueError from e
+    return value
 
-    Accepts any valid grammar of Event ID from any room version.
-    """
 
-    EVENT_ID_HASH_ROOM_VERSION_3_PLUS = re.compile(
-        r"^([a-zA-Z0-9-_]{43}|[a-zA-Z0-9+/]{43})$"
-    )
-
-    @classmethod
-    def __get_validators__(cls) -> Generator[Callable[..., Any], Any, Any]:
-        yield from super().__get_validators__()  # type: ignore
-        yield cls.validate_event_id
-
-    @classmethod
-    def validate_event_id(cls, value: str) -> str:
-        if not value.startswith("$"):
-            raise ValueError("Event ID must start with `$`")
-
-        if ":" in value:
-            # Room versions 1 and 2
-            EventID.from_string(value)  # throws on fail
-        else:
-            # Room versions 3+: event ID is $ + a base64 sha256 hash
-            # Room version 3 is base64, 4+ are base64Url
-            # In both cases, the base64 is unpadded.
-            # refs:
-            # - https://spec.matrix.org/v1.15/rooms/v3/ e.g. $acR1l0raoZnm60CBwAVgqbZqoO/mYU81xysh1u7XcJk
-            # - https://spec.matrix.org/v1.15/rooms/v4/ e.g. $Rqnc-F-dvnEYJTyHq_iKxU2bZ1CI92-kuZq3a5lr5Zg
-            b64_hash = value[1:]
-            if cls.EVENT_ID_HASH_ROOM_VERSION_3_PLUS.fullmatch(b64_hash) is None:
-                raise ValueError(
-                    "Event ID must either have a domain part or be a valid hash"
-                )
-
-        return value
+EventIdV1And2 = Annotated[StrictStr, AfterValidator(validate_event_id_v1_and_2)]
+EventIdV3Plus = Annotated[
+    StrictStr, StringConstraints(pattern=r"^\$([a-zA-Z0-9-_]{43}|[a-zA-Z0-9+/]{43})$")
+]
+AnyEventId = Union[EventIdV1And2, EventIdV3Plus]

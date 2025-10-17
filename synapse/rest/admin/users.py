@@ -1476,9 +1476,9 @@ class RedactUser(RestServlet):
 
     class PostBody(RequestBodyModel):
         rooms: List[StrictStr]
-        reason: Optional[StrictStr]
-        limit: Optional[StrictInt]
-        use_admin: Optional[StrictBool]
+        reason: Optional[StrictStr] = None
+        limit: Optional[StrictInt] = None
+        use_admin: Optional[StrictBool] = None
 
     async def on_POST(
         self, request: SynapseRequest, user_id: str

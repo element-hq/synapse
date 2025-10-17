@@ -50,7 +50,7 @@ class ThreadSubscriptionsRestServlet(RestServlet):
         self.handler = hs.get_thread_subscriptions_handler()
 
     class PutBody(RequestBodyModel):
-        automatic: Optional[AnyEventId]
+        automatic: Optional[AnyEventId] = None
         """
         If supplied, the event ID of an event giving rise to this automatic subscription.
 

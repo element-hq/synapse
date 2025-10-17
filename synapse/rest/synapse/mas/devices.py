@@ -53,7 +53,7 @@ class MasUpsertDeviceResource(MasBaseResource):
     class PostBody(RequestBodyModel):
         localpart: StrictStr
         device_id: StrictStr
-        display_name: Optional[StrictStr]
+        display_name: Optional[StrictStr] = None
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
