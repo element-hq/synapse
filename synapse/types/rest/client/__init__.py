@@ -139,7 +139,9 @@ class SlidingSyncBody(RequestBodyModel):
                 (Max 1000 messages)
         """
 
-        required_state: List[Tuple[StrictStr, StrictStr]]
+        required_state: List[
+            Annotated[Tuple[StrictStr, StrictStr], Field(strict=False)]
+        ]
         timeline_limit: Annotated[int, Field(le=1000, strict=True)]
 
     class SlidingSyncList(CommonRoomParameters):
@@ -244,9 +246,12 @@ class SlidingSyncBody(RequestBodyModel):
 
         ranges: Optional[
             List[
-                Tuple[
-                    Annotated[int, Field(ge=0, strict=True)],
-                    Annotated[int, Field(ge=0, strict=True)],
+                Annotated[
+                    Tuple[
+                        Annotated[int, Field(ge=0, strict=True)],
+                        Annotated[int, Field(ge=0, strict=True)],
+                    ],
+                    Field(strict=False),
                 ]
             ]
         ] = None

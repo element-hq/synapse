@@ -24,8 +24,9 @@ from synapse.types import EventID
 class ParseModel(BaseModel):
     """A custom version of Pydantic's BaseModel which
 
-     - ignores unknown fields and
-     - does not allow fields to be overwritten after construction,
+     - ignores unknown fields,
+     - does not allow fields to be overwritten after construction and
+     - enables strict mode,
 
     but otherwise uses Pydantic's default behaviour.
 
@@ -37,7 +38,7 @@ class ParseModel(BaseModel):
     https://pydantic-docs.helpmanual.io/usage/model_config/#change-behaviour-globally
     """
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
 
 def validate_event_id_v1_and_2(value: str) -> str:
