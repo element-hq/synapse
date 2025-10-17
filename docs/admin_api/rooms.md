@@ -1116,10 +1116,10 @@ Example response:
 }
 ```
 
-# Admin Room Hierarchy Endpoint
+# Admin Space Hierarchy Endpoint
 
-This API allows an admin to fetch the room hierarchy for a given room, returning details about that room and any children
-the room may have. This is functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not return information about any remote
+This API allows an admin to fetch the room hierarchy for a given space, returning details about that room and any children
+the room may have, paginating over the space tree in a depth-first manner to locate child rooms. This is functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not return information about any remote
 rooms that the server is not currently participating in and does not check for room membership when returning room summaries.
 
 **Parameters**
@@ -1128,8 +1128,7 @@ The following query parameters are available:
 
 * `from` - An optional pagination token, provided when there are more rooms to return than the limit. 
 * `limit` - Maximum amount of rooms to return. Must be a non-negative integer, defaults to `50`.
-* `max_depth` - The maximum depth in the tree to explore, must be a non-negative integer. If not provided will recurse
-  into the space tree without limit.
+* `max_depth` - The maximum depth in the tree to explore, must be a non-negative integer. 0 would correspond to just the root room, 1 would include just the root room's children, etc.  If not provided will recurse into the space tree without limit.
 
 Request:
 

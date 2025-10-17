@@ -91,65 +91,12 @@ class AdminRoomHierarchy(RestServlet):
             requester,
             room_id,
             omit_remote_rooms=True,
-            admin_skip_room_check=True,
+            admin_skip_room_visibility_check=True,
             max_depth=max_depth,
             limit=limit,
             from_token=parse_string(request, "from"),
         )
 
-        async def _fetch_additional_details(room_id: str) -> JsonDict:
-            try:
-                creation_event = await self._store.get_create_event_for_room(room_id)
-            except NotFoundError:
-                creation_event = None
-            aliases = await self._store.get_aliases_for_room(room_id)
-
-            pl_event = await self._storage_controllers.state.get_current_state_event(
-                room_id, EventTypes.PowerLevels, ""
-            )
-            pl_users = []
-            if pl_event is not None:
-                users = pl_event.content.get("users", {})
-                for user, level in users.items():
-                    if level >= 25:
-                        pl_users.append(user)
-            if (
-                creation_event
-                and creation_event.room_version.msc4289_creator_power_enabled
-            ):
-                additional_creators = creation_event.content.get(
-                    "additional_creators", []
-                )
-                pl_users.extend(additional_creators)
-                pl_users.append(creation_event.sender)
-            additional_details = {
-                "aliases": aliases,
-                "power_users": pl_users,
-                "room_creation_ts": creation_event.origin_server_ts
-                if creation_event
-                else None,
-                "creator": creation_event.sender if creation_event else None,
-                "creation_event_id": creation_event.event_id
-                if creation_event
-                else None,
-            }
-            return additional_details
-
-        rooms = room_entry_summary.get("rooms")
-        if rooms is not None:
-            for room in rooms:
-                room_id = room.get("room_id")
-                assert room_id is not None
-                # fetch additional details of interest not provided by room summary
-                additional_details = await _fetch_additional_details(room_id)
-                room.update(additional_details)
-                # add any missing fields
-                if not room.get("name"):
-                    room.update({"name": None})
-                if not room.get("topic"):
-                    room.update({"topic": None})
-                is_space = len(room.get("children_state")) > 0
-                room.update({"is_space": is_space})
         return HTTPStatus.OK, room_entry_summary
 
 

@@ -136,7 +136,7 @@ class RoomSummaryHandler:
         requested_room_id: str,
         suggested_only: bool = False,
         omit_remote_rooms: bool = False,
-        admin_skip_room_check: bool = False,
+        admin_skip_room_visibility_check: bool = False,
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
@@ -151,7 +151,7 @@ class RoomSummaryHandler:
             suggested_only: Whether we should only return children with the "suggested"
                 flag set.
             omit_remote_rooms: Whether to omit rooms which the server is not currently participating in
-            admin_skip_room_check: Whether to skip checking if the room can be accessed by the requester,
+            admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
                 used when the requester is a server admin
             max_depth: The maximum depth in the tree to explore, must be a
                 non-negative integer.
@@ -181,7 +181,7 @@ class RoomSummaryHandler:
                 requested_room_id,
                 suggested_only,
                 omit_remote_rooms,
-                admin_skip_room_check,
+                admin_skip_room_visibility_check,
                 max_depth,
                 limit,
                 from_token,
@@ -192,7 +192,7 @@ class RoomSummaryHandler:
             requested_room_id,
             suggested_only,
             omit_remote_rooms,
-            admin_skip_room_check,
+            admin_skip_room_visibility_check,
             max_depth,
             limit,
             from_token,
@@ -205,7 +205,7 @@ class RoomSummaryHandler:
         requested_room_id: str,
         suggested_only: bool = False,
         omit_remote_rooms: bool = False,
-        admin_skip_room_check: bool = False,
+        admin_skip_room_visibility_check: bool = False,
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
         from_token: Optional[str] = None,
@@ -217,7 +217,7 @@ class RoomSummaryHandler:
         local_room = await self._store.is_host_joined(
             requested_room_id, self._server_name
         )
-        if not admin_skip_room_check:
+        if not admin_skip_room_visibility_check:
             if local_room and not await self._is_local_room_accessible(
                 requested_room_id, requester
             ):
@@ -262,7 +262,8 @@ class RoomSummaryHandler:
                 or suggested_only != pagination_session["suggested_only"]
                 or max_depth != pagination_session["max_depth"]
                 or omit_remote_rooms != pagination_session["omit_remote_rooms"]
-                or admin_skip_room_check != pagination_session["admin_skip_room_check"]
+                or admin_skip_room_visibility_check
+                != pagination_session["admin_skip_room_visibility_check"]
             ):
                 raise SynapseError(400, "Unknown pagination token", Codes.INVALID_PARAM)
 
@@ -317,7 +318,7 @@ class RoomSummaryHandler:
                     None,
                     room_id,
                     suggested_only,
-                    admin_skip_room_check=admin_skip_room_check,
+                    admin_skip_room_visibility_check=admin_skip_room_visibility_check,
                 )
 
             # Otherwise, attempt to use information for federation.
@@ -397,7 +398,7 @@ class RoomSummaryHandler:
                     "suggested_only": suggested_only,
                     "max_depth": max_depth,
                     "omit_remote_rooms": omit_remote_rooms,
-                    "admin_skip_room_check": admin_skip_room_check,
+                    "admin_skip_room_visibility_check": admin_skip_room_visibility_check,
                     # The stored state.
                     "room_queue": [
                         attr.astuple(room_entry) for room_entry in room_queue
@@ -480,7 +481,7 @@ class RoomSummaryHandler:
         room_id: str,
         suggested_only: bool,
         include_children: bool = True,
-        admin_skip_room_check: bool = False,
+        admin_skip_room_visibility_check: bool = False,
     ) -> Optional["_RoomEntry"]:
         """
         Generate a room entry and a list of event entries for a given room.
@@ -497,12 +498,15 @@ class RoomSummaryHandler:
                 Otherwise, all children are returned.
             include_children:
                 Whether to include the events of any children.
+            admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
+                used when the requester is a server admin
 
         Returns:
             A room entry if the room should be returned. None, otherwise.
         """
-        if not admin_skip_room_check and not await self._is_local_room_accessible(
-            room_id, requester, origin
+        if (
+            not admin_skip_room_visibility_check
+            and not await self._is_local_room_accessible(room_id, requester, origin)
         ):
             return None
 

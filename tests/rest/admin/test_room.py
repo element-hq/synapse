@@ -155,7 +155,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
     def test_bad_request(self) -> None:
         """
-        Test that invalid param values raise an erro
+        Test that invalid param values raise an error
         """
         channel = self.make_request(
             "GET",
@@ -186,60 +186,47 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, msg=channel.json_body)
         rooms = channel.json_body["rooms"]
         self.assertEqual(len(rooms), 4)
+        self.assertCountEqual(
+            [self.rm1, self.rm2, self.rm3, self.space_rm],
+            [rm["room_id"] for rm in rooms],
+        )
 
-        rm1_found = False
-        rm2_found = False
-        rm3_found = False
-        spacerm_found = False
         for room_result in rooms:
             room_id = room_result["room_id"]
             if room_id == self.rm1:
                 self.assertEqual(room_result["name"], "nefarious")
-                self.assertEqual(room_result["join_rule"], "invite")
-                self.assertEqual(room_result["is_space"], False)
                 self.assertEqual(room_result["topic"], "being bad")
-                self.assertEqual(room_result["creator"], self.other_user)
-                self.assertEqual(room_result["power_users"], [self.other_user])
-                self.assertEqual(room_result["aliases"], [])
-                rm1_found = True
+                self.assertEqual(room_result["join_rule"], "invite")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
             elif room_id == self.rm2:
                 self.assertEqual(room_result["name"], "also nefarious")
                 self.assertEqual(room_result["join_rule"], "public")
-                self.assertEqual(room_result["is_space"], False)
-                self.assertEqual(room_result["topic"], None)
-                self.assertEqual(room_result["creator"], self.third_user)
-                self.assertEqual(room_result["power_users"], [self.third_user])
-                self.assertEqual(room_result["aliases"], [])
-                rm2_found = True
+                self.assertEqual(len(room_result["children_state"]), 0)
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
             elif room_id == self.rm3:
                 self.assertEqual(room_result["name"], "not nefarious")
                 self.assertEqual(room_result["join_rule"], "invite")
-                self.assertEqual(room_result["is_space"], False)
                 self.assertEqual(room_result["topic"], "happy things")
-                self.assertEqual(room_result["creator"], self.admin_user)
-                self.assertCountEqual(
-                    room_result["power_users"],
-                    [self.admin_user, self.third_user, self.other_user],
-                )
-                self.assertEqual(room_result["aliases"], [])
-                rm3_found = True
+                self.assertEqual(len(room_result["children_state"]), 0)
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
             elif room_id == self.rm4:
                 self.fail("this room should not have been returned")
             elif room_id == self.space_rm:
-                self.assertEqual(room_result["name"], None)
                 self.assertEqual(room_result["join_rule"], "public")
-                self.assertEqual(room_result["is_space"], True)
-                self.assertEqual(room_result["topic"], None)
-                self.assertEqual(room_result["creator"], self.other_user)
-                self.assertEqual(room_result["power_users"], [self.other_user])
-                self.assertEqual(room_result["aliases"], [])
-                spacerm_found = True
+                self.assertEqual(len(room_result["children_state"]), 3)
+                self.assertEqual(room_result["room_type"], "m.space")
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
             else:
                 self.fail("unknown room returned")
-        self.assertEqual(rm1_found, True)
-        self.assertEqual(rm2_found, True)
-        self.assertEqual(rm3_found, True)
-        self.assertEqual(spacerm_found, True)
 
     def test_room_summary_pagination(self) -> None:
         """
@@ -265,62 +252,48 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel2.code, 200, msg=channel2.json_body)
         new_rooms = channel2.json_body["rooms"]
         self.assertEqual(len(new_rooms), 2)
-
         rooms = rooms + new_rooms
+        self.assertCountEqual(
+            [self.rm1, self.rm2, self.rm3, self.space_rm],
+            [rm["room_id"] for rm in rooms],
+        )
 
-        rm1_found = False
-        rm2_found = False
-        rm3_found = False
-        spacerm_found = False
         for room_result in rooms:
             room_id = room_result["room_id"]
             if room_id == self.rm1:
                 self.assertEqual(room_result["name"], "nefarious")
-                self.assertEqual(room_result["join_rule"], "invite")
-                self.assertEqual(room_result["is_space"], False)
                 self.assertEqual(room_result["topic"], "being bad")
-                self.assertEqual(room_result["creator"], self.other_user)
-                self.assertEqual(room_result["power_users"], [self.other_user])
-                self.assertEqual(room_result["aliases"], [])
-                rm1_found = True
+                self.assertEqual(room_result["join_rule"], "invite")
+                self.assertEqual(len(room_result["children_state"]), 0)
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
             elif room_id == self.rm2:
                 self.assertEqual(room_result["name"], "also nefarious")
                 self.assertEqual(room_result["join_rule"], "public")
-                self.assertEqual(room_result["is_space"], False)
-                self.assertEqual(room_result["topic"], None)
-                self.assertEqual(room_result["creator"], self.third_user)
-                self.assertEqual(room_result["power_users"], [self.third_user])
-                self.assertEqual(room_result["aliases"], [])
-                rm2_found = True
+                self.assertEqual(len(room_result["children_state"]), 0)
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
             elif room_id == self.rm3:
                 self.assertEqual(room_result["name"], "not nefarious")
                 self.assertEqual(room_result["join_rule"], "invite")
-                self.assertEqual(room_result["is_space"], False)
                 self.assertEqual(room_result["topic"], "happy things")
-                self.assertEqual(room_result["creator"], self.admin_user)
-                self.assertCountEqual(
-                    room_result["power_users"],
-                    [self.admin_user, self.third_user, self.other_user],
-                )
-                self.assertEqual(room_result["aliases"], [])
-                rm3_found = True
+                self.assertEqual(len(room_result["children_state"]), 0)
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], True)
+                self.assertEqual(room_result["num_joined_members"], 1)
             elif room_id == self.rm4:
                 self.fail("this room should not have been returned")
             elif room_id == self.space_rm:
-                self.assertEqual(room_result["name"], None)
                 self.assertEqual(room_result["join_rule"], "public")
-                self.assertEqual(room_result["is_space"], True)
-                self.assertEqual(room_result["topic"], None)
-                self.assertEqual(room_result["creator"], self.other_user)
-                self.assertEqual(room_result["power_users"], [self.other_user])
-                self.assertEqual(room_result["aliases"], [])
-                spacerm_found = True
+                self.assertEqual(len(room_result["children_state"]), 3)
+                self.assertEqual(room_result["room_type"], "m.space")
+                (self.assertEqual(room_result["world_readable"], False),)
+                self.assertEqual(room_result["guest_can_join"], False)
+                self.assertEqual(room_result["num_joined_members"], 1)
             else:
                 self.fail("unknown room returned")
-        self.assertEqual(rm1_found, True)
-        self.assertEqual(rm2_found, True)
-        self.assertEqual(rm3_found, True)
-        self.assertEqual(spacerm_found, True)
 
 
 class DeleteRoomTestCase(unittest.HomeserverTestCase):
