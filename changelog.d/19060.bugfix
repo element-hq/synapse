@@ -1,0 +1,1 @@
+Fix a bug introduced in 1.136.0 that would prevent Synapse from being able to be `reload`-ed more than once when running under systemd.
