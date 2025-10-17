@@ -1201,7 +1201,9 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             HTTPStatus.BAD_REQUEST, channel.code, msg=channel.result["body"]
         )
-        self.assertEqual(expected_errcode, channel.json_body["errcode"])
+        self.assertEqual(
+            expected_errcode, channel.json_body["errcode"], msg=channel.result["body"]
+        )
         self.assertIn(expected_error, channel.json_body["error"])
 
     def _validate_token(self, link: str) -> None:
