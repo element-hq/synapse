@@ -24,7 +24,6 @@ from typing import (
     Optional,
     Sequence,
     Set,
-    Tuple,
     cast,
 )
 
@@ -1041,9 +1040,9 @@ class SlidingSyncExtensionHandler:
         # since the client already sees the thread activity in the timeline.
         # If include_roots=True, we include all threads regardless, because the client
         # wants the thread root events.
-        threads_in_timeline: Set[Tuple[str, str]] = set()  # (room_id, thread_id)
+        threads_in_timeline: Set[str] = set()  # thread_id
         if not threads_request.include_roots:
-            for room_id, room_result in actual_room_response_map.items():
+            for _, room_result in actual_room_response_map.items():
                 if room_result.timeline_events:
                     for event in room_result.timeline_events:
                         # Check if this event is part of a thread
@@ -1057,14 +1056,17 @@ class SlidingSyncExtensionHandler:
                         if rel_type == RelationTypes.THREAD:
                             thread_id = relates_to.get(MRelatesToFields.EVENT_ID)
                             if thread_id:
-                                threads_in_timeline.add((room_id, thread_id))
+                                threads_in_timeline.add(thread_id)
 
         # Collect thread root events and get bundled aggregations.
         # Only fetch bundled aggregations if we have thread root events to attach them to.
         thread_root_events = [
             update.thread_root_event
             for update in all_thread_updates
+            # Don't fetch bundled aggregations for threads with events already in the
+            # timeline response since they will get filtered out later anyway.
             if update.thread_root_event
+            and update.thread_root_event.event_id not in threads_in_timeline
         ]
         aggregations_map = {}
         if thread_root_events:
@@ -1077,7 +1079,7 @@ class SlidingSyncExtensionHandler:
         for update in all_thread_updates:
             # Skip this thread if it already has events in the room timeline
             # (unless include_roots=True, in which case we always include it)
-            if (update.room_id, update.thread_id) in threads_in_timeline:
+            if update.thread_id in threads_in_timeline:
                 continue
 
             # Only look up bundled aggregations if we have a thread root event
