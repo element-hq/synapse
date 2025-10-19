@@ -120,6 +120,10 @@ worker_replication_secret: ""
 
 redis:
     enabled: true
+	# Optional useful networking settings.
+	#host: localhost
+	#port: 6379
+	#use_tls: false
 
 instance_map:
     main:
