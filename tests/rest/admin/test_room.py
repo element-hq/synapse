@@ -81,11 +81,13 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             tok=self.other_user_tok,
             extra_content={"name": "nefarious", "topic": "being bad"},
         )
+
         self.rm2 = self.helper.create_room_as(
             self.third_user,
             tok=self.third_user_tok,
             extra_content={"name": "also nefarious"},
         )
+
         self.rm3 = self.helper.create_room_as(
             self.admin_user,
             is_public=False,
@@ -99,6 +101,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             },
             room_version="12",
         )
+
         self.rm4 = self.helper.create_room_as(
             self.other_user,
             tok=self.other_user_tok,
@@ -112,9 +115,18 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             extra_content={
                 "visibility": "public",
                 "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
+                "name": "space_room",
             },
             tok=self.other_user_tok,
         )
+
+        self.room_id_to_human_name_map = {
+            self.rm1: "room1",
+            self.rm2: "room2",
+            self.rm3: "room3",
+            self.rm4: "room4",
+            self.space_rm: "space_room",
+        }
 
         # add three of the rooms to space
         for state_key in [self.rm1, self.rm2, self.rm3]:
@@ -185,10 +197,9 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, msg=channel.json_body)
         rooms = channel.json_body["rooms"]
-        self.assertEqual(len(rooms), 4)
         self.assertCountEqual(
-            [self.rm1, self.rm2, self.rm3, self.space_rm],
-            [rm["room_id"] for rm in rooms],
+            {self.room_id_to_human_name_map[room["room_id"]] for room in rooms},
+            {"space_room", "room1", "room2", "room3"},
         )
 
         for room_result in rooms:
@@ -225,6 +236,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 (self.assertEqual(room_result["world_readable"], False),)
                 self.assertEqual(room_result["guest_can_join"], False)
                 self.assertEqual(room_result["num_joined_members"], 1)
+                self.assertEqual(room_result["name"], "space_room")
             else:
                 self.fail("unknown room returned")
 
@@ -251,11 +263,10 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel2.code, 200, msg=channel2.json_body)
         new_rooms = channel2.json_body["rooms"]
-        self.assertEqual(len(new_rooms), 2)
         rooms = rooms + new_rooms
         self.assertCountEqual(
-            [self.rm1, self.rm2, self.rm3, self.space_rm],
-            [rm["room_id"] for rm in rooms],
+            {self.room_id_to_human_name_map[room["room_id"]] for room in rooms},
+            {"space_room", "room1", "room2", "room3"},
         )
 
         for room_result in rooms:
@@ -292,6 +303,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 (self.assertEqual(room_result["world_readable"], False),)
                 self.assertEqual(room_result["guest_can_join"], False)
                 self.assertEqual(room_result["num_joined_members"], 1)
+                self.assertEqual(room_result["name"], "space_room")
             else:
                 self.fail("unknown room returned")
 

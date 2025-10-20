@@ -152,7 +152,7 @@ class RoomSummaryHandler:
                 flag set.
             omit_remote_rooms: Whether to omit rooms which the server is not currently participating in
             admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
-                used when the requester is a server admin
+                used for the admin endpoints.
             max_depth: The maximum depth in the tree to explore, must be a
                 non-negative integer.
 
@@ -322,40 +322,39 @@ class RoomSummaryHandler:
                 )
 
             # Otherwise, attempt to use information for federation.
-            else:
-                if not omit_remote_rooms:
-                    # A previous call might have included information for this room.
-                    # It can be used if either:
-                    #
-                    # 1. The room is not a space.
-                    # 2. The maximum depth has been achieved (since no children
-                    #    information is needed).
-                    if queue_entry.remote_room and (
-                        queue_entry.remote_room.get("room_type") != RoomTypes.SPACE
-                        or (max_depth is not None and current_depth >= max_depth)
-                    ):
-                        room_entry = _RoomEntry(
-                            queue_entry.room_id, queue_entry.remote_room
-                        )
+            elif not omit_remote_rooms:
+                # A previous call might have included information for this room.
+                # It can be used if either:
+                #
+                # 1. The room is not a space.
+                # 2. The maximum depth has been achieved (since no children
+                #    information is needed).
+                if queue_entry.remote_room and (
+                    queue_entry.remote_room.get("room_type") != RoomTypes.SPACE
+                    or (max_depth is not None and current_depth >= max_depth)
+                ):
+                    room_entry = _RoomEntry(
+                        queue_entry.room_id, queue_entry.remote_room
+                    )
 
-                    # If the above isn't true, attempt to fetch the room
-                    # information over federation.
-                    else:
-                        (
-                            room_entry,
-                            children_room_entries,
-                            inaccessible_children,
-                        ) = await self._summarize_remote_room_hierarchy(
-                            queue_entry,
-                            suggested_only,
-                        )
+                # If the above isn't true, attempt to fetch the room
+                # information over federation.
+                else:
+                    (
+                        room_entry,
+                        children_room_entries,
+                        inaccessible_children,
+                    ) = await self._summarize_remote_room_hierarchy(
+                        queue_entry,
+                        suggested_only,
+                    )
 
-                    # Ensure this room is accessible to the requester (and not just
-                    # the homeserver).
-                    if room_entry and not await self._is_remote_room_accessible(
-                        requester, queue_entry.room_id, room_entry.room
-                    ):
-                        room_entry = None
+                # Ensure this room is accessible to the requester (and not just
+                # the homeserver).
+                if room_entry and not await self._is_remote_room_accessible(
+                    requester, queue_entry.room_id, room_entry.room
+                ):
+                    room_entry = None
 
             # This room has been processed and should be ignored if it appears
             # elsewhere in the hierarchy.
@@ -499,7 +498,7 @@ class RoomSummaryHandler:
             include_children:
                 Whether to include the events of any children.
             admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
-                used when the requester is a server admin
+                used for the admin endpoints.
 
         Returns:
             A room entry if the room should be returned. None, otherwise.

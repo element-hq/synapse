@@ -65,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 class AdminRoomHierarchy(RestServlet):
     """
-    Given a room returns room details on that room and any children of the provided room.
+    Given a room, returns room details on that room and any space children of the provided room.
     Does not return information about remote rooms which the server is not currently
     participating in
     """
@@ -87,6 +87,9 @@ class AdminRoomHierarchy(RestServlet):
         max_depth = parse_integer(request, "max_depth")
         limit = parse_integer(request, "limit")
 
+        # we omit returning remote rooms that the server is not currently participating in,
+        # as that information shouldn't be available to the server admin (as they are not
+        # participating in those rooms)
         room_entry_summary = await self._room_summary_handler.get_room_hierarchy(
             requester,
             room_id,
