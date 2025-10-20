@@ -426,7 +426,7 @@ class OidcProvider:
         self._jwks = RetryOnExceptionCachedCall(self._load_jwks)
 
         user_mapping_provider_init_method = (
-            provider.user_mapping_provider_class.__init__
+            provider.user_mapping_provider_class.__init__  # type: ignore[misc]
         )
         if len(inspect.signature(user_mapping_provider_init_method).parameters) == 3:
             self._user_mapping_provider = provider.user_mapping_provider_class(
