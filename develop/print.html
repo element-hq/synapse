@@ -1899,6 +1899,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11410"><a class="header" href="#upgrading-to-v11410">Upgrading to v1.141.0</a></h1>
+<h2 id="docker-images-now-based-on-debian-trixie-with-python-313"><a class="header" href="#docker-images-now-based-on-debian-trixie-with-python-313">Docker images now based on Debian <code>trixie</code> with Python 3.13</a></h2>
+<p>The Docker images are now based on Debian <code>trixie</code> and use Python 3.13. If you
+are using the Docker images as a base image you may need to e.g. adjust the
+paths you mount any additional Python packages at.</p>
 <h1 id="upgrading-to-v11400"><a class="header" href="#upgrading-to-v11400">Upgrading to v1.140.0</a></h1>
 <h2 id="users-of-synapse-s3-storage-provider-must-update-the-module-to-v160"><a class="header" href="#users-of-synapse-s3-storage-provider-must-update-the-module-to-v160">Users of <code>synapse-s3-storage-provider</code> must update the module to <code>v1.6.0</code></a></h2>
 <p>Deployments that make use of the
