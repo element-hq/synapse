@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1-labs
 
 ARG SYNAPSE_VERSION=latest
 ARG FROM=matrixdotorg/synapse:$SYNAPSE_VERSION
@@ -29,7 +29,10 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
        --mount=type=cache,target=/var/lib/apt,sharing=locked \
       apt-get update -qq && \
       DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
-          nginx-light redis-server="6:${REDIS_VERSION}.*" redis-tools="6:${REDIS_VERSION}.*"
+          nginx-light \
+          redis-server="6:${REDIS_VERSION}.*" redis-tools="6:${REDIS_VERSION}.*" \
+          # libicu is required by postgres, see `docker/complement/Dockerfile`
+          libicu76
 
     RUN \
     # remove default page
@@ -49,6 +52,7 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
 FROM $FROM
 
     # Copy over dependencies
+    COPY --from=deps_base --parents /usr/lib/*-linux-gnu/libicu* /
     COPY --from=deps_base /usr/bin/redis-server /usr/local/bin
     COPY --from=deps_base /uv /
     COPY --from=deps_base /usr/sbin/nginx /usr/sbin

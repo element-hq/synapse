@@ -18,10 +18,10 @@ FROM $FROM
 # since for repeated rebuilds, this is much faster than apt installing
 # postgres each time.
 
-# This trick only works because (a) the Synapse image happens to have all the
-# shared libraries that postgres wants, (b) we use a postgres image based on
-# the same debian version as Synapse's docker image (so the versions of the
-# shared libraries match).
+# This trick only works because we use a postgres image based on the same
+# debian version as Synapse's docker image (so the versions of the shared
+# libraries match). Any missing libraries need to be added to either the
+# Synapse image or docker/Dockerfile-workers.
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
 COPY --from=postgres_base /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres_base /usr/share/postgresql /usr/share/postgresql

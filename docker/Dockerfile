@@ -142,7 +142,6 @@ RUN \
       libwebp7 \
       xmlsec1 \
       libjemalloc2 \
-      libicu76 \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
