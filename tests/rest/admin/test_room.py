@@ -27,7 +27,6 @@ from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
-from twisted.internet.task import deferLater
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
@@ -861,7 +860,7 @@ class DeleteRoomV2TestCase(unittest.HomeserverTestCase):
         # Mock PaginationHandler.purge_room to sleep for 100s, so we have time to do a second call
         # before the purge is over. Note that it doesn't purge anymore, but we don't care.
         async def purge_room(room_id: str, force: bool) -> None:
-            await deferLater(self.hs.get_reactor(), 100, lambda: None)
+            await self.hs.get_clock().sleep(100)
 
         self.pagination_handler.purge_room = AsyncMock(side_effect=purge_room)  # type: ignore[method-assign]
 

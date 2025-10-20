@@ -317,11 +317,6 @@ class SynapseHomeServer(HomeServer):
                 # during parsing
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
-    def start_background_tasks(self) -> None:
-        super().start_background_tasks()
-
-        self.get_datastores().main.db_pool.updates.start_doing_background_updates()
-
 
 def load_or_generate_config(argv_options: List[str]) -> HomeServerConfig:
     """
