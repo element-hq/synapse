@@ -1,0 +1,1 @@
+Fix a bug introduced in 1.140.0 where an internal server error could be raised when hashing user passwords that are too long.
