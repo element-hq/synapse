@@ -319,7 +319,7 @@ all = [
     #   - systemd: this is a system-based requirement
 ]
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 # We pin development dependencies in poetry.lock so that our tests don't start
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
