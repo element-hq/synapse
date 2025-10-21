@@ -38,6 +38,7 @@ import attr
 import click
 import git
 import github
+import github.Auth
 from click.exceptions import ClickException
 from git import GitCommandError, Repo
 from github import BadCredentialsException, Github
@@ -833,7 +834,7 @@ def check_valid_gh_token(gh_token: Optional[str]) -> None:
         return
 
     try:
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(gh_token))
 
         # We need to lookup name to trigger a request.
         _name = gh.get_user().name
