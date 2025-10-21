@@ -69,7 +69,12 @@ class SlidingSyncConfig(SlidingSyncBody):
 
     user: UserID
     requester: Requester
-    model_config = ConfigDict(extra="ignore", frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        extra="ignore",
+        frozen=True,
+        # Allow custom types like `UserID` to be used in the model.
+        arbitrary_types_allowed=True,
+    )
 
 
 class OperationType(Enum):

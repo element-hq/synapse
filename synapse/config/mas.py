@@ -45,7 +45,7 @@ class MasConfigModel(ParseModel):
             return self
         if not self.secret and not self.secret_path:
             raise ValueError(
-                "You must set a `secret` or `secret_path` when enabling Matrix "
+                "You must set a `secret` or `secret_path` when enabling the Matrix "
                 "Authentication Service integration."
             )
         if self.secret and self.secret_path:
