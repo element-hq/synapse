@@ -1,0 +1,1 @@
+Fix the `oidc_session_no_samesite` cookie to have the `Secure` attribute, so the only difference between it and the paired `oidc_session` cookie, is the configuration of the `SameSite` attribute as described in the comments / cookie names. Contributed by @kieranlane.
