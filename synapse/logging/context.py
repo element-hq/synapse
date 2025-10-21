@@ -898,7 +898,7 @@ def run_in_background(
         # If the function messes with logcontexts, we can assume it follows the Synapse
         # logcontext rules (Rules for functions returning awaitables: "If the awaitable
         # is already complete, the function returns with the same logcontext it started
-        # with."). If it function doesn't touch logcontexts at all, we can also assume
+        # with."). If the function doesn't touch logcontexts at all, we can also assume
         # the logcontext is unchanged.
         #
         # Either way, the function should have maintained the calling logcontext, so we
@@ -907,11 +907,21 @@ def run_in_background(
         # to reset the logcontext to the sentinel logcontext as that would run
         # immediately (remember our goal is to maintain the calling logcontext when we
         # return).
-        logcontext_debug_logger.debug(
-            "run_in_background(%s): deferred already completed and the function should have maintained the logcontext %s",
-            instance_id,
-            calling_context,
-        )
+        if current_context() != calling_context:
+            logcontext_error(
+                "run_in_background(%s): deferred already completed but the function did not maintain the calling logcontext %s (found %s)"
+                % (
+                    instance_id,
+                    calling_context,
+                    current_context(),
+                )
+            )
+        else:
+            logcontext_debug_logger.debug(
+                "run_in_background(%s): deferred already completed and the function should have maintained the calling logcontext %s",
+                instance_id,
+                calling_context,
+            )
         return d
 
     # Since the function we called may follow the Synapse logcontext rules (Rules for

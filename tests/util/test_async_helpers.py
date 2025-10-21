@@ -26,6 +26,7 @@ from parameterized import parameterized_class
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.python.failure import Failure
+from tests.unittest import logcontext_clean
 
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
@@ -198,7 +199,12 @@ class TimeoutDeferredTest(TestCase):
 
         self.failureResultOf(timing_out_d, defer.TimeoutError)
 
-    async def test_logcontext_is_preserved_on_cancellation(self) -> None:
+    @logcontext_clean
+    async def test_logcontext_is_preserved_on_timeout_cancellation(self) -> None:
+        """
+        Test that the logcontext is preserved when we timeout and the deferred is
+        cancelled.
+        """
         # Sanity check that we start in the sentinel context
         self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
@@ -268,6 +274,62 @@ class TimeoutDeferredTest(TestCase):
             self.assertIs(current_context(), context_one)
 
         # Back to the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+    @logcontext_clean
+    async def test_logcontext_is_not_lost_when_awaiting_on_timeout_cancellation(
+        self,
+    ) -> None:
+        """
+        Test that the logcontext isn't lost when we `await` the deferred to
+        complete/timeout and it times out.
+        """
+
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Create a deferred which we will never complete
+        incomplete_d: Deferred = Deferred()
+
+        async def competing_task() -> None:
+            with LoggingContext(name="one", server_name="test_server") as context_one:
+                timing_out_d = timeout_deferred(
+                    deferred=incomplete_d,
+                    timeout=1.0,
+                    clock=self.clock,
+                )
+                self.assertNoResult(timing_out_d)
+                # We should still be in the logcontext we started in
+                self.assertIs(current_context(), context_one)
+
+                # Mimic the normal use case to wait for the work to complete or timeout.
+                #
+                # We expect the deferred to timeout and raise an exception at this
+                # point.
+                await make_deferred_yieldable(timing_out_d)
+
+                # We're still in the same logcontext
+                self.assertIs(current_context(), context_one)
+
+        d = defer.ensureDeferred(competing_task())
+
+        # Still in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Pump until we trigger the timeout
+        self.reactor.pump(
+            # We only need to pump `1.0` (seconds) as we set
+            # `timeout_deferred(timeout=1.0)` above
+            (1.0,)
+        )
+
+        # Still in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # We expect a failure due to the timeout
+        self.failureResultOf(d, defer.TimeoutError)
+
+        # Back to the sentinel context at the end of the day
         self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
 
