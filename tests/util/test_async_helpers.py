@@ -292,7 +292,9 @@ class TimeoutDeferredTest(TestCase):
         incomplete_d: Deferred = Deferred()
 
         async def competing_task() -> None:
-            with LoggingContext(name="one", server_name="test_server") as context_one:
+            with LoggingContext(
+                name="competing", server_name="test_server"
+            ) as context_competing:
                 timing_out_d = timeout_deferred(
                     deferred=incomplete_d,
                     timeout=1.0,
@@ -300,16 +302,16 @@ class TimeoutDeferredTest(TestCase):
                 )
                 self.assertNoResult(timing_out_d)
                 # We should still be in the logcontext we started in
-                self.assertIs(current_context(), context_one)
+                self.assertIs(current_context(), context_competing)
 
                 # Mimic the normal use case to wait for the work to complete or timeout.
                 #
-                # We expect the deferred to timeout and raise an exception at this
-                # point.
+                # In this specific test, we expect the deferred to timeout and raise an
+                # exception at this point.
                 await make_deferred_yieldable(timing_out_d)
 
                 # We're still in the same logcontext
-                self.assertIs(current_context(), context_one)
+                self.assertIs(current_context(), context_competing)
 
         d = defer.ensureDeferred(competing_task())
 
