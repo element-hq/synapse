@@ -213,7 +213,7 @@ netaddr = ">=0.7.18"
 Jinja2 = ">=3.0"
 bleach = ">=1.4.3"
 # pydantic 2.12 depends on typing-extensions>=4.14.1
-typing-extensions = ">=4.14.1, <5"
+typing-extensions = ">=4.14.1"
 # We enforce that we have a `cryptography` version that bundles an `openssl`
 # with the latest security patches.
 cryptography = ">=3.4.7"
