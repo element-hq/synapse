@@ -135,7 +135,7 @@ class RoomSummaryHandler:
         requester: Requester,
         requested_room_id: str,
         suggested_only: bool = False,
-        omit_remote_rooms: bool = False,
+        omit_remote_room_hierarchy: bool = False,
         admin_skip_room_visibility_check: bool = False,
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
@@ -150,7 +150,8 @@ class RoomSummaryHandler:
             requested_room_id: The room ID to start the hierarchy at (the "root" room).
             suggested_only: Whether we should only return children with the "suggested"
                 flag set.
-            omit_remote_rooms: Whether to omit rooms which the server is not currently participating in
+            omit_remote_room_hierarchy: Whether to skip reaching out over federation to get information on rooms which the server is not
+                currently joined to
             admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
                 used for the admin endpoints.
             max_depth: The maximum depth in the tree to explore, must be a
@@ -180,7 +181,7 @@ class RoomSummaryHandler:
                 requester.user.to_string(),
                 requested_room_id,
                 suggested_only,
-                omit_remote_rooms,
+                omit_remote_room_hierarchy,
                 admin_skip_room_visibility_check,
                 max_depth,
                 limit,
@@ -191,7 +192,7 @@ class RoomSummaryHandler:
             requester.user.to_string(),
             requested_room_id,
             suggested_only,
-            omit_remote_rooms,
+            omit_remote_room_hierarchy,
             admin_skip_room_visibility_check,
             max_depth,
             limit,
@@ -204,7 +205,7 @@ class RoomSummaryHandler:
         requester: str,
         requested_room_id: str,
         suggested_only: bool = False,
-        omit_remote_rooms: bool = False,
+        omit_remote_room_hierarchy: bool = False,
         admin_skip_room_visibility_check: bool = False,
         max_depth: Optional[int] = None,
         limit: Optional[int] = None,
@@ -228,7 +229,7 @@ class RoomSummaryHandler:
                     errcode=Codes.NOT_JOINED,
                 )
 
-        if not local_room and not omit_remote_rooms:
+        if not local_room and not omit_remote_room_hierarchy:
             room_hierarchy = await self._summarize_remote_room_hierarchy(
                 _RoomQueueEntry(requested_room_id, remote_room_hosts or ()),
                 False,
@@ -254,14 +255,15 @@ class RoomSummaryHandler:
             except StoreError:
                 raise SynapseError(400, "Unknown pagination token", Codes.INVALID_PARAM)
 
-            # If the requester, room ID, suggested-only, or max depth were modified
-            # the session is invalid.
+            # If the requester, room ID, suggested-only, max depth, omit_remote_room_hierarchy, or admin_skip_room_visibility_check
+            # were modified the session is invalid.
             if (
                 requester != pagination_session["requester"]
                 or requested_room_id != pagination_session["room_id"]
                 or suggested_only != pagination_session["suggested_only"]
                 or max_depth != pagination_session["max_depth"]
-                or omit_remote_rooms != pagination_session["omit_remote_rooms"]
+                or omit_remote_room_hierarchy
+                != pagination_session["omit_remote_room_hierarchy"]
                 or admin_skip_room_visibility_check
                 != pagination_session["admin_skip_room_visibility_check"]
             ):
@@ -320,9 +322,12 @@ class RoomSummaryHandler:
                     suggested_only,
                     admin_skip_room_visibility_check=admin_skip_room_visibility_check,
                 )
-
+            # if we are not fetching remote room details over federation, return what is
+            # known about the room
+            elif omit_remote_room_hierarchy:
+                room_entry = _RoomEntry(room_id, {"room_id": room_id}, ())
             # Otherwise, attempt to use information for federation.
-            elif not omit_remote_rooms:
+            else:
                 # A previous call might have included information for this room.
                 # It can be used if either:
                 #
@@ -396,7 +401,7 @@ class RoomSummaryHandler:
                     "room_id": requested_room_id,
                     "suggested_only": suggested_only,
                     "max_depth": max_depth,
-                    "omit_remote_rooms": omit_remote_rooms,
+                    "omit_remote_room_hierarchy": omit_remote_room_hierarchy,
                     "admin_skip_room_visibility_check": admin_skip_room_visibility_check,
                     # The stored state.
                     "room_queue": [

@@ -66,8 +66,8 @@ logger = logging.getLogger(__name__)
 class AdminRoomHierarchy(RestServlet):
     """
     Given a room, returns room details on that room and any space children of the provided room.
-    Does not return information about remote rooms which the server is not currently
-    participating in
+    Does not reach out over federation to fetch details information about any remote rooms which
+    the server is not currently participating in, returning only the room id of those rooms
     """
 
     PATTERNS = admin_patterns("/rooms/(?P<room_id>[^/]*)/hierarchy$")
@@ -87,13 +87,10 @@ class AdminRoomHierarchy(RestServlet):
         max_depth = parse_integer(request, "max_depth")
         limit = parse_integer(request, "limit")
 
-        # we omit returning remote rooms that the server is not currently participating in,
-        # as that information shouldn't be available to the server admin (as they are not
-        # participating in those rooms)
         room_entry_summary = await self._room_summary_handler.get_room_hierarchy(
             requester,
             room_id,
-            omit_remote_rooms=True,
+            omit_remote_room_hierarchy=True,  # We omit details about remote rooms because we only care about managing rooms local to the homeserver. This also immensely helps with the response time of the endpoint since we don't need to reach out over federation. There is a trade-off as this will leave holes where information about public/peekable remote rooms the server is not participating in will be omitted.
             admin_skip_room_visibility_check=True,
             max_depth=max_depth,
             limit=limit,
