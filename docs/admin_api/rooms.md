@@ -1159,13 +1159,11 @@ Response:
         "guest_can_join": false,
         "is_space": true,
         "join_rule": "public",
-        "name": null,
         "num_joined_members": 1,
         "power_users": ["@user:test"],
         "room_creation_ts": 1400,
         "room_id": "!sPOpNyMHbZAoAOsOFL:test",
         "room_type": "m.space",
-        "topic": null, 
         "world_readable": false
       },
 
