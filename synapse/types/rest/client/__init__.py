@@ -30,6 +30,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 from typing_extensions import Annotated, Self
 
 from synapse.types.rest import RequestBodyModel
@@ -86,7 +87,18 @@ class EmailRequestTokenBody(ThreepidRequestTokenBody):
     # know the exact spelling (eg. upper and lower case) of address in the database.
     # Without this, an email stored in the database as "foo@bar.com" would cause
     # user requests for "FOO@bar.com" to raise a Not Found error.
-    _email_validator = field_validator("email")(validate_email)
+    @field_validator("email")
+    @classmethod
+    def _email_validator(cls, email: StrictStr) -> StrictStr:
+        try:
+            return validate_email(email)
+        except ValueError as e:
+            # To ensure backward compatibility of HTTP error codes, we return a
+            # Pydantic error with the custom, unrecognized error type
+            # "email_custom_err_type" instead of the default error type
+            # "value_error". This results in the more generic BAD_JSON HTTP
+            # error instead of the more specific INVALID_PARAM one.
+            raise PydanticCustomError("email_custom_err_type", str(e), None) from e
 
 
 ISO3116_1_Alpha_2 = Annotated[str, StringConstraints(pattern="[A-Z]{2}", strict=True)]
