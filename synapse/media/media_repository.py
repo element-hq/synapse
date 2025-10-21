@@ -19,12 +19,17 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import base64
 import errno
+import hashlib
+import hmac
 import logging
 import os
 import shutil
+from http.client import TEMPORARY_REDIRECT
 from io import BytesIO
 from typing import IO, TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlencode
 
 import attr
 from matrix_common.types.mxc_uri import MXCUri
@@ -44,7 +49,7 @@ from synapse.api.errors import (
 )
 from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.repository import ThumbnailRequirement
-from synapse.http.server import respond_with_json
+from synapse.http.server import respond_with_json, respond_with_redirect
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import defer_to_thread
 from synapse.logging.opentracing import trace
@@ -55,6 +60,7 @@ from synapse.media._base import (
     check_for_cached_entry_and_respond,
     get_filename_from_headers,
     respond_404,
+    respond_with_multipart_location,
     respond_with_multipart_responder,
     respond_with_responder,
 )
@@ -68,7 +74,7 @@ from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import UserID
+from synapse.types import StrSequence, UserID
 from synapse.util.async_helpers import Linearizer
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import random_string
@@ -122,6 +128,8 @@ class MediaRepository:
             clock=hs.get_clock(),
             cfg=hs.config.ratelimiting.remote_media_downloads,
         )
+
+        self._media_request_signature_secret = hs.config.media.redirect_secret
 
         # List of StorageProviders where we should search for media and
         # potentially upload to.
@@ -499,6 +507,7 @@ class MediaRepository:
         max_timeout_ms: int,
         allow_authenticated: bool = True,
         federation: bool = False,
+        may_redirect: bool = False,
     ) -> None:
         """Responds to requests for local media, if exists, or returns 404.
 
@@ -510,8 +519,12 @@ class MediaRepository:
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
-            allow_authenticated: whether media marked as authenticated may be served to this request
-            federation: whether the local media being fetched is for a federation request
+            allow_authenticated: whether media marked as authenticated may be
+                served to this request
+            federation: whether the local media being fetched is for a
+                federation request
+            may_redirect: whether the request may issue a redirect instead of
+                serving the media directly
 
         Returns:
             Resolves once a response has successfully been written to request
@@ -525,6 +538,19 @@ class MediaRepository:
                 raise NotFoundError()
 
         self.mark_recently_accessed(None, media_id)
+
+        if self.hs.config.media.use_redirect and may_redirect:
+            location = self.signed_location_for_media(media_id, name)
+
+            if federation:
+                respond_with_multipart_location(request, location.encode("ascii"))
+
+            else:
+                respond_with_redirect(
+                    request, location.encode("ascii"), TEMPORARY_REDIRECT
+                )
+
+            return
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -1578,3 +1604,145 @@ class MediaRepository:
             removed_media.append(media_id)
 
         return removed_media, len(removed_media)
+
+    def download_media_key(
+        self,
+        media_id: str,
+        exp: int,
+        name: Optional[str] = None,
+    ) -> StrSequence:
+        """Get the key used for the download media signature
+
+        Args:
+            media_id: The media ID of the content. (This is the same as
+                the file_id for local content.)
+            exp: The expiration time of the signature, as a unix timestamp in ms.
+            name: Optional name that, if specified, will be used as
+                the filename in the Content-Disposition header of the response.
+        """
+        if name is not None:
+            return ("download", media_id, str(exp), name)
+
+        return ("download", media_id, str(exp))
+
+    def signed_location_for_media(
+        self,
+        media_id: str,
+        name: Optional[str] = None,
+    ) -> str:
+        """Get the signed location for a media download
+
+        That URL will serve the media with no extra authentication for a limited
+        time, allowing the media to be cached by a CDN more easily.
+        """
+
+        # XXX: One potential improvement here would be to round the `exp` to
+        # the nearest 5 minutes, so that a CDN/cache can always cache the
+        # media for a little bit
+        exp = self.clock.time_msec() + self.hs.config.media.redirect_ttl_ms
+        key = self.download_media_key(
+            media_id=media_id,
+            exp=exp,
+            name=name,
+        )
+        signature = self.compute_media_request_signature(key)
+
+        # This *could* in theory be a relative redirect, but Synapse has a
+        # bug where it always treats it as absolute. Because this is used
+        # for federation request, we can't just fix the bug in Synapse and
+        # use a relative redirect, we have to wait for the fix to be rolled
+        # out across the federation.
+        name_path = f"/{name}" if name else ""
+        return f"{self.hs.config.server.public_baseurl}_synapse/media/download/{media_id}{name_path}?exp={exp}&sig={signature}"
+
+    def thumbnail_media_key(
+        self, media_id: str, parameters: str, exp: int
+    ) -> StrSequence:
+        """Get the key used for the thumbnail media signature
+
+        Args:
+            media_id: The media ID of the content. (This is the same as
+                the file_id for local content.)
+            parameters: The parameters of the thumbnail request as a string,
+                e.g. "width=100&height=100"
+            exp: The expiration time of the signature, as a unix timestamp in ms.
+        """
+        return ("thumbnail", media_id, parameters, str(exp))
+
+    def signed_location_for_thumbnail(
+        self,
+        media_id: str,
+        parameters: dict[str, str],
+    ) -> str:
+        """Get the signed location for a thumbnail media
+
+        That URL will serve the media with no extra authentication for a limited
+        time, allowing the media to be cached by a CDN more easily.
+        """
+
+        # XXX: One potential improvement here would be to round the `exp` to
+        # the nearest 5 minutes, so that a CDN/cache can always cache the
+        # media for a little bit
+        exp = self.clock.time_msec() + self.hs.config.media.redirect_ttl_ms
+        parameters_str = base64.urlsafe_b64encode(
+            urlencode(sorted(parameters.items())).encode("utf-8")
+        ).decode("ascii")
+        key = self.thumbnail_media_key(
+            media_id=media_id,
+            parameters=parameters_str,
+            exp=exp,
+        )
+        signature = self.compute_media_request_signature(key)
+
+        # This *could* in theory be a relative redirect, but Synapse has a
+        # bug where it always treats it as absolute. Because this is used
+        # for federation request, we can't just fix the bug in Synapse and
+        # use a relative redirect, we have to wait for the fix to be rolled
+        # out across the federation.
+        return f"{self.hs.config.server.public_baseurl}_synapse/media/thumbnail/{media_id}/{parameters_str}?exp={exp}&sig={signature}"
+
+    def compute_media_request_signature(self, payload: StrSequence) -> str:
+        """Compute the signature for a signed media request
+
+        This currently uses a HMAC-SHA256 signature encoded as hex, but this could
+        be swapped to an asymmetric signature.
+        """
+        assert self._media_request_signature_secret is not None, (
+            "media request signature secret not set"
+        )
+
+        # XXX: alternatively, we could do multiple rounds of HMAC with the
+        # different segments, like AWS SigV4 does
+        bytes_payload = "|".join(payload).encode("utf-8")
+
+        digest = hmac.digest(
+            key=self._media_request_signature_secret,
+            msg=bytes_payload,
+            digest=hashlib.sha256,
+        )
+        signature = digest.hex()
+        return signature
+
+    def verify_media_request_signature(
+        self, payload: StrSequence, signature: str
+    ) -> bool:
+        """Verify the signature for a signed media request
+
+        Returns True if the signature is valid, False otherwise.
+        """
+        # In case there is no secret, we can't verify the signature
+        if self._media_request_signature_secret is None:
+            return False
+
+        bytes_payload = "|".join(payload).encode("utf-8")
+        decoded_signature = bytes.fromhex(signature)
+        computed_signature = hmac.digest(
+            key=self._media_request_signature_secret,
+            msg=bytes_payload,
+            digest=hashlib.sha256,
+        )
+
+        if len(computed_signature) != len(decoded_signature):
+            return False
+
+        return hmac.compare_digest(computed_signature, decoded_signature)

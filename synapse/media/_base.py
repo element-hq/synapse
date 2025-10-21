@@ -36,6 +36,7 @@ from typing import (
     Tuple,
     Type,
 )
+from uuid import uuid4
 
 import attr
 from zope.interface import implementer
@@ -62,6 +63,8 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+CRLF = b"\r\n"
 
 # list all text content types that will have the charset default to UTF-8 when
 # none is given
@@ -438,6 +441,35 @@ async def respond_with_responder(
             if request.producer:
                 request.unregisterProducer()
 
+    finish_request(request)
+
+
+def respond_with_multipart_location(
+    request: SynapseRequest,
+    location: bytes,
+) -> None:
+    """Responds to a media request with a multipart/mixed response, with the
+    (empty) media metadata as a JSON object in the first part, and a `Location`
+    header as the second part
+
+    Args:
+        request: The incoming request.
+        location: The URL to give in the `Location` header.
+    """
+    boundary = uuid4().hex.encode("ascii")  # Pick a random boundary
+    request.setResponseCode(200)
+    request.setHeader(
+        b"Content-Type",
+        b"multipart/mixed; boundary=" + boundary,
+    )
+    request.write(b"--" + boundary + CRLF)
+    request.write(b"Content-Type: application/json" + CRLF + CRLF)
+    # This is an empty JSON object for now, we don't have any
+    # metadata associated with media yet
+    request.write(b"{}")
+    request.write(CRLF + b"--" + boundary + CRLF)
+    request.write(b"Location: " + location + CRLF + CRLF)
+    request.write(CRLF + b"--" + boundary + b"--" + CRLF)
     finish_request(request)
 
 

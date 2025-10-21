@@ -20,6 +20,7 @@
 #
 #
 import logging
+from http.client import TEMPORARY_REDIRECT
 from io import BytesIO
 from types import TracebackType
 from typing import TYPE_CHECKING, List, Optional, Tuple, Type
@@ -28,7 +29,7 @@ from PIL import Image
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.config.repository import THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP
-from synapse.http.server import respond_with_json
+from synapse.http.server import respond_with_json, respond_with_redirect
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace
 from synapse.media._base import (
@@ -37,6 +38,7 @@ from synapse.media._base import (
     check_for_cached_entry_and_respond,
     respond_404,
     respond_with_file,
+    respond_with_multipart_location,
     respond_with_multipart_responder,
     respond_with_responder,
 )
@@ -269,6 +271,7 @@ class ThumbnailProvider:
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
+        self.clock = hs.get_clock()
         self.dynamic_thumbnails = hs.config.media.dynamic_thumbnails
 
     async def respond_local_thumbnail(
@@ -282,6 +285,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         for_federation: bool,
         allow_authenticated: bool = True,
+        may_redirect: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
@@ -294,6 +298,26 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        if self.hs.config.media.use_redirect and may_redirect:
+            location = self.media_repo.signed_location_for_thumbnail(
+                media_id,
+                {
+                    "width": str(width),
+                    "height": str(height),
+                    "method": method,
+                    "type": m_type,
+                },
+            )
+
+            if for_federation:
+                respond_with_multipart_location(request, location.encode("ascii"))
+            else:
+                respond_with_redirect(
+                    request, location.encode("ascii"), TEMPORARY_REDIRECT
+                )
+
+            return
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
@@ -327,6 +351,7 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         for_federation: bool,
         allow_authenticated: bool = True,
+        may_redirect: bool = False,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
@@ -339,6 +364,27 @@ class ThumbnailProvider:
         if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 raise NotFoundError()
+
+        if self.hs.config.media.use_redirect and may_redirect:
+            location = self.media_repo.signed_location_for_thumbnail(
+                media_id,
+                {
+                    "width": str(desired_width),
+                    "height": str(desired_height),
+                    "method": desired_method,
+                    "type": desired_type,
+                },
+            )
+
+            if for_federation:
+                respond_with_multipart_location(request, location.encode("ascii"))
+
+            else:
+                respond_with_redirect(
+                    request, location.encode("ascii"), TEMPORARY_REDIRECT
+                )
+
+            return
 
         # Once we've checked auth we can return early if the media is cached on
         # the client
