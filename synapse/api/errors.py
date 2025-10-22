@@ -152,6 +152,8 @@ class Codes(str, Enum):
     # Part of MSC4326
     UNKNOWN_DEVICE = "ORG.MATRIX.MSC4326.M_UNKNOWN_DEVICE"
 
+    MSC4335_USER_LIMIT_EXCEEDED = "ORG.MATRIX.MSC4335_USER_LIMIT_EXCEEDED"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
@@ -510,6 +512,40 @@ class ResourceLimitError(SynapseError):
             self.errcode,
             admin_contact=self.admin_contact,
             limit_type=self.limit_type,
+        )
+
+
+class MSC4335UserLimitExceededError(SynapseError):
+    """
+    Experimental implementation of MSC4335 M_USER_LIMIT_EXCEEDED error
+    """
+
+    def __init__(
+        self,
+        code: int,
+        msg: str,
+        info_uri: str,
+        soft_limit: bool = False,
+        increase_uri: Optional[str] = None,
+    ):
+        if soft_limit and increase_uri is None:
+            raise ValueError("increase_uri must be provided if soft_limit is True")
+
+        additional_fields: dict[str, Union[str, bool]] = {
+            "org.matrix.msc4335.info_uri": info_uri,
+        }
+
+        if soft_limit:
+            additional_fields["org.matrix.msc4335.soft_limit"] = soft_limit
+
+        if soft_limit and increase_uri is not None:
+            additional_fields["org.matrix.msc4335.increase_uri"] = increase_uri
+
+        super().__init__(
+            code,
+            msg,
+            Codes.MSC4335_USER_LIMIT_EXCEEDED,
+            additional_fields=additional_fields,
         )
 
 

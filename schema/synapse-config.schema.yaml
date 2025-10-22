@@ -2424,20 +2424,40 @@ properties:
       module API [callback](../../modules/media_repository_callbacks.md#get_media_upload_limits_for_user).
     default: []
     items:
-      time_period:
-        type: "#/$defs/duration"
-        description: >-
-          The time period over which the limit applies. Required.
-      max_size:
-        type: "#/$defs/bytes"
-        description: >-
-          Amount of data that can be uploaded in the time period by the user.
-          Required.
+      type: object
+      required:
+        - time_period
+        - max_size
+      properties:
+        time_period:
+          $ref: "#/$defs/duration"
+          description: >-
+            The time period over which the limit applies. Required.
+        max_size:
+          $ref: "#/$defs/bytes"
+          description: >-
+            Amount of data that can be uploaded in the time period by the user.
+            Required.
+        msc4335_info_uri:
+          type: string
+          description: >-
+            Experimental MSC4335 URI to where the user can find information about the upload limit. Optional.
+        msc4335_soft_limit:
+          type: boolean
+          description: >-
+            Experimental MSC4335 value to say if the limit can be increased. Optional.
+        msc4335_increase_uri:
+          type: string
+          description: >-
+            Experimental MSC4335 URI to where the user can increase the upload limit. Required if msc4335_soft_limit is true.
     examples:
       - - time_period: 1h
           max_size: 100M
         - time_period: 1w
           max_size: 500M
+          msc4335_info_uri: https://example.com/quota
+          msc4335_soft_limit: true
+          msc4335_increase_uri: https://example.com/increase-quota
   max_image_pixels:
     $ref: "#/$defs/bytes"
     description: Maximum number of pixels that will be thumbnailed.
