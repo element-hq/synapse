@@ -117,7 +117,7 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     """
 
     try:
-        topic_content = TopicContent.model_validate(content)
+        topic_content = TopicContent.model_validate(content, strict=False)
     except ValidationError:
         return None
 
