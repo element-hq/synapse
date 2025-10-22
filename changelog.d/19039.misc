@@ -1,1 +1,0 @@
-Drop a deprecated field of the `PyGitHub` dependency in the release script and raise the dependency's minimum version to `1.59.0`.
