@@ -425,6 +425,8 @@ class OidcProvider:
         # from the IdP's jwks_uri, if required.
         self._jwks = RetryOnExceptionCachedCall(self._load_jwks)
 
+        # Type safety: we will not be instantiating a subclass of the provider class,
+        # so the warning about directly accessing __init__ being unsound does not apply here
         user_mapping_provider_init_method = (
             provider.user_mapping_provider_class.__init__  # type: ignore[misc]
         )
