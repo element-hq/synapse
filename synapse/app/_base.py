@@ -588,9 +588,9 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
                 # we're not using systemd.
                 sdnotify(b"RELOADING=1")
 
-            for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
-                for func, args, kwargs in sighup_callbacks:
-                    func(*args, **kwargs)
+                for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
+                    for func, args, kwargs in sighup_callbacks:
+                        func(*args, **kwargs)
 
                 sdnotify(b"READY=1")
 

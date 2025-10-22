@@ -1679,8 +1679,22 @@ class AuthHandler:
             # Normalise the Unicode in the password
             pw = unicodedata.normalize("NFKC", password)
 
+            bytes_to_hash = pw.encode(
+                "utf8"
+            ) + self.hs.config.auth.password_pepper.encode("utf8")
+            if len(bytes_to_hash) > 72:
+                # bcrypt only looks at the first 72 bytes.
+                #
+                # Note: we explicitly DO NOT log the length of the user's password here.
+                logger.debug(
+                    "Password is too long; truncating to 72 bytes for bcrypt. "
+                    "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
+                    "sufficient entropy for a password."
+                )
+                bytes_to_hash = bytes_to_hash[:72]
+
             return bcrypt.hashpw(
-                pw.encode("utf8") + self.hs.config.auth.password_pepper.encode("utf8"),
+                bytes_to_hash,
                 bcrypt.gensalt(self.bcrypt_rounds),
             ).decode("ascii")
 

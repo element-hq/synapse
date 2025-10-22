@@ -317,11 +317,6 @@ class SynapseHomeServer(HomeServer):
                 # during parsing
                 logger.warning("Unrecognized listener type: %s", listener.type)
 
-    def start_background_tasks(self) -> None:
-        super().start_background_tasks()
-
-        self.get_datastores().main.db_pool.updates.start_doing_background_updates()
-
 
 def load_or_generate_config(argv_options: list[str]) -> HomeServerConfig:
     """
@@ -434,6 +429,9 @@ def setup(
             await oidc.load_metadata()
 
         await _base.start(hs, freeze)
+
+        # TODO: Feels like this should be moved somewhere else.
+        hs.get_datastores().main.db_pool.updates.start_doing_background_updates()
 
     # Register a callback to be invoked once the reactor is running
     register_start(hs, _start_when_reactor_running)
