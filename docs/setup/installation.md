@@ -178,7 +178,7 @@ xbps-install -S synapse
 Synapse can be installed via FreeBSD Ports or Packages contributed by Brendan Molloy from:
 
 - Ports: `cd /usr/ports/net-im/py-matrix-synapse && make install clean`
-- Packages: `pkg install py38-matrix-synapse`
+- Packages: `pkg install py311-matrix-synapse`
 
 #### OpenBSD
 
