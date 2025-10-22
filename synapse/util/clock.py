@@ -268,7 +268,7 @@ class Clock:
                 # We use `PreserveLoggingContext` to prevent our new `call_later`
                 # logcontext from finishing as soon as we exit this function, in case `f`
                 # returns an awaitable/deferred which would continue running and may try to
-                # restore the `loop_call` context when it's done (because it's trying to
+                # restore the `call_later` context when it's done (because it's trying to
                 # adhere to the Synapse logcontext rules.)
                 #
                 # This also ensures that we return to the `sentinel` context when we exit
