@@ -280,8 +280,8 @@ class TimeoutDeferredTest(TestCase):
         self,
     ) -> None:
         """
-        Test that the logcontext isn't lost when we `await` the deferred to
-        complete/timeout and it times out.
+        Test that the logcontext isn't lost when we `await make_deferred_yieldable(...)`
+        the deferred to complete/timeout and it times out.
         """
 
         # Sanity check that we start in the sentinel context
