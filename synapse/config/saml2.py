@@ -161,6 +161,7 @@ class SAML2Config(Config):
 
         # Get the desired saml auth response attributes from the module
         # Type safety: the provider class was already checked for having the method being called
+        # with the runtime checks above, which mypy is not aware of
         saml2_config_dict = self._default_saml_config_dict(
             *self.saml2_user_mapping_provider_class.get_saml_attributes(  # type: ignore[attr-defined]
                 self.saml2_user_mapping_provider_config
