@@ -821,7 +821,9 @@ def get_repo_and_check_clean_checkout(
             f"{path} is not a git repository (expecting a {name} repository)."
         )
     while repo.is_dirty():
-        if not click.confirm(f"Uncommitted changes exist in {path}. Commit or stash them. Ready to continue?"):
+        if not click.confirm(
+            f"Uncommitted changes exist in {path}. Commit or stash them. Ready to continue?"
+        ):
             raise click.ClickException("Aborted.")
 
     return repo
