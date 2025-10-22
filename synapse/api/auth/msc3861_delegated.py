@@ -20,7 +20,7 @@
 #
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -70,7 +70,7 @@ STABLE_SCOPE_MATRIX_DEVICE_PREFIX = "urn:matrix:client:device:"
 SCOPE_SYNAPSE_ADMIN = "urn:synapse:admin:*"
 
 
-def scope_to_list(scope: str) -> List[str]:
+def scope_to_list(scope: str) -> list[str]:
     """Convert a scope string to a list of scope tokens"""
     return scope.strip().split(" ")
 
@@ -96,7 +96,7 @@ class IntrospectionResult:
         absolute_expiry_ms = expires_in * 1000 + self.retrieved_at_ms
         return now_ms < absolute_expiry_ms
 
-    def get_scope_list(self) -> List[str]:
+    def get_scope_list(self) -> list[str]:
         value = self._inner.get("scope")
         if not isinstance(value, str):
             return []
@@ -264,7 +264,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.warning("Failed to load metadata:", exc_info=True)
             return None
 
-    async def auth_metadata(self) -> Dict[str, Any]:
+    async def auth_metadata(self) -> dict[str, Any]:
         """
         Returns the auth metadata dict
         """
@@ -303,7 +303,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         # By default, we shouldn't cache the result unless we know it's valid
         cache_context.should_cache = False
         introspection_endpoint = await self._introspection_endpoint()
-        raw_headers: Dict[str, str] = {
+        raw_headers: dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
             # Tell MAS that we support reading the device ID as an explicit
@@ -520,7 +520,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             raise InvalidClientTokenError("Token is not active")
 
         # Let's look at the scope
-        scope: List[str] = introspection_result.get_scope_list()
+        scope: list[str] = introspection_result.get_scope_list()
 
         # Determine type of user based on presence of particular scopes
         has_user_scope = (
@@ -575,7 +575,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             # We only allow a single device_id in the scope, so we find them all in the
             # scope list, and raise if there are more than one. The OIDC server should be
             # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-            device_ids: Set[str] = set()
+            device_ids: set[str] = set()
             for tok in scope:
                 if tok.startswith(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX):
                     device_ids.add(tok[len(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, TypedDict
+from typing import Optional, TypedDict
 
 
 class EmailReason(TypedDict, total=False):
@@ -91,7 +91,7 @@ class NotifVars(TypedDict):
 
     link: str
     ts: Optional[int]
-    messages: List[MessageVars]
+    messages: list[MessageVars]
 
 
 class RoomVars(TypedDict):
@@ -110,7 +110,7 @@ class RoomVars(TypedDict):
     title: Optional[str]
     hash: int
     invite: bool
-    notifs: List[NotifVars]
+    notifs: list[NotifVars]
     link: str
     avatar_url: Optional[str]
 
@@ -137,5 +137,5 @@ class TemplateVars(TypedDict, total=False):
     user_display_name: str
     unsubscribe_link: str
     summary_text: str
-    rooms: List[RoomVars]
+    rooms: list[RoomVars]
     reason: EmailReason

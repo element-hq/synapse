@@ -41,8 +41,6 @@ from typing import (
     Callable,
     Literal,
     Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -393,7 +391,7 @@ class LoggingContext:
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
+        type: Optional[type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
@@ -498,13 +496,13 @@ class LoggingContext:
 
         return res
 
-    def _get_cputime(self, current: "resource.struct_rusage") -> Tuple[float, float]:
+    def _get_cputime(self, current: "resource.struct_rusage") -> tuple[float, float]:
         """Get the cpu usage time between start() and the given rusage
 
         Args:
             rusage: the current resource usage
 
-        Returns: Tuple[float, float]: seconds in user mode, seconds in system mode
+        Returns: tuple[float, float]: seconds in user mode, seconds in system mode
         """
         assert self.usage_start is not None
 
@@ -672,7 +670,7 @@ class PreserveLoggingContext:
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
+        type: Optional[type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:

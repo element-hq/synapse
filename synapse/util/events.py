@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from synapse._pydantic_compat import Field, StrictStr, ValidationError, validator
 from synapse.types import JsonDict
@@ -52,7 +52,7 @@ class MTopic(ParseModel):
     See `TopicContentBlock` in the Matrix specification.
     """
 
-    m_text: Optional[List[MTextRepresentation]] = Field(alias="m.text")
+    m_text: Optional[list[MTextRepresentation]] = Field(alias="m.text")
     """
     An ordered array of textual representations in different mimetypes.
     """
@@ -63,7 +63,7 @@ class MTopic(ParseModel):
     @validator("m_text", pre=True)
     def ignore_invalid_representations(
         cls, m_text: Any
-    ) -> Optional[List[MTextRepresentation]]:
+    ) -> Optional[list[MTextRepresentation]]:
         if not isinstance(m_text, list):
             raise ValueError("m.text must be a list")
         representations = []

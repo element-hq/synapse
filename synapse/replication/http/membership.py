@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.server import Request
 
@@ -63,7 +63,7 @@ class ReplicationRemoteJoinRestServlet(ReplicationEndpoint):
         requester: Requester,
         room_id: str,
         user_id: str,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         content: JsonDict,
     ) -> JsonDict:
         """
@@ -85,7 +85,7 @@ class ReplicationRemoteJoinRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, room_id: str, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         remote_room_hosts = content["remote_room_hosts"]
         event_content = content["content"]
 
@@ -130,7 +130,7 @@ class ReplicationRemoteKnockRestServlet(ReplicationEndpoint):
         requester: Requester,
         room_id: str,
         user_id: str,
-        remote_room_hosts: List[str],
+        remote_room_hosts: list[str],
         content: JsonDict,
     ) -> JsonDict:
         """
@@ -149,7 +149,7 @@ class ReplicationRemoteKnockRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, room_id: str, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         remote_room_hosts = content["remote_room_hosts"]
         event_content = content["content"]
 
@@ -215,7 +215,7 @@ class ReplicationRemoteRejectInviteRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, invite_event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         txn_id = content["txn_id"]
         event_content = content["content"]
 
@@ -279,7 +279,7 @@ class ReplicationRemoteRescindKnockRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: SynapseRequest, content: JsonDict, knock_event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         txn_id = content["txn_id"]
         event_content = content["content"]
 
@@ -343,7 +343,7 @@ class ReplicationUserJoinedLeftRoomRestServlet(ReplicationEndpoint):
         room_id: str,
         user_id: str,
         change: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         logger.info("user membership change: %s in %s", user_id, room_id)
 
         user = UserID.from_string(user_id)

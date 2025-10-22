@@ -29,17 +29,12 @@ from typing import (
     AbstractSet,
     Any,
     ClassVar,
-    Dict,
-    List,
     Literal,
     Mapping,
     Match,
     MutableMapping,
     NoReturn,
     Optional,
-    Set,
-    Tuple,
-    Type,
     TypedDict,
     TypeVar,
     Union,
@@ -84,16 +79,16 @@ logger = logging.getLogger(__name__)
 # Define a state map type from type/state_key to T (usually an event ID or
 # event)
 T = TypeVar("T")
-StateKey = Tuple[str, str]
+StateKey = tuple[str, str]
 StateMap = Mapping[StateKey, T]
 MutableStateMap = MutableMapping[StateKey, T]
 
 # JSON types. These could be made stronger, but will do for now.
 # A "simple" (canonical) JSON value.
 SimpleJsonValue = Optional[Union[str, int, bool]]
-JsonValue = Union[List[SimpleJsonValue], Tuple[SimpleJsonValue, ...], SimpleJsonValue]
+JsonValue = Union[list[SimpleJsonValue], tuple[SimpleJsonValue, ...], SimpleJsonValue]
 # A JSON-serialisable dict.
-JsonDict = Dict[str, Any]
+JsonDict = dict[str, Any]
 # A JSON-serialisable mapping; roughly speaking an immutable JSONDict.
 # Useful when you have a TypedDict which isn't going to be mutated and you don't want
 # to cast to JsonDict everywhere.
@@ -106,12 +101,12 @@ JsonSerializable = object
 #
 # StrCollection is an unordered collection of strings. If ordering is important,
 # StrSequence can be used instead.
-StrCollection = Union[Tuple[str, ...], List[str], AbstractSet[str]]
+StrCollection = Union[tuple[str, ...], list[str], AbstractSet[str]]
 # Sequence[str] that does not include str itself; str being a Sequence[str]
 # is very misleading and results in bugs.
 #
 # Unlike StrCollection, StrSequence is an ordered collection of strings.
-StrSequence = Union[Tuple[str, ...], List[str]]
+StrSequence = Union[tuple[str, ...], list[str]]
 
 
 # Note that this seems to require inheriting *directly* from Interface in order
@@ -165,13 +160,13 @@ class Requester:
     user: "UserID"
     access_token_id: Optional[int]
     is_guest: bool
-    scope: Set[str]
+    scope: set[str]
     shadow_banned: bool
     device_id: Optional[str]
     app_service: Optional["ApplicationService"]
     authenticated_entity: str
 
-    def serialize(self) -> Dict[str, Any]:
+    def serialize(self) -> dict[str, Any]:
         """Converts self to a type that can be serialized as JSON, and then
         deserialized by `deserialize`
 
@@ -191,7 +186,7 @@ class Requester:
 
     @staticmethod
     def deserialize(
-        store: "ApplicationServiceWorkerStore", input: Dict[str, Any]
+        store: "ApplicationServiceWorkerStore", input: dict[str, Any]
     ) -> "Requester":
         """Converts a dict that was produced by `serialize` back into a
         Requester.
@@ -305,11 +300,11 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
     def __copy__(self: DS) -> DS:
         return self
 
-    def __deepcopy__(self: DS, memo: Dict[str, object]) -> DS:
+    def __deepcopy__(self: DS, memo: dict[str, object]) -> DS:
         return self
 
     @classmethod
-    def from_string(cls: Type[DS], s: str) -> DS:
+    def from_string(cls: type[DS], s: str) -> DS:
         """Parse the string given by 's' into a structure object."""
         if len(s) < 1 or s[0:1] != cls.SIGIL:
             raise SynapseError(
@@ -337,7 +332,7 @@ class DomainSpecificString(metaclass=abc.ABCMeta):
         return "%s%s:%s" % (self.SIGIL, self.localpart, self.domain)
 
     @classmethod
-    def is_valid(cls: Type[DS], s: str) -> bool:
+    def is_valid(cls: type[DS], s: str) -> bool:
         """Parses the input string and attempts to ensure it is valid."""
         # TODO: this does not reject an empty localpart or an overly-long string.
         # See https://spec.matrix.org/v1.2/appendices/#identifier-grammar
@@ -393,7 +388,7 @@ class RoomID:
     room_id_with_domain: Optional[RoomIdWithDomain]
 
     @classmethod
-    def is_valid(cls: Type["RoomID"], s: str) -> bool:
+    def is_valid(cls: type["RoomID"], s: str) -> bool:
         if ":" in s:
             return RoomIdWithDomain.is_valid(s)
         try:
@@ -415,7 +410,7 @@ class RoomID:
     __repr__ = to_string
 
     @classmethod
-    def from_string(cls: Type["RoomID"], s: str) -> "RoomID":
+    def from_string(cls: type["RoomID"], s: str) -> "RoomID":
         # sigil check
         if len(s) < 1 or s[0] != cls.SIGIL:
             raise SynapseError(
@@ -829,7 +824,7 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
         return super().copy_and_advance(other)
 
-    def as_historical_tuple(self) -> Tuple[int, int]:
+    def as_historical_tuple(self) -> tuple[int, int]:
         """Returns a tuple of `(topological, stream)` for historical tokens.
 
         Raises if not an historical token (i.e. doesn't have a topological part).
@@ -1412,7 +1407,7 @@ class ThirdPartyInstanceID:
     def __copy__(self) -> "ThirdPartyInstanceID":
         return self
 
-    def __deepcopy__(self, memo: Dict[str, object]) -> "ThirdPartyInstanceID":
+    def __deepcopy__(self, memo: dict[str, object]) -> "ThirdPartyInstanceID":
         return self
 
     @classmethod
@@ -1436,7 +1431,7 @@ class ReadReceipt:
     room_id: str
     receipt_type: str
     user_id: str
-    event_ids: List[str]
+    event_ids: list[str]
     thread_id: Optional[str]
     data: JsonDict
 
@@ -1459,8 +1454,8 @@ class DeviceListUpdates:
     # The latter happening only once, thus always giving you the same sets
     # across multiple DeviceListUpdates instances.
     # Also see: don't define mutable default arguments.
-    changed: Set[str] = attr.ib(factory=set)
-    left: Set[str] = attr.ib(factory=set)
+    changed: set[str] = attr.ib(factory=set)
+    left: set[str] = attr.ib(factory=set)
 
     def __bool__(self) -> bool:
         return bool(self.changed or self.left)
@@ -1468,7 +1463,7 @@ class DeviceListUpdates:
 
 def get_verify_key_from_cross_signing_key(
     key_info: Mapping[str, Any],
-) -> Tuple[str, VerifyKey]:
+) -> tuple[str, VerifyKey]:
     """Get the key ID and signedjson verify key from a cross-signing key dict
 
     Args:

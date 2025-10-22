@@ -21,7 +21,7 @@
 import html
 import logging
 import urllib.parse
-from typing import TYPE_CHECKING, List, Optional, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 import attr
 
@@ -118,7 +118,7 @@ class OEmbedProvider:
         # Search for link elements with the proper rel and type attributes.
         # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
         for tag in cast(
-            List["etree._Element"],
+            list["etree._Element"],
             tree.xpath("//link[@rel='alternate'][@type='application/json+oembed']"),
         ):
             if "href" in tag.attrib:
@@ -127,7 +127,7 @@ class OEmbedProvider:
         # Some providers (e.g. Flickr) use alternative instead of alternate.
         # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
         for tag in cast(
-            List["etree._Element"],
+            list["etree._Element"],
             tree.xpath("//link[@rel='alternative'][@type='application/json+oembed']"),
         ):
             if "href" in tag.attrib:
@@ -223,10 +223,10 @@ class OEmbedProvider:
         return OEmbedResult(open_graph_response, author_name, cache_age)
 
 
-def _fetch_urls(tree: "etree._Element", tag_name: str) -> List[str]:
+def _fetch_urls(tree: "etree._Element", tag_name: str) -> list[str]:
     results = []
     # Cast: the type returned by xpath depends on the xpath expression: mypy can't deduce this.
-    for tag in cast(List["etree._Element"], tree.xpath("//*/" + tag_name)):
+    for tag in cast(list["etree._Element"], tree.xpath("//*/" + tag_name)):
         if "src" in tag.attrib:
             results.append(cast(str, tag.attrib["src"]))
     return results

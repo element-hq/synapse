@@ -21,7 +21,7 @@
 #
 import logging
 from abc import ABCMeta
-from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Any, Collection, Iterable, Optional, Union
 
 from synapse.storage.database import (
     DatabasePool,
@@ -60,7 +60,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self.database_engine = database.engine
         self.db_pool = database
 
-        self.external_cached_functions: Dict[str, CachedFunction] = {}
+        self.external_cached_functions: dict[str, CachedFunction] = {}
 
     def process_replication_rows(  # noqa: B027 (no-op by design)
         self,
