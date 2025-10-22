@@ -52,6 +52,7 @@ import attr
 from typing_extensions import ParamSpec
 
 from twisted.internet import defer, threads
+from twisted.python.failure import Failure
 from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
@@ -963,6 +964,12 @@ def run_in_background(
                 context,
             )
             set_current_context(context)
+
+            # Re-raise the exception so that any further errbacks can do their thing as
+            # normal
+            if isinstance(result, Failure):
+                result.raiseException()
+            # Otherwise, pass the result through
             return result
 
         d.addBoth(_log_set_context_cb, SENTINEL_CONTEXT)
@@ -1069,6 +1076,12 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
                 context,
             )
             set_current_context(context)
+
+            # Re-raise the exception so that any further errbacks can do their thing as
+            # normal
+            if isinstance(result, Failure):
+                result.raiseException()
+            # Otherwise, pass the result through
             return result
 
         deferred.addBoth(_log_set_context_cb, calling_context)
@@ -1082,8 +1095,17 @@ ResultT = TypeVar("ResultT")
 
 
 def _set_context_cb(result: ResultT, context: LoggingContextOrSentinel) -> ResultT:
-    """A callback function which just sets the logging context"""
+    """
+    A transparent passthrough deferred callback/errback which sets the logging context
+    """
     set_current_context(context)
+
+    # Re-raise the exception so that any further errbacks can do their thing as
+    # normal
+    if isinstance(result, Failure):
+        result.raiseException()
+
+    # Otherwise, pass the result through
     return result
 
 
