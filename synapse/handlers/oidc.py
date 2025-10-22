@@ -96,7 +96,7 @@ logger = logging.getLogger(__name__)
 # Here we have the names of the cookies, and the options we use to set them.
 _SESSION_COOKIES = [
     (b"oidc_session", b"HttpOnly; Secure; SameSite=None"),
-    (b"oidc_session_no_samesite", b"HttpOnly"),
+    (b"oidc_session_no_samesite", b"HttpOnly; Secure"),
 ]
 
 
