@@ -310,8 +310,9 @@ class TimeoutDeferredTest(TestCase):
                 logger.info("asdf awaiting make_deferred_yieldable")
                 await make_deferred_yieldable(timing_out_d)
 
-                # We're still in the same logcontext
-                self.assertIs(current_context(), context_competing)
+                self.fail(
+                    "We should not make it to this point as the `timing_out_d` should have been cancelled"
+                )
 
         d = defer.ensureDeferred(competing_task())
 
