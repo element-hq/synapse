@@ -180,6 +180,7 @@ from synapse.types import (
 from synapse.util.clock import Clock
 from synapse.util.metrics import Measure
 from synapse.util.retryutils import filter_destinations_by_retry_limiter
+from synapse.visibility import filter_events_for_server
 
 if TYPE_CHECKING:
     from synapse.events.presence_router import PresenceRouter
@@ -240,6 +241,13 @@ class AbstractFederationSender(metaclass=abc.ABCMeta):
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to
         send out to other servers.
+        """
+        raise NotImplementedError()
+
+    @abc.abstractmethod
+    def notify_new_server_joined(self, server: str, room_id: str) -> None:
+        """This gets called when we a new server has joined a room. We might
+        want to send out some events to this server.
         """
         raise NotImplementedError()
 
@@ -504,6 +512,64 @@ class FederationSender(AbstractFederationSender):
             queue = PerDestinationQueue(self.hs, self._transaction_manager, destination)
             self._per_destination_queues[destination] = queue
         return queue
+
+    def notify_new_server_joined(self, server: str, room_id: str) -> None:
+        # We currently only use this notification for MSC4354: Sticky Events.
+        if not self.hs.config.experimental.msc4354_enabled:
+            return
+        # fire off a processing loop in the background
+        self.hs.run_as_background_process(
+            "process_new_server_joined_over_federation",
+            self._process_new_server_joined_over_federation,
+            server,
+            room_id,
+        )
+
+    async def _process_new_server_joined_over_federation(
+        self, new_server: str, room_id: str
+    ) -> None:
+        sticky_event_ids = await self.store.get_sticky_event_ids_sent_by_self(
+            room_id,
+            0,
+        )
+        sticky_events = await self.store.get_events_as_list(sticky_event_ids)
+
+        # We must not send events that are outliers / lack a stream ordering, else we won't be able to
+        # satisfy /get_missing_events requests
+        sticky_events = [
+            ev
+            for ev in sticky_events
+            if ev.internal_metadata.stream_ordering is not None
+            and not ev.internal_metadata.is_outlier()
+        ]
+        # order by stream ordering so we present things in the right timeline order on the receiver
+        sticky_events = sorted(
+            sticky_events,
+            key=lambda ev: ev.internal_metadata.stream_ordering
+            or 0,  # not possible to be 0
+        )
+
+        sticky_events = await filter_events_for_server(
+            self._storage_controllers,
+            new_server,
+            self.server_name,
+            sticky_events,
+            redact=False,
+            filter_out_erased_senders=True,
+            filter_out_remote_partial_state_events=True,
+        )
+        if sticky_events:
+            logger.info(
+                "sending %d sticky events to newly joined server %s in room %s",
+                len(sticky_events),
+                new_server,
+                room_id,
+            )
+            # we don't track that we sent up to this stream position since it won't make any difference
+            # since notify_new_server_joined is only called initially.
+            await self._transaction_manager.send_new_transaction(
+                new_server, sticky_events, []
+            )
 
     def notify_new_events(self, max_token: RoomStreamToken) -> None:
         """This gets called when we have some new events we might want to

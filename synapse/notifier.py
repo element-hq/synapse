@@ -533,6 +533,7 @@ class Notifier:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
         ],
         new_token: int,
         users: Optional[Collection[Union[str, UserID]]] = None,
@@ -938,6 +939,11 @@ class Notifier:
         # Tell the federation client about the fact the server is back up, so
         # that any in flight requests can be immediately retried.
         self._federation_client.wake_destination(server)
+
+    def notify_new_server_joined(self, server: str, room_id: str) -> None:
+        # Inform the federation_sender that it may need to send events to the new server.
+        if self.federation_sender:
+            self.federation_sender.notify_new_server_joined(server, room_id)
 
     def add_lock_released_callback(
         self, callback: Callable[[str, str, str], None]

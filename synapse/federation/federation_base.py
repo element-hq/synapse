@@ -195,6 +195,8 @@ class FederationBase:
             # using the event in prev_events).
             redacted_event = prune_event(pdu)
             redacted_event.internal_metadata.soft_failed = True
+            # Mark this as spam so we don't re-evaluate soft-failure status.
+            redacted_event.internal_metadata.policy_server_spammy = True
             return redacted_event
 
         return pdu

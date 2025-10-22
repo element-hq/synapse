@@ -21,6 +21,7 @@ from typing import (
     AbstractSet,
     Any,
     Callable,
+    Collection,
     Dict,
     Final,
     Generic,
@@ -396,12 +397,26 @@ class SlidingSyncResult:
                     or bool(self.prev_batch)
                 )
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class StickyEventsExtension:
+            """The Sticky Events extension (MSC4354)
+
+            Attributes:
+                room_id_to_sticky_events: map (room_id -> [unexpired_sticky_events])
+            """
+
+            room_id_to_sticky_events: Mapping[str, Collection[EventBase]]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_sticky_events)
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
         thread_subscriptions: Optional[ThreadSubscriptionsExtension] = None
+        sticky_events: Optional[StickyEventsExtension] = None
 
         def __bool__(self) -> bool:
             return bool(
@@ -411,6 +426,7 @@ class SlidingSyncResult:
                 or self.receipts
                 or self.typing
                 or self.thread_subscriptions
+                or self.sticky_events
             )
 
     next_pos: SlidingSyncStreamToken

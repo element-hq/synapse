@@ -1011,6 +1011,7 @@ class StreamKeyType(Enum):
     DEVICE_LIST = "device_list_key"
     UN_PARTIAL_STATED_ROOMS = "un_partial_stated_rooms_key"
     THREAD_SUBSCRIPTIONS = "thread_subscriptions_key"
+    STICKY_EVENTS = "sticky_events_key"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1032,6 +1033,7 @@ class StreamToken:
         9. `groups_key`: `1` (note that this key is now unused)
         10. `un_partial_stated_rooms_key`: `379`
         11. `thread_subscriptions_key`: 4242
+        12. `sticky_events_key`: 4141
 
     You can see how many of these keys correspond to the various
     fields in a "/sync" response:
@@ -1091,6 +1093,7 @@ class StreamToken:
     groups_key: int
     un_partial_stated_rooms_key: int
     thread_subscriptions_key: int
+    sticky_events_key: int
 
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
@@ -1119,6 +1122,7 @@ class StreamToken:
                 groups_key,
                 un_partial_stated_rooms_key,
                 thread_subscriptions_key,
+                sticky_events_key,
             ) = keys
 
             return cls(
@@ -1135,6 +1139,7 @@ class StreamToken:
                 groups_key=int(groups_key),
                 un_partial_stated_rooms_key=int(un_partial_stated_rooms_key),
                 thread_subscriptions_key=int(thread_subscriptions_key),
+                sticky_events_key=int(sticky_events_key),
             )
         except CancelledError:
             raise
@@ -1158,6 +1163,7 @@ class StreamToken:
                 str(self.groups_key),
                 str(self.un_partial_stated_rooms_key),
                 str(self.thread_subscriptions_key),
+                str(self.sticky_events_key),
             ]
         )
 
@@ -1223,6 +1229,7 @@ class StreamToken:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
             StreamKeyType.THREAD_SUBSCRIPTIONS,
+            StreamKeyType.STICKY_EVENTS,
         ],
     ) -> int: ...
 
@@ -1279,7 +1286,7 @@ class StreamToken:
             f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
             f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
             f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key},"
-            f"thread_subscriptions: {self.thread_subscriptions_key})"
+            f"thread_subscriptions: {self.thread_subscriptions_key}, sticky_events: {self.sticky_events_key})"
         )
 
 
@@ -1295,6 +1302,7 @@ StreamToken.START = StreamToken(
     groups_key=0,
     un_partial_stated_rooms_key=0,
     thread_subscriptions_key=0,
+    sticky_events_key=0,
 )
 
 

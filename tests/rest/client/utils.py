@@ -456,6 +456,49 @@ class RestHelper:
 
         return channel.json_body
 
+    def send_sticky_event(
+        self,
+        room_id: str,
+        type: str,
+        duration_ms: int,
+        content: Optional[dict] = None,
+        txn_id: Optional[str] = None,
+        tok: Optional[str] = None,
+        expect_code: int = HTTPStatus.OK,
+        custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+    ) -> JsonDict:
+        if txn_id is None:
+            txn_id = "m%s" % (str(time.time()))
+
+        path = (
+            "/_matrix/client/r0/rooms/%s/send/%s/%s?org.matrix.msc4354.sticky_duration_ms=%d"
+            % (
+                room_id,
+                type,
+                txn_id,
+                duration_ms,
+            )
+        )
+        if tok:
+            path = path + "&access_token=%s" % tok
+
+        channel = make_request(
+            self.reactor,
+            self.site,
+            "PUT",
+            path,
+            content or {},
+            custom_headers=custom_headers,
+        )
+
+        assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (
+            expect_code,
+            channel.code,
+            channel.result["body"],
+        )
+
+        return channel.json_body
+
     def get_event(
         self,
         room_id: str,
