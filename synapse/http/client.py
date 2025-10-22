@@ -412,7 +412,7 @@ class BaseHttpClient:
                 if data is not None:
                     body_producer = QuieterFileBodyProducer(
                         BytesIO(data),
-                        # cooperator=self._cooperator,
+                        cooperator=self._cooperator,
                     )
 
                 # Always make sure we add a user agent to the request
@@ -438,7 +438,7 @@ class BaseHttpClient:
                 # for https://twistedmatrix.com/trac/ticket/9534.
                 request_deferred = timeout_deferred(
                     deferred=request_deferred,
-                    timeout=2,
+                    timeout=60,
                     clock=self.hs.get_clock(),
                 )
 

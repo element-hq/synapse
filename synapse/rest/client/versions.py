@@ -47,7 +47,6 @@ class VersionsRestServlet(RestServlet):
         self.config = hs.config
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
-        self.http_client = hs.get_proxied_blocklisted_http_client()
 
         # Calculate these once since they shouldn't change after start-up.
         self.e2ee_forced_public = (
@@ -64,33 +63,6 @@ class VersionsRestServlet(RestServlet):
         )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        logger.info("asdf before test")
-        try:
-            from twisted.internet import defer
-
-            async def _catch_errors(task: defer.Deferred, url: str):
-                try:
-                    await task
-                except Exception:
-                    logger.exception("Error in async callback (POST %s)", url)
-
-            stub_url = "http://localhost:3000/post"
-            await self.http_client.post_json_get_json(
-                uri=stub_url, post_json="{}", headers=None
-            )
-            # task = self.http_client.post_json_get_json(
-            #     uri=stub_url, post_json="{}", headers=None
-            # )
-            # await task
-            # if False:
-            #     defer.ensureDeferred(_catch_errors(task, stub_url))
-            # else:
-            #     await task
-        except Exception as exc:
-            logger.exception("asdf exception during test: %s", exc)
-        finally:
-            logger.info("asdf after test")
-
         msc3881_enabled = self.config.experimental.msc3881_enabled
         msc3575_enabled = self.config.experimental.msc3575_enabled
 

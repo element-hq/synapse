@@ -59,9 +59,6 @@ def setup_logging() -> None:
     log_level = os.environ.get("SYNAPSE_TEST_LOG_LEVEL", "ERROR")
     root_logger.setLevel(log_level)
 
-    # TODO: Remove
-    logging.getLogger("synapse.logging.context.debug").setLevel(logging.DEBUG)
-
     # In order to not add noise by default (since we only log ERROR messages for trial
     # tests as configured above), we only enable this for developers for looking for
     # more INFO or DEBUG.
