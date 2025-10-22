@@ -813,13 +813,8 @@ def timeout_deferred(
 
         try:
             logger.info("asdf timeout_deferred cancel")
-            # with PreserveLoggingContext():
-            #     deferred.cancel()
-            # The whole lambda will be run in the current logcontext. But we're using a
-            # trick to return the deferred itself so that `run_in_background` will wait
-            # on that to complete and reset the logcontext to the sentinel when it does
-            # to avoid leaking the current logcontext into the reactor.
-            run_in_background(lambda: (deferred.cancel(), deferred)[1])
+            with PreserveLoggingContext():
+                deferred.cancel()
         except Exception:  # if we throw any exception it'll break time outs
             logger.exception("Canceller failed during timeout")
 
