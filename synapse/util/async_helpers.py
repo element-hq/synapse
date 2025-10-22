@@ -812,7 +812,6 @@ def timeout_deferred(
         timed_out[0] = True
 
         try:
-            logger.info("asdf timeout_deferred cancel")
             with PreserveLoggingContext():
                 deferred.cancel()
         except Exception:  # if we throw any exception it'll break time outs
