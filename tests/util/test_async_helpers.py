@@ -308,6 +308,7 @@ class TimeoutDeferredTest(TestCase):
                 #
                 # In this specific test, we expect the deferred to timeout and raise an
                 # exception at this point.
+                logger.info("asdf awaiting make_deferred_yieldable")
                 await make_deferred_yieldable(timing_out_d)
 
                 # We're still in the same logcontext

@@ -23,6 +23,7 @@ import logging
 from typing import Callable, Generator, cast
 
 from twisted.internet import defer, reactor as _reactor
+from twisted.internet.defer import CancelledError, Deferred
 
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
@@ -456,6 +457,105 @@ class LoggingContextTestCase(unittest.TestCase):
         # Back to the sentinel context
         self._check_test_key("sentinel")
 
+    @logcontext_clean
+    async def test_deferred_callback_fire_and_forget_with_current_context_asdf(
+        self,
+    ) -> None:
+        """
+        Test that it's possible to call the deferred callback with the current context
+        while fire-and-forgetting the callback (no adverse effects like leaking the
+        logcontext into the reactor or restarting an already finished logcontext).
+
+        Demonstrates one pattern that we can use fix the naive case where we just call
+        `d.callback(None)` without anything else. See the *Deferred callbacks* section
+        of docs/log_contexts.md for more details.
+        """
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
+
+        # Sanity check that we start in the sentinel context
+        self._check_test_key("sentinel")
+
+        callback_finished = False
+
+        async def competing_callback() -> None:
+            nonlocal callback_finished
+            try:
+                # The deferred callback should have the same logcontext as the caller
+                self._check_test_key("foo")
+
+                with LoggingContext(name="competing", server_name="test_server"):
+                    await clock.sleep(0)
+                    self._check_test_key("competing")
+
+                self._check_test_key("foo")
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        def competing_callback2() -> None:
+            nonlocal callback_finished
+            try:
+                with LoggingContext(name="competing2", server_name="test_server"):
+                    # clock.call_later(
+                    #     0, lambda: defer.ensureDeferred(competing_callback())
+                    # )
+                    pass
+            finally:
+                # When exceptions happen, we still want to mark the callback as finished
+                # so that the test can complete and we see the underlying error.
+                callback_finished = True
+
+        # Part of fix for the naive case is here (i.e. things don't work correctly if we
+        # don't `PreserveLoggingContext(...)` here).
+        #
+        # We can extend the lifetime of the "foo" logcontext is to avoid calling the
+        # context manager lifetime methods of `LoggingContext` (`__enter__`/`__exit__`).
+        # And we can still set the current logcontext by using `PreserveLoggingContext`
+        # and passing in the "foo" logcontext.
+        with PreserveLoggingContext(
+            LoggingContext(name="foo", server_name="test_server")
+        ):
+            d: defer.Deferred[None] = defer.Deferred()
+            # d.addErrback(lambda _: defer.ensureDeferred(competing_callback()))
+            d.addErrback(lambda _: competing_callback2())
+            # make_deferred_yieldable(d)
+            self._check_test_key("foo")
+            # Other part of fix for the naive case is here (i.e. things don't work
+            # correctly if we don't `run_in_background(...)` here).
+            #
+            # `run_in_background(...)` will run the whole lambda in the current
+            # logcontext and it handles the magic behind the scenes of a) restoring the
+            # calling logcontext before returning to the caller and b) resetting the
+            # logcontext to the sentinel after the deferred completes and we yield
+            # control back to the reactor to avoid leaking the logcontext into the
+            # reactor.
+            #
+            # We're using a lambda here as a little trick so we can still get everything
+            # to run in the "foo" logcontext, but return the deferred `d` itself so that
+            # `run_in_background` will wait on that to complete before resetting the
+            # logcontext to the sentinel.
+            #
+            # type-ignore[call-overload]: This appears like a mypy type inference bug. A
+            # function that returns a deferred is exactly what `run_in_background`
+            # expects.
+            #
+            # type-ignore[func-returns-value]: This appears like a mypy type inference
+            # bug. We're always returning the deferred `d`.
+            run_in_background(lambda: (d.cancel(), d)[1])  # type: ignore[call-overload, func-returns-value]
+            self._check_test_key("foo")
+
+        await clock.sleep(0)
+
+        self.assertTrue(
+            callback_finished,
+            "Callback never finished which means the test probably didn't wait long enough",
+        )
+
+        # Back to the sentinel context
+        self._check_test_key("sentinel")
+
     async def _test_run_in_background(self, function: Callable[[], object]) -> None:
         # Ignore linter error since we are creating a `Clock` for testing purposes.
         clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
@@ -687,6 +787,77 @@ class LoggingContextTestCase(unittest.TestCase):
 
             # now it should be restored
             self._check_test_key("foo")
+
+    # @logcontext_clean
+    async def test_make_deferred_yieldable_asdf(self) -> None:
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
+
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Create a deferred which we will never complete
+        incomplete_d: Deferred = Deferred()
+
+        async def competing_task() -> None:
+            with LoggingContext(
+                name="competing", server_name="test_server"
+            ) as context_competing:
+                self.assertNoResult(incomplete_d)
+                # We should still be in the logcontext we started in
+                self.assertIs(current_context(), context_competing)
+
+                # Mimic the normal use case to wait for the work to complete or timeout.
+                #
+                # In this specific test, we expect the deferred to timeout and raise an
+                # exception at this point.
+                logger.info("asdf awaiting make_deferred_yieldable")
+                await make_deferred_yieldable(incomplete_d)
+
+                # We're still in the same logcontext
+                self.assertIs(current_context(), context_competing)
+
+        # with LoggingContext(name="foo", server_name="test_server"):
+        with PreserveLoggingContext(
+            LoggingContext(name="foo", server_name="test_server")
+        ):
+            # d = defer.ensureDeferred(competing_task())
+            d = run_in_background(competing_task)
+            # reactor.callLater(0, lambda: defer.ensureDeferred(competing_task()))
+            await clock.sleep(0)
+
+            logger.info("asdf 1")
+
+            self._check_test_key("foo")
+
+            # Pump the competing task a bit
+            # await clock.sleep(0)
+
+            # Cancel the deferred
+            logger.info("asdf going to cancel incomplete_d")
+            # incomplete_d.cancel()
+            # with PreserveLoggingContext():
+            #     incomplete_d.cancel()
+            # await run_in_background(lambda: (incomplete_d.cancel(), incomplete_d)[1])
+
+            def _cancel_d() -> None:
+                logger.info("asdf before cancel")
+                incomplete_d.cancel()
+                logger.info("asdf after cancel")
+
+            await run_in_background(lambda: (_cancel_d(), incomplete_d)[1])
+
+            logger.info("asdf 2")
+
+            self._check_test_key("foo")
+
+            # We expect a failure due to the timeout
+            self.failureResultOf(d, defer.CancelledError)
+
+            self._check_test_key("foo")
+
+        # Back to the sentinel context at the end of the day
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
 
     @logcontext_clean
     def test_nested_logging_context(self) -> None:
