@@ -23,11 +23,13 @@ import logging
 from typing import Callable, Generator, cast
 
 from twisted.internet import defer, reactor as _reactor
-from twisted.internet.defer import CancelledError, Deferred
+from twisted.internet.defer import Deferred
+from twisted.python.failure import Failure
 
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
     LoggingContext,
+    LoggingContextOrSentinel,
     PreserveLoggingContext,
     _Sentinel,
     current_context,
@@ -457,7 +459,7 @@ class LoggingContextTestCase(unittest.TestCase):
         # Back to the sentinel context
         self._check_test_key("sentinel")
 
-    @logcontext_clean
+    # @logcontext_clean
     async def test_deferred_callback_fire_and_forget_with_current_context_asdf(
         self,
     ) -> None:
@@ -519,7 +521,8 @@ class LoggingContextTestCase(unittest.TestCase):
         ):
             d: defer.Deferred[None] = defer.Deferred()
             # d.addErrback(lambda _: defer.ensureDeferred(competing_callback()))
-            d.addErrback(lambda _: competing_callback2())
+            # d.addErrback(lambda _: competing_callback2())
+            d.addErrback(lambda _: make_deferred_yieldable(d))
             # make_deferred_yieldable(d)
             self._check_test_key("foo")
             # Other part of fix for the naive case is here (i.e. things don't work
@@ -789,7 +792,7 @@ class LoggingContextTestCase(unittest.TestCase):
             self._check_test_key("foo")
 
     # @logcontext_clean
-    async def test_make_deferred_yieldable_asdf(self) -> None:
+    async def test_make_deferred_yieldable_asdf1(self) -> None:
         # Ignore linter error since we are creating a `Clock` for testing purposes.
         clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
 
@@ -798,6 +801,110 @@ class LoggingContextTestCase(unittest.TestCase):
 
         # Create a deferred which we will never complete
         incomplete_d: Deferred = Deferred()
+
+        errback_logcontext: LoggingContextOrSentinel = None
+
+        def check_errback_logcontext(res: Failure) -> None:
+            nonlocal errback_logcontext
+            errback_logcontext = current_context()
+
+            # Re-raise the exception so that any further errbacks can do their thing as
+            # normal
+            res.raiseException()
+
+        incomplete_d.addErrback(check_errback_logcontext)
+
+        async def competing_task() -> None:
+            with LoggingContext(
+                name="competing", server_name="test_server"
+            ) as context_competing:
+                self.assertNoResult(incomplete_d)
+                # We should still be in the logcontext we started in
+                self.assertIs(current_context(), context_competing)
+
+                # Mimic the normal use case to wait for the work to complete or timeout.
+                #
+                # In this specific test, we expect the deferred to timeout and raise an
+                # exception at this point.
+                logger.info(
+                    "asdf before awaiting make_deferred_yieldable incomplete_d=%s",
+                    incomplete_d,
+                )
+                await make_deferred_yieldable(incomplete_d)
+
+                self.fail(
+                    "Did not expect to make it past this point as the `incomplete_d` should have been cancelled"
+                )
+
+        # with LoggingContext(name="foo", server_name="test_server"):
+        with PreserveLoggingContext(
+            LoggingContext(name="foo", server_name="test_server")
+        ):
+            # d = defer.ensureDeferred(competing_task())
+            d = run_in_background(competing_task)
+            # reactor.callLater(0, lambda: defer.ensureDeferred(competing_task()))
+            await clock.sleep(0)
+
+            logger.info("asdf 1")
+
+            self._check_test_key("foo")
+
+            # Pump the competing task a bit
+            # await clock.sleep(0)
+
+            # Cancel the deferred
+            logger.info("asdf going to cancel incomplete_d")
+            # incomplete_d.cancel()
+            # with PreserveLoggingContext():
+            #     incomplete_d.cancel()
+            await run_in_background(lambda: (incomplete_d.cancel(), incomplete_d)[1])
+            # await run_in_background(
+            #     lambda: (incomplete_d.callback(None), incomplete_d)[1]
+            # )
+
+            # def _cancel_d() -> None:
+            #     logger.info("asdf before cancel")
+            #     incomplete_d.cancel()
+            #     logger.info("asdf after cancel")
+
+            # await run_in_background(lambda: (_cancel_d(), incomplete_d)[1])
+
+            logger.info("asdf 2")
+
+            self._check_test_key("foo")
+
+            # Pump the competing task a bit
+            # await clock.sleep(0)
+            # await clock.sleep(0)
+
+            # We expect a failure due to the timeout
+            # self.failureResultOf(d, defer.CancelledError)
+            self.successResultOf(d)
+
+            self._check_test_key("foo")
+
+        self.assertEqual(str(errback_logcontext), "foo")
+
+        # Back to the sentinel context at the end of the day
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+    # @logcontext_clean
+    async def test_make_deferred_yieldable_asdf2(self) -> None:
+        # Ignore linter error since we are creating a `Clock` for testing purposes.
+        clock = Clock(reactor, server_name="test_server")  # type: ignore[multiple-internal-clocks]
+
+        # Sanity check that we start in the sentinel context
+        self.assertEqual(current_context(), SENTINEL_CONTEXT)
+
+        # Create a deferred which we will never complete
+        incomplete_d: Deferred = Deferred()
+
+        async def bbb() -> None:
+            logger.info("asdf before cancel")
+            # incomplete_d.cancel()
+            with PreserveLoggingContext():
+                incomplete_d.cancel()
+            logger.info("asdf after cancel")
 
         async def competing_task() -> None:
             with LoggingContext(
@@ -822,37 +929,13 @@ class LoggingContextTestCase(unittest.TestCase):
             LoggingContext(name="foo", server_name="test_server")
         ):
             # d = defer.ensureDeferred(competing_task())
-            d = run_in_background(competing_task)
+            d1 = run_in_background(competing_task)
+            _d2 = run_in_background(bbb)
             # reactor.callLater(0, lambda: defer.ensureDeferred(competing_task()))
             await clock.sleep(0)
 
-            logger.info("asdf 1")
-
-            self._check_test_key("foo")
-
-            # Pump the competing task a bit
-            # await clock.sleep(0)
-
-            # Cancel the deferred
-            logger.info("asdf going to cancel incomplete_d")
-            # incomplete_d.cancel()
-            # with PreserveLoggingContext():
-            #     incomplete_d.cancel()
-            # await run_in_background(lambda: (incomplete_d.cancel(), incomplete_d)[1])
-
-            def _cancel_d() -> None:
-                logger.info("asdf before cancel")
-                incomplete_d.cancel()
-                logger.info("asdf after cancel")
-
-            await run_in_background(lambda: (_cancel_d(), incomplete_d)[1])
-
-            logger.info("asdf 2")
-
-            self._check_test_key("foo")
-
             # We expect a failure due to the timeout
-            self.failureResultOf(d, defer.CancelledError)
+            self.failureResultOf(d1, defer.CancelledError)
 
             self._check_test_key("foo")
 

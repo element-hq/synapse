@@ -26,7 +26,6 @@ from parameterized import parameterized_class
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.python.failure import Failure
-from tests.unittest import logcontext_clean
 
 from synapse.logging.context import (
     SENTINEL_CONTEXT,
@@ -46,7 +45,7 @@ from synapse.util.async_helpers import (
 )
 
 from tests.server import get_clock
-from tests.unittest import TestCase
+from tests.unittest import TestCase, logcontext_clean
 
 logger = logging.getLogger(__name__)
 
