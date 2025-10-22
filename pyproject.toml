@@ -81,6 +81,10 @@ select = [
     # pyupgrade
     "UP006",
 ]
+extend-safe-fixes = [
+    # pyupgrade
+    "UP006"
+]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
