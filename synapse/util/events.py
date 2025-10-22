@@ -66,8 +66,8 @@ class MTopic(ParseModel):
     def ignore_invalid_representations(
         cls, m_text: Any
     ) -> Optional[List[MTextRepresentation]]:
-        if not isinstance(m_text, list):
-            raise ValueError("m.text must be a list")
+        if not isinstance(m_text, (list, tuple)):
+            raise ValueError("m.text must be a list or a tuple")
         representations = []
         for element in m_text:
             try:
