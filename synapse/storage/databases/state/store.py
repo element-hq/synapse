@@ -22,13 +22,9 @@
 import logging
 from typing import (
     TYPE_CHECKING,
-    Dict,
     Iterable,
-    List,
     Mapping,
     Optional,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -174,7 +170,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 return _GetStateGroupDelta(None, None)
 
             delta_ids = cast(
-                List[Tuple[str, str, str]],
+                list[tuple[str, str, str]],
                 self.db_pool.simple_select_list_txn(
                     txn,
                     table="state_groups_state",
@@ -199,8 +195,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     @cancellable
     async def _get_state_groups_from_groups(
-        self, groups: List[int], state_filter: StateFilter
-    ) -> Dict[int, StateMap[str]]:
+        self, groups: list[int], state_filter: StateFilter
+    ) -> dict[int, StateMap[str]]:
         """Returns the state groups for a given set of groups from the
         database, filtering on types of state events.
 
@@ -211,7 +207,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         Returns:
             Dict of state group to state map.
         """
-        results: Dict[int, StateMap[str]] = {}
+        results: dict[int, StateMap[str]] = {}
 
         chunks = [groups[i : i + 100] for i in range(0, len(groups), 100)]
         for chunk in chunks:
@@ -232,7 +228,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         cache: DictionaryCache[int, StateKey, str],
         group: int,
         state_filter: StateFilter,
-    ) -> Tuple[MutableStateMap[str], bool]:
+    ) -> tuple[MutableStateMap[str], bool]:
         """Checks if group is in cache. See `get_state_for_groups`
 
         Args:
@@ -284,7 +280,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @cancellable
     async def _get_state_for_groups(
         self, groups: Iterable[int], state_filter: Optional[StateFilter] = None
-    ) -> Dict[int, MutableStateMap[str]]:
+    ) -> dict[int, MutableStateMap[str]]:
         """Gets the state at each of a list of state groups, optionally
         filtering by type/state_key
 
@@ -355,7 +351,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         groups: Iterable[int],
         cache: DictionaryCache[int, StateKey, str],
         state_filter: StateFilter,
-    ) -> Tuple[Dict[int, MutableStateMap[str]], Set[int]]:
+    ) -> tuple[dict[int, MutableStateMap[str]], set[int]]:
         """Gets the state at each of a list of state groups, optionally
         filtering by type/state_key, querying from a specific cache.
 
@@ -387,7 +383,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
     def _insert_into_cache(
         self,
-        group_to_state_dict: Dict[int, StateMap[str]],
+        group_to_state_dict: dict[int, StateMap[str]],
         state_filter: StateFilter,
         cache_seq_num_members: int,
         cache_seq_num_non_members: int,
@@ -452,10 +448,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     async def store_state_deltas_for_batched(
         self,
-        events_and_context: List[Tuple[EventBase, UnpersistedEventContextBase]],
+        events_and_context: list[tuple[EventBase, UnpersistedEventContextBase]],
         room_id: str,
         prev_group: int,
-    ) -> List[Tuple[EventBase, UnpersistedEventContext]]:
+    ) -> list[tuple[EventBase, UnpersistedEventContext]]:
         """Generate and store state deltas for a group of events and contexts created to be
         batch persisted. Note that all the events must be in a linear chain (ie a <- b <- c).
 
@@ -469,9 +465,9 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         def insert_deltas_group_txn(
             txn: LoggingTransaction,
-            events_and_context: List[Tuple[EventBase, UnpersistedEventContext]],
+            events_and_context: list[tuple[EventBase, UnpersistedEventContext]],
             prev_group: int,
-        ) -> List[Tuple[EventBase, UnpersistedEventContext]]:
+        ) -> list[tuple[EventBase, UnpersistedEventContext]]:
             """Generate and store state groups for the provided events and contexts.
 
             Requires that we have the state as a delta from the last persisted state group.
@@ -782,7 +778,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         )
 
         rows = cast(
-            List[Tuple[int]],
+            list[tuple[int]],
             self.db_pool.simple_select_many_txn(
                 txn,
                 table="state_group_edges",
@@ -853,7 +849,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     async def get_previous_state_groups(
         self, state_groups: Iterable[int]
-    ) -> Dict[int, int]:
+    ) -> dict[int, int]:
         """Fetch the previous groups of the given state groups.
 
         Args:
@@ -864,7 +860,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         """
 
         rows = cast(
-            List[Tuple[int, int]],
+            list[tuple[int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="state_group_edges",
                 column="state_group",
@@ -881,7 +877,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     @tag_args
     async def get_next_state_groups(
         self, state_groups: Iterable[int]
-    ) -> Dict[int, int]:
+    ) -> dict[int, int]:
         """Fetch the groups that have the given state groups as their previous
         state groups.
 
@@ -893,7 +889,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         """
 
         rows = cast(
-            List[Tuple[int, int]],
+            list[tuple[int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="state_group_edges",
                 column="prev_state_group",

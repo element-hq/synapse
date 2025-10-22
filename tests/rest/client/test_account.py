@@ -23,7 +23,7 @@ import os
 import re
 from email.parser import Parser
 from http import HTTPStatus
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 from unittest.mock import Mock
 
 from twisted.internet.interfaces import IReactorTCP
@@ -87,7 +87,7 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
         ) -> None:
             self.email_attempts.append(msg_bytes)
 
-        self.email_attempts: List[bytes] = []
+        self.email_attempts: list[bytes] = []
         hs.get_send_email_handler()._sendmail = sendmail
 
         return hs
@@ -721,7 +721,7 @@ class WhoamiTestCase(unittest.HomeserverTestCase):
         register.register_servlets,
     ]
 
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = super().default_config()
         config["allow_guest_access"] = True
         return config
@@ -827,7 +827,7 @@ class ThreepidEmailRestTestCase(unittest.HomeserverTestCase):
         ) -> None:
             self.email_attempts.append(msg_bytes)
 
-        self.email_attempts: List[bytes] = []
+        self.email_attempts: list[bytes] = []
         self.hs.get_send_email_handler()._sendmail = sendmail
 
         return self.hs
@@ -1503,10 +1503,10 @@ class AccountStatusTestCase(unittest.HomeserverTestCase):
 
     def _test_status(
         self,
-        users: Optional[List[str]],
+        users: Optional[list[str]],
         expected_status_code: int = HTTPStatus.OK,
-        expected_statuses: Optional[Dict[str, Dict[str, bool]]] = None,
-        expected_failures: Optional[List[str]] = None,
+        expected_statuses: Optional[dict[str, dict[str, bool]]] = None,
+        expected_failures: Optional[list[str]] = None,
         expected_errcode: Optional[str] = None,
     ) -> None:
         """Send a request to the account status endpoint and check that the response

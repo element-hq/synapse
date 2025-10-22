@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import List, Mapping, Optional, Tuple
+from typing import Mapping, Optional
 
 from synapse.types import JsonDict
 
@@ -115,7 +115,7 @@ def event_visible_to_server(
     history_visibility: str,
     erased_senders: Mapping[str, bool],
     partial_state_invisible: bool,
-    memberships: List[Tuple[str, str]],
+    memberships: list[tuple[str, str]],
 ) -> bool:
     """Determine whether the server is allowed to see the unredacted event.
 

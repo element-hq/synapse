@@ -24,10 +24,8 @@ import os
 import signal
 from types import FrameType, TracebackType
 from typing import (
-    Dict,
     Literal,
     Optional,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -134,7 +132,7 @@ def setupdb() -> None:
 @overload
 def default_config(
     server_name: str, parse: Literal[False] = ...
-) -> Dict[str, object]: ...
+) -> dict[str, object]: ...
 
 
 @overload
@@ -143,7 +141,7 @@ def default_config(server_name: str, parse: Literal[True]) -> HomeServerConfig: 
 
 def default_config(
     server_name: str, parse: bool = False
-) -> Union[Dict[str, object], HomeServerConfig]:
+) -> Union[dict[str, object], HomeServerConfig]:
     """
     Create a reasonable test config.
 
@@ -283,7 +281,7 @@ async def create_room(hs: HomeServer, room_id: str, creator_id: str) -> None:
 T = TypeVar("T")
 
 
-def checked_cast(type: Type[T], x: object) -> T:
+def checked_cast(type: type[T], x: object) -> T:
     """A version of typing.cast that is checked at runtime.
 
     We have our own function for this for two reasons:
@@ -337,7 +335,7 @@ class test_timeout:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:

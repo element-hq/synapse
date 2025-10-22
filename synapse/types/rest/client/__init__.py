@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 from pydantic import (
     ConfigDict,
@@ -151,8 +151,8 @@ class SlidingSyncBody(RequestBodyModel):
                 (Max 1000 messages)
         """
 
-        required_state: List[
-            Annotated[Tuple[StrictStr, StrictStr], Field(strict=False)]
+        required_state: list[
+            Annotated[tuple[StrictStr, StrictStr], Field(strict=False)]
         ]
         timeline_limit: Annotated[int, Field(le=1000, strict=True)]
 
@@ -247,19 +247,19 @@ class SlidingSyncBody(RequestBodyModel):
             """
 
             is_dm: Optional[StrictBool] = None
-            spaces: Optional[List[StrictStr]] = None
+            spaces: Optional[list[StrictStr]] = None
             is_encrypted: Optional[StrictBool] = None
             is_invite: Optional[StrictBool] = None
-            room_types: Optional[List[Union[StrictStr, None]]] = None
-            not_room_types: Optional[List[Union[StrictStr, None]]] = None
+            room_types: Optional[list[Union[StrictStr, None]]] = None
+            not_room_types: Optional[list[Union[StrictStr, None]]] = None
             room_name_like: Optional[StrictStr] = None
-            tags: Optional[List[StrictStr]] = None
-            not_tags: Optional[List[StrictStr]] = None
+            tags: Optional[list[StrictStr]] = None
+            not_tags: Optional[list[StrictStr]] = None
 
         ranges: Optional[
-            List[
+            list[
                 Annotated[
-                    Tuple[
+                    tuple[
                         Annotated[int, Field(ge=0, strict=True)],
                         Annotated[int, Field(ge=0, strict=True)],
                     ],
@@ -337,9 +337,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: Optional[list[StrictStr]] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: Optional[list[StrictStr]] = ["*"]
 
         class ReceiptsExtension(RequestBodyModel):
             """The Receipts extension (MSC3960)
@@ -354,9 +354,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: Optional[list[StrictStr]] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: Optional[list[StrictStr]] = ["*"]
 
         class TypingExtension(RequestBodyModel):
             """The Typing Notification extension (MSC3961)
@@ -371,9 +371,9 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
             # Process all lists defined in the Sliding Window API. (This is the default.)
-            lists: Optional[List[StrictStr]] = ["*"]
+            lists: Optional[list[StrictStr]] = ["*"]
             # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-            rooms: Optional[List[StrictStr]] = ["*"]
+            rooms: Optional[list[StrictStr]] = ["*"]
 
         class ThreadSubscriptionsExtension(RequestBodyModel):
             """The Thread Subscriptions extension (MSC4308)
@@ -397,19 +397,19 @@ class SlidingSyncBody(RequestBodyModel):
 
     conn_id: Optional[StrictStr] = None
     lists: Optional[
-        Dict[
+        dict[
             Annotated[str, StringConstraints(max_length=64, strict=True)],
             SlidingSyncList,
         ]
     ] = None
-    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
+    room_subscriptions: Optional[dict[StrictStr, RoomSubscription]] = None
     extensions: Optional[Extensions] = None
 
     @field_validator("lists")
     @classmethod
     def lists_length_check(
-        cls, value: Optional[Dict[str, SlidingSyncList]]
-    ) -> Optional[Dict[str, SlidingSyncList]]:
+        cls, value: Optional[dict[str, SlidingSyncList]]
+    ) -> Optional[dict[str, SlidingSyncList]]:
         if value is not None:
             assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
         return value

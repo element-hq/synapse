@@ -21,7 +21,7 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Iterable, Optional
 
 import attr
 from signedjson.key import (
@@ -82,7 +82,7 @@ class VerifyJsonRequest:
     server_name: str
     get_json_object: Callable[[], JsonDict]
     minimum_valid_until_ts: int
-    key_ids: List[str]
+    key_ids: list[str]
 
     @staticmethod
     def from_json_object(
@@ -141,7 +141,7 @@ class _FetchKeyRequest:
 
     server_name: str
     minimum_valid_until_ts: int
-    key_ids: List[str]
+    key_ids: list[str]
 
 
 class Keyring:
@@ -156,7 +156,7 @@ class Keyring:
 
         if key_fetchers is None:
             # Always fetch keys from the database.
-            mutable_key_fetchers: List[KeyFetcher] = [StoreKeyFetcher(hs)]
+            mutable_key_fetchers: list[KeyFetcher] = [StoreKeyFetcher(hs)]
             # Fetch keys from configured trusted key servers, if any exist.
             key_servers = hs.config.key.key_servers
             if key_servers:
@@ -169,7 +169,7 @@ class Keyring:
             self._key_fetchers = key_fetchers
 
         self._fetch_keys_queue: BatchingQueue[
-            _FetchKeyRequest, Dict[str, Dict[str, FetchKeyResult]]
+            _FetchKeyRequest, dict[str, dict[str, FetchKeyResult]]
         ] = BatchingQueue(
             name="keyring_server",
             hs=hs,
@@ -182,7 +182,7 @@ class Keyring:
 
         # build a FetchKeyResult for each of our own keys, to shortcircuit the
         # fetcher.
-        self._local_verify_keys: Dict[str, FetchKeyResult] = {}
+        self._local_verify_keys: dict[str, FetchKeyResult] = {}
         for key_id, key in hs.config.key.old_signing_keys.items():
             self._local_verify_keys[key_id] = FetchKeyResult(
                 verify_key=key, valid_until_ts=key.expired
@@ -229,8 +229,8 @@ class Keyring:
         return await self.process_request(request)
 
     def verify_json_objects_for_server(
-        self, server_and_json: Iterable[Tuple[str, dict, int]]
-    ) -> List["defer.Deferred[None]"]:
+        self, server_and_json: Iterable[tuple[str, dict, int]]
+    ) -> list["defer.Deferred[None]"]:
         """Bulk verifies signatures of json objects, bulk fetching keys as
         necessary.
 
@@ -286,7 +286,7 @@ class Keyring:
                 Codes.UNAUTHORIZED,
             )
 
-        found_keys: Dict[str, FetchKeyResult] = {}
+        found_keys: dict[str, FetchKeyResult] = {}
 
         # If we are the originating server, short-circuit the key-fetch for any keys
         # we already have
@@ -368,8 +368,8 @@ class Keyring:
             )
 
     async def _inner_fetch_key_requests(
-        self, requests: List[_FetchKeyRequest]
-    ) -> Dict[str, Dict[str, FetchKeyResult]]:
+        self, requests: list[_FetchKeyRequest]
+    ) -> dict[str, dict[str, FetchKeyResult]]:
         """Processing function for the queue of `_FetchKeyRequest`.
 
         Takes a list of key fetch requests, de-duplicates them and then carries out
@@ -387,7 +387,7 @@ class Keyring:
         # First we need to deduplicate requests for the same key. We do this by
         # taking the *maximum* requested `minimum_valid_until_ts` for each pair
         # of server name/key ID.
-        server_to_key_to_ts: Dict[str, Dict[str, int]] = {}
+        server_to_key_to_ts: dict[str, dict[str, int]] = {}
         for request in requests:
             by_server = server_to_key_to_ts.setdefault(request.server_name, {})
             for key_id in request.key_ids:
@@ -412,7 +412,7 @@ class Keyring:
 
         # We now convert the returned list of results into a map from server
         # name to key ID to FetchKeyResult, to return.
-        to_return: Dict[str, Dict[str, FetchKeyResult]] = {}
+        to_return: dict[str, dict[str, FetchKeyResult]] = {}
         for request, results in zip(deduped_requests, results_per_request):
             to_return_by_server = to_return.setdefault(request.server_name, {})
             for key_id, key_result in results.items():
@@ -424,7 +424,7 @@ class Keyring:
 
     async def _inner_fetch_key_request(
         self, verify_request: _FetchKeyRequest
-    ) -> Dict[str, FetchKeyResult]:
+    ) -> dict[str, FetchKeyResult]:
         """Attempt to fetch the given key by calling each key fetcher one by one.
 
         If a key is found, check whether its `valid_until_ts` attribute satisfies the
@@ -445,7 +445,7 @@ class Keyring:
         """
         logger.debug("Starting fetch for %s", verify_request)
 
-        found_keys: Dict[str, FetchKeyResult] = {}
+        found_keys: dict[str, FetchKeyResult] = {}
         missing_key_ids = set(verify_request.key_ids)
 
         for fetcher in self._key_fetchers:
@@ -499,8 +499,8 @@ class KeyFetcher(metaclass=abc.ABCMeta):
         self._queue.shutdown()
 
     async def get_keys(
-        self, server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-    ) -> Dict[str, FetchKeyResult]:
+        self, server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+    ) -> dict[str, FetchKeyResult]:
         results = await self._queue.add_to_queue(
             _FetchKeyRequest(
                 server_name=server_name,
@@ -512,8 +512,8 @@ class KeyFetcher(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     async def _fetch_keys(
-        self, keys_to_fetch: List[_FetchKeyRequest]
-    ) -> Dict[str, Dict[str, FetchKeyResult]]:
+        self, keys_to_fetch: list[_FetchKeyRequest]
+    ) -> dict[str, dict[str, FetchKeyResult]]:
         pass
 
 
@@ -526,8 +526,8 @@ class StoreKeyFetcher(KeyFetcher):
         self.store = hs.get_datastores().main
 
     async def _fetch_keys(
-        self, keys_to_fetch: List[_FetchKeyRequest]
-    ) -> Dict[str, Dict[str, FetchKeyResult]]:
+        self, keys_to_fetch: list[_FetchKeyRequest]
+    ) -> dict[str, dict[str, FetchKeyResult]]:
         key_ids_to_fetch = (
             (queue_value.server_name, key_id)
             for queue_value in keys_to_fetch
@@ -535,7 +535,7 @@ class StoreKeyFetcher(KeyFetcher):
         )
 
         res = await self.store.get_server_keys_json(key_ids_to_fetch)
-        keys: Dict[str, Dict[str, FetchKeyResult]] = {}
+        keys: dict[str, dict[str, FetchKeyResult]] = {}
         for (server_name, key_id), key in res.items():
             keys.setdefault(server_name, {})[key_id] = key
         return keys
@@ -549,7 +549,7 @@ class BaseV2KeyFetcher(KeyFetcher):
 
     async def process_v2_response(
         self, from_server: str, response_json: JsonDict, time_added_ms: int
-    ) -> Dict[str, FetchKeyResult]:
+    ) -> dict[str, FetchKeyResult]:
         """Parse a 'Server Keys' structure from the result of a /key request
 
         This is used to parse either the entirety of the response from
@@ -640,11 +640,11 @@ class PerspectivesKeyFetcher(BaseV2KeyFetcher):
         self.key_servers = hs.config.key.key_servers
 
     async def _fetch_keys(
-        self, keys_to_fetch: List[_FetchKeyRequest]
-    ) -> Dict[str, Dict[str, FetchKeyResult]]:
+        self, keys_to_fetch: list[_FetchKeyRequest]
+    ) -> dict[str, dict[str, FetchKeyResult]]:
         """see KeyFetcher._fetch_keys"""
 
-        async def get_key(key_server: TrustedKeyServer) -> Dict:
+        async def get_key(key_server: TrustedKeyServer) -> dict:
             try:
                 return await self.get_server_verify_key_v2_indirect(
                     keys_to_fetch, key_server
@@ -670,7 +670,7 @@ class PerspectivesKeyFetcher(BaseV2KeyFetcher):
             ).addErrback(unwrapFirstError)
         )
 
-        union_of_keys: Dict[str, Dict[str, FetchKeyResult]] = {}
+        union_of_keys: dict[str, dict[str, FetchKeyResult]] = {}
         for result in results:
             for server_name, keys in result.items():
                 union_of_keys.setdefault(server_name, {}).update(keys)
@@ -678,8 +678,8 @@ class PerspectivesKeyFetcher(BaseV2KeyFetcher):
         return union_of_keys
 
     async def get_server_verify_key_v2_indirect(
-        self, keys_to_fetch: List[_FetchKeyRequest], key_server: TrustedKeyServer
-    ) -> Dict[str, Dict[str, FetchKeyResult]]:
+        self, keys_to_fetch: list[_FetchKeyRequest], key_server: TrustedKeyServer
+    ) -> dict[str, dict[str, FetchKeyResult]]:
         """
         Args:
             keys_to_fetch:
@@ -731,8 +731,8 @@ class PerspectivesKeyFetcher(BaseV2KeyFetcher):
             "Response from notary server %s: %s", perspective_name, query_response
         )
 
-        keys: Dict[str, Dict[str, FetchKeyResult]] = {}
-        added_keys: Dict[Tuple[str, str], FetchKeyResult] = {}
+        keys: dict[str, dict[str, FetchKeyResult]] = {}
+        added_keys: dict[tuple[str, str], FetchKeyResult] = {}
 
         time_now_ms = self.clock.time_msec()
 
@@ -836,8 +836,8 @@ class ServerKeyFetcher(BaseV2KeyFetcher):
         self.client = hs.get_federation_http_client()
 
     async def get_keys(
-        self, server_name: str, key_ids: List[str], minimum_valid_until_ts: int
-    ) -> Dict[str, FetchKeyResult]:
+        self, server_name: str, key_ids: list[str], minimum_valid_until_ts: int
+    ) -> dict[str, FetchKeyResult]:
         results = await self._queue.add_to_queue(
             _FetchKeyRequest(
                 server_name=server_name,
@@ -849,8 +849,8 @@ class ServerKeyFetcher(BaseV2KeyFetcher):
         return results.get(server_name, {})
 
     async def _fetch_keys(
-        self, keys_to_fetch: List[_FetchKeyRequest]
-    ) -> Dict[str, Dict[str, FetchKeyResult]]:
+        self, keys_to_fetch: list[_FetchKeyRequest]
+    ) -> dict[str, dict[str, FetchKeyResult]]:
         """
         Args:
             keys_to_fetch:
@@ -879,7 +879,7 @@ class ServerKeyFetcher(BaseV2KeyFetcher):
 
     async def get_server_verify_keys_v2_direct(
         self, server_name: str
-    ) -> Dict[str, FetchKeyResult]:
+    ) -> dict[str, FetchKeyResult]:
         """
 
         Args:

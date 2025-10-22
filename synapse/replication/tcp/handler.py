@@ -20,18 +20,14 @@
 #
 #
 import logging
+from collections import deque
 from typing import (
     TYPE_CHECKING,
     Any,
     Awaitable,
-    Deque,
-    Dict,
     Iterable,
     Iterator,
-    List,
     Optional,
-    Set,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -119,8 +115,8 @@ tcp_command_queue_gauge = LaterGauge(
 
 
 # the type of the entries in _command_queues_by_stream
-_StreamCommandQueue = Deque[
-    Tuple[Union[RdataCommand, PositionCommand], IReplicationConnection]
+_StreamCommandQueue = deque[
+    tuple[Union[RdataCommand, PositionCommand], IReplicationConnection]
 ]
 
 
@@ -141,18 +137,18 @@ class ReplicationCommandHandler:
         self._instance_name = hs.get_instance_name()
 
         # Additional Redis channel suffixes to subscribe to.
-        self._channels_to_subscribe_to: List[str] = []
+        self._channels_to_subscribe_to: list[str] = []
 
         self._is_presence_writer = (
             hs.get_instance_name() in hs.config.worker.writers.presence
         )
 
-        self._streams: Dict[str, Stream] = {
+        self._streams: dict[str, Stream] = {
             stream.NAME: stream(hs) for stream in STREAMS_MAP.values()
         }
 
         # List of streams that this instance is the source of
-        self._streams_to_replicate: List[Stream] = []
+        self._streams_to_replicate: list[Stream] = []
 
         for stream in self._streams.values():
             if hs.config.redis.redis_enabled and stream.NAME == CachesStream.NAME:
@@ -246,14 +242,14 @@ class ReplicationCommandHandler:
 
         # Map of stream name to batched updates. See RdataCommand for info on
         # how batching works.
-        self._pending_batches: Dict[str, List[Any]] = {}
+        self._pending_batches: dict[str, list[Any]] = {}
 
         # The factory used to create connections.
         self._factory: Optional[ReconnectingClientFactory] = None
 
         # The currently connected connections. (The list of places we need to send
         # outgoing replication commands to.)
-        self._connections: List[IReplicationConnection] = []
+        self._connections: list[IReplicationConnection] = []
 
         tcp_resource_total_connections_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
@@ -264,7 +260,7 @@ class ReplicationCommandHandler:
         # them in order in a separate background process.
 
         # the streams which are currently being processed by _unsafe_process_queue
-        self._processing_streams: Set[str] = set()
+        self._processing_streams: set[str] = set()
 
         # for each stream, a queue of commands that are awaiting processing, and the
         # connection that they arrived on.
@@ -274,7 +270,7 @@ class ReplicationCommandHandler:
 
         # For each connection, the incoming stream names that have received a POSITION
         # from that connection.
-        self._streams_by_connection: Dict[IReplicationConnection, Set[str]] = {}
+        self._streams_by_connection: dict[IReplicationConnection, set[str]] = {}
 
         tcp_command_queue_gauge.register_hook(
             homeserver_instance_id=hs.get_instance_id(),
@@ -450,11 +446,11 @@ class ReplicationCommandHandler:
                 bindAddress=None,
             )
 
-    def get_streams(self) -> Dict[str, Stream]:
+    def get_streams(self) -> dict[str, Stream]:
         """Get a map from stream name to all streams."""
         return self._streams
 
-    def get_streams_to_replicate(self) -> List[Stream]:
+    def get_streams_to_replicate(self) -> list[Stream]:
         """Get a list of streams that this instances replicates."""
         return self._streams_to_replicate
 
@@ -902,8 +898,8 @@ UpdateRow = TypeVar("UpdateRow")
 
 
 def _batch_updates(
-    updates: Iterable[Tuple[UpdateToken, UpdateRow]],
-) -> Iterator[Tuple[UpdateToken, List[UpdateRow]]]:
+    updates: Iterable[tuple[UpdateToken, UpdateRow]],
+) -> Iterator[tuple[UpdateToken, list[UpdateRow]]]:
     """Collect stream updates with the same token together
 
     Given a series of updates returned by Stream.get_updates_since(), collects

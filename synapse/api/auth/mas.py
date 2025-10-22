@@ -13,7 +13,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Optional, Set
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlencode
 
 from pydantic import (
@@ -390,7 +390,7 @@ class MasDelegatedAuth(BaseAuth):
             # We only allow a single device_id in the scope, so we find them all in the
             # scope list, and raise if there are more than one. The OIDC server should be
             # the one enforcing valid scopes, so we raise a 500 if we find an invalid scope.
-            device_ids: Set[str] = set()
+            device_ids: set[str] = set()
             for tok in scope:
                 if tok.startswith(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX):
                     device_ids.add(tok[len(UNSTABLE_SCOPE_MATRIX_DEVICE_PREFIX) :])

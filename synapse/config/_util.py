@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, Type, TypeVar
+from typing import Any, TypeVar
 
 import jsonschema
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -79,8 +79,8 @@ Model = TypeVar("Model", bound=BaseModel)
 
 def parse_and_validate_mapping(
     config: Any,
-    model_type: Type[Model],
-) -> Dict[str, Model]:
+    model_type: type[Model],
+) -> dict[str, Model]:
     """Parse `config` as a mapping from strings to a given `Model` type.
     Args:
         config: The configuration data to check

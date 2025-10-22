@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, cast
+from typing import Optional, cast
 
 from canonicaljson import json
 
@@ -247,8 +247,8 @@ class RedactionTestCase(unittest.HomeserverTestCase):
 
             async def build(
                 self,
-                prev_event_ids: List[str],
-                auth_event_ids: Optional[List[str]],
+                prev_event_ids: list[str],
+                auth_event_ids: Optional[list[str]],
                 depth: Optional[int] = None,
             ) -> EventBase:
                 built_event = await self._base_builder.build(

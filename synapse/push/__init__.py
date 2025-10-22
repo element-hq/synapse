@@ -94,7 +94,7 @@ The Pusher instance also calls out to various utilities for generating payloads
 """
 
 import abc
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import attr
 
@@ -131,7 +131,7 @@ class PusherConfig:
     # while the "set_device_id_for_pushers" background update is running.
     access_token: Optional[int]
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Information that can be retrieved about a pusher after creation."""
         return {
             "app_display_name": self.app_display_name,

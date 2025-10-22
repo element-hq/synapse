@@ -21,16 +21,12 @@ from typing import (
     AbstractSet,
     Any,
     Callable,
-    Dict,
     Final,
     Generic,
-    List,
     Mapping,
     MutableMapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
     TypeVar,
     cast,
 )
@@ -175,17 +171,17 @@ class SlidingSyncResult:
 
         name: Optional[str]
         avatar: Optional[str]
-        heroes: Optional[List[StrippedHero]]
+        heroes: Optional[list[StrippedHero]]
         is_dm: bool
         initial: bool
         unstable_expanded_timeline: bool
         # Should be empty for invite/knock rooms with `stripped_state`
-        required_state: List[EventBase]
+        required_state: list[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
-        timeline_events: List[EventBase]
-        bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
+        timeline_events: list[EventBase]
+        bundled_aggregations: Optional[dict[str, "BundledAggregations"]]
         # Optional because it's only relevant to invite/knock rooms
-        stripped_state: List[JsonDict]
+        stripped_state: list[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         prev_batch: Optional[StreamToken]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
@@ -237,11 +233,11 @@ class SlidingSyncResult:
             """
 
             op: OperationType
-            range: Tuple[int, int]
-            room_ids: List[str]
+            range: tuple[int, int]
+            room_ids: list[str]
 
         count: int
-        ops: List[Operation]
+        ops: list[Operation]
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class Extensions:
@@ -412,7 +408,7 @@ class SlidingSyncResult:
 
     next_pos: SlidingSyncStreamToken
     lists: Mapping[str, SlidingWindowList]
-    rooms: Dict[str, RoomResult]
+    rooms: dict[str, RoomResult]
     extensions: Extensions
 
     def __bool__(self) -> bool:
@@ -482,7 +478,7 @@ class RoomSyncConfig:
         Args:
             room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
         """
-        required_state_map: Dict[str, Set[str]] = {}
+        required_state_map: dict[str, set[str]] = {}
         for (
             state_type,
             state_key,

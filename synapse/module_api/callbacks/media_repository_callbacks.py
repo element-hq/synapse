@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 from synapse.config.repository import MediaUploadLimit
 from synapse.types import JsonDict
@@ -30,7 +30,7 @@ GET_MEDIA_CONFIG_FOR_USER_CALLBACK = Callable[[str], Awaitable[Optional[JsonDict
 IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK = Callable[[str, int], Awaitable[bool]]
 
 GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK = Callable[
-    [str], Awaitable[Optional[List[MediaUploadLimit]]]
+    [str], Awaitable[Optional[list[MediaUploadLimit]]]
 ]
 
 ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK = Callable[
@@ -42,16 +42,16 @@ class MediaRepositoryModuleApiCallbacks:
     def __init__(self, hs: "HomeServer") -> None:
         self.server_name = hs.hostname
         self.clock = hs.get_clock()
-        self._get_media_config_for_user_callbacks: List[
+        self._get_media_config_for_user_callbacks: list[
             GET_MEDIA_CONFIG_FOR_USER_CALLBACK
         ] = []
-        self._is_user_allowed_to_upload_media_of_size_callbacks: List[
+        self._is_user_allowed_to_upload_media_of_size_callbacks: list[
             IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
         ] = []
-        self._get_media_upload_limits_for_user_callbacks: List[
+        self._get_media_upload_limits_for_user_callbacks: list[
             GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
         ] = []
-        self._on_media_upload_limit_exceeded_callbacks: List[
+        self._on_media_upload_limit_exceeded_callbacks: list[
             ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
         ] = []
 
@@ -117,7 +117,7 @@ class MediaRepositoryModuleApiCallbacks:
 
     async def get_media_upload_limits_for_user(
         self, user_id: str
-    ) -> Optional[List[MediaUploadLimit]]:
+    ) -> Optional[list[MediaUploadLimit]]:
         """
         Get the first non-None list of MediaUploadLimits for the user from the registered callbacks.
         If a list is returned it will be sorted in descending order of duration.
@@ -128,7 +128,7 @@ class MediaRepositoryModuleApiCallbacks:
                 name=f"{callback.__module__}.{callback.__qualname__}",
                 server_name=self.server_name,
             ):
-                res: Optional[List[MediaUploadLimit]] = await delay_cancellation(
+                res: Optional[list[MediaUploadLimit]] = await delay_cancellation(
                     callback(user_id)
                 )
             if res is not None:  # to allow [] to be returned meaning no limit

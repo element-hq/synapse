@@ -9,12 +9,9 @@ from typing import (
     Callable,
     Iterable,
     Iterator,
-    List,
     MutableSequence,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -37,11 +34,11 @@ class SortedList(MutableSequence[_T]):
     ): ...
     # NB: currently mypy does not honour return type, see mypy #3307
     @overload
-    def __new__(cls: Type[_SL], iterable: None, key: None) -> _SL: ...
+    def __new__(cls: type[_SL], iterable: None, key: None) -> _SL: ...
     @overload
-    def __new__(cls: Type[_SL], iterable: None, key: _Key[_T]) -> SortedKeyList[_T]: ...
+    def __new__(cls: type[_SL], iterable: None, key: _Key[_T]) -> SortedKeyList[_T]: ...
     @overload
-    def __new__(cls: Type[_SL], iterable: Iterable[_T], key: None) -> _SL: ...
+    def __new__(cls: type[_SL], iterable: Iterable[_T], key: None) -> _SL: ...
     @overload
     def __new__(cls, iterable: Iterable[_T], key: _Key[_T]) -> SortedKeyList[_T]: ...
     @property
@@ -64,11 +61,11 @@ class SortedList(MutableSequence[_T]):
     @overload
     def __getitem__(self, index: int) -> _T: ...
     @overload
-    def __getitem__(self, index: slice) -> List[_T]: ...
+    def __getitem__(self, index: slice) -> list[_T]: ...
     @overload
     def _getitem(self, index: int) -> _T: ...
     @overload
-    def _getitem(self, index: slice) -> List[_T]: ...
+    def _getitem(self, index: slice) -> list[_T]: ...
     @overload
     def __setitem__(self, index: int, value: _T) -> None: ...
     @overload
@@ -95,7 +92,7 @@ class SortedList(MutableSequence[_T]):
         self,
         minimum: Optional[int] = ...,
         maximum: Optional[int] = ...,
-        inclusive: Tuple[bool, bool] = ...,
+        inclusive: tuple[bool, bool] = ...,
         reverse: bool = ...,
     ) -> Iterator[_T]: ...
     def bisect_left(self, value: _T) -> int: ...
@@ -151,14 +148,14 @@ class SortedKeyList(SortedList[_T]):
         self,
         minimum: Optional[int] = ...,
         maximum: Optional[int] = ...,
-        inclusive: Tuple[bool, bool] = ...,
+        inclusive: tuple[bool, bool] = ...,
         reverse: bool = ...,
     ) -> Iterator[_T]: ...
     def irange_key(
         self,
         min_key: Optional[Any] = ...,
         max_key: Optional[Any] = ...,
-        inclusive: Tuple[bool, bool] = ...,
+        inclusive: tuple[bool, bool] = ...,
         reserve: bool = ...,
     ) -> Iterator[_T]: ...
     def bisect_left(self, value: _T) -> int: ...

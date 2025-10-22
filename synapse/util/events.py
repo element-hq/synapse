@@ -13,7 +13,7 @@
 #
 #
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from pydantic import Field, StrictStr, ValidationError, field_validator
 
@@ -53,7 +53,7 @@ class MTopic(ParseModel):
     See `TopicContentBlock` in the Matrix specification.
     """
 
-    m_text: Optional[List[MTextRepresentation]] = Field(None, alias="m.text")
+    m_text: Optional[list[MTextRepresentation]] = Field(None, alias="m.text")
     """
     An ordered array of textual representations in different mimetypes.
     """
@@ -65,7 +65,7 @@ class MTopic(ParseModel):
     @classmethod
     def ignore_invalid_representations(
         cls, m_text: Any
-    ) -> Optional[List[MTextRepresentation]]:
+    ) -> Optional[list[MTextRepresentation]]:
         if not isinstance(m_text, (list, tuple)):
             raise ValueError("m.text must be a list or a tuple")
         representations = []

@@ -21,7 +21,7 @@
 import base64
 import logging
 import os
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import treq
@@ -252,7 +252,7 @@ class ProxyAgentTests(TestCase):
         server_factory: IProtocolFactory,
         ssl: bool = False,
         expected_sni: Optional[bytes] = None,
-        tls_sanlist: Optional[List[bytes]] = None,
+        tls_sanlist: Optional[list[bytes]] = None,
     ) -> IProtocol:
         """Builds a test server, and completes the outgoing client connection
 
