@@ -958,7 +958,7 @@ class BackgroundUpdater:
         #      match the constraint.
         #   3. We try re-validating the constraint.
 
-        parsed_progress = ValidateConstraintProgress.parse_obj(progress)
+        parsed_progress = ValidateConstraintProgress.model_validate(progress)
 
         if parsed_progress.state == ValidateConstraintProgress.State.check:
             return_columns = ", ".join(unique_columns)

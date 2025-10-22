@@ -895,7 +895,7 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
             if it wasn't a JSON object.
     """
     try:
-        instance = model_type.parse_obj(content)
+        instance = model_type.model_validate(content)
     except ValidationError as e:
         err_type = e.errors()[0]["type"]
 

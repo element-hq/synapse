@@ -71,7 +71,7 @@ class MTopic(ParseModel):
         representations = []
         for element in m_text:
             try:
-                representations.append(MTextRepresentation.parse_obj(element))
+                representations.append(MTextRepresentation.model_validate(element))
             except ValidationError:
                 continue
         return representations
@@ -98,7 +98,7 @@ class TopicContent(ParseModel):
     @classmethod
     def ignore_invalid_m_topic(cls, m_topic: Any) -> Optional[MTopic]:
         try:
-            return MTopic.parse_obj(m_topic)
+            return MTopic.model_validate(m_topic)
         except ValidationError:
             return None
 
@@ -117,7 +117,7 @@ def get_plain_text_topic_from_event_content(content: JsonDict) -> Optional[str]:
     """
 
     try:
-        topic_content = TopicContent.parse_obj(content)
+        topic_content = TopicContent.model_validate(content)
     except ValidationError:
         return None
 

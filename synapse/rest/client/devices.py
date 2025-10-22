@@ -109,7 +109,7 @@ class DeleteDevicesRestServlet(RestServlet):
                 # TODO: Can/should we remove this fallback now?
                 # deal with older clients which didn't pass a JSON dict
                 # the same as those that pass an empty dict
-                body = self.PostBody.parse_obj({})
+                body = self.PostBody.model_validate({})
             else:
                 raise e
 
@@ -189,7 +189,7 @@ class DeviceRestServlet(RestServlet):
                 # TODO: can/should we remove this fallback now?
                 # deal with older clients which didn't pass a JSON dict
                 # the same as those that pass an empty dict
-                body = self.DeleteBody.parse_obj({})
+                body = self.DeleteBody.model_validate({})
             else:
                 raise
 
