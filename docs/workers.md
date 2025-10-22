@@ -120,15 +120,9 @@ worker_replication_secret: ""
 
 redis:
     enabled: true
-    # Optional settings for configuring networking and security with Redis.
-    #host: localhost
-    #port: 6379
-    #use_tls: false
-    #ca_file: /etc/ssl/certs/myca.crt
-    #ca_path: /etc/ssl/certs
-    #certificate_file: client.crt
-    #private_key_file: client.pem
-    #password: redisPassword
+    # For additional Redis configuration options (TLS, authentication, etc.), 
+    # see the Synapse configuration documentation:
+    # https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#redis
 
 instance_map:
     main:
