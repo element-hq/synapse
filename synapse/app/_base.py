@@ -29,6 +29,7 @@ import traceback
 import warnings
 from textwrap import indent
 from threading import Thread
+from types import FrameType
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -39,6 +40,7 @@ from typing import (
     NoReturn,
     Optional,
     Tuple,
+    Union,
     cast,
 )
 from wsgiref.simple_server import WSGIServer
@@ -75,7 +77,6 @@ from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
 from synapse.metrics import install_gc_manager, register_threadpool
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.metrics.jemalloc import setup_jemalloc_stats
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.module_api.callbacks.third_party_event_rules_callbacks import (
@@ -543,6 +544,61 @@ def refresh_certificate(hs: "HomeServer") -> None:
         logger.info("Context factories updated.")
 
 
+_already_setup_sighup_handling = False
+"""
+Marks whether we've already successfully ran `setup_sighup_handling()`.
+"""
+
+
+def setup_sighup_handling() -> None:
+    """
+    Set up SIGHUP handling to call registered callbacks.
+
+    This can be called multiple times safely.
+    """
+    global _already_setup_sighup_handling
+    # We only need to set things up once per process.
+    if _already_setup_sighup_handling:
+        return
+
+    previous_sighup_handler: Union[
+        Callable[[int, Optional[FrameType]], Any], int, None
+    ] = None
+
+    # Set up the SIGHUP machinery.
+    if hasattr(signal, "SIGHUP"):
+
+        def handle_sighup(*args: Any, **kwargs: Any) -> None:
+            # Tell systemd our state, if we're using it. This will silently fail if
+            # we're not using systemd.
+            sdnotify(b"RELOADING=1")
+
+            if callable(previous_sighup_handler):
+                previous_sighup_handler(*args, **kwargs)
+
+            for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
+                for func, args, kwargs in sighup_callbacks:
+                    func(*args, **kwargs)
+
+            sdnotify(b"READY=1")
+
+        # We defer running the sighup handlers until next reactor tick. This
+        # is so that we're in a sane state, e.g. flushing the logs may fail
+        # if the sighup happens in the middle of writing a log entry.
+        def run_sighup(*args: Any, **kwargs: Any) -> None:
+            # `callFromThread` should be "signal safe" as well as thread
+            # safe.
+            reactor.callFromThread(handle_sighup, *args, **kwargs)
+
+        # Register for the SIGHUP signal, chaining any existing handler as there can
+        # only be one handler per signal and we don't want to clobber any existing
+        # handlers (like the `multi_synapse` shard process in the context of Synapse Pro
+        # for small hosts)
+        previous_sighup_handler = signal.signal(signal.SIGHUP, run_sighup)
+
+    _already_setup_sighup_handling = True
+
+
 async def start(hs: "HomeServer", freeze: bool = True) -> None:
     """
     Start a Synapse server or worker.
@@ -582,45 +638,9 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
         name="gai_resolver", server_name=server_name, threadpool=resolver_threadpool
     )
 
-    # Set up the SIGHUP machinery.
-    if hasattr(signal, "SIGHUP"):
-
-        def handle_sighup(*args: Any, **kwargs: Any) -> "defer.Deferred[None]":
-            async def _handle_sighup(*args: Any, **kwargs: Any) -> None:
-                # Tell systemd our state, if we're using it. This will silently fail if
-                # we're not using systemd.
-                sdnotify(b"RELOADING=1")
-
-                for sighup_callbacks in _instance_id_to_sighup_callbacks_map.values():
-                    for func, args, kwargs in sighup_callbacks:
-                        func(*args, **kwargs)
-
-                sdnotify(b"READY=1")
-
-            # It's okay to ignore the linter error here and call
-            # `run_as_background_process` directly because `_handle_sighup` operates
-            # outside of the scope of a specific `HomeServer` instance and holds no
-            # references to it which would prevent a clean shutdown.
-            return run_as_background_process(  # type: ignore[untracked-background-process]
-                "sighup",
-                server_name,
-                _handle_sighup,
-                *args,
-                **kwargs,
-            )
-
-        # We defer running the sighup handlers until next reactor tick. This
-        # is so that we're in a sane state, e.g. flushing the logs may fail
-        # if the sighup happens in the middle of writing a log entry.
-        def run_sighup(*args: Any, **kwargs: Any) -> None:
-            # `callFromThread` should be "signal safe" as well as thread
-            # safe.
-            reactor.callFromThread(handle_sighup, *args, **kwargs)
-
-        signal.signal(signal.SIGHUP, run_sighup)
-
-        register_sighup(hs.get_instance_id(), refresh_certificate, hs)
-        register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
+    setup_sighup_handling()
+    register_sighup(hs.get_instance_id(), refresh_certificate, hs)
+    register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
