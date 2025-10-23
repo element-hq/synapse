@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Optional, Union, cast
 
 from twisted.internet.testing import MemoryReactor
 
@@ -60,7 +60,7 @@ class FlattenDictTestCase(unittest.TestCase):
 
     def test_non_string(self) -> None:
         """String, booleans, ints, nulls and list of those should be kept while other items are dropped."""
-        input: Dict[str, Any] = {
+        input: dict[str, Any] = {
             "woo": "woo",
             "foo": True,
             "bar": 1,
@@ -165,13 +165,13 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         )
         room_member_count = 0
         sender_power_level = 0
-        power_levels: Dict[str, Union[int, Dict[str, int]]] = {}
+        power_levels: dict[str, Union[int, dict[str, int]]] = {}
         return PushRuleEvaluator(
             _flatten_dict(event),
             False,
             room_member_count,
             sender_power_level,
-            cast(Dict[str, int], power_levels.get("notifications", {})),
+            cast(dict[str, int], power_levels.get("notifications", {})),
             {} if related_events is None else related_events,
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
@@ -588,7 +588,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         This tests the behaviour of tweaks_for_actions.
         """
 
-        actions: List[Union[Dict[str, str], str]] = [
+        actions: list[Union[dict[str, str], str]] = [
             {"set_tweak": "sound", "value": "default"},
             {"set_tweak": "highlight"},
             "notify",

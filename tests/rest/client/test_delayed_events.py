@@ -15,7 +15,6 @@
 """Tests REST events for /delayed_events paths."""
 
 from http import HTTPStatus
-from typing import List
 
 from parameterized import parameterized
 
@@ -574,7 +573,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    def _get_delayed_events(self) -> List[JsonDict]:
+    def _get_delayed_events(self) -> list[JsonDict]:
         channel = self.make_request(
             "GET",
             PATH_PREFIX,

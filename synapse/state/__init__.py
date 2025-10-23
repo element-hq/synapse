@@ -26,15 +26,9 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    DefaultDict,
-    Dict,
-    FrozenSet,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
 )
 
 import attr
@@ -246,7 +240,7 @@ class StateHandler:
 
     async def get_current_user_ids_in_room(
         self, room_id: str, latest_event_ids: StrCollection
-    ) -> Set[str]:
+    ) -> set[str]:
         """
         Get the users IDs who are currently in a room.
 
@@ -271,7 +265,7 @@ class StateHandler:
 
     async def get_hosts_in_room_at_events(
         self, room_id: str, event_ids: StrCollection
-    ) -> FrozenSet[str]:
+    ) -> frozenset[str]:
         """Get the hosts that were in a room at the given event ids
 
         Args:
@@ -647,7 +641,7 @@ class StateResolutionHandler:
         )
 
         # dict of set of event_ids -> _StateCacheEntry.
-        self._state_cache: ExpiringCache[FrozenSet[int], _StateCacheEntry] = (
+        self._state_cache: ExpiringCache[frozenset[int], _StateCacheEntry] = (
             ExpiringCache(
                 cache_name="state_cache",
                 server_name=self.server_name,
@@ -665,7 +659,7 @@ class StateResolutionHandler:
         #
 
         # tracks the amount of work done on state res per room
-        self._state_res_metrics: DefaultDict[str, _StateResMetrics] = defaultdict(
+        self._state_res_metrics: defaultdict[str, _StateResMetrics] = defaultdict(
             _StateResMetrics
         )
 
@@ -676,7 +670,7 @@ class StateResolutionHandler:
         room_id: str,
         room_version: str,
         state_groups_ids: Mapping[int, StateMap[str]],
-        event_map: Optional[Dict[str, EventBase]],
+        event_map: Optional[dict[str, EventBase]],
         state_res_store: "StateResolutionStore",
     ) -> _StateCacheEntry:
         """Resolves conflicts between a set of state groups
@@ -776,7 +770,7 @@ class StateResolutionHandler:
         room_id: str,
         room_version: str,
         state_sets: Sequence[StateMap[str]],
-        event_map: Optional[Dict[str, EventBase]],
+        event_map: Optional[dict[str, EventBase]],
         state_res_store: "StateResolutionStore",
     ) -> StateMap[str]:
         """
@@ -884,7 +878,7 @@ class StateResolutionHandler:
         items = self._state_res_metrics.items()
 
         # log the N biggest rooms
-        biggest: List[Tuple[str, _StateResMetrics]] = heapq.nlargest(
+        biggest: list[tuple[str, _StateResMetrics]] = heapq.nlargest(
             n_to_log, items, key=lambda i: extract_key(i[1])
         )
         metrics_logger.debug(
@@ -975,7 +969,7 @@ class StateResolutionStore:
 
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
-    ) -> Awaitable[Dict[str, EventBase]]:
+    ) -> Awaitable[dict[str, EventBase]]:
         """Get events from the database
 
         Args:
@@ -996,9 +990,9 @@ class StateResolutionStore:
     def get_auth_chain_difference(
         self,
         room_id: str,
-        state_sets: List[Set[str]],
-        conflicted_state: Optional[Set[str]],
-        additional_backwards_reachable_conflicted_events: Optional[Set[str]],
+        state_sets: list[set[str]],
+        conflicted_state: Optional[set[str]],
+        additional_backwards_reachable_conflicted_events: Optional[set[str]],
     ) -> Awaitable[StateDifference]:
         """ "Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).

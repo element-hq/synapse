@@ -30,15 +30,10 @@ from typing import (
     Any,
     Callable,
     Collection,
-    Dict,
     Generic,
     Iterable,
-    List,
     Literal,
     Optional,
-    Set,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -308,7 +303,7 @@ class _Node(Generic[KT, VT]):
         # footprint down. Storing `None` is free as its a singleton, while empty
         # lists are 56 bytes (and empty sets are 216 bytes, if we did the naive
         # thing and used sets).
-        self.callbacks: Optional[List[Callable[[], None]]] = None
+        self.callbacks: Optional[list[Callable[[], None]]] = None
 
         self.add_callbacks(callbacks)
 
@@ -404,7 +399,7 @@ class LruCache(Generic[KT, VT]):
         clock: Clock,
         server_name: str,
         cache_name: str,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
+        cache_type: type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
@@ -420,7 +415,7 @@ class LruCache(Generic[KT, VT]):
         clock: Clock,
         server_name: str,
         cache_name: Literal[None] = None,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
+        cache_type: type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
@@ -435,7 +430,7 @@ class LruCache(Generic[KT, VT]):
         clock: Clock,
         server_name: str,
         cache_name: Optional[str] = None,
-        cache_type: Type[Union[dict, TreeCache]] = dict,
+        cache_type: type[Union[dict, TreeCache]] = dict,
         size_callback: Optional[Callable[[VT], int]] = None,
         metrics_collection_callback: Optional[Callable[[], None]] = None,
         apply_cache_factor_from_config: bool = True,
@@ -489,7 +484,7 @@ class LruCache(Generic[KT, VT]):
 
                 Note: The new key does not have to be unique.
         """
-        cache: Union[Dict[KT, _Node[KT, VT]], TreeCache] = cache_type()
+        cache: Union[dict[KT, _Node[KT, VT]], TreeCache] = cache_type()
         self.cache = cache  # Used for introspection.
         self.apply_cache_factor_from_config = apply_cache_factor_from_config
 
@@ -529,7 +524,7 @@ class LruCache(Generic[KT, VT]):
 
         lock = threading.Lock()
 
-        extra_index: Dict[KT, Set[KT]] = {}
+        extra_index: dict[KT, set[KT]] = {}
 
         def evict() -> None:
             while cache_len() > self.max_size:
@@ -682,21 +677,21 @@ class LruCache(Generic[KT, VT]):
             key: tuple,
             default: Literal[None] = None,
             update_metrics: bool = True,
-        ) -> Union[None, Iterable[Tuple[KT, VT]]]: ...
+        ) -> Union[None, Iterable[tuple[KT, VT]]]: ...
 
         @overload
         def cache_get_multi(
             key: tuple,
             default: T,
             update_metrics: bool = True,
-        ) -> Union[T, Iterable[Tuple[KT, VT]]]: ...
+        ) -> Union[T, Iterable[tuple[KT, VT]]]: ...
 
         @synchronized
         def cache_get_multi(
             key: tuple,
             default: Optional[T] = None,
             update_metrics: bool = True,
-        ) -> Union[None, T, Iterable[Tuple[KT, VT]]]:
+        ) -> Union[None, T, Iterable[tuple[KT, VT]]]:
             """Returns a generator yielding all entries under the given key.
 
             Can only be used if backed by a tree cache.

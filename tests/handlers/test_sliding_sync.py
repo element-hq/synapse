@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import AbstractSet, Dict, Mapping, Optional, Set, Tuple
+from typing import AbstractSet, Mapping, Optional
 from unittest.mock import patch
 
 import attr
@@ -3278,7 +3278,7 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         user: UserID,
         to_token: StreamToken,
         from_token: Optional[StreamToken],
-    ) -> Tuple[Dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
+    ) -> tuple[dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
         """
         Get the rooms the user should be syncing with
         """
@@ -3615,7 +3615,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         user: UserID,
         to_token: StreamToken,
         from_token: Optional[StreamToken],
-    ) -> Tuple[Dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
+    ) -> tuple[dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
         """
         Get the rooms the user should be syncing with
         """
@@ -3824,13 +3824,13 @@ class SortRoomsTestCase(HomeserverTestCase):
 
 @attr.s(slots=True, auto_attribs=True, frozen=True)
 class RequiredStateChangesTestParameters:
-    previous_required_state_map: Dict[str, Set[str]]
-    request_required_state_map: Dict[str, Set[str]]
+    previous_required_state_map: dict[str, set[str]]
+    request_required_state_map: dict[str, set[str]]
     state_deltas: StateMap[str]
-    expected_with_state_deltas: Tuple[
+    expected_with_state_deltas: tuple[
         Optional[Mapping[str, AbstractSet[str]]], StateFilter
     ]
-    expected_without_state_deltas: Tuple[
+    expected_without_state_deltas: tuple[
         Optional[Mapping[str, AbstractSet[str]]], StateFilter
     ]
 
@@ -4785,7 +4785,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         self,
         _test_label: str,
         event_type: str,
-        extra_state_keys: Set[str],
+        extra_state_keys: set[str],
     ) -> None:
         """
         Test that we limit the number of state_keys that we remember but always include

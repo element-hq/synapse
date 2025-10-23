@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 import tempfile
-from typing import List, Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence
 
 from twisted.internet import defer, task
 
@@ -150,7 +150,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
         if list(os.listdir(self.base_directory)):
             raise Exception("Directory must be empty")
 
-    def write_events(self, room_id: str, events: List[EventBase]) -> None:
+    def write_events(self, room_id: str, events: list[EventBase]) -> None:
         room_directory = os.path.join(self.base_directory, "rooms", room_id)
         os.makedirs(room_directory, exist_ok=True)
         events_file = os.path.join(room_directory, "events")
@@ -255,7 +255,7 @@ class FileExfiltrationWriter(ExfiltrationWriter):
         return self.base_directory
 
 
-def load_config(argv_options: List[str]) -> Tuple[HomeServerConfig, argparse.Namespace]:
+def load_config(argv_options: list[str]) -> tuple[HomeServerConfig, argparse.Namespace]:
     parser = argparse.ArgumentParser(description="Synapse Admin Command")
     HomeServerConfig.add_arguments_to_parser(parser)
 

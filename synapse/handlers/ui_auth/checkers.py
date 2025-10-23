@@ -21,7 +21,7 @@
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, Sequence, Type
+from typing import TYPE_CHECKING, Any, ClassVar, Sequence
 
 from twisted.web.client import PartialDownloadError
 
@@ -321,7 +321,7 @@ class RegistrationTokenAuthChecker(UserInteractiveAuthChecker):
             )
 
 
-INTERACTIVE_AUTH_CHECKERS: Sequence[Type[UserInteractiveAuthChecker]] = [
+INTERACTIVE_AUTH_CHECKERS: Sequence[type[UserInteractiveAuthChecker]] = [
     DummyAuthChecker,
     TermsAuthChecker,
     RecaptchaAuthChecker,

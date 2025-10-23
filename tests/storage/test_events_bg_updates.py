@@ -13,7 +13,6 @@
 #
 #
 
-from typing import Dict
 
 from twisted.internet.testing import MemoryReactor
 
@@ -48,7 +47,7 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
             )
         )
 
-    def create_room(self, room_version: RoomVersion) -> Dict[str, int]:
+    def create_room(self, room_version: RoomVersion) -> dict[str, int]:
         """Create a room with a known room version and insert events.
 
         Returns the set of event IDs that exceed MAX_DEPTH and
@@ -67,7 +66,7 @@ class TestFixupMaxDepthCapBgUpdate(HomeserverTestCase):
         )
 
         # Insert events with some depths exceeding MAX_DEPTH
-        event_id_to_depth: Dict[str, int] = {}
+        event_id_to_depth: dict[str, int] = {}
         for depth in range(MAX_DEPTH - 5, MAX_DEPTH + 5):
             event_id = f"$event{depth}:example.com"
             event_id_to_depth[event_id] = depth

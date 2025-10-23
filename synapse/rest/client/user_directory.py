@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse.api.errors import SynapseError
 from synapse.http.server import HttpServer
@@ -46,7 +46,7 @@ class UserDirectorySearchRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.user_directory_handler = hs.get_user_directory_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonMapping]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonMapping]:
         """Searches for users in directory
 
         Returns:

@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from authlib.jose import JsonWebToken, JWTClaims
 from authlib.jose.errors import BadSignatureError, InvalidClaimError, JoseError
@@ -41,7 +41,7 @@ class JwtHandler:
         self.jwt_issuer = hs.config.jwt.jwt_issuer
         self.jwt_audiences = hs.config.jwt.jwt_audiences
 
-    def validate_login(self, login_submission: JsonDict) -> Tuple[str, Optional[str]]:
+    def validate_login(self, login_submission: JsonDict) -> tuple[str, Optional[str]]:
         """
         Authenticates the user for the /login API
 

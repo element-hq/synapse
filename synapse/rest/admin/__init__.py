@@ -35,7 +35,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.handlers.pagination import PURGE_HISTORY_ACTION_NAME
@@ -138,7 +138,7 @@ class VersionServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.res = {"server_version": SYNAPSE_VERSION}
 
-    def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         return HTTPStatus.OK, self.res
 
 
@@ -154,7 +154,7 @@ class PurgeHistoryRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str, event_id: Optional[str]
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         body = parse_json_object_from_request(request, allow_empty_body=True)
@@ -238,7 +238,7 @@ class PurgeHistoryStatusRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, purge_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
         purge_task = await self.pagination_handler.get_delete_task(purge_id)

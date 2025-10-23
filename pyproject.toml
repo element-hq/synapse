@@ -78,6 +78,12 @@ select = [
     "LOG",
     # flake8-logging-format
     "G",
+    # pyupgrade
+    "UP006",
+]
+extend-safe-fixes = [
+    # pyupgrade
+    "UP006"
 ]
 
 [tool.ruff.lint.isort]

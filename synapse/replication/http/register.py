@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.server import Request
 
@@ -104,7 +104,7 @@ class ReplicationRegisterServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.registration_handler.check_registration_ratelimit(content["address"])
 
         # Always default admin users to approved (since it means they were created by
@@ -156,7 +156,7 @@ class ReplicationPostRegisterActionsServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         auth_result = content["auth_result"]
         access_token = content["access_token"]
 
