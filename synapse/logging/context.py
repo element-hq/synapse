@@ -53,7 +53,7 @@ from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool
 
 from synapse.logging.loggers import ExplicitlyConfiguredLogger
-from synapse.util.stringutils import random_string
+from synapse.util.stringutils import pseudo_random_string
 
 if TYPE_CHECKING:
     from synapse.logging.scopecontextmanager import _LogContextScope
@@ -657,7 +657,7 @@ class PreserveLoggingContext:
         self, new_context: LoggingContextOrSentinel = SENTINEL_CONTEXT
     ) -> None:
         self._new_context = new_context
-        self._instance_id = random_string(5)
+        self._instance_id = pseudo_random_string(5)
 
     def __enter__(self) -> None:
         logcontext_debug_logger.debug(
@@ -859,7 +859,7 @@ def run_in_background(
         Note that the returned Deferred does not follow the synapse logcontext
         rules.
     """
-    instance_id = random_string(5)
+    instance_id = pseudo_random_string(5)
     calling_context = current_context()
     logcontext_debug_logger.debug(
         "run_in_background(%s): called with logcontext=%s", instance_id, calling_context
@@ -1012,7 +1012,7 @@ def make_deferred_yieldable(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]
     restores the old context once the awaitable completes (execution passes from the
     reactor back to the code).
     """
-    instance_id = random_string(5)
+    instance_id = pseudo_random_string(5)
     logcontext_debug_logger.debug(
         "make_deferred_yieldable(%s): called with logcontext=%s",
         instance_id,
