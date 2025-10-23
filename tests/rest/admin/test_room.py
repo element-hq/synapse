@@ -74,6 +74,10 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
         self.third_user = self.register_user("third_user", "pass")
         self.third_user_tok = self.login("third_user", "pass")
 
+        # mock out the function which pulls room information in over federation.
+        self._room_summary_handler = hs.get_room_summary_handler()
+        self._room_summary_handler._summarize_remote_room_hierarchy = Mock()  # type: ignore[method-assign]
+
         # create some rooms with different options
         self.room_id1 = self.helper.create_room_as(
             self.other_user,
@@ -102,14 +106,14 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             room_version="12",
         )
 
-        self.room_id4 = self.helper.create_room_as(
+        self.not_in_space_room_id = self.helper.create_room_as(
             self.other_user,
             tok=self.other_user_tok,
             extra_content={"name": "not related to other rooms"},
         )
 
         # create a space room
-        self.space_rm = self.helper.create_room_as(
+        self.space_room_id = self.helper.create_room_as(
             self.other_user,
             is_public=True,
             extra_content={
@@ -127,24 +131,28 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             self.room_id1: "room1",
             self.room_id2: "room2",
             self.room_id3: "room3",
-            self.room_id4: "room4",
-            self.space_rm: "space_room",
+            self.not_in_space_room_id: "room4",
+            self.space_room_id: "space_room",
             self.remote_room_id: "remote_room",
         }
 
         # add three of the rooms to space
         for state_key in [self.room_id1, self.room_id2, self.room_id3]:
             self.helper.send_state(
-                self.space_rm,
+                self.space_room_id,
                 EventTypes.SpaceChild,
                 body={"via": ["local_test_server"]},
                 tok=self.other_user_tok,
                 state_key=state_key,
             )
 
-        # and add remote room to space
+        # and add remote room to space - ideally we'd add an actual remote space with rooms
+        # in it but the test framework doesn't currently support that. Instead we add a
+        # room which the server would have to reach out over federation to get details about
+        # and assert that the federation call was not made and that nothing other than it's room
+        # id and empty child state are returned
         self.helper.send_state(
-            self.space_rm,
+            self.space_room_id,
             EventTypes.SpaceChild,
             body={"via": ["remote_test_server"]},
             tok=self.other_user_tok,
@@ -158,7 +166,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy",
         )
 
         self.assertEqual(401, channel.code, msg=channel.json_body)
@@ -171,7 +179,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy",
             access_token=self.other_user_tok,
         )
 
@@ -184,7 +192,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
         """
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy?limit=ten",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?limit=ten",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(400, channel.code, msg=channel.json_body)
@@ -192,7 +200,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy?max_depth=four",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?max_depth=four",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(400, channel.code, msg=channel.json_body)
@@ -205,7 +213,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(channel.code, 200, msg=channel.json_body)
@@ -245,9 +253,9 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 self.assertEqual(room_result["world_readable"], False)
                 self.assertEqual(room_result["guest_can_join"], True)
                 self.assertEqual(room_result["num_joined_members"], 1)
-            elif room_id == self.room_id4:
+            elif room_id == self.not_in_space_room_id:
                 self.fail("this room should not have been returned")
-            elif room_id == self.space_rm:
+            elif room_id == self.space_room_id:
                 self.assertEqual(room_result["join_rule"], "public")
                 self.assertEqual(len(room_result["children_state"]), 4)
                 self.assertEqual(room_result["room_type"], "m.space")
@@ -258,6 +266,8 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             elif room_id == self.remote_room_id:
                 # only room_id and children_state fields are returned for remote rooms
                 self.assertEqual(len(room_result["children_state"]), 0)
+                # assert that a federation call to look up details about this room is not called
+                self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
             else:
                 self.fail("unknown room returned")
 
@@ -269,22 +279,11 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy?limit=2",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?limit=2",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(channel.code, 200, msg=channel.json_body)
         rooms = channel.json_body["rooms"]
-        self.assertEqual(len(rooms), 2)
-        next_batch = channel.json_body["next_batch"]
-
-        channel2 = self.make_request(
-            "GET",
-            f"/_synapse/admin/v1/rooms/{self.space_rm}/hierarchy?from={next_batch}",
-            access_token=self.admin_user_tok,
-        )
-        self.assertEqual(channel2.code, 200, msg=channel2.json_body)
-        new_rooms = channel2.json_body["rooms"]
-        rooms = rooms + new_rooms
         self.assertCountEqual(
             {
                 self.room_id_to_human_name_map.get(
@@ -292,7 +291,25 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 )
                 for room in rooms
             },
-            {"space_room", "room1", "room2", "room3", "remote_room"},
+            {"space_room", "room1"},
+        )
+        next_batch = channel.json_body["next_batch"]
+
+        channel2 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.space_room_id}/hierarchy?from={next_batch}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel2.code, 200, msg=channel2.json_body)
+        new_rooms = channel2.json_body["rooms"]
+        self.assertCountEqual(
+            {
+                self.room_id_to_human_name_map.get(
+                    room["room_id"], f"Unknown room: {room['room_id']}"
+                )
+                for room in new_rooms
+            },
+            {"room2", "room3", "remote_room"},
         )
 
         for room_result in rooms:
@@ -320,9 +337,9 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 self.assertEqual(room_result["world_readable"], False)
                 self.assertEqual(room_result["guest_can_join"], True)
                 self.assertEqual(room_result["num_joined_members"], 1)
-            elif room_id == self.room_id4:
+            elif room_id == self.not_in_space_room_id:
                 self.fail("this room should not have been returned")
-            elif room_id == self.space_rm:
+            elif room_id == self.space_room_id:
                 self.assertEqual(room_result["join_rule"], "public")
                 self.assertEqual(len(room_result["children_state"]), 4)
                 self.assertEqual(room_result["room_type"], "m.space")
@@ -333,6 +350,8 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             elif room_id == self.remote_room_id:
                 # only room_id and children_state fields are returned for remote rooms
                 self.assertEqual(len(room_result["children_state"]), 0)
+                # assert that a federation call to look up details about this room is not called
+                self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
             else:
                 self.fail("unknown room returned")
 

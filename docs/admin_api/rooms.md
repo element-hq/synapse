@@ -1119,8 +1119,10 @@ Example response:
 # Admin Space Hierarchy Endpoint
 
 This API allows an admin to fetch the space/room hierarchy for a given space, returning details about that room and any children
-the room may have, paginating over the space tree in a depth-first manner to locate child rooms. This is functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not return information about any remote
-rooms that the server is not currently joined to and does not check for room membership when returning room summaries.
+the room may have, paginating over the space tree in a depth-first manner to locate child rooms. This is functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not check for room membership when returning room summaries. The endpoint also
+does not return information about any remote rooms that the server is not currently joined to as it does not reach out over
+federation to fill in details about those rooms, as we only care about managing rooms local to the homeserver. This is a trade-off as this will leave holes where information about public/peekable remote rooms the server is not participating in are omitted, but does greatly improve the response time of the endpoint. These rooms will be indicated in the response
+by having only a room id and an empty `children_state`.
 
 **Parameters**
 
@@ -1142,8 +1144,7 @@ Response:
 {
   "rooms":
       [
-        {"aliases": [],
-        "children_state": [
+        { "children_state": [
             {
               "content": {
                 "via": ["local_test_server"]
@@ -1154,31 +1155,21 @@ Response:
               "type": "m.space.child"
             }
         ],
-        "creation_event_id": "$bVkNVtm4aDw4c0LRf_U5Ad7mZSo4WKzzQKImrk_rQcg",
-        "creator": "@user:test",
+        "name": "space room",
         "guest_can_join": false,
-        "is_space": true,
         "join_rule": "public",
         "num_joined_members": 1,
-        "power_users": ["@user:test"],
-        "room_creation_ts": 1400,
         "room_id": "!sPOpNyMHbZAoAOsOFL:test",
         "room_type": "m.space",
         "world_readable": false
       },
 
       {
-        "aliases": [],
         "children_state": [],
-        "creation_event_id": "$kymNeN-gA5kzLwZ6FEQUu0_2MfeenYKINSO3dUuLYf8",
-        "creator": "@user:test",
         "guest_can_join": true,
-        "is_space": false,
         "join_rule": "invite",
         "name": "nefarious",
         "num_joined_members": 1,
-        "power_users": ["@user:test"],
-        "room_creation_ts": 999,
         "room_id": "!QrMkkqBSwYRIFNFCso:test",
         "topic": "being bad",
         "world_readable": false}

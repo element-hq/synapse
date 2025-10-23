@@ -238,12 +238,13 @@ class RoomSummaryHandler:
             if not root_room_entry or not await self._is_remote_room_accessible(
                 requester, requested_room_id, root_room_entry.room
             ):
-                raise UnstableSpecAuthError(
-                    403,
-                    "User %s not in room %s, and room previews are disabled"
-                    % (requester, requested_room_id),
-                    errcode=Codes.NOT_JOINED,
-                )
+                if not admin_skip_room_visibility_check:
+                    raise UnstableSpecAuthError(
+                        403,
+                        "User %s not in room %s, and room previews are disabled"
+                        % (requester, requested_room_id),
+                        errcode=Codes.NOT_JOINED,
+                    )
 
         # If this is continuing a previous session, pull the persisted data.
         if from_token:
