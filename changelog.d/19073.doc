@@ -1,1 +1,1 @@
-Add optional Redis networking and security config options to workers.md. Contributed by @servisbryce.
+Point out additional Redis configuration options available in the worker docs. Contributed by @servisbryce.
