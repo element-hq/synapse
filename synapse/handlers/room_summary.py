@@ -150,10 +150,10 @@ class RoomSummaryHandler:
             requested_room_id: The room ID to start the hierarchy at (the "root" room).
             suggested_only: Whether we should only return children with the "suggested"
                 flag set.
-            omit_remote_room_hierarchy: Whether to skip reaching out over federation to get information on rooms which the server is not
-                currently joined to
-            admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
-                used for the admin endpoints.
+            omit_remote_room_hierarchy: Whether to skip reaching out over federation to
+                get information on rooms which the server is not currently joined to
+            admin_skip_room_visibility_check: Whether to skip checking if the room can
+                be accessed by the requester, used for the admin endpoints.
             max_depth: The maximum depth in the tree to explore, must be a
                 non-negative integer.
 
@@ -256,7 +256,8 @@ class RoomSummaryHandler:
             except StoreError:
                 raise SynapseError(400, "Unknown pagination token", Codes.INVALID_PARAM)
 
-            # If the requester, room ID, suggested-only, max depth, omit_remote_room_hierarchy, or admin_skip_room_visibility_check
+            # If the requester, room ID, suggested-only, max depth,
+            # omit_remote_room_hierarchy, or admin_skip_room_visibility_check
             # were modified the session is invalid.
             if (
                 requester != pagination_session["requester"]
@@ -323,10 +324,6 @@ class RoomSummaryHandler:
                     suggested_only,
                     admin_skip_room_visibility_check=admin_skip_room_visibility_check,
                 )
-            # if we are not fetching remote room details over federation, return what is
-            # known about the room
-            elif omit_remote_room_hierarchy:
-                room_entry = _RoomEntry(room_id, {"room_id": room_id}, ())
             # Otherwise, attempt to use information for federation.
             else:
                 # A previous call might have included information for this room.
@@ -345,7 +342,7 @@ class RoomSummaryHandler:
 
                 # If the above isn't true, attempt to fetch the room
                 # information over federation.
-                else:
+                elif not omit_remote_room_hierarchy:
                     (
                         room_entry,
                         children_room_entries,
@@ -503,8 +500,8 @@ class RoomSummaryHandler:
                 Otherwise, all children are returned.
             include_children:
                 Whether to include the events of any children.
-            admin_skip_room_visibility_check: Whether to skip checking if the room can be accessed by the requester,
-                used for the admin endpoints.
+            admin_skip_room_visibility_check: Whether to skip checking if the room
+                can be accessed by the requester, used for the admin endpoints.
 
         Returns:
             A room entry if the room should be returned. None, otherwise.

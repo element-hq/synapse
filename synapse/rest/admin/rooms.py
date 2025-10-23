@@ -65,9 +65,9 @@ logger = logging.getLogger(__name__)
 
 class AdminRoomHierarchy(RestServlet):
     """
-    Given a room, returns room details on that room and any space children of the provided room.
-    Does not reach out over federation to fetch details information about any remote rooms which
-    the server is not currently participating in, returning only the room id of those rooms
+    Given a room, returns room details on that room and any space children of
+    the provided room. Does not reach out over federation to fetch information about
+    any remote rooms which the server is not currently participating in
     """
 
     PATTERNS = admin_patterns("/rooms/(?P<room_id>[^/]*)/hierarchy$")

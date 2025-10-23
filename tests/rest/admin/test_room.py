@@ -146,11 +146,11 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 state_key=state_key,
             )
 
-        # and add remote room to space - ideally we'd add an actual remote space with rooms
-        # in it but the test framework doesn't currently support that. Instead we add a
-        # room which the server would have to reach out over federation to get details about
-        # and assert that the federation call was not made and that nothing other than it's room
-        # id and empty child state are returned
+        # and add remote room to space - ideally we'd add an actual remote
+        # space with rooms in it but the test framework doesn't currently
+        # support that. Instead we add a room which the server would have to
+        # reach out over federation to get details about and assert that the
+        # federation call was not made
         self.helper.send_state(
             self.space_room_id,
             EventTypes.SpaceChild,
@@ -225,7 +225,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 )
                 for room in rooms
             },
-            {"space_room", "room1", "room2", "room3", "remote_room"},
+            {"space_room", "room1", "room2", "room3"},
         )
 
         for room_result in rooms:
@@ -263,13 +263,11 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 self.assertEqual(room_result["guest_can_join"], False)
                 self.assertEqual(room_result["num_joined_members"], 1)
                 self.assertEqual(room_result["name"], "space_room")
-            elif room_id == self.remote_room_id:
-                # only room_id and children_state fields are returned for remote rooms
-                self.assertEqual(len(room_result["children_state"]), 0)
-                # assert that a federation call to look up details about this room is not called
-                self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
             else:
                 self.fail("unknown room returned")
+
+        # assert that a federation call to look up details about this room is not called
+        self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
 
     def test_room_summary_pagination(self) -> None:
         """
@@ -309,7 +307,7 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 )
                 for room in new_rooms
             },
-            {"room2", "room3", "remote_room"},
+            {"room2", "room3"},
         )
 
         for room_result in rooms:
@@ -347,13 +345,11 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
                 self.assertEqual(room_result["guest_can_join"], False)
                 self.assertEqual(room_result["num_joined_members"], 1)
                 self.assertEqual(room_result["name"], "space_room")
-            elif room_id == self.remote_room_id:
-                # only room_id and children_state fields are returned for remote rooms
-                self.assertEqual(len(room_result["children_state"]), 0)
-                # assert that a federation call to look up details about this room is not called
-                self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
             else:
                 self.fail("unknown room returned")
+
+        # assert that a federation call to look up details about this room is not called
+        self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
 
 
 class DeleteRoomTestCase(unittest.HomeserverTestCase):
