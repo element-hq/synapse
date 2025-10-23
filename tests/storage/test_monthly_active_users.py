@@ -17,7 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import AsyncMock
 
 from twisted.internet.testing import MemoryReactor
@@ -32,7 +32,7 @@ from tests.unittest import default_config, override_config
 FORTY_DAYS = 40 * 24 * 60 * 60
 
 
-def gen_3pids(count: int) -> List[Dict[str, Any]]:
+def gen_3pids(count: int) -> list[dict[str, Any]]:
     """Generate `count` threepids as a list."""
     return [
         {"medium": "email", "address": "user%i@matrix.org" % i} for i in range(count)
@@ -40,7 +40,7 @@ def gen_3pids(count: int) -> List[Dict[str, Any]]:
 
 
 class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         config = default_config("test")
 
         config.update({"limit_usage_by_mau": True, "max_mau_value": 50})
@@ -110,13 +110,13 @@ class MonthlyActiveUsersTestCase(unittest.HomeserverTestCase):
         self.assertGreater(timestamp, 0)
 
         # Test that users with reserved 3pids are not removed from the MAU table
-        # XXX some of this is redundant. poking things into the config shouldn't
-        # work, and in any case it's not obvious what we expect to happen when
-        # we advance the reactor.
-        self.hs.config.server.max_mau_value = 0
+        #
+        # The `start_phone_stats_home()` looping call will cause us to run
+        # `reap_monthly_active_users` after the time has advanced
         self.reactor.advance(FORTY_DAYS)
-        self.hs.config.server.max_mau_value = 5
 
+        # I guess we call this one more time for good measure? Perhaps because
+        # previously, the phone home stats weren't running in tests?
         self.get_success(self.store.reap_monthly_active_users())
 
         active_count = self.get_success(self.store.get_monthly_active_count())

@@ -18,7 +18,7 @@
 #
 #
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import NotFoundError, SynapseError
@@ -81,7 +81,7 @@ class SendServerNoticeServlet(RestServlet):
         request: SynapseRequest,
         requester: Requester,
         txn_id: Optional[str],
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await assert_user_is_admin(self.auth, requester)
         body = parse_json_object_from_request(request)
         assert_params_in_dict(body, ("user_id", "content"))
@@ -118,13 +118,13 @@ class SendServerNoticeServlet(RestServlet):
     async def on_POST(
         self,
         request: SynapseRequest,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         return await self._do(request, requester, None)
 
     async def on_PUT(
         self, request: SynapseRequest, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         set_tag("txn_id", txn_id)
         return await self.txns.fetch_or_execute_request(

@@ -26,7 +26,7 @@ import os
 import sys
 import threading
 from string import Template
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import yaml
 from zope.interface import implementer
@@ -186,7 +186,7 @@ class LoggingConfig(Config):
             help=argparse.SUPPRESS,
         )
 
-    def generate_files(self, config: Dict[str, Any], config_dir_path: str) -> None:
+    def generate_files(self, config: dict[str, Any], config_dir_path: str) -> None:
         log_config = config.get("log_config")
         if log_config and not os.path.exists(log_config):
             log_file = self.abspath("homeserver.log")

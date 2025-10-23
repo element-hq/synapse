@@ -27,12 +27,8 @@ from typing import (
     AbstractSet,
     Any,
     Collection,
-    Dict,
-    List,
     Mapping,
     Optional,
-    Set,
-    Tuple,
     Union,
     cast,
 )
@@ -139,7 +135,7 @@ class RoomSortOrder(Enum):
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class PartialStateResyncInfo:
     joined_via: Optional[str]
-    servers_in_room: Set[str] = attr.ib(factory=set)
+    servers_in_room: set[str] = attr.ib(factory=set)
 
 
 class RoomWorkerStore(CacheInvalidationWorkerStore):
@@ -209,7 +205,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             logger.error("store_room with room_id=%s failed: %s", room_id, e)
             raise StoreError(500, "Problem creating room.")
 
-    async def get_room(self, room_id: str) -> Optional[Tuple[bool, bool]]:
+    async def get_room(self, room_id: str) -> Optional[tuple[bool, bool]]:
         """Retrieve a room.
 
         Args:
@@ -222,7 +218,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             or None if the room is unknown.
         """
         row = cast(
-            Optional[Tuple[Optional[Union[int, bool]], Optional[Union[int, bool]]]],
+            Optional[tuple[Optional[Union[int, bool]], Optional[Union[int, bool]]]],
             await self.db_pool.simple_select_one(
                 table="rooms",
                 keyvalues={"room_id": room_id},
@@ -287,7 +283,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             "get_room_with_stats", get_room_with_stats_txn, room_id
         )
 
-    async def get_public_room_ids(self) -> List[str]:
+    async def get_public_room_ids(self) -> list[str]:
         return await self.db_pool.simple_select_onecol(
             table="rooms",
             keyvalues={"is_public": True},
@@ -296,8 +292,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         )
 
     def _construct_room_type_where_clause(
-        self, room_types: Union[List[Union[str, None]], None]
-    ) -> Tuple[Union[str, None], list]:
+        self, room_types: Union[list[Union[str, None]], None]
+    ) -> tuple[Union[str, None], list]:
         if not room_types:
             return None, []
 
@@ -387,7 +383,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             """
 
             txn.execute(sql, query_args)
-            return cast(Tuple[int], txn.fetchone())[0]
+            return cast(tuple[int], txn.fetchone())[0]
 
         return await self.db_pool.runInteraction(
             "count_public_rooms", _count_public_rooms_txn
@@ -399,7 +395,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         def f(txn: LoggingTransaction) -> int:
             sql = "SELECT count(*)  FROM rooms"
             txn.execute(sql)
-            row = cast(Tuple[int], txn.fetchone())
+            row = cast(tuple[int], txn.fetchone())
             return row[0]
 
         return await self.db_pool.runInteraction("get_rooms", f)
@@ -409,10 +405,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         network_tuple: Optional[ThirdPartyInstanceID],
         search_filter: Optional[dict],
         limit: Optional[int],
-        bounds: Optional[Tuple[int, str]],
+        bounds: Optional[tuple[int, str]],
         forwards: bool,
         ignore_non_federatable: bool = False,
-    ) -> List[LargestRoomStats]:
+    ) -> list[LargestRoomStats]:
         """Gets the largest public rooms (where largest is in terms of joined
         members, as tracked in the statistics table).
 
@@ -433,7 +429,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """
 
         where_clauses = []
-        query_args: List[Union[str, int]] = []
+        query_args: list[Union[str, int]] = []
 
         if network_tuple:
             if network_tuple.appservice_id:
@@ -549,7 +545,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_largest_public_rooms_txn(
             txn: LoggingTransaction,
-        ) -> List[LargestRoomStats]:
+        ) -> list[LargestRoomStats]:
             txn.execute(sql, query_args)
 
             results = [
@@ -611,7 +607,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         search_term: Optional[str],
         public_rooms: Optional[bool],
         empty_rooms: Optional[bool],
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Function to retrieve a paginated list of rooms as json.
 
         Args:
@@ -760,7 +756,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_rooms_paginate_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Dict[str, Any]], int]:
+        ) -> tuple[list[dict[str, Any]], int]:
             # Add the search term into the WHERE clause
             # and execute the data query
             txn.execute(info_sql, where_args + [limit, start])
@@ -795,7 +791,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             # Add the search term into the WHERE clause if present
             txn.execute(count_sql, where_args)
 
-            room_count = cast(Tuple[int], txn.fetchone())
+            room_count = cast(tuple[int], txn.fetchone())
             return rooms, room_count[0]
 
         return await self.db_pool.runInteraction(
@@ -909,7 +905,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def get_retention_policy_for_room_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Tuple[Optional[int], Optional[int]]]:
+        ) -> Optional[tuple[Optional[int], Optional[int]]]:
             txn.execute(
                 """
                 SELECT min_lifetime, max_lifetime FROM room_retention
@@ -919,7 +915,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 (room_id,),
             )
 
-            return cast(Optional[Tuple[Optional[int], Optional[int]]], txn.fetchone())
+            return cast(Optional[tuple[Optional[int], Optional[int]]], txn.fetchone())
 
         ret = await self.db_pool.runInteraction(
             "get_retention_policy_for_room",
@@ -951,7 +947,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             max_lifetime=max_lifetime,
         )
 
-    async def get_media_mxcs_in_room(self, room_id: str) -> Tuple[List[str], List[str]]:
+    async def get_media_mxcs_in_room(self, room_id: str) -> tuple[list[str], list[str]]:
         """Retrieves all the local and remote media MXC URIs in a given room
 
         Args:
@@ -963,7 +959,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_media_mxcs_in_room_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[str], List[str]]:
+        ) -> tuple[list[str], list[str]]:
             local_mxcs, remote_mxcs = self._get_media_mxcs_in_room_txn(txn, room_id)
             local_media_mxcs = []
             remote_media_mxcs = []
@@ -1001,7 +997,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     def _get_media_mxcs_in_room_txn(
         self, txn: LoggingTransaction, room_id: str
-    ) -> Tuple[List[str], List[Tuple[str, str]]]:
+    ) -> tuple[list[str], list[tuple[str, str]]]:
         """Retrieves all the local and remote media MXC URIs in a given room
 
         Returns:
@@ -1107,7 +1103,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     def _get_media_ids_by_user_txn(
         self, txn: LoggingTransaction, user_id: str, filter_quarantined: bool = True
-    ) -> List[str]:
+    ) -> list[str]:
         """Retrieves local media IDs by a given user
 
         Args:
@@ -1137,8 +1133,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
     def _quarantine_local_media_txn(
         self,
         txn: LoggingTransaction,
-        hashes: Set[str],
-        media_ids: Set[str],
+        hashes: set[str],
+        media_ids: set[str],
         quarantined_by: Optional[str],
     ) -> int:
         """Quarantine and unquarantine local media items.
@@ -1192,8 +1188,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
     def _quarantine_remote_media_txn(
         self,
         txn: LoggingTransaction,
-        hashes: Set[str],
-        media: Set[Tuple[str, str]],
+        hashes: set[str],
+        media: set[tuple[str, str]],
         quarantined_by: Optional[str],
     ) -> int:
         """Quarantine and unquarantine remote items
@@ -1240,8 +1236,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
     def _quarantine_media_txn(
         self,
         txn: LoggingTransaction,
-        local_mxcs: List[str],
-        remote_mxcs: List[Tuple[str, str]],
+        local_mxcs: list[str],
+        remote_mxcs: list[tuple[str, str]],
         quarantined_by: Optional[str],
     ) -> int:
         """Quarantine and unquarantine local and remote media items
@@ -1346,7 +1342,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_rooms_for_retention_period_in_range(
         self, min_ms: Optional[int], max_ms: Optional[int], include_null: bool = False
-    ) -> Dict[str, RetentionPolicy]:
+    ) -> dict[str, RetentionPolicy]:
         """Retrieves all of the rooms within the given retention range.
 
         Optionally includes the rooms which don't have a retention policy.
@@ -1368,7 +1364,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def get_rooms_for_retention_period_in_range_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, RetentionPolicy]:
+        ) -> dict[str, RetentionPolicy]:
             range_conditions = []
             args = []
 
@@ -1464,10 +1460,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             A dictionary of rooms with partial state, with room IDs as keys and
             lists of servers in rooms as values.
         """
-        room_servers: Dict[str, PartialStateResyncInfo] = {}
+        room_servers: dict[str, PartialStateResyncInfo] = {}
 
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 table="partial_state_rooms",
                 keyvalues={},
@@ -1480,7 +1476,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             room_servers[room_id] = PartialStateResyncInfo(joined_via=joined_via)
 
         rows = cast(
-            List[Tuple[str, str]],
+            list[tuple[str, str]],
             await self.db_pool.simple_select_list(
                 "partial_state_rooms_servers",
                 keyvalues=None,
@@ -1533,7 +1529,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """
 
         rows = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.db_pool.simple_select_many_batch(
                 table="partial_state_rooms",
                 column="room_id",
@@ -1571,7 +1567,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_join_event_id_and_device_lists_stream_id_for_partial_state(
         self, room_id: str
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Get the event ID of the initial join that started the partial
         join, and the device list stream ID at the point we started the partial
         join.
@@ -1583,7 +1579,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         """
 
         return cast(
-            Tuple[str, int],
+            tuple[str, int],
             await self.db_pool.simple_select_one(
                 table="partial_state_rooms",
                 keyvalues={"room_id": room_id},
@@ -1602,7 +1598,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_un_partial_stated_rooms_between(
         self, last_id: int, current_id: int, room_ids: Collection[str]
-    ) -> Set[str]:
+    ) -> set[str]:
         """Get all rooms that got un partial stated between `last_id` exclusive and
         `current_id` inclusive.
 
@@ -1615,7 +1611,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_un_partial_stated_rooms_between_txn(
             txn: LoggingTransaction,
-        ) -> Set[str]:
+        ) -> set[str]:
             sql = """
                 SELECT DISTINCT room_id FROM un_partial_stated_room_stream
                 WHERE ? < stream_id AND stream_id <= ? AND
@@ -1636,7 +1632,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     async def get_un_partial_stated_rooms_from_stream(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, Tuple[str]]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple[str]]], int, bool]:
         """Get updates for un partial stated rooms replication stream.
 
         Args:
@@ -1663,7 +1659,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def get_un_partial_stated_rooms_from_stream_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, Tuple[str]]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple[str]]], int, bool]:
             sql = """
                 SELECT stream_id, room_id
                 FROM un_partial_stated_room_stream
@@ -1686,7 +1682,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             get_un_partial_stated_rooms_from_stream_txn,
         )
 
-    async def get_event_report(self, report_id: int) -> Optional[Dict[str, Any]]:
+    async def get_event_report(self, report_id: int) -> Optional[dict[str, Any]]:
         """Retrieve an event report
 
         Args:
@@ -1698,7 +1694,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_event_report_txn(
             txn: LoggingTransaction, report_id: int
-        ) -> Optional[Dict[str, Any]]:
+        ) -> Optional[dict[str, Any]]:
             sql = """
                 SELECT
                     er.id,
@@ -1755,7 +1751,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         user_id: Optional[str] = None,
         room_id: Optional[str] = None,
         event_sender_user_id: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Retrieve a paginated list of event reports
 
         Args:
@@ -1775,9 +1771,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         def _get_event_reports_paginate_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Dict[str, Any]], int]:
+        ) -> tuple[list[dict[str, Any]], int]:
             filters = []
-            args: List[object] = []
+            args: list[object] = []
 
             if user_id:
                 filters.append("er.user_id LIKE ?")
@@ -1810,7 +1806,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 {}
                 """.format(where_clause)
             txn.execute(sql, args)
-            count = cast(Tuple[int], txn.fetchone())[0]
+            count = cast(tuple[int], txn.fetchone())[0]
 
             sql = """
                 SELECT
@@ -2214,7 +2210,7 @@ class RoomBackgroundUpdateStore(RoomWorkerStore):
 
         last_room = progress.get("room_id", "")
 
-        def _get_rooms(txn: LoggingTransaction) -> List[str]:
+        def _get_rooms(txn: LoggingTransaction) -> list[str]:
             txn.execute(
                 """
                 SELECT room_id
@@ -2460,7 +2456,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._instance_name = hs.get_instance_name()
 
     async def upsert_room_on_join(
-        self, room_id: str, room_version: RoomVersion, state_events: List[EventBase]
+        self, room_id: str, room_version: RoomVersion, state_events: list[EventBase]
     ) -> None:
         """Ensure that the room is stored in the table
 

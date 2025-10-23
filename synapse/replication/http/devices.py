@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.web.server import Request
 
@@ -59,13 +59,13 @@ class ReplicationNotifyDeviceUpdateRestServlet(ReplicationEndpoint):
 
     @staticmethod
     async def _serialize_payload(  # type: ignore[override]
-        user_id: str, device_ids: List[str]
+        user_id: str, device_ids: list[str]
     ) -> JsonDict:
         return {"device_ids": device_ids}
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         device_ids = content["device_ids"]
 
         span = active_span()
@@ -102,12 +102,12 @@ class ReplicationNotifyUserSignatureUpdateRestServlet(ReplicationEndpoint):
         self.clock = hs.get_clock()
 
     @staticmethod
-    async def _serialize_payload(from_user_id: str, user_ids: List[str]) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(from_user_id: str, user_ids: list[str]) -> JsonDict:  # type: ignore[override]
         return {"user_ids": user_ids}
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, from_user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         user_ids = content["user_ids"]
 
         span = active_span()
@@ -165,13 +165,13 @@ class ReplicationMultiUserDevicesResyncRestServlet(ReplicationEndpoint):
         self.clock = hs.get_clock()
 
     @staticmethod
-    async def _serialize_payload(user_ids: List[str]) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(user_ids: list[str]) -> JsonDict:  # type: ignore[override]
         return {"user_ids": user_ids}
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, Dict[str, Optional[JsonMapping]]]:
-        user_ids: List[str] = content["user_ids"]
+    ) -> tuple[int, dict[str, Optional[JsonMapping]]]:
+        user_ids: list[str] = content["user_ids"]
 
         logger.info("Resync for %r", user_ids)
         span = active_span()
@@ -210,7 +210,7 @@ class ReplicationHandleNewDeviceUpdateRestServlet(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.device_handler.handle_new_device_update()
         return 200, {}
 
@@ -241,7 +241,7 @@ class ReplicationDeviceHandleRoomUnPartialStated(ReplicationEndpoint):
 
     async def _handle_request(  # type: ignore[override]
         self, request: Request, content: JsonDict, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self.device_handler.handle_room_un_partial_stated(room_id)
         return 200, {}
 

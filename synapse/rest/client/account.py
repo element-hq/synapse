@@ -21,7 +21,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Literal, Optional
 from urllib.parse import urlparse
 
 import attr
@@ -89,7 +89,7 @@ class EmailPasswordRequestTokenRestServlet(RestServlet):
                 template_text=self.config.email.email_password_reset_template_text,
             )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.config.email.can_verify_email:
             logger.warning(
                 "User password resets have been disabled due to lack of email config"
@@ -169,7 +169,7 @@ class PasswordRestServlet(RestServlet):
             new_password: Optional[constr(max_length=512, strict=True)] = None
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         # we do basic sanity checks here because the auth layer will store these
@@ -296,7 +296,7 @@ class DeactivateAccountRestServlet(RestServlet):
         erase: StrictBool = False
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         requester = await self.auth.get_user_by_req(request)
@@ -341,7 +341,7 @@ class EmailThreepidRequestTokenRestServlet(RestServlet):
                 template_text=self.config.email.email_add_threepid_template_text,
             )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_3pid_changes:
             raise SynapseError(
                 400, "3PID changes are disabled on this server", Codes.FORBIDDEN
@@ -418,7 +418,7 @@ class MsisdnThreepidRequestTokenRestServlet(RestServlet):
         self.store = self.hs.get_datastores().main
         self.identity_handler = hs.get_identity_handler()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(
             request, MsisdnRequestTokenBody
         )
@@ -567,7 +567,7 @@ class AddThreepidMsisdnSubmitTokenServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.identity_handler = hs.get_identity_handler()
 
-    async def on_POST(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: Request) -> tuple[int, JsonDict]:
         if not self.config.registration.account_threepid_delegate_msisdn:
             raise SynapseError(
                 400,
@@ -601,7 +601,7 @@ class ThreepidRestServlet(RestServlet):
         self.auth_handler = hs.get_auth_handler()
         self.datastore = self.hs.get_datastores().main
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         threepids = await self.datastore.user_get_threepids(requester.user.to_string())
@@ -612,7 +612,7 @@ class ThreepidRestServlet(RestServlet):
     # the endpoint is deprecated. (If you really want to, you could do this by reusing
     # ThreePidBindRestServelet.PostBody with an `alias_generator` to handle
     # `threePidCreds` versus `three_pid_creds`.
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if self.hs.config.mas.enabled or self.hs.config.experimental.msc3861.enabled:
             raise NotFoundError(errcode=Codes.UNRECOGNIZED)
 
@@ -669,7 +669,7 @@ class ThreepidAddRestServlet(RestServlet):
         sid: StrictStr
 
     @interactive_auth_handler
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_3pid_changes:
             raise SynapseError(
                 400, "3PID changes are disabled on this server", Codes.FORBIDDEN
@@ -718,7 +718,7 @@ class ThreepidBindRestServlet(RestServlet):
         id_server: StrictStr
         sid: StrictStr
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         requester = await self.auth.get_user_by_req(request)
@@ -746,7 +746,7 @@ class ThreepidUnbindRestServlet(RestServlet):
         id_server: Optional[StrictStr] = None
         medium: Literal["email", "msisdn"]
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         """Unbind the given 3pid from a specific identity server, or identity servers that are
         known to have this 3pid bound
         """
@@ -775,7 +775,7 @@ class ThreepidDeleteRestServlet(RestServlet):
         id_server: Optional[StrictStr] = None
         medium: Literal["email", "msisdn"]
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         if not self.hs.config.registration.enable_3pid_changes:
             raise SynapseError(
                 400, "3PID changes are disabled on this server", Codes.FORBIDDEN
@@ -859,7 +859,7 @@ class WhoamiRestServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         response = {
@@ -889,9 +889,9 @@ class AccountStatusRestServlet(RestServlet):
     class PostBody(RequestBodyModel):
         # TODO: we could validate that each user id is an mxid here, and/or parse it
         #       as a UserID
-        user_ids: List[StrictStr]
+        user_ids: list[StrictStr]
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self._auth.get_user_by_req(request)
 
         body = parse_and_validate_json_object_from_request(request, self.PostBody)

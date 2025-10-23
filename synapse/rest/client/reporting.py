@@ -21,7 +21,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -57,7 +57,7 @@ class ReportEventRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
@@ -138,7 +138,7 @@ class ReportRoomRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
@@ -191,7 +191,7 @@ class ReportUserRestServlet(RestServlet):
 
     async def on_POST(
         self, request: SynapseRequest, target_user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         body = parse_and_validate_json_object_from_request(request, self.PostBody)
 

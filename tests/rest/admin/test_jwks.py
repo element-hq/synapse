@@ -19,7 +19,6 @@
 #
 #
 
-from typing import Dict
 
 from twisted.web.resource import Resource
 
@@ -33,7 +32,7 @@ from tests.utils import HAS_AUTHLIB
 class JWKSTestCase(HomeserverTestCase):
     """Test /_synapse/jwks JWKS data."""
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         d = super().create_resource_dict()
         d.update(build_synapse_client_resource_tree(self.hs))
         return d

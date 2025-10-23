@@ -24,7 +24,7 @@ import json
 import os
 import re
 import shutil
-from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
+from typing import Any, BinaryIO, ClassVar, Optional, Sequence
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
@@ -265,7 +265,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         assert self.media_repo.url_previewer is not None
         self.url_previewer = self.media_repo.url_previewer
 
-        self.lookups: Dict[str, Any] = {}
+        self.lookups: dict[str, Any] = {}
 
         class Resolver:
             def resolveHostName(
@@ -273,7 +273,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
                 resolutionReceiver: IResolutionReceiver,
                 hostName: str,
                 portNumber: int = 0,
-                addressTypes: Optional[Sequence[Type[IAddress]]] = None,
+                addressTypes: Optional[Sequence[type[IAddress]]] = None,
                 transportSemantics: str = "TCP",
             ) -> IResolutionReceiver:
                 resolution = HostResolution(hostName)
@@ -1357,7 +1357,7 @@ class URLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(body["og:title"], "Test")
         self.assertNotIn("og:image", body)
 
-    def _download_image(self) -> Tuple[str, str]:
+    def _download_image(self) -> tuple[str, str]:
         """Downloads an image into the URL cache.
         Returns:
             A (host, media_id) tuple representing the MXC URI of the image.
@@ -1994,8 +1994,8 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
     ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.fetches: List[
-            Tuple[
+        self.fetches: list[
+            tuple[
                 "Deferred[Any]",
                 str,
                 str,
@@ -2014,12 +2014,12 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
-        ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]], bytes]]":
+        ) -> "Deferred[tuple[int, dict[bytes, list[bytes]], bytes]]":
             """A mock for MatrixFederationHttpClient.federation_get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]],
-            ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
+                r: tuple[bytes, tuple[int, dict[bytes, list[bytes]], bytes]],
+            ) -> tuple[int, dict[bytes, list[bytes]], bytes]:
                 data, response = r
                 output_stream.write(data)
                 return response
@@ -2029,7 +2029,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 output_stream.write(f.value.response)
                 return f
 
-            d: Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]]] = (
+            d: Deferred[tuple[bytes, tuple[int, dict[bytes, list[bytes]], bytes]]] = (
                 Deferred()
             )
             self.fetches.append((d, destination, path, args))
@@ -2048,12 +2048,12 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             retry_on_dns_fail: bool = True,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
-        ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]]]]":
+        ) -> "Deferred[tuple[int, dict[bytes, list[bytes]]]]":
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
-            ) -> Tuple[int, Dict[bytes, List[bytes]]]:
+                r: tuple[bytes, tuple[int, dict[bytes, list[bytes]]]],
+            ) -> tuple[int, dict[bytes, list[bytes]]]:
                 data, response = r
                 output_stream.write(data)
                 return response
@@ -2063,7 +2063,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
                 output_stream.write(f.value.response)
                 return f
 
-            d: Deferred[Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]] = Deferred()
+            d: Deferred[tuple[bytes, tuple[int, dict[bytes, list[bytes]]]]] = Deferred()
             self.fetches.append((d, destination, path, args))
             # Note that this callback changes the value held by d.
             d_after_callback = d.addCallbacks(write_to, write_err)
@@ -2538,7 +2538,7 @@ configs = [
 
 @parameterized_class(configs)
 class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
-    extra_config: Dict[str, Any]
+    extra_config: dict[str, Any]
     servlets = [
         media.register_servlets,
         login.register_servlets,
@@ -2576,7 +2576,7 @@ class AuthenticatedMediaTestCase(unittest.HomeserverTestCase):
         self.user = self.register_user("user", "pass")
         self.tok = self.login("user", "pass")
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -2895,7 +2895,7 @@ class MediaUploadLimits(unittest.HomeserverTestCase):
         self.user = self.register_user("user", "pass")
         self.tok = self.login("user", "pass")
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -3012,7 +3012,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
     async def _get_media_upload_limits_for_user(
         self,
         user_id: str,
-    ) -> Optional[List[MediaUploadLimit]]:
+    ) -> Optional[list[MediaUploadLimit]]:
         # user1 has custom limits
         if user_id == self.user1:
             # n.b. we return these in increasing duration order and Synapse will need to sort them correctly
@@ -3060,7 +3060,7 @@ class MediaUploadLimitsModuleOverrides(unittest.HomeserverTestCase):
             on_media_upload_limit_exceeded=self._on_media_upload_limit_exceeded,
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources

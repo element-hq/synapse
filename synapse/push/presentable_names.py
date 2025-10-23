@@ -21,7 +21,7 @@
 
 import logging
 import re
-from typing import TYPE_CHECKING, Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
@@ -205,8 +205,8 @@ def name_from_member_event(member_event: EventBase) -> str:
     return member_event.state_key
 
 
-def _state_as_two_level_dict(state: StateMap[str]) -> Dict[str, Dict[str, str]]:
-    ret: Dict[str, Dict[str, str]] = {}
+def _state_as_two_level_dict(state: StateMap[str]) -> dict[str, dict[str, str]]:
+    ret: dict[str, dict[str, str]] = {}
     for k, v in state.items():
         ret.setdefault(k[0], {})[k[1]] = v
     return ret

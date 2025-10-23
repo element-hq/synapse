@@ -120,6 +120,9 @@ worker_replication_secret: ""
 
 redis:
     enabled: true
+    # For additional Redis configuration options (TLS, authentication, etc.), 
+    # see the Synapse configuration documentation:
+    # https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#redis
 
 instance_map:
     main:

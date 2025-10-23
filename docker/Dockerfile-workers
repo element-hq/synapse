@@ -1,9 +1,10 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1-labs
 
 ARG SYNAPSE_VERSION=latest
 ARG FROM=matrixdotorg/synapse:$SYNAPSE_VERSION
-ARG DEBIAN_VERSION=bookworm
-ARG PYTHON_VERSION=3.12
+ARG DEBIAN_VERSION=trixie
+ARG PYTHON_VERSION=3.13
+ARG REDIS_VERSION=7.2
 
 # first of all, we create a base image with dependencies which we can copy into the
 # target image. For repeated rebuilds, this is much faster than apt installing
@@ -11,15 +12,27 @@ ARG PYTHON_VERSION=3.12
 
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
 
+    ARG DEBIAN_VERSION
+    ARG REDIS_VERSION
+
     # Tell apt to keep downloaded package files, as we're using cache mounts.
     RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+    # The upstream redis-server deb has fewer dynamic libraries than Debian's package which makes it easier to copy later on
+    RUN \
+      curl -fsSL https://packages.redis.io/gpg | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg && \
+      chmod 644 /usr/share/keyrings/redis-archive-keyring.gpg && \
+      echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb ${DEBIAN_VERSION} main" | tee /etc/apt/sources.list.d/redis.list
 
     RUN \
        --mount=type=cache,target=/var/cache/apt,sharing=locked \
        --mount=type=cache,target=/var/lib/apt,sharing=locked \
       apt-get update -qq && \
       DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
-          nginx-light
+          nginx-light \
+          redis-server="6:${REDIS_VERSION}.*" redis-tools="6:${REDIS_VERSION}.*" \
+          # libicu is required by postgres, see `docker/complement/Dockerfile`
+          libicu76
 
     RUN \
     # remove default page
@@ -35,19 +48,12 @@ FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS deps_base
 
     RUN mkdir -p /uv/etc/supervisor/conf.d
 
-# Similarly, a base to copy the redis server from.
-#
-# The redis docker image has fewer dynamic libraries than the debian package,
-# which makes it much easier to copy (but we need to make sure we use an image
-# based on the same debian version as the synapse image, to make sure we get
-# the expected version of libc.
-FROM docker.io/library/redis:7-${DEBIAN_VERSION} AS redis_base
-
 # now build the final image, based on the the regular Synapse docker image
 FROM $FROM
 
     # Copy over dependencies
-    COPY --from=redis_base /usr/local/bin/redis-server /usr/local/bin
+    COPY --from=deps_base --parents /usr/lib/*-linux-gnu/libicu* /
+    COPY --from=deps_base /usr/bin/redis-server /usr/local/bin
     COPY --from=deps_base /uv /
     COPY --from=deps_base /usr/sbin/nginx /usr/sbin
     COPY --from=deps_base /usr/share/nginx /usr/share/nginx

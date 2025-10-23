@@ -23,7 +23,7 @@ import logging
 import time
 import urllib.parse
 from http import HTTPStatus
-from typing import Any, Callable, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, TypeVar, Union
 from unittest.mock import Mock
 
 import attr
@@ -147,7 +147,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
     def do_sync(
         self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
-    ) -> Tuple[JsonDict, str]:
+    ) -> tuple[JsonDict, str]:
         """Do a sliding sync request with given body.
 
         Asserts the request was successful.
@@ -350,7 +350,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.federation_http_client.get_json.side_effect = get_json
 
         # PDU's that hs1 sent to hs2
-        collected_pdus_from_hs1_federation_send: Set[str] = set()
+        collected_pdus_from_hs1_federation_send: set[str] = set()
 
         async def put_json(
             destination: str,
@@ -503,7 +503,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         T = TypeVar("T")
 
         # PDU's that hs1 sent to hs2
-        collected_pdus_from_hs1_federation_send: Set[str] = set()
+        collected_pdus_from_hs1_federation_send: set[str] = set()
 
         async def put_json(
             destination: str,

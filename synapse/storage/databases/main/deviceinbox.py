@@ -24,12 +24,8 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
     Iterable,
-    List,
     Optional,
-    Set,
-    Tuple,
     cast,
 )
 
@@ -92,7 +88,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         # Map of (user_id, device_id) to the last stream_id that has been
         # deleted up to. This is so that we can no op deletions.
         self._last_device_delete_cache: ExpiringCache[
-            Tuple[str, Optional[str]], int
+            tuple[str, Optional[str]], int
         ] = ExpiringCache(
             cache_name="last_device_delete_cache",
             server_name=self.server_name,
@@ -203,7 +199,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         user_ids: Collection[str],
         from_stream_id: int,
         to_stream_id: int,
-    ) -> Dict[Tuple[str, str], List[JsonDict]]:
+    ) -> dict[tuple[str, str], list[JsonDict]]:
         """
         Retrieve to-device messages for a given set of users.
 
@@ -242,7 +238,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         from_stream_id: int,
         to_stream_id: int,
         limit: int = 100,
-    ) -> Tuple[List[JsonDict], int]:
+    ) -> tuple[list[JsonDict], int]:
         """
         Retrieve to-device messages for a single user device.
 
@@ -271,7 +267,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def get_device_messages_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[JsonDict], int]:
+        ) -> tuple[list[JsonDict], int]:
             sql = """
                 SELECT stream_id, message_json FROM device_inbox
                 WHERE user_id = ? AND device_id = ?
@@ -284,7 +280,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # Create and fill a dictionary of (user ID, device ID) -> list of messages
             # intended for each device.
             last_processed_stream_pos = to_stream_id
-            to_device_messages: List[JsonDict] = []
+            to_device_messages: list[JsonDict] = []
             rowcount = 0
             for row in txn:
                 rowcount += 1
@@ -331,7 +327,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         user_ids: Collection[str],
         from_stream_id: int,
         to_stream_id: int,
-    ) -> Tuple[Dict[Tuple[str, str], List[JsonDict]], int]:
+    ) -> tuple[dict[tuple[str, str], list[JsonDict]], int]:
         """
         Retrieve pending to-device messages for a collection of user devices.
 
@@ -363,7 +359,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             logger.warning("No users provided upon querying for device IDs")
             return {}, to_stream_id
 
-        user_ids_to_query: Set[str] = set()
+        user_ids_to_query: set[str] = set()
 
         # Determine which users have devices with pending messages
         for user_id in user_ids:
@@ -378,7 +374,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def get_device_messages_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[Dict[Tuple[str, str], List[JsonDict]], int]:
+        ) -> tuple[dict[tuple[str, str], list[JsonDict]], int]:
             # Build a query to select messages from any of the given devices that
             # are between the given stream id bounds.
 
@@ -389,7 +385,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # since device_inbox has an index on `(user_id, device_id, stream_id)`
 
             user_device_dicts = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_many_txn(
                     txn,
                     table="devices",
@@ -436,7 +432,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # Create and fill a dictionary of (user ID, device ID) -> list of messages
             # intended for each device.
-            recipient_device_to_messages: Dict[Tuple[str, str], List[JsonDict]] = {}
+            recipient_device_to_messages: dict[tuple[str, str], list[JsonDict]] = {}
             rowcount = 0
             for row in txn:
                 rowcount += 1
@@ -535,7 +531,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         from_stream_id: Optional[int],
         to_stream_id: int,
         limit: int,
-    ) -> Tuple[Optional[int], int]:
+    ) -> tuple[Optional[int], int]:
         """Delete N device messages between the stream IDs, returning the
         highest stream ID deleted (or None if all messages in the range have
         been deleted) and the number of messages deleted.
@@ -555,7 +551,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def delete_messages_for_device_between_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[Optional[int], int]:
+        ) -> tuple[Optional[int], int]:
             txn.execute(
                 """
                 SELECT MAX(stream_id) FROM (
@@ -598,7 +594,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     @trace
     async def get_new_device_msgs_for_remote(
         self, destination: str, last_stream_id: int, current_stream_id: int, limit: int
-    ) -> Tuple[List[JsonDict], int]:
+    ) -> tuple[list[JsonDict], int]:
         """
         Args:
             destination: The name of the remote server.
@@ -628,7 +624,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         @trace
         def get_new_messages_for_remote_destination_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[JsonDict], int]:
+        ) -> tuple[list[JsonDict], int]:
             sql = (
                 "SELECT stream_id, messages_json FROM device_federation_outbox"
                 " WHERE destination = ?"
@@ -684,7 +680,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
     async def get_all_new_device_messages(
         self, instance_name: str, last_id: int, current_id: int, limit: int
-    ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+    ) -> tuple[list[tuple[int, tuple]], int, bool]:
         """Get updates for to device replication stream.
 
         Args:
@@ -711,7 +707,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         def get_all_new_device_messages_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[Tuple[int, tuple]], int, bool]:
+        ) -> tuple[list[tuple[int, tuple]], int, bool]:
             # We limit like this as we might have multiple rows per stream_id, and
             # we want to make sure we always get all entries for any stream_id
             # we return.
@@ -746,8 +742,8 @@ class DeviceInboxWorkerStore(SQLBaseStore):
     @trace
     async def add_messages_to_device_inbox(
         self,
-        local_messages_by_user_then_device: Dict[str, Dict[str, JsonDict]],
-        remote_messages_by_destination: Dict[str, JsonDict],
+        local_messages_by_user_then_device: dict[str, dict[str, JsonDict]],
+        remote_messages_by_destination: dict[str, JsonDict],
     ) -> int:
         """Used to send messages from this server.
 
@@ -844,7 +840,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         self,
         origin: str,
         message_id: str,
-        local_messages_by_user_then_device: Dict[str, Dict[str, JsonDict]],
+        local_messages_by_user_then_device: dict[str, dict[str, JsonDict]],
     ) -> int:
         assert self._can_write_to_device
 
@@ -898,7 +894,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
         self,
         txn: LoggingTransaction,
         stream_id: int,
-        messages_by_user_then_device: Dict[str, Dict[str, JsonDict]],
+        messages_by_user_then_device: dict[str, dict[str, JsonDict]],
     ) -> None:
         assert self._can_write_to_device
 
@@ -929,7 +925,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 # We exclude hidden devices (such as cross-signing keys) here as they are
                 # not expected to receive to-device messages.
                 rows = cast(
-                    List[Tuple[str]],
+                    list[tuple[str]],
                     self.db_pool.simple_select_many_txn(
                         txn,
                         table="devices",
@@ -1055,7 +1051,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             txn.execute(sql, args)
             return {row[0] for row in txn}
 
-        results: Set[str] = set()
+        results: set[str] = set()
         for batch_device_ids in batch_iter(device_ids, 1000):
             batch_results = await self.db_pool.runInteraction(
                 "get_devices_with_messages",
@@ -1143,7 +1139,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
 
         def _remove_dead_devices_from_device_inbox_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, bool]:
+        ) -> tuple[int, bool]:
             if "max_stream_id" in progress:
                 max_stream_id = progress["max_stream_id"]
             else:
@@ -1151,7 +1147,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
                 # There's a type mismatch here between how we want to type the row and
                 # what fetchone says it returns, but we silence it because we know that
                 # res can't be None.
-                res = cast(Tuple[Optional[int]], txn.fetchone())
+                res = cast(tuple[Optional[int]], txn.fetchone())
                 if res[0] is None:
                     # this can only happen if the `device_inbox` table is empty, in which
                     # case we have no work to do.
@@ -1214,7 +1210,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
                 max_stream_id = progress["max_stream_id"]
             else:
                 txn.execute("SELECT max(stream_id) FROM device_federation_outbox")
-                res = cast(Tuple[Optional[int]], txn.fetchone())
+                res = cast(tuple[Optional[int]], txn.fetchone())
                 if res[0] is None:
                     # this can only happen if the `device_inbox` table is empty, in which
                     # case we have no work to do.
