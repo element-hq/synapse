@@ -208,7 +208,8 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
     def test_room_summary(self) -> None:
         """
-        Test that details of room and details of children of room are provided correctly
+        Test that details of room and details of children of room are
+        provided correctly
         """
 
         channel = self.make_request(
@@ -272,8 +273,8 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
 
     def test_room_summary_pagination(self) -> None:
         """
-        Test that details of room and details of children of room are provided correctly
-        when paginating
+        Test that details of room and details of children of room are provided
+        correctly when paginating
         """
 
         channel = self.make_request(
