@@ -20,7 +20,7 @@
 #
 
 import copy
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from synapse.push.rulekinds import PRIORITY_CLASS_INVERSE_MAP, PRIORITY_CLASS_MAP
 from synapse.synapse_rust.push import FilteredPushRules, PushRule
@@ -29,11 +29,11 @@ from synapse.types import UserID
 
 def format_push_rules_for_user(
     user: UserID, ruleslist: FilteredPushRules
-) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
     """Converts a list of rawrules and a enabled map into nested dictionaries
     to match the Matrix client-server format for push rules"""
 
-    rules: Dict[str, Dict[str, List[Dict[str, Any]]]] = {"global": {}}
+    rules: dict[str, dict[str, list[dict[str, Any]]]] = {"global": {}}
 
     rules["global"] = _add_empty_priority_class_arrays(rules["global"])
 
@@ -70,7 +70,7 @@ def format_push_rules_for_user(
     return rules
 
 
-def _convert_type_to_value(rule_or_cond: Dict[str, Any], user: UserID) -> None:
+def _convert_type_to_value(rule_or_cond: dict[str, Any], user: UserID) -> None:
     for type_key in ("pattern", "value"):
         type_value = rule_or_cond.pop(f"{type_key}_type", None)
         if type_value == "user_id":
@@ -79,14 +79,14 @@ def _convert_type_to_value(rule_or_cond: Dict[str, Any], user: UserID) -> None:
             rule_or_cond[type_key] = user.localpart
 
 
-def _add_empty_priority_class_arrays(d: Dict[str, list]) -> Dict[str, list]:
+def _add_empty_priority_class_arrays(d: dict[str, list]) -> dict[str, list]:
     for pc in PRIORITY_CLASS_MAP.keys():
         d[pc] = []
     return d
 
 
-def _rule_to_template(rule: PushRule) -> Optional[Dict[str, Any]]:
-    templaterule: Dict[str, Any]
+def _rule_to_template(rule: PushRule) -> Optional[dict[str, Any]]:
+    templaterule: dict[str, Any]
 
     unscoped_rule_id = _rule_id_from_namespaced(rule.rule_id)
 

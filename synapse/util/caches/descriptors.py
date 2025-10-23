@@ -26,17 +26,13 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
     Generic,
     Hashable,
     Iterable,
-    List,
     Mapping,
     Optional,
     Protocol,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     cast,
@@ -57,15 +53,15 @@ from synapse.util.clock import Clock
 
 logger = logging.getLogger(__name__)
 
-CacheKey = Union[Tuple, Any]
+CacheKey = Union[tuple, Any]
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
 class CachedFunction(Generic[F]):
-    invalidate: Callable[[Tuple[Any, ...]], None]
+    invalidate: Callable[[tuple[Any, ...]], None]
     invalidate_all: Callable[[], None]
-    prefill: Callable[[Tuple[Any, ...], Any], None]
+    prefill: Callable[[tuple[Any, ...], Any], None]
     cache: Any = None
     num_args: Any = None
 
@@ -247,7 +243,7 @@ class DeferredCacheDescriptor(_CacheDescriptorBase):
         self.prune_unread_entries = prune_unread_entries
 
     def __get__(
-        self, obj: Optional[HasServerNameAndClock], owner: Optional[Type]
+        self, obj: Optional[HasServerNameAndClock], owner: Optional[type]
     ) -> Callable[..., "defer.Deferred[Any]"]:
         # We need access to instance-level `obj.server_name` attribute
         assert obj is not None, (
@@ -332,7 +328,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
 
     def __init__(
         self,
-        orig: Callable[..., Awaitable[Dict]],
+        orig: Callable[..., Awaitable[dict]],
         cached_method_name: str,
         list_name: str,
         num_args: Optional[int] = None,
@@ -363,8 +359,8 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
     def __get__(
-        self, obj: Optional[Any], objtype: Optional[Type] = None
-    ) -> Callable[..., "defer.Deferred[Dict[Hashable, Any]]"]:
+        self, obj: Optional[Any], objtype: Optional[type] = None
+    ) -> Callable[..., "defer.Deferred[dict[Hashable, Any]]"]:
         cached_method = getattr(obj, self.cached_method_name)
         cache: DeferredCache[CacheKey, Any] = cached_method.cache
         num_args = cached_method.num_args
@@ -376,7 +372,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             )
 
         @functools.wraps(self.orig)
-        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[Dict]":
+        def wrapped(*args: Any, **kwargs: Any) -> "defer.Deferred[dict]":
             # If we're passed a cache_context then we'll want to call its
             # invalidate() whenever we are invalidated
             invalidate_callback = kwargs.pop("on_invalidate", None)
@@ -412,10 +408,10 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
 
             results = {cache_key_to_arg(key): v for key, v in immediate_results.items()}
 
-            cached_defers: List["defer.Deferred[Any]"] = []
+            cached_defers: list["defer.Deferred[Any]"] = []
             if pending_deferred:
 
-                def update_results(r: Dict) -> None:
+                def update_results(r: dict) -> None:
                     for k, v in r.items():
                         results[cache_key_to_arg(k)] = v
 
@@ -425,7 +421,7 @@ class DeferredCacheListDescriptor(_CacheDescriptorBase):
             if missing:
                 cache_entry = cache.start_bulk_input(missing, invalidate_callback)
 
-                def complete_all(res: Dict[Hashable, Any]) -> None:
+                def complete_all(res: dict[Hashable, Any]) -> None:
                     missing_results = {}
                     for key in missing:
                         arg = cache_key_to_arg(key)
@@ -478,7 +474,7 @@ class _CacheContext:
     Cache = Union[DeferredCache, LruCache]
 
     _cache_context_objects: """WeakValueDictionary[
-        Tuple["_CacheContext.Cache", CacheKey], "_CacheContext"
+        tuple["_CacheContext.Cache", CacheKey], "_CacheContext"
     ]""" = WeakValueDictionary()
 
     def __init__(self, cache: "_CacheContext.Cache", cache_key: CacheKey) -> None:

@@ -25,14 +25,10 @@ import collections.abc
 from typing import (
     TYPE_CHECKING,
     Any,
-    Dict,
     Generic,
     Iterable,
-    List,
     Literal,
     Optional,
-    Tuple,
-    Type,
     TypeVar,
     Union,
     overload,
@@ -94,20 +90,20 @@ class DictProperty(Generic[T]):
     def __get__(
         self,
         instance: Literal[None],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: Optional[type[_DictPropertyInstance]] = None,
     ) -> "DictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: Optional[type[_DictPropertyInstance]] = None,
     ) -> T: ...
 
     def __get__(
         self,
         instance: Optional[_DictPropertyInstance],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: Optional[type[_DictPropertyInstance]] = None,
     ) -> Union[T, "DictProperty"]:
         # if the property is accessed as a class property rather than an instance
         # property, return the property itself rather than the value
@@ -160,20 +156,20 @@ class DefaultDictProperty(DictProperty, Generic[T]):
     def __get__(
         self,
         instance: Literal[None],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: Optional[type[_DictPropertyInstance]] = None,
     ) -> "DefaultDictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: Optional[type[_DictPropertyInstance]] = None,
     ) -> T: ...
 
     def __get__(
         self,
         instance: Optional[_DictPropertyInstance],
-        owner: Optional[Type[_DictPropertyInstance]] = None,
+        owner: Optional[type[_DictPropertyInstance]] = None,
     ) -> Union[T, "DefaultDictProperty"]:
         if instance is None:
             return self
@@ -192,7 +188,7 @@ class EventBase(metaclass=abc.ABCMeta):
         self,
         event_dict: JsonDict,
         room_version: RoomVersion,
-        signatures: Dict[str, Dict[str, str]],
+        signatures: dict[str, dict[str, str]],
         unsigned: JsonDict,
         internal_metadata_dict: JsonDict,
         rejected_reason: Optional[str],
@@ -210,7 +206,7 @@ class EventBase(metaclass=abc.ABCMeta):
 
     depth: DictProperty[int] = DictProperty("depth")
     content: DictProperty[JsonDict] = DictProperty("content")
-    hashes: DictProperty[Dict[str, str]] = DictProperty("hashes")
+    hashes: DictProperty[dict[str, str]] = DictProperty("hashes")
     origin_server_ts: DictProperty[int] = DictProperty("origin_server_ts")
     sender: DictProperty[str] = DictProperty("sender")
     # TODO state_key should be Optional[str]. This is generally asserted in Synapse
@@ -293,13 +289,13 @@ class EventBase(metaclass=abc.ABCMeta):
     def __contains__(self, field: str) -> bool:
         return field in self._dict
 
-    def items(self) -> List[Tuple[str, Optional[Any]]]:
+    def items(self) -> list[tuple[str, Optional[Any]]]:
         return list(self._dict.items())
 
     def keys(self) -> Iterable[str]:
         return self._dict.keys()
 
-    def prev_event_ids(self) -> List[str]:
+    def prev_event_ids(self) -> list[str]:
         """Returns the list of prev event IDs. The order matches the order
         specified in the event, though there is no meaning to it.
 
@@ -457,7 +453,7 @@ class FrozenEventV2(EventBase):
     def room_id(self) -> str:
         return self._dict["room_id"]
 
-    def prev_event_ids(self) -> List[str]:
+    def prev_event_ids(self) -> list[str]:
         """Returns the list of prev event IDs. The order matches the order
         specified in the event, though there is no meaning to it.
 
@@ -558,7 +554,7 @@ class FrozenEventV4(FrozenEventV3):
 
 def _event_type_from_format_version(
     format_version: int,
-) -> Type[Union[FrozenEvent, FrozenEventV2, FrozenEventV3]]:
+) -> type[Union[FrozenEvent, FrozenEventV2, FrozenEventV3]]:
     """Returns the python type to use to construct an Event object for the
     given event format version.
 
@@ -669,4 +665,4 @@ class StrippedStateEvent:
     type: str
     state_key: str
     sender: str
-    content: Dict[str, Any]
+    content: dict[str, Any]

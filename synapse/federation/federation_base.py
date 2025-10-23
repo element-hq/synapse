@@ -20,7 +20,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional, Sequence
 
 from synapse.api.constants import MAX_DEPTH, EventContentFields, EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
@@ -305,7 +305,7 @@ def _is_invite_via_3pid(event: EventBase) -> bool:
 
 def parse_events_from_pdu_json(
     pdus_json: Sequence[JsonDict], room_version: RoomVersion
-) -> List[EventBase]:
+) -> list[EventBase]:
     return [
         event_from_pdu_json(pdu_json, room_version)
         for pdu_json in filter_pdus_for_valid_depth(pdus_json)

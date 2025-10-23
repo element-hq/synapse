@@ -21,7 +21,7 @@
 
 import logging
 import string
-from typing import TYPE_CHECKING, Iterable, List, Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Optional, Sequence
 
 from synapse.api.constants import MAX_ALIAS_LENGTH, EventTypes
 from synapse.api.errors import (
@@ -108,7 +108,7 @@ class DirectoryHandler:
         requester: Requester,
         room_alias: RoomAlias,
         room_id: str,
-        servers: Optional[List[str]] = None,
+        servers: Optional[list[str]] = None,
         check_membership: bool = True,
     ) -> None:
         """Attempt to create a new alias

@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
 
 from prometheus_client import Gauge
 
@@ -100,7 +100,7 @@ class PusherPool:
         self._last_room_stream_id_seen = self.store.get_room_max_stream_ordering()
 
         # map from user id to app_id:pushkey to pusher
-        self.pushers: Dict[str, Dict[str, Pusher]] = {}
+        self.pushers: dict[str, dict[str, Pusher]] = {}
 
         self._account_validity_handler = hs.get_account_validity_handler()
 

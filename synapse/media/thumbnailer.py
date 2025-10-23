@@ -22,7 +22,7 @@
 import logging
 from io import BytesIO
 from types import TracebackType
-from typing import TYPE_CHECKING, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Optional
 
 from PIL import Image
 
@@ -116,7 +116,7 @@ class Thumbnailer:
             logger.info("Error parsing image EXIF information: %s", e)
 
     @trace
-    def transpose(self) -> Tuple[int, int]:
+    def transpose(self) -> tuple[int, int]:
         """Transpose the image using its EXIF Orientation tag
 
         Returns:
@@ -134,7 +134,7 @@ class Thumbnailer:
             self.image.info["exif"] = None
         return self.image.size
 
-    def aspect(self, max_width: int, max_height: int) -> Tuple[int, int]:
+    def aspect(self, max_width: int, max_height: int) -> tuple[int, int]:
         """Calculate the largest size that preserves aspect ratio which
         fits within the given rectangle::
 
@@ -246,7 +246,7 @@ class Thumbnailer:
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
+        type: Optional[type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
@@ -553,7 +553,7 @@ class ThumbnailProvider:
         desired_height: int,
         desired_method: str,
         desired_type: str,
-        thumbnail_infos: List[ThumbnailInfo],
+        thumbnail_infos: list[ThumbnailInfo],
         media_id: str,
         file_id: str,
         url_cache: bool,
@@ -719,7 +719,7 @@ class ThumbnailProvider:
         desired_height: int,
         desired_method: str,
         desired_type: str,
-        thumbnail_infos: List[ThumbnailInfo],
+        thumbnail_infos: list[ThumbnailInfo],
         file_id: str,
         url_cache: bool,
         server_name: Optional[str],
@@ -750,12 +750,12 @@ class ThumbnailProvider:
 
         if desired_method == "crop":
             # Thumbnails that match equal or larger sizes of desired width/height.
-            crop_info_list: List[
-                Tuple[int, int, int, bool, Optional[int], ThumbnailInfo]
+            crop_info_list: list[
+                tuple[int, int, int, bool, Optional[int], ThumbnailInfo]
             ] = []
             # Other thumbnails.
-            crop_info_list2: List[
-                Tuple[int, int, int, bool, Optional[int], ThumbnailInfo]
+            crop_info_list2: list[
+                tuple[int, int, int, bool, Optional[int], ThumbnailInfo]
             ] = []
             for info in thumbnail_infos:
                 # Skip thumbnails generated with different methods.
@@ -801,9 +801,9 @@ class ThumbnailProvider:
                 thumbnail_info = min(crop_info_list2, key=lambda t: t[:-1])[-1]
         elif desired_method == "scale":
             # Thumbnails that match equal or larger sizes of desired width/height.
-            info_list: List[Tuple[int, bool, int, ThumbnailInfo]] = []
+            info_list: list[tuple[int, bool, int, ThumbnailInfo]] = []
             # Other thumbnails.
-            info_list2: List[Tuple[int, bool, int, ThumbnailInfo]] = []
+            info_list2: list[tuple[int, bool, int, ThumbnailInfo]] = []
 
             for info in thumbnail_infos:
                 # Skip thumbnails generated with different methods.

@@ -19,7 +19,6 @@
 #
 #
 import logging
-from typing import Tuple
 
 from twisted.internet.testing import MemoryReactor
 
@@ -64,7 +63,7 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
 
         self.requester = create_requester(self.user_id, device_id=device_id)
 
-    def _create_and_persist_member_event(self) -> Tuple[EventBase, EventContext]:
+    def _create_and_persist_member_event(self) -> tuple[EventBase, EventContext]:
         # Create a member event we can use as an auth_event
         memberEvent, memberEventContext = self.get_success(
             create_event(
@@ -86,7 +85,7 @@ class EventCreationTestCase(unittest.HomeserverTestCase):
 
     def _create_duplicate_event(
         self, txn_id: str
-    ) -> Tuple[EventBase, UnpersistedEventContextBase]:
+    ) -> tuple[EventBase, UnpersistedEventContextBase]:
         """Create a new event with the given transaction ID. All events produced
         by this method will be considered duplicates.
         """

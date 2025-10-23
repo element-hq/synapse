@@ -8,9 +8,9 @@ ARG PYTHON_VERSION=3.9
 ###
 ### Stage 0: generate requirements.txt
 ###
-# We hardcode the use of Debian bookworm here because this could change upstream
-# and other Dockerfiles used for testing are expecting bookworm.
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm
+# We hardcode the use of Debian trixie here because this could change upstream
+# and other Dockerfiles used for testing are expecting trixie.
+FROM docker.io/library/python:${PYTHON_VERSION}-slim-trixie
 
 # Install Rust and other dependencies (stolen from normal Dockerfile)
 # install the OS build deps

@@ -19,7 +19,7 @@
 #
 #
 
-from typing import Any, Dict, Optional, cast
+from typing import Any, Optional, cast
 
 import attr
 
@@ -37,9 +37,9 @@ class RatelimitSettings:
     @classmethod
     def parse(
         cls,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         key: str,
-        defaults: Optional[Dict[str, float]] = None,
+        defaults: Optional[dict[str, float]] = None,
     ) -> "RatelimitSettings":
         """Parse config[key] as a new-style rate limiter config.
 
@@ -62,7 +62,7 @@ class RatelimitSettings:
 
         # By this point we should have hit the rate limiter parameters.
         # We don't actually check this though!
-        rl_config = cast(Dict[str, float], rl_config)
+        rl_config = cast(dict[str, float], rl_config)
 
         return cls(
             key=key,

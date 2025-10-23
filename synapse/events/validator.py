@@ -19,7 +19,7 @@
 #
 #
 import collections.abc
-from typing import List, Type, Union, cast
+from typing import Union, cast
 
 import jsonschema
 
@@ -283,13 +283,13 @@ POWER_LEVELS_SCHEMA = {
 
 
 class Mentions(RequestBodyModel):
-    user_ids: List[StrictStr] = Field(default_factory=list)
+    user_ids: list[StrictStr] = Field(default_factory=list)
     room: StrictBool = False
 
 
 # This could return something newer than Draft 7, but that's the current "latest"
 # validator.
-def _create_validator(schema: JsonDict) -> Type[jsonschema.Draft7Validator]:
+def _create_validator(schema: JsonDict) -> type[jsonschema.Draft7Validator]:
     validator = jsonschema.validators.validator_for(schema)
 
     # by default jsonschema does not consider a immutabledict to be an object so

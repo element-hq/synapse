@@ -18,7 +18,7 @@
 #
 #
 import io
-from typing import Any, Dict, Generator
+from typing import Any, Generator
 from unittest.mock import ANY, Mock, create_autospec
 
 from netaddr import IPSet
@@ -745,7 +745,7 @@ class FederationClientTests(HomeserverTestCase):
 
 
 class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
-    def default_config(self) -> Dict[str, Any]:
+    def default_config(self) -> dict[str, Any]:
         conf = super().default_config()
         conf["instance_map"] = {
             "main": {"host": "testserv", "port": 8765},

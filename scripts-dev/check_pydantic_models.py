@@ -47,11 +47,7 @@ from contextlib import contextmanager
 from typing import (
     Any,
     Callable,
-    Dict,
     Generator,
-    List,
-    Set,
-    Type,
     TypeVar,
 )
 
@@ -69,7 +65,7 @@ from synapse._pydantic_compat import (
 
 logger = logging.getLogger(__name__)
 
-CONSTRAINED_TYPE_FACTORIES_WITH_STRICT_FLAG: List[Callable] = [
+CONSTRAINED_TYPE_FACTORIES_WITH_STRICT_FLAG: list[Callable] = [
     constr,
     conbytes,
     conint,
@@ -145,7 +141,7 @@ class PatchedBaseModel(PydanticBaseModel):
     """
 
     @classmethod
-    def __init_subclass__(cls: Type[PydanticBaseModel], **kwargs: object):
+    def __init_subclass__(cls: type[PydanticBaseModel], **kwargs: object):
         for field in cls.__fields__.values():
             # Note that field.type_ and field.outer_type are computed based on the
             # annotation type, see pydantic.fields.ModelField._type_analysis
@@ -212,7 +208,7 @@ def lint() -> int:
     return os.EX_DATAERR if failures else os.EX_OK
 
 
-def do_lint() -> Set[str]:
+def do_lint() -> set[str]:
     """Try to import all of Synapse and see if we spot any Pydantic type coercions."""
     failures = set()
 
@@ -258,8 +254,8 @@ def run_test_snippet(source: str) -> None:
     # > Remember that at the module level, globals and locals are the same dictionary.
     # > If exec gets two separate objects as globals and locals, the code will be
     # > executed as if it were embedded in a class definition.
-    globals_: Dict[str, object]
-    locals_: Dict[str, object]
+    globals_: dict[str, object]
+    locals_: dict[str, object]
     globals_ = locals_ = {}
     exec(textwrap.dedent(source), globals_, locals_)
 
@@ -394,10 +390,10 @@ class TestFieldTypeInspection(unittest.TestCase):
             ("bool"),
             ("Optional[str]",),
             ("Union[None, str]",),
-            ("List[str]",),
-            ("List[List[str]]",),
-            ("Dict[StrictStr, str]",),
-            ("Dict[str, StrictStr]",),
+            ("list[str]",),
+            ("list[list[str]]",),
+            ("dict[StrictStr, str]",),
+            ("dict[str, StrictStr]",),
             ("TypedDict('D', x=int)",),
         ]
     )
@@ -425,9 +421,9 @@ class TestFieldTypeInspection(unittest.TestCase):
             ("constr(strict=True, min_length=10)",),
             ("Optional[StrictStr]",),
             ("Union[None, StrictStr]",),
-            ("List[StrictStr]",),
-            ("List[List[StrictStr]]",),
-            ("Dict[StrictStr, StrictStr]",),
+            ("list[StrictStr]",),
+            ("list[list[StrictStr]]",),
+            ("dict[StrictStr, StrictStr]",),
             ("TypedDict('D', x=StrictInt)",),
         ]
     )
