@@ -150,8 +150,9 @@ class RoomSummaryHandler:
             requested_room_id: The room ID to start the hierarchy at (the "root" room).
             suggested_only: Whether we should only return children with the "suggested"
                 flag set.
-            omit_remote_room_hierarchy: Whether to skip reaching out over federation to
-                get information on rooms which the server is not currently joined to
+            omit_remote_room_hierarchy: Whether to skip reaching out over
+                federation to get information on rooms which the server
+                is not currently joined to
             admin_skip_room_visibility_check: Whether to skip checking if the room can
                 be accessed by the requester, used for the admin endpoints.
             max_depth: The maximum depth in the tree to explore, must be a
@@ -324,6 +325,7 @@ class RoomSummaryHandler:
                     suggested_only,
                     admin_skip_room_visibility_check=admin_skip_room_visibility_check,
                 )
+
             # Otherwise, attempt to use information for federation.
             else:
                 # A previous call might have included information for this room.

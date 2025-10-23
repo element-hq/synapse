@@ -266,7 +266,8 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             else:
                 self.fail("unknown room returned")
 
-        # assert that a federation call to look up details about this room is not called
+        # assert that a federation function to look up details about
+        # this room has not been called
         self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
 
     def test_room_summary_pagination(self) -> None:
@@ -348,7 +349,8 @@ class AdminHierarchyTestCase(unittest.HomeserverTestCase):
             else:
                 self.fail("unknown room returned")
 
-        # assert that a federation call to look up details about this room is not called
+        # assert that a federation function to look up details about this
+        # room has not been called
         self._room_summary_handler._summarize_remote_room_hierarchy.assert_not_called()  # type: ignore[attr-defined]
 
 

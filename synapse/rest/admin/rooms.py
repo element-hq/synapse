@@ -90,11 +90,13 @@ class AdminRoomHierarchy(RestServlet):
         room_entry_summary = await self._room_summary_handler.get_room_hierarchy(
             requester,
             room_id,
-            # We omit details about remote rooms because we only care about managing rooms
-            # local to the homeserver. This also immensely helps with the response time
-            # of the endpoint since we don't need to reach out over federation. There is
-            # a trade-off as this will leave holes where information about public/peekable
-            # remote rooms the server is not participating in will be omitted.
+            # We omit details about remote rooms because we only care
+            # about managing rooms local to the homeserver. This
+            # also immensely helps with the response time of the
+            # endpoint since we don't need to reach out over federation.
+            # There is a trade-off as this will leave holes where
+            # information about public/peekable remote rooms the
+            # server is not participating in will be omitted.
             omit_remote_room_hierarchy=True,
             admin_skip_room_visibility_check=True,
             max_depth=max_depth,
