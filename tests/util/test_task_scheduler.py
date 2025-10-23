@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from twisted.internet.task import deferLater
 from twisted.internet.testing import MemoryReactor
@@ -42,7 +42,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         # This test task will copy the parameters to the result
         result = None
         if task.params:
@@ -85,7 +85,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _sleeping_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         # Sleep for a second
         await deferLater(self.reactor, 1, lambda: None)
         return TaskStatus.COMPLETE, None, None
@@ -103,7 +103,7 @@ class TestTaskScheduler(HomeserverTestCase):
                 )
             )
 
-        def get_tasks_of_status(status: TaskStatus) -> List[ScheduledTask]:
+        def get_tasks_of_status(status: TaskStatus) -> list[ScheduledTask]:
             tasks = (
                 self.get_success(self.task_scheduler.get_task(task_id))
                 for task_id in task_ids
@@ -151,7 +151,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _raising_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         raise Exception("raising")
 
     def test_schedule_raising_task(self) -> None:
@@ -165,7 +165,7 @@ class TestTaskScheduler(HomeserverTestCase):
 
     async def _resumable_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         if task.result and "in_progress" in task.result:
             return TaskStatus.COMPLETE, {"success": True}, None
         else:
@@ -201,7 +201,7 @@ class TestTaskSchedulerWithBackgroundWorker(BaseMultiWorkerStreamTestCase):
 
     async def _test_task(
         self, task: ScheduledTask
-    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+    ) -> tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
         return (TaskStatus.COMPLETE, None, None)
 
     @override_config({"run_background_tasks_on": "worker1"})

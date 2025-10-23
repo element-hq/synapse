@@ -22,15 +22,10 @@ import logging
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
-    FrozenSet,
     Iterable,
-    List,
     Mapping,
     Optional,
     Sequence,
-    Set,
-    Tuple,
     Union,
     cast,
 )
@@ -179,7 +174,7 @@ class RelationsWorkerStore(SQLBaseStore):
         from_token: Optional[StreamToken] = None,
         to_token: Optional[StreamToken] = None,
         recurse: bool = False,
-    ) -> Tuple[Sequence[_RelatedEvent], Optional[StreamToken]]:
+    ) -> tuple[Sequence[_RelatedEvent], Optional[StreamToken]]:
         """Get a list of relations for an event, ordered by topological ordering.
 
         Args:
@@ -209,7 +204,7 @@ class RelationsWorkerStore(SQLBaseStore):
         assert limit >= 0
 
         where_clause = ["room_id = ?"]
-        where_args: List[Union[str, int]] = [room_id]
+        where_args: list[Union[str, int]] = [room_id]
         is_redacted = event.internal_metadata.is_redacted()
 
         if relation_type is not None:
@@ -281,14 +276,14 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def _get_recent_references_for_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[_RelatedEvent], Optional[StreamToken]]:
+        ) -> tuple[list[_RelatedEvent], Optional[StreamToken]]:
             txn.execute(sql, [event.event_id] + where_args + [limit + 1])
 
             events = []
-            topo_orderings: List[int] = []
-            stream_orderings: List[int] = []
+            topo_orderings: list[int] = []
+            stream_orderings: list[int] = []
             for event_id, relation_type, sender, topo_ordering, stream_ordering in cast(
-                List[Tuple[str, str, str, int, int]], txn
+                list[tuple[str, str, str, int, int]], txn
             ):
                 # Do not include edits for redacted events as they leak event
                 # content.
@@ -329,8 +324,8 @@ class RelationsWorkerStore(SQLBaseStore):
     async def get_all_relations_for_event_with_types(
         self,
         event_id: str,
-        relation_types: List[str],
-    ) -> List[str]:
+        relation_types: list[str],
+    ) -> list[str]:
         """Get the event IDs of all events that have a relation to the given event with
         one of the given relation types.
 
@@ -345,9 +340,9 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def get_all_relation_ids_for_event_with_types_txn(
             txn: LoggingTransaction,
-        ) -> List[str]:
+        ) -> list[str]:
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_many_txn(
                     txn=txn,
                     table="event_relations",
@@ -368,7 +363,7 @@ class RelationsWorkerStore(SQLBaseStore):
     async def get_all_relations_for_event(
         self,
         event_id: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """Get the event IDs of all events that have a relation to the given event.
 
         Args:
@@ -380,9 +375,9 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def get_all_relation_ids_for_event_txn(
             txn: LoggingTransaction,
-        ) -> List[str]:
+        ) -> list[str]:
             rows = cast(
-                List[Tuple[str]],
+                list[tuple[str]],
                 self.db_pool.simple_select_list_txn(
                     txn=txn,
                     table="event_relations",
@@ -462,7 +457,7 @@ class RelationsWorkerStore(SQLBaseStore):
         return result is not None
 
     @cached()  # type: ignore[synapse-@cached-mutable]
-    async def get_references_for_event(self, event_id: str) -> List[JsonDict]:
+    async def get_references_for_event(self, event_id: str) -> list[JsonDict]:
         raise NotImplementedError()
 
     @cachedList(cached_method_name="get_references_for_event", list_name="event_ids")
@@ -498,12 +493,12 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def _get_references_for_events_txn(
             txn: LoggingTransaction,
-        ) -> Mapping[str, List[_RelatedEvent]]:
+        ) -> Mapping[str, list[_RelatedEvent]]:
             txn.execute(sql, args)
 
-            result: Dict[str, List[_RelatedEvent]] = {}
+            result: dict[str, list[_RelatedEvent]] = {}
             for relates_to_id, event_id, sender in cast(
-                List[Tuple[str, str, str]], txn
+                list[tuple[str, str, str]], txn
             ):
                 result.setdefault(relates_to_id, []).append(
                     _RelatedEvent(event_id, sender)
@@ -578,14 +573,14 @@ class RelationsWorkerStore(SQLBaseStore):
                 ORDER by edit.origin_server_ts, edit.event_id
             """
 
-        def _get_applicable_edits_txn(txn: LoggingTransaction) -> Dict[str, str]:
+        def _get_applicable_edits_txn(txn: LoggingTransaction) -> dict[str, str]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "relates_to_id", event_ids
             )
             args.append(RelationTypes.REPLACE)
 
             txn.execute(sql % (clause,), args)
-            return dict(cast(Iterable[Tuple[str, str]], txn.fetchall()))
+            return dict(cast(Iterable[tuple[str, str]], txn.fetchall()))
 
         edit_ids = await self.db_pool.runInteraction(
             "get_applicable_edits", _get_applicable_edits_txn
@@ -603,14 +598,14 @@ class RelationsWorkerStore(SQLBaseStore):
         }
 
     @cached()  # type: ignore[synapse-@cached-mutable]
-    def get_thread_summary(self, event_id: str) -> Optional[Tuple[int, EventBase]]:
+    def get_thread_summary(self, event_id: str) -> Optional[tuple[int, EventBase]]:
         raise NotImplementedError()
 
     # TODO: This returns a mutable object, which is generally bad.
     @cachedList(cached_method_name="get_thread_summary", list_name="event_ids")  # type: ignore[synapse-@cached-mutable]
     async def get_thread_summaries(
         self, event_ids: Collection[str]
-    ) -> Mapping[str, Optional[Tuple[int, EventBase]]]:
+    ) -> Mapping[str, Optional[tuple[int, EventBase]]]:
         """Get the number of threaded replies and the latest reply (if any) for the given events.
 
         Args:
@@ -627,7 +622,7 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def _get_thread_summaries_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[Dict[str, int], Dict[str, str]]:
+        ) -> tuple[dict[str, int], dict[str, str]]:
             # Fetch the count of threaded events and the latest event ID.
             # TODO Should this only allow m.room.message events.
             if isinstance(self.database_engine, PostgresEngine):
@@ -698,7 +693,7 @@ class RelationsWorkerStore(SQLBaseStore):
             args.append(RelationTypes.THREAD)
 
             txn.execute(sql % (clause,), args)
-            counts = dict(cast(List[Tuple[str, int]], txn.fetchall()))
+            counts = dict(cast(list[tuple[str, int]], txn.fetchall()))
 
             return counts, latest_event_ids
 
@@ -726,8 +721,8 @@ class RelationsWorkerStore(SQLBaseStore):
     async def get_threaded_messages_per_user(
         self,
         event_ids: Collection[str],
-        users: FrozenSet[str] = frozenset(),
-    ) -> Dict[Tuple[str, str], int]:
+        users: frozenset[str] = frozenset(),
+    ) -> dict[tuple[str, str], int]:
         """Get the number of threaded replies for a set of users.
 
         This is used, in conjunction with get_thread_summaries, to calculate an
@@ -759,7 +754,7 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def _get_threaded_messages_per_user_txn(
             txn: LoggingTransaction,
-        ) -> Dict[Tuple[str, str], int]:
+        ) -> dict[tuple[str, str], int]:
             users_sql, users_args = make_in_list_sql_clause(
                 self.database_engine, "child.sender", users
             )
@@ -799,7 +794,7 @@ class RelationsWorkerStore(SQLBaseStore):
             user participated in that event's thread, otherwise false.
         """
 
-        def _get_threads_participated_txn(txn: LoggingTransaction) -> Set[str]:
+        def _get_threads_participated_txn(txn: LoggingTransaction) -> set[str]:
             # Fetch whether the requester has participated or not.
             sql = """
                 SELECT DISTINCT relates_to_id
@@ -830,10 +825,10 @@ class RelationsWorkerStore(SQLBaseStore):
 
     async def events_have_relations(
         self,
-        parent_ids: List[str],
-        relation_senders: Optional[List[str]],
-        relation_types: Optional[List[str]],
-    ) -> List[str]:
+        parent_ids: list[str],
+        relation_senders: Optional[list[str]],
+        relation_types: Optional[list[str]],
+    ) -> list[str]:
         """Check which events have a relationship from the given senders of the
         given types.
 
@@ -856,8 +851,8 @@ class RelationsWorkerStore(SQLBaseStore):
                 %s;
         """
 
-        def _get_if_events_have_relations(txn: LoggingTransaction) -> List[str]:
-            clauses: List[str] = []
+        def _get_if_events_have_relations(txn: LoggingTransaction) -> list[str]:
+            clauses: list[str] = []
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "relates_to_id", parent_ids
             )
@@ -936,7 +931,7 @@ class RelationsWorkerStore(SQLBaseStore):
         room_id: str,
         limit: int = 5,
         from_token: Optional[ThreadsNextBatch] = None,
-    ) -> Tuple[Sequence[str], Optional[ThreadsNextBatch]]:
+    ) -> tuple[Sequence[str], Optional[ThreadsNextBatch]]:
         """Get a list of thread IDs, ordered by topological ordering of their
         latest reply.
 
@@ -976,10 +971,10 @@ class RelationsWorkerStore(SQLBaseStore):
 
         def _get_threads_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[List[str], Optional[ThreadsNextBatch]]:
+        ) -> tuple[list[str], Optional[ThreadsNextBatch]]:
             txn.execute(sql, (room_id, *pagination_args, limit + 1))
 
-            rows = cast(List[Tuple[str, int, int]], txn.fetchall())
+            rows = cast(list[tuple[str, int, int]], txn.fetchall())
             thread_ids = [r[0] for r in rows]
 
             # If there are more events, generate the next pagination key from the

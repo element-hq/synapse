@@ -20,7 +20,7 @@
 #
 import json
 from contextlib import contextmanager
-from typing import Generator, List, Set, Tuple
+from typing import Generator
 from unittest import mock
 
 from twisted.enterprise.adbapi import ConnectionPool
@@ -60,7 +60,7 @@ class HaveSeenEventsTestCase(unittest.HomeserverTestCase):
         self.token = self.login(self.user, "pass")
         self.room_id = self.helper.create_room_as(self.user, tok=self.token)
 
-        self.event_ids: List[str] = []
+        self.event_ids: list[str] = []
         for i in range(3):
             event = self.get_success(
                 inject_event(
@@ -316,7 +316,7 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
 
         room_id = self.helper.create_room_as(user_id, tok=user_tok)
 
-        event_ids: Set[str] = set()
+        event_ids: set[str] = set()
         for i in range(num_events):
             event = self.get_success(
                 inject_event(
@@ -371,7 +371,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        self.event_ids: List[str] = []
+        self.event_ids: list[str] = []
         for idx in range(1, 21):  # Stream ordering starts at 1.
             event_json = {
                 "type": f"test {idx}",
@@ -504,7 +504,7 @@ class GetEventCancellationTestCase(unittest.HomeserverTestCase):
     def blocking_get_event_calls(
         self,
     ) -> Generator[
-        Tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
+        tuple["Deferred[None]", "Deferred[None]", "Deferred[None]"], None, None
     ]:
         """Starts two concurrent `get_event` calls for the same event.
 

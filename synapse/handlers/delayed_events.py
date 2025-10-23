@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from twisted.internet.interfaces import IDelayedCall
 
@@ -226,7 +226,7 @@ class DelayedEventsHandler:
 
                 await self._store.update_delayed_events_stream_pos(max_pos)
 
-    async def _handle_state_deltas(self, deltas: List[StateDelta]) -> None:
+    async def _handle_state_deltas(self, deltas: list[StateDelta]) -> None:
         """
         Process current state deltas to cancel other users' pending delayed events
         that target the same state.
@@ -502,8 +502,8 @@ class DelayedEventsHandler:
 
         await self._send_events(events)
 
-    async def _send_events(self, events: List[DelayedEventDetails]) -> None:
-        sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
+    async def _send_events(self, events: list[DelayedEventDetails]) -> None:
+        sent_state: set[tuple[RoomID, EventType, StateKey]] = set()
         for event in events:
             if event.state_key is not None:
                 state_info = (event.room_id, event.type, event.state_key)
@@ -547,7 +547,7 @@ class DelayedEventsHandler:
         else:
             self._next_delayed_event_call.reset(delay_sec)
 
-    async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
+    async def get_all_for_user(self, requester: Requester) -> list[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
             requester,

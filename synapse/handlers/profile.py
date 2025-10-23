@@ -20,7 +20,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
@@ -69,7 +69,7 @@ class ProfileHandler:
         self.request_ratelimiter = hs.get_request_ratelimiter()
 
         self.max_avatar_size: Optional[int] = hs.config.server.max_avatar_size
-        self.allowed_avatar_mimetypes: Optional[List[str]] = (
+        self.allowed_avatar_mimetypes: Optional[list[str]] = (
             hs.config.server.allowed_avatar_mimetypes
         )
 

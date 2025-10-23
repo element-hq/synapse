@@ -25,7 +25,7 @@ import logging
 import re
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Awaitable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Optional
 from urllib import parse as urlparse
 
 from prometheus_client.core import Histogram
@@ -166,20 +166,20 @@ class RoomCreateRestServlet(TransactionRestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         set_tag("txn_id", txn_id)
         return await self.txns.fetch_or_execute_request(
             request, requester, self._do, request, requester
         )
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         return await self._do(request, requester)
 
     async def _do(
         self, request: SynapseRequest, requester: Requester
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         room_id, _, _ = await self._room_creation_handler.create_room(
             requester, self.get_room_config(request)
         )
@@ -244,18 +244,18 @@ class RoomStateEventRestServlet(RestServlet):
     @cancellable
     def on_GET_no_state_key(
         self, request: SynapseRequest, room_id: str, event_type: str
-    ) -> Awaitable[Tuple[int, JsonDict]]:
+    ) -> Awaitable[tuple[int, JsonDict]]:
         return self.on_GET(request, room_id, event_type, "")
 
     def on_PUT_no_state_key(
         self, request: SynapseRequest, room_id: str, event_type: str
-    ) -> Awaitable[Tuple[int, JsonDict]]:
+    ) -> Awaitable[tuple[int, JsonDict]]:
         return self.on_PUT(request, room_id, event_type, "")
 
     @cancellable
     async def on_GET(
         self, request: SynapseRequest, room_id: str, event_type: str, state_key: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         format = parse_string(
             request, "format", default="content", allowed_values=["content", "event"]
@@ -295,7 +295,7 @@ class RoomStateEventRestServlet(RestServlet):
         event_type: str,
         state_key: str,
         txn_id: Optional[str] = None,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         if txn_id:
@@ -408,7 +408,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         room_id: str,
         event_type: str,
         txn_id: Optional[str],
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
         origin_server_ts = None
@@ -460,13 +460,13 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         request: SynapseRequest,
         room_id: str,
         event_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         return await self._do(request, requester, room_id, event_type, None)
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, event_type: str, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         set_tag("txn_id", txn_id)
 
@@ -545,11 +545,11 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         requester: Requester,
         room_identifier: str,
         txn_id: Optional[str],
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request, allow_empty_body=True)
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
         # Prefer via over server_name (deprecated with MSC4156)
         remote_room_hosts = parse_strings_from_args(args, "via", required=False)
         if remote_room_hosts is None:
@@ -578,13 +578,13 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         self,
         request: SynapseRequest,
         room_identifier: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         return await self._do(request, requester, room_identifier, None)
 
     async def on_PUT(
         self, request: SynapseRequest, room_identifier: str, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         set_tag("txn_id", txn_id)
 
@@ -603,7 +603,7 @@ class PublicRoomListRestServlet(RestServlet):
         self.hs = hs
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         server = parse_string(request, "server")
 
         try:
@@ -652,7 +652,7 @@ class PublicRoomListRestServlet(RestServlet):
 
         return 200, data
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         await self.auth.get_user_by_req(request, allow_guest=True)
 
         server = parse_string(request, "server")
@@ -726,7 +726,7 @@ class RoomMemberListRestServlet(RestServlet):
     @cancellable
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # TODO support Pagination stream API (limit/tokens)
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         handler = self.message_handler
@@ -780,7 +780,7 @@ class JoinedRoomMemberListRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         users_with_profile = await self.message_handler.get_joined_members(
@@ -809,7 +809,7 @@ class RoomMessageListRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         processing_start_time = self.clock.time_msec()
         # Fire off and hope that we get a result by the end.
         #
@@ -870,7 +870,7 @@ class RoomStateRestServlet(RestServlet):
     @cancellable
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, List[JsonDict]]:
+    ) -> tuple[int, list[JsonDict]]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         # Get all the current state for this room
         events = await self.message_handler.get_state_events(
@@ -893,7 +893,7 @@ class RoomInitialSyncRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         pagination_config = await PaginationConfig.from_request(
             self.store, request, default_limit=10
@@ -925,7 +925,7 @@ class RoomEventServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         include_unredacted_content = self.msc2815_enabled and (
@@ -1013,7 +1013,7 @@ class RoomEventContextServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         limit = parse_integer(request, "limit", default=10)
@@ -1072,20 +1072,20 @@ class RoomForgetRestServlet(TransactionRestServlet):
         PATTERNS = "/rooms/(?P<room_id>[^/]*)/forget"
         register_txn_path(self, PATTERNS, http_server)
 
-    async def _do(self, requester: Requester, room_id: str) -> Tuple[int, JsonDict]:
+    async def _do(self, requester: Requester, room_id: str) -> tuple[int, JsonDict]:
         await self.room_member_handler.forget(user=requester.user, room_id=room_id)
 
         return 200, {}
 
     async def on_POST(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
         return await self._do(requester, room_id)
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=False)
         set_tag("txn_id", txn_id)
 
@@ -1119,7 +1119,7 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         room_id: str,
         membership_action: str,
         txn_id: Optional[str],
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if requester.is_guest and membership_action not in {
             Membership.JOIN,
             Membership.LEAVE,
@@ -1196,13 +1196,13 @@ class RoomMembershipRestServlet(TransactionRestServlet):
         request: SynapseRequest,
         room_id: str,
         membership_action: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         return await self._do(request, requester, room_id, membership_action, None)
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, membership_action: str, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         set_tag("txn_id", txn_id)
 
@@ -1242,7 +1242,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
         room_id: str,
         event_id: str,
         txn_id: Optional[str],
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
         requester_suspended = await self._store.get_user_suspended_status(
@@ -1328,13 +1328,13 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
         request: SynapseRequest,
         room_id: str,
         event_id: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         return await self._do(request, requester, room_id, event_id, None)
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, event_id: str, txn_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         set_tag("txn_id", txn_id)
 
@@ -1363,7 +1363,7 @@ class RoomTypingRestServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, room_id: str, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         if not self._is_typing_writer:
@@ -1419,7 +1419,7 @@ class RoomAliasListServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         alias_list = await self.directory_handler.get_aliases_for_room(
@@ -1438,7 +1438,7 @@ class SearchRestServlet(RestServlet):
         self.search_handler = hs.get_search_handler()
         self.auth = hs.get_auth()
 
-    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_POST(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
 
         content = parse_json_object_from_request(request)
@@ -1458,7 +1458,7 @@ class JoinedRoomsRestServlet(RestServlet):
         self.store = hs.get_datastores().main
         self.auth = hs.get_auth()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         room_ids = await self.store.get_rooms_for_user(requester.user.to_string())
@@ -1533,7 +1533,7 @@ class TimestampLookupRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await self._auth.check_user_in_room_or_world_readable(room_id, requester)
 
@@ -1566,7 +1566,7 @@ class RoomHierarchyRestServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request, allow_guest=True)
 
         max_depth = parse_integer(request, "max_depth")
@@ -1575,7 +1575,7 @@ class RoomHierarchyRestServlet(RestServlet):
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         remote_room_hosts = None
         if self.msc4235_enabled:
-            args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+            args: dict[bytes, list[bytes]] = request.args  # type: ignore
             via_param = parse_strings_from_args(
                 args, "org.matrix.msc4235.via", required=False
             )
@@ -1614,7 +1614,7 @@ class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, room_identifier: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         try:
             requester = await self._auth.get_user_by_req(request, allow_guest=True)
             requester_user_id: Optional[str] = requester.user.to_string()
@@ -1623,7 +1623,7 @@ class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
             requester_user_id = None
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
-        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        args: dict[bytes, list[bytes]] = request.args  # type: ignore
         remote_room_hosts = parse_strings_from_args(args, "via", required=False)
         room_id, remote_room_hosts = await self.resolve_room_id(
             room_identifier,

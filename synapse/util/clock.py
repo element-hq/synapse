@@ -17,8 +17,6 @@
 from typing import (
     Any,
     Callable,
-    Dict,
-    List,
 )
 
 from typing_extensions import ParamSpec
@@ -62,10 +60,10 @@ class Clock:
         self._delayed_call_id: int = 0
         """Unique ID used to track delayed calls"""
 
-        self._looping_calls: List[LoopingCall] = []
+        self._looping_calls: list[LoopingCall] = []
         """List of active looping calls"""
 
-        self._call_id_to_delayed_call: Dict[int, IDelayedCall] = {}
+        self._call_id_to_delayed_call: dict[int, IDelayedCall] = {}
         """Mapping from unique call ID to delayed call"""
 
         self._is_shutdown = False

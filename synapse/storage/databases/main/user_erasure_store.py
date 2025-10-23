@@ -18,7 +18,7 @@
 #
 #
 
-from typing import Iterable, List, Mapping, Tuple, cast
+from typing import Iterable, Mapping, cast
 
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main import CacheInvalidationWorkerStore
@@ -57,7 +57,7 @@ class UserErasureWorkerStore(CacheInvalidationWorkerStore):
             for each user, whether the user has requested erasure.
         """
         rows = cast(
-            List[Tuple[str]],
+            list[tuple[str]],
             await self.db_pool.simple_select_many_batch(
                 table="erased_users",
                 column="user_id",

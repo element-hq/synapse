@@ -18,7 +18,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from types import FrameType
-from typing import Collection, Optional, Sequence, Set
+from typing import Collection, Optional, Sequence
 
 # These are expanded inside the dockerfile to be a fully qualified image name.
 # e.g. docker.io/library/debian:bullseye
@@ -54,7 +54,7 @@ class Builder:
     ):
         self.redirect_stdout = redirect_stdout
         self._docker_build_args = tuple(docker_build_args or ())
-        self.active_containers: Set[str] = set()
+        self.active_containers: set[str] = set()
         self._lock = threading.Lock()
         self._failed = False
 

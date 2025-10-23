@@ -20,7 +20,7 @@
 #
 
 from http import HTTPStatus
-from typing import Any, Generator, Tuple, cast
+from typing import Any, Generator, cast
 from unittest.mock import AsyncMock, Mock, call
 
 from twisted.internet import defer, reactor as _reactor
@@ -92,7 +92,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         self,
     ) -> Generator["defer.Deferred[Any]", object, None]:
         @defer.inlineCallbacks
-        def cb() -> Generator["defer.Deferred[object]", object, Tuple[int, JsonDict]]:
+        def cb() -> Generator["defer.Deferred[object]", object, tuple[int, JsonDict]]:
             # Ignore `multiple-internal-clocks` linter error here since we are creating a `Clock`
             # for testing purposes.
             yield defer.ensureDeferred(
@@ -124,7 +124,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         """
         called = [False]
 
-        def cb() -> "defer.Deferred[Tuple[int, JsonDict]]":
+        def cb() -> "defer.Deferred[tuple[int, JsonDict]]":
             if called[0]:
                 # return a valid result the second time
                 return defer.succeed(self.mock_http_response)
@@ -156,7 +156,7 @@ class HttpTransactionCacheTestCase(unittest.TestCase):
         """
         called = [False]
 
-        def cb() -> "defer.Deferred[Tuple[int, JsonDict]]":
+        def cb() -> "defer.Deferred[tuple[int, JsonDict]]":
             if called[0]:
                 # return a valid result the second time
                 return defer.succeed(self.mock_http_response)

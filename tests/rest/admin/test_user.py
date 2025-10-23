@@ -27,7 +27,7 @@ import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
-from typing import Dict, List, Optional
+from typing import Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized, parameterized_class
@@ -1185,7 +1185,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+            expected_user_ids: list[str], not_user_types: Optional[list[str]] = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1262,7 +1262,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         )
 
         def test_user_type(
-            expected_user_ids: List[str], not_user_types: Optional[List[str]] = None
+            expected_user_ids: list[str], not_user_types: Optional[list[str]] = None
         ) -> None:
             """Runs a test for the not_user_types param
             Args:
@@ -1373,7 +1373,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
 
     def _order_test(
         self,
-        expected_user_list: List[str],
+        expected_user_list: list[str],
         order_by: Optional[str],
         dir: Optional[str] = None,
     ) -> None:
@@ -1403,7 +1403,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(expected_user_list, returned_order)
         self._check_fields(channel.json_body["users"])
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected user attributes are present in content
         Args:
             content: List that is checked for content
@@ -3690,7 +3690,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
             self.other_user
         )
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
+    def create_resource_dict(self) -> dict[str, Resource]:
         resources = super().create_resource_dict()
         resources["/_matrix/media"] = self.hs.get_media_repository_resource()
         return resources
@@ -4138,7 +4138,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
             [media2] + sorted([media1, media3]), "safe_from_quarantine", "b"
         )
 
-    def _create_media_for_user(self, user_token: str, number_media: int) -> List[str]:
+    def _create_media_for_user(self, user_token: str, number_media: int) -> list[str]:
         """
         Create a number of media for a specific user
         Args:
@@ -4195,7 +4195,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
 
         return media_id
 
-    def _check_fields(self, content: List[JsonDict]) -> None:
+    def _check_fields(self, content: list[JsonDict]) -> None:
         """Checks that the expected user attributes are present in content
         Args:
             content: List that is checked for content
@@ -4212,7 +4212,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
 
     def _order_test(
         self,
-        expected_media_list: List[str],
+        expected_media_list: list[str],
         order_by: Optional[str],
         dir: Optional[str] = None,
     ) -> None:

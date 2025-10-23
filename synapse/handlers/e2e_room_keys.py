@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Literal, Optional, cast
+from typing import TYPE_CHECKING, Literal, Optional, cast
 
 from synapse.api.errors import (
     Codes,
@@ -65,8 +65,8 @@ class E2eRoomKeysHandler:
         version: str,
         room_id: Optional[str] = None,
         session_id: Optional[str] = None,
-    ) -> Dict[
-        Literal["rooms"], Dict[str, Dict[Literal["sessions"], Dict[str, RoomKey]]]
+    ) -> dict[
+        Literal["rooms"], dict[str, dict[Literal["sessions"], dict[str, RoomKey]]]
     ]:
         """Bulk get the E2E room keys for a given backup, optionally filtered to a given
         room, or a given session.

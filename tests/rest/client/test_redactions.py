@@ -18,7 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
+from typing import Optional
 
 from parameterized import parameterized
 
@@ -85,7 +85,7 @@ class RedactionsTestCase(HomeserverTestCase):
         room_id: str,
         event_id: str,
         expect_code: int = 200,
-        with_relations: Optional[List[str]] = None,
+        with_relations: Optional[list[str]] = None,
         content: Optional[JsonDict] = None,
     ) -> JsonDict:
         """Helper function to send a redaction event.
@@ -104,7 +104,7 @@ class RedactionsTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, expect_code)
         return channel.json_body
 
-    def _sync_room_timeline(self, access_token: str, room_id: str) -> List[JsonDict]:
+    def _sync_room_timeline(self, access_token: str, room_id: str) -> list[JsonDict]:
         channel = self.make_request("GET", "sync", access_token=access_token)
         self.assertEqual(channel.code, 200)
         room_sync = channel.json_body["rooms"]["join"][room_id]

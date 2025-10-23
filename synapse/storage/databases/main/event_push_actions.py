@@ -84,11 +84,8 @@ from collections import defaultdict
 from typing import (
     TYPE_CHECKING,
     Collection,
-    Dict,
-    List,
     Mapping,
     Optional,
-    Tuple,
     Union,
     cast,
 )
@@ -118,11 +115,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_NOTIF_ACTION: List[Union[dict, str]] = [
+DEFAULT_NOTIF_ACTION: list[Union[dict, str]] = [
     "notify",
     {"set_tweak": "highlight", "value": False},
 ]
-DEFAULT_HIGHLIGHT_ACTION: List[Union[dict, str]] = [
+DEFAULT_HIGHLIGHT_ACTION: list[Union[dict, str]] = [
     "notify",
     {"set_tweak": "sound", "value": "default"},
     {"set_tweak": "highlight"},
@@ -138,7 +135,7 @@ class _RoomReceipt:
 
     unthreaded_stream_ordering: int = 0
     # threaded_stream_ordering includes the main pseudo-thread.
-    threaded_stream_ordering: Dict[str, int] = attr.Factory(dict)
+    threaded_stream_ordering: dict[str, int] = attr.Factory(dict)
 
     def is_unread(self, thread_id: str, stream_ordering: int) -> bool:
         """Returns True if the stream ordering is unread according to the receipt information."""
@@ -165,7 +162,7 @@ class HttpPushAction:
     event_id: str
     room_id: str
     stream_ordering: int
-    actions: List[Union[dict, str]]
+    actions: list[Union[dict, str]]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -244,7 +241,7 @@ def _serialize_action(
     return json_encoder.encode(actions)
 
 
-def _deserialize_action(actions: str, is_highlight: bool) -> List[Union[dict, str]]:
+def _deserialize_action(actions: str, is_highlight: bool) -> list[Union[dict, str]]:
     """Custom deserializer for actions. This allows us to "compress" common actions"""
     if actions:
         return db_to_json(actions)
@@ -256,7 +253,7 @@ def _deserialize_action(actions: str, is_highlight: bool) -> List[Union[dict, st
 
 
 class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBaseStore):
-    _background_tasks: List[LoopingCall] = []
+    _background_tasks: list[LoopingCall] = []
 
     def __init__(
         self,
@@ -351,7 +348,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         )
         return 0
 
-    async def get_unread_counts_by_room_for_user(self, user_id: str) -> Dict[str, int]:
+    async def get_unread_counts_by_room_for_user(self, user_id: str) -> dict[str, int]:
         """Get the notification count by room for a user. Only considers notifications,
         not highlight or unread counts, and threads are currently aggregated under their room.
 
@@ -373,7 +370,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
     def _get_unread_counts_by_room_for_user_txn(
         self, txn: LoggingTransaction, user_id: str
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         receipt_types_clause, args = make_in_list_sql_clause(
             self.database_engine,
             "receipt_type",
@@ -440,7 +437,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         txn.execute(sql, args)
 
         seen_thread_ids = set()
-        room_to_count: Dict[str, int] = defaultdict(int)
+        room_to_count: dict[str, int] = defaultdict(int)
 
         for room_id, thread_id, notif_count in txn:
             room_to_count[room_id] += notif_count
@@ -585,7 +582,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         """
 
         main_counts = NotifCounts()
-        thread_counts: Dict[str, NotifCounts] = {}
+        thread_counts: dict[str, NotifCounts] = {}
 
         def _get_thread(thread_id: str) -> NotifCounts:
             if thread_id == MAIN_TIMELINE:
@@ -778,7 +775,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         stream_ordering: int,
         max_stream_ordering: Optional[int] = None,
         thread_id: Optional[str] = None,
-    ) -> List[Tuple[int, int, str]]:
+    ) -> list[tuple[int, int, str]]:
         """Returns the notify and unread counts from `event_push_actions` for
         the given user/room in the given range.
 
@@ -840,12 +837,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         """
 
         txn.execute(sql, args)
-        return cast(List[Tuple[int, int, str]], txn.fetchall())
+        return cast(list[tuple[int, int, str]], txn.fetchall())
 
     async def get_push_action_users_in_range(
         self, min_stream_ordering: int, max_stream_ordering: int
-    ) -> List[str]:
-        def f(txn: LoggingTransaction) -> List[str]:
+    ) -> list[str]:
+        def f(txn: LoggingTransaction) -> list[str]:
             sql = (
                 "SELECT DISTINCT(user_id) FROM event_push_actions WHERE"
                 " stream_ordering >= ? AND stream_ordering <= ? AND notif = 1"
@@ -861,7 +858,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         user_id: str,
         room_ids: StrCollection,
         thread_ids: StrCollection,
-    ) -> Dict[str, _RoomReceipt]:
+    ) -> dict[str, _RoomReceipt]:
         """
         Get (private) read receipts for a user in each of the given room IDs
         and thread IDs.
@@ -936,7 +933,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         txn.execute(sql, args)
 
-        result: Dict[str, _RoomReceipt] = {}
+        result: dict[str, _RoomReceipt] = {}
         for room_id, thread_id, stream_ordering in txn:
             room_receipt = result.setdefault(room_id, _RoomReceipt())
             if thread_id is None:
@@ -952,7 +949,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         min_stream_ordering: int,
         max_stream_ordering: int,
         limit: int = 20,
-    ) -> List[HttpPushAction]:
+    ) -> list[HttpPushAction]:
         """Get a list of the most recent unread push actions for a given user,
         within the given stream ordering range. Called by the httppusher.
 
@@ -971,7 +968,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         def get_push_actions_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str, str, int, str, bool]]:
+        ) -> list[tuple[str, str, str, int, str, bool]]:
             sql = """
                 SELECT ep.event_id, ep.room_id, ep.thread_id, ep.stream_ordering,
                     ep.actions, ep.highlight
@@ -984,7 +981,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 ORDER BY ep.stream_ordering ASC LIMIT ?
             """
             txn.execute(sql, (user_id, min_stream_ordering, max_stream_ordering, limit))
-            return cast(List[Tuple[str, str, str, int, str, bool]], txn.fetchall())
+            return cast(list[tuple[str, str, str, int, str, bool]], txn.fetchall())
 
         push_actions = await self.db_pool.runInteraction(
             "get_unread_push_actions_for_user_in_range_http", get_push_actions_txn
@@ -1040,7 +1037,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         min_stream_ordering: int,
         max_stream_ordering: int,
         limit: int = 20,
-    ) -> List[EmailPushAction]:
+    ) -> list[EmailPushAction]:
         """Get a list of the most recent unread push actions for a given user,
         within the given stream ordering range. Called by the emailpusher
 
@@ -1059,7 +1056,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
 
         def get_push_actions_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str, str, int, str, bool, int]]:
+        ) -> list[tuple[str, str, str, int, str, bool, int]]:
             sql = """
                 SELECT ep.event_id, ep.room_id, ep.thread_id, ep.stream_ordering,
                     ep.actions, ep.highlight, e.received_ts
@@ -1073,7 +1070,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 ORDER BY ep.stream_ordering DESC LIMIT ?
             """
             txn.execute(sql, (user_id, min_stream_ordering, max_stream_ordering, limit))
-            return cast(List[Tuple[str, str, str, int, str, bool, int]], txn.fetchall())
+            return cast(list[tuple[str, str, str, int, str, bool, int]], txn.fetchall())
 
         push_actions = await self.db_pool.runInteraction(
             "get_unread_push_actions_for_user_in_range_email", get_push_actions_txn
@@ -1159,7 +1156,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
     async def add_push_actions_to_staging(
         self,
         event_id: str,
-        user_id_actions: Dict[str, Collection[Union[Mapping, str]]],
+        user_id_actions: dict[str, Collection[Union[Mapping, str]]],
         count_as_unread: bool,
         thread_id: str,
     ) -> None:
@@ -1179,7 +1176,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # can be used to insert into the `event_push_actions_staging` table.
         def _gen_entry(
             user_id: str, actions: Collection[Union[Mapping, str]]
-        ) -> Tuple[str, str, str, int, int, int, str, int]:
+        ) -> tuple[str, str, str, int, int, int, str, int]:
             is_highlight = 1 if _action_has_highlight(actions) else 0
             notif = 1 if "notify" in actions else 0
             return (
@@ -1296,7 +1293,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             The stream ordering
         """
         txn.execute("SELECT MAX(stream_ordering) FROM events")
-        max_stream_ordering = cast(Tuple[Optional[int]], txn.fetchone())[0]
+        max_stream_ordering = cast(tuple[Optional[int]], txn.fetchone())[0]
 
         if max_stream_ordering is None:
             return 0
@@ -1355,7 +1352,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
     async def get_time_of_last_push_action_before(
         self, stream_ordering: int
     ) -> Optional[int]:
-        def f(txn: LoggingTransaction) -> Optional[Tuple[int]]:
+        def f(txn: LoggingTransaction) -> Optional[tuple[int]]:
             sql = """
                 SELECT e.received_ts
                 FROM event_push_actions AS ep
@@ -1365,7 +1362,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 LIMIT 1
             """
             txn.execute(sql, (stream_ordering,))
-            return cast(Optional[Tuple[int]], txn.fetchone())
+            return cast(Optional[tuple[int]], txn.fetchone())
 
         result = await self.db_pool.runInteraction(
             "get_time_of_last_push_action_before", f
@@ -1457,7 +1454,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 limit,
             ),
         )
-        rows = cast(List[Tuple[int, str, str, Optional[str], int]], txn.fetchall())
+        rows = cast(list[tuple[int, str, str, Optional[str], int]], txn.fetchall())
 
         # For each new read receipt we delete push actions from before it and
         # recalculate the summary.
@@ -1469,7 +1466,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 continue
 
             thread_clause = ""
-            thread_args: Tuple = ()
+            thread_args: tuple = ()
             if thread_id is not None:
                 thread_clause = "AND thread_id = ?"
                 thread_args = (thread_id,)
@@ -1654,7 +1651,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # object because we might not have the same amount of rows in each of them. To do
         # this, we use a dict indexed on the user ID and room ID to make it easier to
         # populate.
-        summaries: Dict[Tuple[str, str, str], _EventPushSummary] = {}
+        summaries: dict[tuple[str, str, str], _EventPushSummary] = {}
         for row in txn:
             summaries[(row[0], row[1], row[2])] = _EventPushSummary(
                 unread_count=row[3],
@@ -1832,10 +1829,10 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         before: Optional[int] = None,
         limit: int = 50,
         only_highlight: bool = False,
-    ) -> List[UserPushAction]:
+    ) -> list[UserPushAction]:
         def f(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str, int, int, str, bool, str, int]]:
+        ) -> list[tuple[str, str, int, int, str, bool, str, int]]:
             before_clause = ""
             if before:
                 before_clause = "AND epa.stream_ordering < ?"
@@ -1863,7 +1860,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             """ % (before_clause,)
             txn.execute(sql, args)
             return cast(
-                List[Tuple[str, str, int, int, str, bool, str, int]], txn.fetchall()
+                list[tuple[str, str, int, int, str, bool, str, int]], txn.fetchall()
             )
 
         push_actions = await self.db_pool.runInteraction("get_push_actions_for_user", f)

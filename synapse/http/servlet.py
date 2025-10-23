@@ -27,13 +27,10 @@ import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
-    List,
     Literal,
     Mapping,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     TypeVar,
     overload,
 )
@@ -548,7 +545,7 @@ EnumT = TypeVar("EnumT", bound=enum.Enum)
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     default: EnumT,
 ) -> EnumT: ...
 
@@ -557,7 +554,7 @@ def parse_enum(
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     *,
     required: Literal[True],
 ) -> EnumT: ...
@@ -566,7 +563,7 @@ def parse_enum(
 def parse_enum(
     request: Request,
     name: str,
-    E: Type[EnumT],
+    E: type[EnumT],
     default: Optional[EnumT] = None,
     required: bool = False,
 ) -> Optional[EnumT]:
@@ -637,18 +634,18 @@ def parse_strings_from_args(
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]: ...
+) -> Optional[list[str]]: ...
 
 
 @overload
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: List[str],
+    default: list[str],
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> List[str]: ...
+) -> list[str]: ...
 
 
 @overload
@@ -659,29 +656,29 @@ def parse_strings_from_args(
     required: Literal[True],
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> List[str]: ...
+) -> list[str]: ...
 
 
 @overload
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[List[str]] = None,
+    default: Optional[list[str]] = None,
     *,
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]: ...
+) -> Optional[list[str]]: ...
 
 
 def parse_strings_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
-    default: Optional[List[str]] = None,
+    default: Optional[list[str]] = None,
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]:
+) -> Optional[list[str]]:
     """
     Parse a string parameter from the request query string list.
 
@@ -892,7 +889,7 @@ def parse_json_object_from_request(
 Model = TypeVar("Model", bound=BaseModel)
 
 
-def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
+def validate_json_object(content: JsonDict, model_type: type[Model]) -> Model:
     """Validate a deserialized JSON object using the given pydantic model.
 
     Raises:
@@ -922,7 +919,7 @@ def validate_json_object(content: JsonDict, model_type: Type[Model]) -> Model:
 
 
 def parse_and_validate_json_object_from_request(
-    request: Request, model_type: Type[Model]
+    request: Request, model_type: type[Model]
 ) -> Model:
     """Parse a JSON object from the body of a twisted HTTP request, then deserialise and
     validate using the given pydantic model.
@@ -988,8 +985,8 @@ class ResolveRoomIdMixin:
         self.room_member_handler = hs.get_room_member_handler()
 
     async def resolve_room_id(
-        self, room_identifier: str, remote_room_hosts: Optional[List[str]] = None
-    ) -> Tuple[str, Optional[List[str]]]:
+        self, room_identifier: str, remote_room_hosts: Optional[list[str]] = None
+    ) -> tuple[str, Optional[list[str]]]:
         """
         Resolve a room identifier to a room ID, if necessary.
 

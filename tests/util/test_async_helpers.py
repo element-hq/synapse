@@ -19,7 +19,7 @@
 #
 import logging
 import traceback
-from typing import Any, Coroutine, List, NoReturn, Optional, Tuple, TypeVar
+from typing import Any, Coroutine, NoReturn, Optional, TypeVar
 
 from parameterized import parameterized_class
 
@@ -71,7 +71,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: List[Optional[int]] = [None, None]
+        results: list[Optional[int]] = [None, None]
 
         def check_val(res: int, idx: int) -> int:
             results[idx] = res
@@ -102,7 +102,7 @@ class ObservableDeferredTest(TestCase):
         observer1.addBoth(check_called_first)
 
         # store the results
-        results: List[Optional[Failure]] = [None, None]
+        results: list[Optional[Failure]] = [None, None]
 
         def check_failure(res: Failure, idx: int) -> None:
             results[idx] = res
@@ -708,7 +708,7 @@ class AwakenableSleeperTests(TestCase):
 class GatherCoroutineTests(TestCase):
     """Tests for `gather_optional_coroutines`"""
 
-    def make_coroutine(self) -> Tuple[Coroutine[Any, Any, T], "defer.Deferred[T]"]:
+    def make_coroutine(self) -> tuple[Coroutine[Any, Any, T], "defer.Deferred[T]"]:
         """Returns a coroutine and a deferred that it is waiting on to resolve"""
 
         d: "defer.Deferred[T]" = defer.Deferred()

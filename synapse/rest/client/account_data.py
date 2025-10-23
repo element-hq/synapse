@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import AccountDataTypes, ReceiptTypes
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -75,7 +75,7 @@ class AccountDataServlet(RestServlet):
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, account_data_type: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add account data for other users.")
@@ -101,7 +101,7 @@ class AccountDataServlet(RestServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, account_data_type: str
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot get account data for other users.")
@@ -152,7 +152,7 @@ class UnstableAccountDataServlet(RestServlet):
         request: SynapseRequest,
         user_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot delete account data for other users.")
@@ -191,7 +191,7 @@ class RoomAccountDataServlet(RestServlet):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add account data for other users.")
@@ -230,7 +230,7 @@ class RoomAccountDataServlet(RestServlet):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonMapping]:
+    ) -> tuple[int, JsonMapping]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot get account data for other users.")
@@ -288,7 +288,7 @@ class UnstableRoomAccountDataServlet(RestServlet):
         user_id: str,
         room_id: str,
         account_data_type: str,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot delete account data for other users.")

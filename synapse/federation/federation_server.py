@@ -27,11 +27,8 @@ from typing import (
     Awaitable,
     Callable,
     Collection,
-    Dict,
-    List,
     Mapping,
     Optional,
-    Tuple,
     Union,
 )
 
@@ -163,10 +160,10 @@ class FederationServer(FederationBase):
 
         # origins that we are currently processing a transaction from.
         # a dict from origin to txn id.
-        self._active_transactions: Dict[str, str] = {}
+        self._active_transactions: dict[str, str] = {}
 
         # We cache results for transaction with the same ID
-        self._transaction_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
+        self._transaction_resp_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="fed_txn_handler",
             server_name=self.server_name,
@@ -179,7 +176,7 @@ class FederationServer(FederationBase):
 
         # We cache responses to state queries, as they take a while and often
         # come in waves.
-        self._state_resp_cache: ResponseCache[Tuple[str, Optional[str]]] = (
+        self._state_resp_cache: ResponseCache[tuple[str, Optional[str]]] = (
             ResponseCache(
                 clock=hs.get_clock(),
                 name="state_resp",
@@ -187,7 +184,7 @@ class FederationServer(FederationBase):
                 timeout_ms=30000,
             )
         )
-        self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
+        self._state_ids_resp_cache: ResponseCache[tuple[str, str]] = ResponseCache(
             clock=hs.get_clock(),
             name="state_ids_resp",
             server_name=self.server_name,
@@ -236,8 +233,8 @@ class FederationServer(FederationBase):
             await self._clock.sleep(random.uniform(0, 0.1))
 
     async def on_backfill_request(
-        self, origin: str, room_id: str, versions: List[str], limit: int
-    ) -> Tuple[int, Dict[str, Any]]:
+        self, origin: str, room_id: str, versions: list[str], limit: int
+    ) -> tuple[int, dict[str, Any]]:
         async with self._server_linearizer.queue((origin, room_id)):
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
@@ -252,7 +249,7 @@ class FederationServer(FederationBase):
 
     async def on_timestamp_to_event_request(
         self, origin: str, room_id: str, timestamp: int, direction: Direction
-    ) -> Tuple[int, Dict[str, Any]]:
+    ) -> tuple[int, dict[str, Any]]:
         """When we receive a federated `/timestamp_to_event` request,
         handle all of the logic for validating and fetching the event.
 
@@ -298,7 +295,7 @@ class FederationServer(FederationBase):
         transaction_id: str,
         destination: str,
         transaction_data: JsonDict,
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         # If we receive a transaction we should make sure that kick off handling
         # any old events in the staging area.
         if not self._started_handling_of_staged_events:
@@ -365,7 +362,7 @@ class FederationServer(FederationBase):
 
     async def _on_incoming_transaction_inner(
         self, origin: str, transaction: Transaction, request_time: int
-    ) -> Tuple[int, Dict[str, Any]]:
+    ) -> tuple[int, dict[str, Any]]:
         # CRITICAL SECTION: the first thing we must do (before awaiting) is
         # add an entry to _active_transactions.
         assert origin not in self._active_transactions
@@ -381,7 +378,7 @@ class FederationServer(FederationBase):
 
     async def _handle_incoming_transaction(
         self, origin: str, transaction: Transaction, request_time: int
-    ) -> Tuple[int, Dict[str, Any]]:
+    ) -> tuple[int, dict[str, Any]]:
         """Process an incoming transaction and return the HTTP response
 
         Args:
@@ -429,7 +426,7 @@ class FederationServer(FederationBase):
 
     async def _handle_pdus_in_txn(
         self, origin: str, transaction: Transaction, request_time: int
-    ) -> Dict[str, dict]:
+    ) -> dict[str, dict]:
         """Process the PDUs in a received transaction.
 
         Args:
@@ -448,7 +445,7 @@ class FederationServer(FederationBase):
 
         origin_host, _ = parse_server_name(origin)
 
-        pdus_by_room: Dict[str, List[EventBase]] = {}
+        pdus_by_room: dict[str, list[EventBase]] = {}
 
         newest_pdu_ts = 0
 
@@ -601,7 +598,7 @@ class FederationServer(FederationBase):
 
     async def on_room_state_request(
         self, origin: str, room_id: str, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         await self._event_auth_handler.assert_host_in_room(room_id, origin)
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
@@ -625,7 +622,7 @@ class FederationServer(FederationBase):
     @tag_args
     async def on_state_ids_request(
         self, origin: str, room_id: str, event_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> tuple[int, JsonDict]:
         if not event_id:
             raise NotImplementedError("Specify an event")
 
@@ -653,7 +650,7 @@ class FederationServer(FederationBase):
 
     async def _on_context_state_request_compute(
         self, room_id: str, event_id: str
-    ) -> Dict[str, list]:
+    ) -> dict[str, list]:
         pdus: Collection[EventBase]
         event_ids = await self.handler.get_state_ids_for_pdu(room_id, event_id)
         pdus = await self.store.get_events_as_list(event_ids)
@@ -669,7 +666,7 @@ class FederationServer(FederationBase):
 
     async def on_pdu_request(
         self, origin: str, event_id: str
-    ) -> Tuple[int, Union[JsonDict, str]]:
+    ) -> tuple[int, Union[JsonDict, str]]:
         pdu = await self.handler.get_persisted_pdu(origin, event_id)
 
         if pdu:
@@ -678,8 +675,8 @@ class FederationServer(FederationBase):
             return 404, ""
 
     async def on_query_request(
-        self, query_type: str, args: Dict[str, str]
-    ) -> Tuple[int, Dict[str, Any]]:
+        self, query_type: str, args: dict[str, str]
+    ) -> tuple[int, dict[str, Any]]:
         received_queries_counter.labels(
             type=query_type,
             **{SERVER_NAME_LABEL: self.server_name},
@@ -688,8 +685,8 @@ class FederationServer(FederationBase):
         return 200, resp
 
     async def on_make_join_request(
-        self, origin: str, room_id: str, user_id: str, supported_versions: List[str]
-    ) -> Dict[str, Any]:
+        self, origin: str, room_id: str, user_id: str, supported_versions: list[str]
+    ) -> dict[str, Any]:
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
 
@@ -714,7 +711,7 @@ class FederationServer(FederationBase):
 
     async def on_invite_request(
         self, origin: str, content: JsonDict, room_version_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         room_version = KNOWN_ROOM_VERSIONS.get(room_version_id)
         if not room_version:
             raise SynapseError(
@@ -748,7 +745,7 @@ class FederationServer(FederationBase):
         content: JsonDict,
         room_id: str,
         caller_supports_partial_state: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         set_tag(
             SynapseTags.SEND_JOIN_RESPONSE_IS_PARTIAL_STATE,
             caller_supports_partial_state,
@@ -809,7 +806,7 @@ class FederationServer(FederationBase):
 
     async def on_make_leave_request(
         self, origin: str, room_id: str, user_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         origin_host, _ = parse_server_name(origin)
         await self.check_server_matches_acl(origin_host, room_id)
         pdu = await self.handler.on_make_leave_request(origin, room_id, user_id)
@@ -826,7 +823,7 @@ class FederationServer(FederationBase):
         return {}
 
     async def on_make_knock_request(
-        self, origin: str, room_id: str, user_id: str, supported_versions: List[str]
+        self, origin: str, room_id: str, user_id: str, supported_versions: list[str]
     ) -> JsonDict:
         """We've received a /make_knock/ request, so we create a partial knock
         event for the room and hand that back, along with the room version, to the knocking
@@ -884,7 +881,7 @@ class FederationServer(FederationBase):
         origin: str,
         content: JsonDict,
         room_id: str,
-    ) -> Dict[str, List[JsonDict]]:
+    ) -> dict[str, list[JsonDict]]:
         """
         We have received a knock event for a room. Verify and send the event into the room
         on the knocking homeserver's behalf. Then reply with some stripped state from the
@@ -1034,7 +1031,7 @@ class FederationServer(FederationBase):
 
     async def on_event_auth(
         self, origin: str, room_id: str, event_id: str
-    ) -> Tuple[int, Dict[str, Any]]:
+    ) -> tuple[int, dict[str, Any]]:
         async with self._server_linearizer.queue((origin, room_id)):
             await self._event_auth_handler.assert_host_in_room(room_id, origin)
             origin_host, _ = parse_server_name(origin)
@@ -1046,20 +1043,20 @@ class FederationServer(FederationBase):
         return 200, res
 
     async def on_query_client_keys(
-        self, origin: str, content: Dict[str, str]
-    ) -> Tuple[int, Dict[str, Any]]:
+        self, origin: str, content: dict[str, str]
+    ) -> tuple[int, dict[str, Any]]:
         return await self.on_query_request("client_keys", content)
 
     async def on_query_user_devices(
         self, origin: str, user_id: str
-    ) -> Tuple[int, Dict[str, Any]]:
+    ) -> tuple[int, dict[str, Any]]:
         keys = await self.device_handler.on_federation_query_user_devices(user_id)
         return 200, keys
 
     @trace
     async def on_claim_client_keys(
-        self, query: List[Tuple[str, str, str, int]], always_include_fallback_keys: bool
-    ) -> Dict[str, Any]:
+        self, query: list[tuple[str, str, str, int]], always_include_fallback_keys: bool
+    ) -> dict[str, Any]:
         if any(
             not self.hs.is_mine(UserID.from_string(user_id))
             for user_id, _, _, _ in query
@@ -1071,7 +1068,7 @@ class FederationServer(FederationBase):
             query, always_include_fallback_keys=always_include_fallback_keys
         )
 
-        json_result: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
+        json_result: dict[str, dict[str, dict[str, JsonDict]]] = {}
         for result in results:
             for user_id, device_keys in result.items():
                 for device_id, keys in device_keys.items():
@@ -1098,10 +1095,10 @@ class FederationServer(FederationBase):
         self,
         origin: str,
         room_id: str,
-        earliest_events: List[str],
-        latest_events: List[str],
+        earliest_events: list[str],
+        latest_events: list[str],
         limit: int,
-    ) -> Dict[str, list]:
+    ) -> dict[str, list]:
         async with self._server_linearizer.queue((origin, room_id)):
             origin_host, _ = parse_server_name(origin)
             await self.check_server_matches_acl(origin_host, room_id)
@@ -1133,7 +1130,7 @@ class FederationServer(FederationBase):
         ts_now_ms = self._clock.time_msec()
         return await self.store.get_user_id_for_open_id_token(token, ts_now_ms)
 
-    def _transaction_dict_from_pdus(self, pdu_list: List[EventBase]) -> JsonDict:
+    def _transaction_dict_from_pdus(self, pdu_list: list[EventBase]) -> JsonDict:
         """Returns a new Transaction containing the given PDUs suitable for
         transmission.
         """
@@ -1208,7 +1205,7 @@ class FederationServer(FederationBase):
 
     async def _get_next_nonspam_staged_event_for_room(
         self, room_id: str, room_version: RoomVersion
-    ) -> Optional[Tuple[str, EventBase]]:
+    ) -> Optional[tuple[str, EventBase]]:
         """Fetch the first non-spam event from staging queue.
 
         Args:
@@ -1363,13 +1360,13 @@ class FederationServer(FederationBase):
             lock = new_lock
 
     async def exchange_third_party_invite(
-        self, sender_user_id: str, target_user_id: str, room_id: str, signed: Dict
+        self, sender_user_id: str, target_user_id: str, room_id: str, signed: dict
     ) -> None:
         await self.handler.exchange_third_party_invite(
             sender_user_id, target_user_id, room_id, signed
         )
 
-    async def on_exchange_third_party_invite_request(self, event_dict: Dict) -> None:
+    async def on_exchange_third_party_invite_request(self, event_dict: dict) -> None:
         await self.handler.on_exchange_third_party_invite_request(event_dict)
 
     async def check_server_matches_acl(self, server_name: str, room_id: str) -> None:
@@ -1407,13 +1404,13 @@ class FederationHandlerRegistry:
         # the case.
         self._send_edu = ReplicationFederationSendEduRestServlet.make_client(hs)
 
-        self.edu_handlers: Dict[str, Callable[[str, dict], Awaitable[None]]] = {}
-        self.query_handlers: Dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
+        self.edu_handlers: dict[str, Callable[[str, dict], Awaitable[None]]] = {}
+        self.query_handlers: dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
 
         # Map from type to instance names that we should route EDU handling to.
         # We randomly choose one instance from the list to route to for each new
         # EDU received.
-        self._edu_type_to_instance: Dict[str, List[str]] = {}
+        self._edu_type_to_instance: dict[str, list[str]] = {}
 
     def register_edu_handler(
         self, edu_type: str, handler: Callable[[str, JsonDict], Awaitable[None]]
@@ -1455,7 +1452,7 @@ class FederationHandlerRegistry:
         self.query_handlers[query_type] = handler
 
     def register_instances_for_edu(
-        self, edu_type: str, instance_names: List[str]
+        self, edu_type: str, instance_names: list[str]
     ) -> None:
         """Register that the EDU handler is on multiple instances."""
         self._edu_type_to_instance[edu_type] = instance_names

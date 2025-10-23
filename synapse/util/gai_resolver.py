@@ -17,12 +17,9 @@ from socket import (
 from typing import (
     TYPE_CHECKING,
     Callable,
-    List,
     NoReturn,
     Optional,
     Sequence,
-    Tuple,
-    Type,
     Union,
 )
 
@@ -91,13 +88,13 @@ _socktypeToType = {
 }
 
 
-_GETADDRINFO_RESULT = List[
-    Tuple[
+_GETADDRINFO_RESULT = list[
+    tuple[
         AddressFamily,
         SocketKind,
         int,
         str,
-        Union[Tuple[str, int], Tuple[str, int, int, int], Tuple[int, bytes]],
+        Union[tuple[str, int], tuple[str, int, int, int], tuple[int, bytes]],
     ]
 ]
 
@@ -141,7 +138,7 @@ class GAIResolver:
         resolutionReceiver: IResolutionReceiver,
         hostName: str,
         portNumber: int = 0,
-        addressTypes: Optional[Sequence[Type[IAddress]]] = None,
+        addressTypes: Optional[Sequence[type[IAddress]]] = None,
         transportSemantics: str = "TCP",
     ) -> IHostResolution:
         """

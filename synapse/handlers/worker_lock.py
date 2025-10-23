@@ -26,10 +26,7 @@ from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
     Collection,
-    Dict,
     Optional,
-    Tuple,
-    Type,
     Union,
 )
 from weakref import WeakSet
@@ -75,8 +72,8 @@ class WorkerLocksHandler:
 
         # Map from lock name/key to set of `WaitingLock` that are active for
         # that lock.
-        self._locks: Dict[
-            Tuple[str, str], WeakSet[Union[WaitingLock, WaitingMultiLock]]
+        self._locks: dict[
+            tuple[str, str], WeakSet[Union[WaitingLock, WaitingMultiLock]]
         ] = {}
 
         self._clock.looping_call(self._cleanup_locks, 30_000)
@@ -141,7 +138,7 @@ class WorkerLocksHandler:
 
     def acquire_multi_read_write_lock(
         self,
-        lock_names: Collection[Tuple[str, str]],
+        lock_names: Collection[tuple[str, str]],
         *,
         write: bool,
     ) -> "WaitingMultiLock":
@@ -261,7 +258,7 @@ class WaitingLock:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> Optional[bool]:
@@ -289,7 +286,7 @@ class WaitingLock:
 
 @attr.s(auto_attribs=True, eq=False)
 class WaitingMultiLock:
-    lock_names: Collection[Tuple[str, str]]
+    lock_names: Collection[tuple[str, str]]
 
     write: bool
 
@@ -341,7 +338,7 @@ class WaitingMultiLock:
 
     async def __aexit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> Optional[bool]:

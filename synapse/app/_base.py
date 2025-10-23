@@ -34,11 +34,8 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
-    List,
     NoReturn,
     Optional,
-    Tuple,
     cast,
 )
 from wsgiref.simple_server import WSGIServer
@@ -98,8 +95,8 @@ reactor = cast(ISynapseReactor, _reactor)
 
 logger = logging.getLogger(__name__)
 
-_instance_id_to_sighup_callbacks_map: Dict[
-    str, List[Tuple[Callable[..., None], Tuple[object, ...], Dict[str, object]]]
+_instance_id_to_sighup_callbacks_map: dict[
+    str, list[tuple[Callable[..., None], tuple[object, ...], dict[str, object]]]
 ] = {}
 """
 Map from homeserver instance_id to a list of callbacks.
@@ -176,7 +173,7 @@ def start_worker_reactor(
 def start_reactor(
     appname: str,
     soft_file_limit: int,
-    gc_thresholds: Optional[Tuple[int, int, int]],
+    gc_thresholds: Optional[tuple[int, int, int]],
     pid_file: Optional[str],
     daemonize: bool,
     print_pidfile: bool,
@@ -309,7 +306,7 @@ def register_start(
 
 def listen_metrics(
     bind_addresses: StrCollection, port: int
-) -> List[Tuple[WSGIServer, Thread]]:
+) -> list[tuple[WSGIServer, Thread]]:
     """
     Start Prometheus metrics server.
 
@@ -330,7 +327,7 @@ def listen_metrics(
 
     from synapse.metrics import RegistryProxy
 
-    servers: List[Tuple[WSGIServer, Thread]] = []
+    servers: list[tuple[WSGIServer, Thread]] = []
     for host in bind_addresses:
         logger.info("Starting metrics listener on %s:%d", host, port)
         server, thread = start_http_server_prometheus(
@@ -345,7 +342,7 @@ def listen_manhole(
     port: int,
     manhole_settings: ManholeConfig,
     manhole_globals: dict,
-) -> List[Port]:
+) -> list[Port]:
     # twisted.conch.manhole 21.1.0 uses "int_from_bytes", which produces a confusing
     # warning. It's fixed by https://github.com/twisted/twisted/pull/1522), so
     # suppress the warning for now.
@@ -370,7 +367,7 @@ def listen_tcp(
     factory: ServerFactory,
     reactor: IReactorTCP = reactor,
     backlog: int = 50,
-) -> List[Port]:
+) -> list[Port]:
     """
     Create a TCP socket for a port and several addresses
 
@@ -395,7 +392,7 @@ def listen_unix(
     factory: ServerFactory,
     reactor: IReactorUNIX = reactor,
     backlog: int = 50,
-) -> List[Port]:
+) -> list[Port]:
     """
     Create a UNIX socket for a given path and 'mode' permission
 
@@ -419,7 +416,7 @@ def listen_http(
     max_request_body_size: int,
     context_factory: Optional[IOpenSSLContextFactory],
     reactor: ISynapseReactor = reactor,
-) -> List[Port]:
+) -> list[Port]:
     """
     Args:
         listener_config: TODO
@@ -489,7 +486,7 @@ def listen_ssl(
     context_factory: IOpenSSLContextFactory,
     reactor: IReactorSSL = reactor,
     backlog: int = 50,
-) -> List[Port]:
+) -> list[Port]:
     """
     Create an TLS-over-TCP socket for a port and several addresses
 

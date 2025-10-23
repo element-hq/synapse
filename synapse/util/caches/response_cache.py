@@ -24,7 +24,6 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    Dict,
     Generic,
     Iterable,
     Optional,
@@ -119,7 +118,7 @@ class ResponseCache(Generic[KV]):
             timeout_ms
             enable_logging
         """
-        self._result_cache: Dict[KV, ResponseCacheEntry] = {}
+        self._result_cache: dict[KV, ResponseCacheEntry] = {}
 
         self.clock = clock
         self.timeout_sec = timeout_ms / 1000.0
