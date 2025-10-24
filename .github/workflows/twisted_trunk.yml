@@ -108,11 +108,11 @@ jobs:
     if: needs.check_repo.outputs.should_run_workflow == 'true'
     runs-on: ubuntu-latest
     container:
-      # We're using debian:bullseye because it uses Python 3.9 which is our minimum supported Python version.
+      # We're using bookworm because that's what Debian oldstable is at the time of writing.
       # This job is a canary to warn us about unreleased twisted changes that would cause problems for us if
       # they were to be released immediately. For simplicity's sake (and to save CI runners) we use the oldest
       # version, assuming that any incompatibilities on newer versions would also be present on the oldest.
-      image: matrixdotorg/sytest-synapse:bullseye
+      image: matrixdotorg/sytest-synapse:bookworm
       volumes:
         - ${{ github.workspace }}:/src
 
