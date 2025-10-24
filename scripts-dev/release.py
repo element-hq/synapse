@@ -430,7 +430,7 @@ def _publish(gh_token: str) -> None:
 
     if gh_token:
         # Test that the GH Token is valid before continuing.
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
         gh.get_user()
 
     # Make sure we're in a git repo.
@@ -443,7 +443,7 @@ def _publish(gh_token: str) -> None:
         return
 
     # Publish the draft release
-    gh = Github(gh_token)
+    gh = Github(auth=github.Auth.Token(token=gh_token))
     gh_repo = gh.get_repo("element-hq/synapse")
     for release in gh_repo.get_releases():
         if release.title == tag_name:
@@ -488,8 +488,13 @@ def _upload(gh_token: Optional[str]) -> None:
         click.echo(f"Tag {tag_name} ({tag.commit}) is not currently checked out!")
         click.get_current_context().abort()
 
+    if gh_token:
+        gh = Github(auth=github.Auth.Token(token=gh_token))
+    else:
+        # Use github anonymously.
+        gh = Github()
+
     # Query all the assets corresponding to this release.
-    gh = Github(gh_token)
     gh_repo = gh.get_repo("element-hq/synapse")
     gh_release = gh_repo.get_release(tag_name)
 
@@ -752,7 +757,7 @@ Ask the designated people to do the blog and tweets."""
 def full(gh_token: str) -> None:
     if gh_token:
         # Test that the GH Token is valid before continuing.
-        gh = Github(gh_token)
+        gh = Github(auth=github.Auth.Token(token=gh_token))
         gh.get_user()
 
     click.echo("1. If this is a security release, read the security wiki page.")
@@ -834,7 +839,7 @@ def check_valid_gh_token(gh_token: Optional[str]) -> None:
         return
 
     try:
-        gh = Github(auth=github.Auth.Token(gh_token))
+        gh = Github(auth=github.Auth.Token(token=gh_token))
 
         # We need to lookup name to trigger a request.
         _name = gh.get_user().name
