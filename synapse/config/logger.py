@@ -375,7 +375,7 @@ def setup_logging(
     if log_config_path:
         server_name = hs.hostname
         appbase.register_sighup(
-            hs.get_instance_id(), _reload_logging_config, server_name, log_config_path
+            hs, _reload_logging_config, server_name, log_config_path
         )
 
     # Log immediately so we can grep backwards.

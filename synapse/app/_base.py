@@ -112,7 +112,7 @@ P = ParamSpec("P")
 
 
 def register_sighup(
-    homeserver_instance_id: str,
+    hs: "HomeServer",
     func: Callable[P, None],
     *args: P.args,
     **kwargs: P.kwargs,
@@ -127,19 +127,25 @@ def register_sighup(
         *args, **kwargs: args and kwargs to be passed to the target function.
     """
 
-    _instance_id_to_sighup_callbacks_map.setdefault(homeserver_instance_id, []).append(
-        (func, args, kwargs)
+    # Wrap the function so we can run it within a logcontext
+    def _callback_wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
+        with LoggingContext(name="sighup", server_name=hs.hostname):
+            func(*args, **kwargs)
+
+    _instance_id_to_sighup_callbacks_map.setdefault(hs.get_instance_id(), []).append(
+        (_callback_wrapper, args, kwargs)
     )
 
 
-def unregister_sighups(instance_id: str) -> None:
+def unregister_sighups(homeserver_instance_id: str) -> None:
     """
     Unregister all sighup functions associated with this Synapse instance.
 
     Args:
-        instance_id: Unique ID for this Synapse process instance.
+        homeserver_instance_id: The unique ID for this Synapse process instance to
+            unregister hooks for (`hs.get_instance_id()`).
     """
-    _instance_id_to_sighup_callbacks_map.pop(instance_id, [])
+    _instance_id_to_sighup_callbacks_map.pop(homeserver_instance_id, [])
 
 
 def start_worker_reactor(
@@ -639,8 +645,8 @@ async def start(hs: "HomeServer", freeze: bool = True) -> None:
     )
 
     setup_sighup_handling()
-    register_sighup(hs.get_instance_id(), refresh_certificate, hs)
-    register_sighup(hs.get_instance_id(), reload_cache_config, hs.config)
+    register_sighup(hs, refresh_certificate, hs)
+    register_sighup(hs, reload_cache_config, hs.config)
 
     # Apply the cache config.
     hs.config.caches.resize_all_caches()
