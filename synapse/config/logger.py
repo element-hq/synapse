@@ -327,7 +327,7 @@ def _load_logging_config(log_config_path: str) -> None:
     reset_logging_config()
 
 
-def _reload_logging_config(log_config_path: Optional[str]) -> None:
+def _reload_logging_config(server_name: str, log_config_path: Optional[str]) -> None:
     """
     Reload the log configuration from the file and apply it.
     """
@@ -336,7 +336,9 @@ def _reload_logging_config(log_config_path: Optional[str]) -> None:
         return
 
     _load_logging_config(log_config_path)
-    logger.info("Reloaded log config from %s due to SIGHUP", log_config_path)
+    logger.info(
+        "Reloaded log config for %s from %s due to SIGHUP", server_name, log_config_path
+    )
 
 
 def setup_logging(
@@ -371,8 +373,9 @@ def setup_logging(
     # We only need to reload the config if there is a log config file path provided to
     # reload from.
     if log_config_path:
+        server_name = hs.hostname
         appbase.register_sighup(
-            hs.get_instance_id(), _reload_logging_config, log_config_path
+            hs.get_instance_id(), _reload_logging_config, server_name, log_config_path
         )
 
     # Log immediately so we can grep backwards.
