@@ -1126,7 +1126,7 @@ room membership when returning room summaries.
 
 The endpoint does not query other servers over federation about remote rooms
 that the server has not joined. This is a deliberate trade-off: while this
-means it will leave some holes in the hiearchy that we could otherwise
+means it will leave some holes in the hierarchy that we could otherwise
 sometimes fill in, it significantly improves the endpoint's response time and
 the admin endpoint is designed for managing rooms local to the homeserver
 anyway.
