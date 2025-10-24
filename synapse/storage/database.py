@@ -1161,36 +1161,17 @@ class DatabasePool:
         SQLite versions that don't support it).
         """
 
-        if txn.database_engine.supports_returning:
-            sql = "INSERT INTO %s (%s) VALUES(%s) RETURNING %s" % (
-                table,
-                ", ".join(k for k in values.keys()),
-                ", ".join("?" for _ in values.keys()),
-                ", ".join(k for k in returning),
-            )
+        sql = "INSERT INTO %s (%s) VALUES(%s) RETURNING %s" % (
+            table,
+            ", ".join(k for k in values.keys()),
+            ", ".join("?" for _ in values.keys()),
+            ", ".join(k for k in returning),
+        )
 
-            txn.execute(sql, list(values.values()))
-            row = txn.fetchone()
-            assert row is not None
-            return row
-        else:
-            # For old versions of SQLite we do a standard insert and then can
-            # use `last_insert_rowid` to get at the row we just inserted
-            DatabasePool.simple_insert_txn(
-                txn,
-                table=table,
-                values=values,
-            )
-            txn.execute("SELECT last_insert_rowid()")
-            row = txn.fetchone()
-            assert row is not None
-            (rowid,) = row
-
-            row = DatabasePool.simple_select_one_txn(
-                txn, table=table, keyvalues={"rowid": rowid}, retcols=returning
-            )
-            assert row is not None
-            return row
+        txn.execute(sql, list(values.values()))
+        row = txn.fetchone()
+        assert row is not None
+        return row
 
     async def simple_insert_many(
         self,
