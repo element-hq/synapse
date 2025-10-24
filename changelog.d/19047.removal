@@ -1,1 +1,1 @@
-Remove support for SQLite < 3.40.1.
+Remove support for SQLite < 3.37.2.

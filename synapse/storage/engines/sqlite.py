@@ -75,8 +75,8 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
             # Synapse is untested against older SQLite versions, and we don't want
             # to let users upgrade to a version of Synapse with broken support for their
             # sqlite version, because it risks leaving them with a half-upgraded db.
-            if sqlite3.sqlite_version_info < (3, 40, 1):
-                raise RuntimeError("Synapse requires sqlite 3.40.1 or above.")
+            if sqlite3.sqlite_version_info < (3, 37, 2):
+                raise RuntimeError("Synapse requires sqlite 3.37.2 or above.")
 
     def check_new_database(self, txn: Cursor) -> None:
         """Gets called when setting up a brand new database. This allows us to
