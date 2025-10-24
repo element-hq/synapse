@@ -14848,6 +14848,69 @@ that were deleted.</p>
   ]
 }
 </code></pre>
+<h1 id="admin-space-hierarchy-endpoint"><a class="header" href="#admin-space-hierarchy-endpoint">Admin Space Hierarchy Endpoint</a></h1>
+<p>This API allows an admin to fetch the space/room hierarchy for a given space, 
+returning details about that room and any children the room may have, paginating
+over the space tree in a depth-first manner to locate child rooms. This is
+functionally similar to the <a href="https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy">CS Hierarchy</a> endpoint but does not check for
+room membership when returning room summaries.</p>
+<p>The endpoint does not query other servers over federation about remote rooms
+that the server has not joined. This is a deliberate trade-off: while this
+means it will leave some holes in the hierarchy that we could otherwise
+sometimes fill in, it significantly improves the endpoint's response time and
+the admin endpoint is designed for managing rooms local to the homeserver
+anyway.</p>
+<p><strong>Parameters</strong></p>
+<p>The following query parameters are available:</p>
+<ul>
+<li><code>from</code> - An optional pagination token, provided when there are more rooms to 
+return than the limit. </li>
+<li><code>limit</code> - Maximum amount of rooms to return. Must be a non-negative integer,
+defaults to <code>50</code>.</li>
+<li><code>max_depth</code> - The maximum depth in the tree to explore, must be a non-negative
+integer. 0 would correspond to just the root room, 1 would include just the
+root room's children, etc.  If not provided will recurse into the space tree without limit.</li>
+</ul>
+<p>Request:</p>
+<pre><code class="language-http">GET /_synapse/admin/v1/rooms/&lt;room_id&gt;/hierarchy
+</code></pre>
+<p>Response:</p>
+<pre><code class="language-json">{
+  &quot;rooms&quot;:
+      [
+        { &quot;children_state&quot;: [
+            {
+              &quot;content&quot;: {
+                &quot;via&quot;: [&quot;local_test_server&quot;]
+              },
+              &quot;origin_server_ts&quot;: 1500,
+              &quot;sender&quot;: &quot;@user:test&quot;,
+              &quot;state_key&quot;: &quot;!QrMkkqBSwYRIFNFCso:test&quot;,
+              &quot;type&quot;: &quot;m.space.child&quot;
+            }
+        ],
+        &quot;name&quot;: &quot;space room&quot;,
+        &quot;guest_can_join&quot;: false,
+        &quot;join_rule&quot;: &quot;public&quot;,
+        &quot;num_joined_members&quot;: 1,
+        &quot;room_id&quot;: &quot;!sPOpNyMHbZAoAOsOFL:test&quot;,
+        &quot;room_type&quot;: &quot;m.space&quot;,
+        &quot;world_readable&quot;: false
+      },
+
+      {
+        &quot;children_state&quot;: [],
+        &quot;guest_can_join&quot;: true,
+        &quot;join_rule&quot;: &quot;invite&quot;,
+        &quot;name&quot;: &quot;nefarious&quot;,
+        &quot;num_joined_members&quot;: 1,
+        &quot;room_id&quot;: &quot;!QrMkkqBSwYRIFNFCso:test&quot;,
+        &quot;topic&quot;: &quot;being bad&quot;,
+        &quot;world_readable&quot;: false}
+    ],
+  &quot;next_batch&quot;: &quot;KUYmRbeSpAoaAIgOKGgyaCEn&quot;
+}
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="show-scheduled-tasks"><a class="header" href="#show-scheduled-tasks">Show scheduled tasks</a></h1>
 <p>This API returns information about scheduled tasks.</p>
 <p>To use it, you will need to authenticate by providing an <code>access_token</code>
