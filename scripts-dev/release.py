@@ -715,18 +715,31 @@ def _announce() -> None:
 
     current_version = get_package_version()
     tag_name = f"v{current_version}"
+    is_rc = "rc" in tag_name
 
-    click.echo(
-        f"""
+    release_text = f"""
+### Synapse {current_version} {"🧪" if is_rc else "🚀"}
+
 Hi everyone. Synapse {current_version} has just been released.
+"""
 
+    if "rc" in tag_name:
+        release_text += (
+            "\nThis is a release candidate. Please help us test it out "
+            "before the final release by deploying it to non-production environments, "
+            "and reporting any issues you find to "
+            "[the issue tracker](https://github.com/element-hq/synapse/issues). Thanks!\n"
+        )
+
+    release_text += f"""
 [notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
 [docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
-    )
 
-    if "rc" in tag_name:
+    click.echo(release_text)
+
+    if is_rc:
         click.echo(
             """
 Announce the RC in
