@@ -1124,12 +1124,12 @@ over the space tree in a depth-first manner to locate child rooms. This is
 functionally similar to the [CS Hierarchy](https://spec.matrix.org/v1.16/client-server-api/#get_matrixclientv1roomsroomidhierarchy) endpoint but does not check for
 room membership when returning room summaries.
 
-The endpoint also does not return information about any remote rooms that the
-server is not currently joined to as it does not reach out over federation to fill 
-in details about those rooms, as we only care about managing rooms local to the
-homeserver. This is a trade-off as this will leave holes where information about
-public/peekable remote rooms the server is not participating in are omitted, but
-does greatly improve the response time of the endpoint. 
+The endpoint does not query other servers over federation about remote rooms
+that the server has not joined. This is a deliberate trade-off: while this
+means it will leave some holes in the hiearchy that we could otherwise
+sometimes fill in, it significantly improves the endpoint's response time and
+the admin endpoint is designed for managing rooms local to the homeserver
+anyway.
 
 **Parameters**
 
