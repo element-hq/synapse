@@ -1691,7 +1691,7 @@ class AuthHandler:
                 #
                 # Note: we explicitly DO NOT log the length of the user's password here.
                 logger.debug(
-                    "Password is too long; truncating to 72 bytes for bcrypt. "
+                    "Password + pepper is too long; truncating to 72 bytes for bcrypt. "
                     "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
                     "sufficient entropy for a password."
                 )
@@ -1726,7 +1726,7 @@ class AuthHandler:
             if len(bytes_to_hash) > 72:
                 # bcrypt only looks at the first 72 bytes
                 logger.debug(
-                    f"Password + pepper is too long; truncating to 72 bytes for bcrypt. "
+                    "Password + pepper is too long; truncating to 72 bytes for bcrypt. "
                     "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
                     "sufficient entropy for a password."
                 )
