@@ -260,7 +260,8 @@ authlib = { version = ">=0.15.1", optional = true }
 # `contrib/systemd/log_config.yaml`.
 # Note: systemd-python 231 appears to have been yanked from pypi
 systemd-python = { version = ">=231", optional = true }
-lxml = { version = ">=4.5.2", optional = true }
+# 4.6.3 removes usage of _PyGen_Send which is unavailable in CPython as of Python 3.10.
+lxml = { version = ">=4.6.3", optional = true }
 sentry-sdk = { version = ">=0.7.2", optional = true }
 opentracing = { version = ">=2.2.0", optional = true }
 # 4.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
