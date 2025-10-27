@@ -101,7 +101,7 @@ jobs:
           echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
 
       - name: Upload debs as artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
           path: debs/*
@@ -154,7 +154,7 @@ jobs:
           # for, and so need extra build deps.
           CIBW_TEST_SKIP: pp3*-* *i686* *musl*
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: Wheel-${{ matrix.os }}
           path: ./wheelhouse/*.whl
@@ -175,7 +175,7 @@ jobs:
       - name: Build sdist
         run: python -m build --sdist
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: Sdist
           path: dist/*.tar.gz
