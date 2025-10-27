@@ -218,7 +218,8 @@ netaddr = ">=0.7.18"
 # end up with a broken installation, with recent MarkupSafe but old Jinja, we
 # add a lower bound to the Jinja2 dependency.
 Jinja2 = ">=3.0"
-bleach = ">=1.4.3"
+# 3.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
+bleach = ">=3.2.0"
 # We use `assert_never`, which were added in `typing-extensions` 4.1.
 typing-extensions = ">=4.1"
 # We enforce that we have a `cryptography` version that bundles an `openssl`
