@@ -1720,9 +1720,20 @@ class AuthHandler:
         def _do_validate_hash(checked_hash: bytes) -> bool:
             # Normalise the Unicode in the password
             pw = unicodedata.normalize("NFKC", password)
+            password_pepper = self.hs.config.auth.password_pepper
+
+            bytes_to_hash = pw.encode("utf8") + password_pepper.encode("utf8")
+            if len(bytes_to_hash) > 72:
+                # bcrypt only looks at the first 72 bytes
+                logger.debug(
+                    f"Password + pepper is too long; truncating to 72 bytes for bcrypt. "
+                    "This is expected behaviour and will not affect a user's ability to log in. 72 bytes is "
+                    "sufficient entropy for a password."
+                )
+                bytes_to_hash = bytes_to_hash[:72]
 
             return bcrypt.checkpw(
-                pw.encode("utf8") + self.hs.config.auth.password_pepper.encode("utf8"),
+                bytes_to_hash,
                 checked_hash,
             )
 
