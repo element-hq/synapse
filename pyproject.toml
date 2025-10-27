@@ -201,7 +201,8 @@ bcrypt = ">=3.1.7"
 # Packagers that already took care of libwebp can lower that down to 5.4.0.
 Pillow = ">=10.0.1"
 # We use SortedDict.peekitem(), which was added in sortedcontainers 1.5.2.
-sortedcontainers = ">=1.5.2"
+# 2.0.5 updates collections.abc imports to avoid Python 3.10 incompatibility.
+sortedcontainers = ">=2.0.5"
 pymacaroons = ">=0.13.0"
 msgpack = ">=0.5.2"
 phonenumbers = ">=8.2.0"
