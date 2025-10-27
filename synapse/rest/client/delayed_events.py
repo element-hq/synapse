@@ -53,8 +53,6 @@ class UpdateDelayedEventServlet(RestServlet):
     async def on_POST(
         self, request: SynapseRequest, delay_id: str
     ) -> tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request)
-
         body = parse_json_object_from_request(request)
         try:
             action = str(body["action"])
@@ -75,11 +73,11 @@ class UpdateDelayedEventServlet(RestServlet):
             )
 
         if enum_action == _UpdateDelayedEventAction.CANCEL:
-            await self.delayed_events_handler.cancel(requester, delay_id)
+            await self.delayed_events_handler.cancel(delay_id)
         elif enum_action == _UpdateDelayedEventAction.RESTART:
-            await self.delayed_events_handler.restart(requester, delay_id)
+            await self.delayed_events_handler.restart(delay_id)
         elif enum_action == _UpdateDelayedEventAction.SEND:
-            await self.delayed_events_handler.send(requester, delay_id)
+            await self.delayed_events_handler.send(delay_id)
         return 200, {}
 
 

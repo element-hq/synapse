@@ -110,7 +110,6 @@ class DelayedEventsStore(SQLBaseStore):
                 table="delayed_events",
                 values={
                     "delay_id": delay_id,
-                    "user_localpart": user_localpart,
                     "device_id": device_id,
                     "delay": delay,
                     "send_ts": send_ts,
@@ -136,7 +135,6 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         *,
         delay_id: str,
-        user_localpart: str,
         current_ts: Timestamp,
     ) -> Timestamp:
         """
@@ -145,7 +143,6 @@ class DelayedEventsStore(SQLBaseStore):
 
         Args:
             delay_id: The ID of the delayed event to restart.
-            user_localpart: The localpart of the delayed event's owner.
             current_ts: The current time, which will be used to calculate the new send time.
 
         Returns: The send time of the next delayed event to be sent,
@@ -163,13 +160,11 @@ class DelayedEventsStore(SQLBaseStore):
                 """
                 UPDATE delayed_events
                 SET send_ts = ? + delay
-                WHERE delay_id = ? AND user_localpart = ?
-                    AND NOT is_processed
+                WHERE delay_id = ? AND NOT is_processed
                 """,
                 (
                     current_ts,
                     delay_id,
-                    user_localpart,
                 ),
             )
             if txn.rowcount == 0:
@@ -321,9 +316,8 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         *,
         delay_id: str,
-        user_localpart: str,
     ) -> tuple[
-        EventDetails,
+        DelayedEventDetails,
         Optional[Timestamp],
     ]:
         """
@@ -332,7 +326,6 @@ class DelayedEventsStore(SQLBaseStore):
 
         Args:
             delay_id: The ID of the delayed event to restart.
-            user_localpart: The localpart of the delayed event's owner.
 
         Returns: The details of the matching delayed event,
             and the send time of the next delayed event to be sent, if any.
@@ -351,7 +344,7 @@ class DelayedEventsStore(SQLBaseStore):
                 """
                 UPDATE delayed_events
                 SET is_processed = TRUE
-                WHERE delay_id = ? AND user_localpart = ?
+                WHERE delay_id = ? 
                     AND NOT is_processed
                 RETURNING
                     room_id,
@@ -359,24 +352,26 @@ class DelayedEventsStore(SQLBaseStore):
                     state_key,
                     origin_server_ts,
                     content,
-                    device_id
+                    device_id,
+                    user_localpart
                 """,
                 (
                     delay_id,
-                    user_localpart,
                 ),
             )
             row = txn.fetchone()
             if row is None:
                 raise NotFoundError("Delayed event not found")
 
-            event = EventDetails(
+            event = DelayedEventDetails(
                 RoomID.from_string(row[0]),
                 EventType(row[1]),
                 StateKey(row[2]) if row[2] is not None else None,
                 Timestamp(row[3]) if row[3] is not None else None,
                 db_to_json(row[4]),
                 DeviceID(row[5]) if row[5] is not None else None,
+                DelayID(delay_id),
+                UserLocalpart(row[6]),
             )
 
             return event, self._get_next_delayed_event_send_ts_txn(txn)
@@ -388,8 +383,7 @@ class DelayedEventsStore(SQLBaseStore):
     async def cancel_delayed_event(
         self,
         *,
-        delay_id: str,
-        user_localpart: str,
+        delay_id: str
     ) -> Optional[Timestamp]:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
@@ -413,7 +407,6 @@ class DelayedEventsStore(SQLBaseStore):
                     table="delayed_events",
                     keyvalues={
                         "delay_id": delay_id,
-                        "user_localpart": user_localpart,
                         "is_processed": False,
                     },
                 )

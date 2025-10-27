@@ -399,7 +399,7 @@ class DelayedEventsHandler:
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at(next_send_ts)
 
-    async def cancel(self, requester: Requester, delay_id: str) -> None:
+    async def cancel(self, delay_id: str) -> None:
         """
         Cancels the scheduled delivery of the matching delayed event.
 
@@ -412,20 +412,19 @@ class DelayedEventsHandler:
         """
         assert self._is_master
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            requester,
-            (requester.user.to_string(), requester.device_id),
+            None,
+            (delay_id),
         )
         await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.cancel_delayed_event(
             delay_id=delay_id,
-            user_localpart=requester.user.localpart,
         )
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
-    async def restart(self, requester: Requester, delay_id: str) -> None:
+    async def restart(self, delay_id: str) -> None:
         """
         Restarts the scheduled delivery of the matching delayed event.
 
@@ -438,26 +437,24 @@ class DelayedEventsHandler:
         """
         assert self._is_master
         await self._delayed_event_mgmt_ratelimiter.ratelimit(
-            requester,
-            (requester.user.to_string(), requester.device_id),
+            None,
+            (delay_id),
         )
         await make_deferred_yieldable(self._initialized_from_db)
 
         next_send_ts = await self._store.restart_delayed_event(
             delay_id=delay_id,
-            user_localpart=requester.user.localpart,
             current_ts=self._get_current_ts(),
         )
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at(next_send_ts)
 
-    async def send(self, requester: Requester, delay_id: str) -> None:
+    async def send(self, delay_id: str) -> None:
         """
         Immediately sends the matching delayed event, instead of waiting for its scheduled delivery.
 
         Args:
-            requester: The owner of the delayed event to act on.
             delay_id: The ID of the delayed event to act on.
 
         Raises:
@@ -466,28 +463,21 @@ class DelayedEventsHandler:
         assert self._is_master
         # Use standard request limiter for sending delayed events on-demand,
         # as an on-demand send is similar to sending a regular event.
-        await self._request_ratelimiter.ratelimit(requester)
         await make_deferred_yieldable(self._initialized_from_db)
+        await self._delayed_event_mgmt_ratelimiter.ratelimit(
+            None,
+            (delay_id),
+        )
 
         event, next_send_ts = await self._store.process_target_delayed_event(
             delay_id=delay_id,
-            user_localpart=requester.user.localpart,
         )
 
         if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
         await self._send_event(
-            DelayedEventDetails(
-                delay_id=DelayID(delay_id),
-                user_localpart=UserLocalpart(requester.user.localpart),
-                room_id=event.room_id,
-                type=event.type,
-                state_key=event.state_key,
-                origin_server_ts=event.origin_server_ts,
-                content=event.content,
-                device_id=event.device_id,
-            )
+            event
         )
 
     async def _send_on_timeout(self) -> None:
