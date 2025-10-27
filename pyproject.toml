@@ -263,6 +263,7 @@ systemd-python = { version = ">=231", optional = true }
 lxml = { version = ">=4.5.2", optional = true }
 sentry-sdk = { version = ">=0.7.2", optional = true }
 opentracing = { version = ">=2.2.0", optional = true }
+# 4.2.0 updates collections.abc imports to avoid Python 3.10 incompatibility.
 jaeger-client = { version = ">=4.2.0", optional = true }
 txredisapi = { version = ">=1.4.7", optional = true }
 hiredis = { version = "*", optional = true }
