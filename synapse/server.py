@@ -51,6 +51,7 @@ from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
+from synapse.logging.context import PreserveLoggingContext
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
 from synapse.api.auth.mas import MasDelegatedAuth
@@ -507,7 +508,8 @@ class HomeServer(metaclass=abc.ABCMeta):
 
         for background_process in list(self._background_processes):
             try:
-                background_process.cancel()
+                with PreserveLoggingContext():
+                    background_process.cancel()
             except Exception:
                 pass
         self._background_processes.clear()
