@@ -279,25 +279,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        args = (
+        channel = self.make_request(
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "cancel"},
             self.user1_access_token,
         )
-        channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
-
-        # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
-        self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(
-                self.user1_user_id, 0, 0
-            )
-        )
-
-        # Test that the request isn't ratelimited anymore.
-        channel = self.make_request(*args)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     def test_send_delayed_state_event(self) -> None:
         state_key = "to_send_on_request"
@@ -345,7 +333,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    @unittest.override_config({"rc_message": {"per_second": 3.5, "burst_count": 4}})
+    @unittest.override_config({"rc_message": {"per_second": 2.5, "burst_count": 3}})
     def test_send_delayed_event_ratelimit(self) -> None:
         delay_ids = []
         for _ in range(2):
@@ -368,25 +356,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        args = (
+        channel = self.make_request(
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "send"},
             self.user1_access_token,
         )
-        channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
-
-        # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
-        self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(
-                self.user1_user_id, 0, 0
-            )
-        )
-
-        # Test that the request isn't ratelimited anymore.
-        channel = self.make_request(*args)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     def test_restart_delayed_state_event(self) -> None:
         state_key = "to_send_on_restarted_timeout"
@@ -474,25 +450,13 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-        args = (
+        channel = self.make_request(
             "POST",
             f"{PATH_PREFIX}/{delay_ids.pop(0)}",
             {"action": "restart"},
             self.user1_access_token,
         )
-        channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.TOO_MANY_REQUESTS, channel.code, channel.result)
-
-        # Add the current user to the ratelimit overrides, allowing them no ratelimiting.
-        self.get_success(
-            self.hs.get_datastores().main.set_ratelimit_for_user(
-                self.user1_user_id, 0, 0
-            )
-        )
-
-        # Test that the request isn't ratelimited anymore.
-        channel = self.make_request(*args)
-        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
     def test_delayed_state_is_not_cancelled_by_new_state_from_same_user(
         self,

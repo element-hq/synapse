@@ -47,7 +47,6 @@ class UpdateDelayedEventServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
     async def on_POST(
@@ -73,11 +72,11 @@ class UpdateDelayedEventServlet(RestServlet):
             )
 
         if enum_action == _UpdateDelayedEventAction.CANCEL:
-            await self.delayed_events_handler.cancel(delay_id)
+            await self.delayed_events_handler.cancel(request, delay_id)
         elif enum_action == _UpdateDelayedEventAction.RESTART:
-            await self.delayed_events_handler.restart(delay_id)
+            await self.delayed_events_handler.restart(request, delay_id)
         elif enum_action == _UpdateDelayedEventAction.SEND:
-            await self.delayed_events_handler.send(delay_id)
+            await self.delayed_events_handler.send(request, delay_id)
         return 200, {}
 
 

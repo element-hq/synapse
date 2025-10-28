@@ -110,6 +110,7 @@ class DelayedEventsStore(SQLBaseStore):
                 table="delayed_events",
                 values={
                     "delay_id": delay_id,
+                    "user_localpart": user_localpart,
                     "device_id": device_id,
                     "delay": delay,
                     "send_ts": send_ts,
@@ -133,7 +134,6 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def restart_delayed_event(
         self,
-        *,
         delay_id: str,
         current_ts: Timestamp,
     ) -> Timestamp:
@@ -314,7 +314,6 @@ class DelayedEventsStore(SQLBaseStore):
 
     async def process_target_delayed_event(
         self,
-        *,
         delay_id: str,
     ) -> tuple[
         DelayedEventDetails,
@@ -323,9 +322,6 @@ class DelayedEventsStore(SQLBaseStore):
         """
         Marks for processing the matching delayed event, regardless of its timeout time,
         as long as it has not already been marked as such.
-
-        Args:
-            delay_id: The ID of the delayed event to restart.
 
         Returns: The details of the matching delayed event,
             and the send time of the next delayed event to be sent, if any.
@@ -337,15 +333,14 @@ class DelayedEventsStore(SQLBaseStore):
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
         ) -> tuple[
-            EventDetails,
+            DelayedEventDetails,
             Optional[Timestamp],
         ]:
             txn.execute(
                 """
                 UPDATE delayed_events
                 SET is_processed = TRUE
-                WHERE delay_id = ? 
-                    AND NOT is_processed
+                WHERE delay_id = ? AND NOT is_processed
                 RETURNING
                     room_id,
                     event_type,
@@ -355,9 +350,7 @@ class DelayedEventsStore(SQLBaseStore):
                     device_id,
                     user_localpart
                 """,
-                (
-                    delay_id,
-                ),
+                (delay_id,),
             )
             row = txn.fetchone()
             if row is None:
@@ -380,17 +373,9 @@ class DelayedEventsStore(SQLBaseStore):
             "process_target_delayed_event", process_target_delayed_event_txn
         )
 
-    async def cancel_delayed_event(
-        self,
-        *,
-        delay_id: str
-    ) -> Optional[Timestamp]:
+    async def cancel_delayed_event(self, delay_id: str) -> Optional[Timestamp]:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
-
-        Args:
-            delay_id: The ID of the delayed event to restart.
-            user_localpart: The localpart of the delayed event's owner.
 
         Returns: The send time of the next delayed event to be sent, if any.
 
@@ -466,11 +451,7 @@ class DelayedEventsStore(SQLBaseStore):
             "cancel_delayed_state_events", cancel_delayed_state_events_txn
         )
 
-    async def delete_processed_delayed_event(
-        self,
-        delay_id: DelayID,
-        user_localpart: UserLocalpart,
-    ) -> None:
+    async def delete_processed_delayed_event(self, delay_id: DelayID) -> None:
         """
         Delete the matching delayed event, as long as it has been marked as processed.
 
@@ -481,7 +462,6 @@ class DelayedEventsStore(SQLBaseStore):
             table="delayed_events",
             keyvalues={
                 "delay_id": delay_id,
-                "user_localpart": user_localpart,
                 "is_processed": True,
             },
             desc="delete_processed_delayed_event",
@@ -547,7 +527,7 @@ def _generate_delay_id() -> DelayID:
 
     # We use the following format for delay IDs:
     #    syd_<random string>
-    # They are scoped to user localparts, so it is possible for
-    # the same ID to exist for multiple users.
+    # They are not scoped to user localparts, but the random string
+    # is expected to be sufficiently random to be globally unique.
 
     return DelayID(f"syd_{stringutils.random_string(20)}")
