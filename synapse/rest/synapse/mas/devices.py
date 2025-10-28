@@ -17,7 +17,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Optional
 
-from pydantic import Field, StrictStr
+from pydantic import StrictStr
 
 from synapse.api.errors import NotFoundError
 from synapse.http.servlet import parse_and_validate_json_object_from_request
@@ -177,7 +177,7 @@ class MasSyncDevicesResource(MasBaseResource):
 
     class PostBody(RequestBodyModel):
         localpart: StrictStr
-        devices: set[StrictStr] = Field(strict=False)
+        devices: set[str]
 
     async def _async_render_POST(
         self, request: "SynapseRequest"
