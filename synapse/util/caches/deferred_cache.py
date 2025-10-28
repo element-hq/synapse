@@ -106,7 +106,9 @@ class DeferredCache(Generic[KT, VT]):
         cache_type = TreeCache if tree else dict
 
         # _pending_deferred_cache maps from the key value to a `CacheEntry` object.
-        self._pending_deferred_cache: TreeCache | "MutableMapping[KT, CacheEntry[KT, VT]]" = cache_type()
+        self._pending_deferred_cache: (
+            TreeCache | "MutableMapping[KT, CacheEntry[KT, VT]]"
+        ) = cache_type()
 
         def metrics_cb() -> None:
             cache_pending_metric.labels(
@@ -260,9 +262,7 @@ class DeferredCache(Generic[KT, VT]):
 
         return (cached, pending_deferred, missing)
 
-    def get_immediate(
-        self, key: KT, default: T, update_metrics: bool = True
-    ) -> VT | T:
+    def get_immediate(self, key: KT, default: T, update_metrics: bool = True) -> VT | T:
         """If we have a *completed* cached value, return it."""
         return self.cache.get(key, default, update_metrics=update_metrics)
 

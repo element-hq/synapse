@@ -502,9 +502,7 @@ def serialize_event(
             #
             # For guests and appservice users, we can't check the access token ID
             # so assume it is the same session.
-            event_token_id: int | None = getattr(
-                e.internal_metadata, "token_id", None
-            )
+            event_token_id: int | None = getattr(e.internal_metadata, "token_id", None)
             if (
                 (
                     event_token_id is not None

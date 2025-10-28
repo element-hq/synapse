@@ -86,15 +86,15 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
         # Map of (user_id, device_id) to the last stream_id that has been
         # deleted up to. This is so that we can no op deletions.
-        self._last_device_delete_cache: ExpiringCache[
-            tuple[str, str | None], int
-        ] = ExpiringCache(
-            cache_name="last_device_delete_cache",
-            server_name=self.server_name,
-            hs=hs,
-            clock=self.clock,
-            max_len=10000,
-            expiry_ms=30 * 60 * 1000,
+        self._last_device_delete_cache: ExpiringCache[tuple[str, str | None], int] = (
+            ExpiringCache(
+                cache_name="last_device_delete_cache",
+                server_name=self.server_name,
+                hs=hs,
+                clock=self.clock,
+                max_len=10000,
+                expiry_ms=30 * 60 * 1000,
+            )
         )
 
         self._can_write_to_device = (

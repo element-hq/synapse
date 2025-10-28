@@ -447,7 +447,8 @@ class ModuleApi:
     def register_ratelimit_callbacks(
         self,
         *,
-        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK | None = None,
+        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        | None = None,
     ) -> None:
         """Registers callbacks for ratelimit capabilities.
         Added in Synapse v1.132.0.
@@ -460,9 +461,12 @@ class ModuleApi:
         self,
         *,
         get_media_config_for_user: GET_MEDIA_CONFIG_FOR_USER_CALLBACK | None = None,
-        is_user_allowed_to_upload_media_of_size: IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK | None = None,
-        get_media_upload_limits_for_user: GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK | None = None,
-        on_media_upload_limit_exceeded: ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK | None = None,
+        is_user_allowed_to_upload_media_of_size: IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
+        | None = None,
+        get_media_upload_limits_for_user: GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
+        | None = None,
+        on_media_upload_limit_exceeded: ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
+        | None = None,
     ) -> None:
         """Registers callbacks for media repository capabilities.
         Added in Synapse v1.132.0.
@@ -479,16 +483,21 @@ class ModuleApi:
         *,
         check_event_allowed: CHECK_EVENT_ALLOWED_CALLBACK | None = None,
         on_create_room: ON_CREATE_ROOM_CALLBACK | None = None,
-        check_threepid_can_be_invited: CHECK_THREEPID_CAN_BE_INVITED_CALLBACK | None = None,
-        check_visibility_can_be_modified: CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK | None = None,
+        check_threepid_can_be_invited: CHECK_THREEPID_CAN_BE_INVITED_CALLBACK
+        | None = None,
+        check_visibility_can_be_modified: CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK
+        | None = None,
         on_new_event: ON_NEW_EVENT_CALLBACK | None = None,
         check_can_shutdown_room: CHECK_CAN_SHUTDOWN_ROOM_CALLBACK | None = None,
         check_can_deactivate_user: CHECK_CAN_DEACTIVATE_USER_CALLBACK | None = None,
         on_profile_update: ON_PROFILE_UPDATE_CALLBACK | None = None,
-        on_user_deactivation_status_changed: ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK | None = None,
+        on_user_deactivation_status_changed: ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK
+        | None = None,
         on_threepid_bind: ON_THREEPID_BIND_CALLBACK | None = None,
-        on_add_user_third_party_identifier: ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK | None = None,
-        on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK | None = None,
+        on_add_user_third_party_identifier: ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
+        | None = None,
+        on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
+        | None = None,
     ) -> None:
         """Registers callbacks for third party event rules capabilities.
 
@@ -529,10 +538,13 @@ class ModuleApi:
         *,
         check_3pid_auth: CHECK_3PID_AUTH_CALLBACK | None = None,
         on_logged_out: ON_LOGGED_OUT_CALLBACK | None = None,
-        auth_checkers: dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK] | None = None,
+        auth_checkers: dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK]
+        | None = None,
         is_3pid_allowed: IS_3PID_ALLOWED_CALLBACK | None = None,
-        get_username_for_registration: GET_USERNAME_FOR_REGISTRATION_CALLBACK | None = None,
-        get_displayname_for_registration: GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK | None = None,
+        get_username_for_registration: GET_USERNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
+        get_displayname_for_registration: GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
     ) -> None:
         """Registers callbacks for password auth provider capabilities.
 
@@ -603,7 +615,8 @@ class ModuleApi:
     def register_add_extra_fields_to_unsigned_client_event_callbacks(
         self,
         *,
-        add_field_to_unsigned_callback: ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK | None = None,
+        add_field_to_unsigned_callback: ADD_EXTRA_FIELDS_TO_UNSIGNED_CLIENT_EVENT_CALLBACK
+        | None = None,
     ) -> None:
         """Registers a callback that can be used to add fields to the unsigned
         section of events.
@@ -1765,9 +1778,7 @@ class ModuleApi:
         """
         await self._store.add_user_bound_threepid(user_id, medium, address, id_server)
 
-    def check_push_rule_actions(
-        self, actions: list[str | dict[str, str]]
-    ) -> None:
+    def check_push_rule_actions(self, actions: list[str | dict[str, str]]) -> None:
         """Checks if the given push rule actions are valid according to the Matrix
         specification.
 

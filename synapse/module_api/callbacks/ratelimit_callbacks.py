@@ -51,7 +51,8 @@ class RatelimitModuleApiCallbacks:
 
     def register_callbacks(
         self,
-        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK | None = None,
+        get_ratelimit_override_for_user: GET_RATELIMIT_OVERRIDE_FOR_USER_CALLBACK
+        | None = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if get_ratelimit_override_for_user is not None:

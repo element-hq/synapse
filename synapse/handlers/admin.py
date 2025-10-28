@@ -100,9 +100,7 @@ class AdminHandler:
 
     async def get_user(self, user: UserID) -> JsonMapping | None:
         """Function to get user details"""
-        user_info: UserInfo | None = await self._store.get_user_by_id(
-            user.to_string()
-        )
+        user_info: UserInfo | None = await self._store.get_user_by_id(user.to_string())
         if user_info is None:
             return None
 

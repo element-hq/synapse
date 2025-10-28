@@ -206,9 +206,7 @@ class UsersRestServletV2(RestServlet):
 class UsersRestServletV3(UsersRestServletV2):
     PATTERNS = admin_patterns("/users$", "v3")
 
-    def _parse_parameter_deactivated(
-        self, request: SynapseRequest
-    ) -> bool | None:
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
         return parse_boolean(request, "deactivated")
 
 

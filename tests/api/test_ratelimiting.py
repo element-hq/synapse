@@ -1,4 +1,3 @@
-
 from synapse.api.ratelimiting import LimitExceededError, Ratelimiter
 from synapse.appservice import ApplicationService
 from synapse.config.ratelimiting import RatelimitSettings

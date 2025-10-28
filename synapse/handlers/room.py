@@ -341,7 +341,10 @@ class RoomCreationHandler:
         tombstone_event: EventBase,
         tombstone_context: synapse.events.snapshot.EventContext,
         additional_creators: list[str] | None,
-        creation_event_with_context: tuple[EventBase, synapse.events.snapshot.EventContext] | None = None,
+        creation_event_with_context: tuple[
+            EventBase, synapse.events.snapshot.EventContext
+        ]
+        | None = None,
         auto_member: bool = False,
     ) -> str:
         """
@@ -556,7 +559,10 @@ class RoomCreationHandler:
         new_room_version: RoomVersion,
         tombstone_event_id: str,
         additional_creators: list[str] | None,
-        creation_event_with_context: tuple[EventBase, synapse.events.snapshot.EventContext] | None = None,
+        creation_event_with_context: tuple[
+            EventBase, synapse.events.snapshot.EventContext
+        ]
+        | None = None,
         auto_member: bool = False,
     ) -> None:
         """Populate a new room based on an old room
@@ -1425,7 +1431,10 @@ class RoomCreationHandler:
         power_level_content_override: JsonDict | None = None,
         creator_join_profile: JsonDict | None = None,
         ignore_forced_encryption: bool = False,
-        creation_event_with_context: tuple[EventBase, synapse.events.snapshot.EventContext] | None = None,
+        creation_event_with_context: tuple[
+            EventBase, synapse.events.snapshot.EventContext
+        ]
+        | None = None,
     ) -> tuple[int, str, int]:
         """Sends the initial events into a new room. Sends the room creation, membership,
         and power level events into the room sequentially, then creates and batches up the
@@ -2238,7 +2247,8 @@ class RoomShutdownHandler:
         room_id: str,
         params: ShutdownRoomParams,
         result: ShutdownRoomResponse | None = None,
-        update_result_fct: Callable[[JsonMapping | None], Awaitable[None]] | None = None,
+        update_result_fct: Callable[[JsonMapping | None], Awaitable[None]]
+        | None = None,
     ) -> ShutdownRoomResponse | None:
         """
         Shuts down a room. Moves all joined local users and room aliases automatically

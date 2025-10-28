@@ -157,9 +157,7 @@ class LaterGauge(Collector):
     labelnames: StrSequence | None = attr.ib(hash=False)
     _instance_id_to_hook_map: dict[
         str | None,  # instance_id
-        Callable[
-            [], Mapping[tuple[str, ...], int | float] | int | float
-        ],
+        Callable[[], Mapping[tuple[str, ...], int | float] | int | float],
     ] = attr.ib(factory=dict, hash=False)
     """
     Map from homeserver instance_id to a callback. Each callback should either return a
@@ -199,9 +197,7 @@ class LaterGauge(Collector):
         self,
         *,
         homeserver_instance_id: str | None,
-        hook: Callable[
-            [], Mapping[tuple[str, ...], int | float] | int | float
-        ],
+        hook: Callable[[], Mapping[tuple[str, ...], int | float] | int | float],
     ) -> None:
         """
         Register a callback/hook that will be called to generate a metric samples for

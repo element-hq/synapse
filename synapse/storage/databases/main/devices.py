@@ -1456,9 +1456,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn, self.get_device_list_last_stream_id_for_remote, (user_id,)
         )
 
-    async def get_dehydrated_device(
-        self, user_id: str
-    ) -> tuple[str, JsonDict] | None:
+    async def get_dehydrated_device(self, user_id: str) -> tuple[str, JsonDict] | None:
         """Retrieve the information for a dehydrated device.
 
         Args:

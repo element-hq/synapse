@@ -219,9 +219,7 @@ def generate_pagination_bounds(
     direction: Direction,
     from_token: RoomStreamToken | None,
     to_token: RoomStreamToken | None,
-) -> tuple[
-    str, tuple[int | None, int] | None, tuple[int | None, int] | None
-]:
+) -> tuple[str, tuple[int | None, int] | None, tuple[int | None, int] | None]:
     """
     Generate a start and end point for this page of events.
 

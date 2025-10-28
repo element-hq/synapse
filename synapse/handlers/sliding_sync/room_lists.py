@@ -1562,9 +1562,7 @@ class SlidingSyncRoomLists:
         room_ids: set[str],
         sync_room_map: dict[str, RoomsForUserType],
         to_token: StreamToken,
-        room_id_to_stripped_state_map: dict[
-            str, StateMap[StrippedStateEvent] | None
-        ],
+        room_id_to_stripped_state_map: dict[str, StateMap[StrippedStateEvent] | None],
     ) -> Mapping[str, str | None | StateSentinel]:
         """
         Get the given state event content for a list of rooms. First we check the

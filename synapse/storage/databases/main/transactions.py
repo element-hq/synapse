@@ -567,9 +567,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
         def get_destinations_paginate_txn(
             txn: LoggingTransaction,
         ) -> tuple[
-            list[
-                tuple[str, int | None, int | None, int | None, int | None]
-            ],
+            list[tuple[str, int | None, int | None, int | None, int | None]],
             int,
         ]:
             order_by_column = DestinationSortOrder(order_by).value
@@ -599,11 +597,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
             """
             txn.execute(sql, args + [limit, start])
             destinations = cast(
-                list[
-                    tuple[
-                        str, int | None, int | None, int | None, int | None
-                    ]
-                ],
+                list[tuple[str, int | None, int | None, int | None, int | None]],
                 txn.fetchall(),
             )
             return destinations, count

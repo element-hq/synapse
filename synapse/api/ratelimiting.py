@@ -96,9 +96,7 @@ class Ratelimiter:
 
         self.clock.looping_call(self._prune_message_counts, 60 * 1000)
 
-    def _get_key(
-        self, requester: Requester | None, key: Hashable | None
-    ) -> Hashable:
+    def _get_key(self, requester: Requester | None, key: Hashable | None) -> Hashable:
         """Use the requester's MXID as a fallback key if no key is provided."""
         if key is None:
             if not requester:

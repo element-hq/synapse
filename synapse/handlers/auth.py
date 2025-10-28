@@ -1059,9 +1059,7 @@ class AuthHandler:
         """
         return await self.store.is_user_approved(user_id)
 
-    async def _find_user_id_and_pwd_hash(
-        self, user_id: str
-    ) -> tuple[str, str] | None:
+    async def _find_user_id_and_pwd_hash(self, user_id: str) -> tuple[str, str] | None:
         """Checks to see if a user with the given id exists. Will check case
         insensitively, but will return None if there are multiple inexact
         matches.
@@ -1698,9 +1696,7 @@ class AuthHandler:
 
         return await defer_to_thread(self.hs.get_reactor(), _do_hash)
 
-    async def validate_hash(
-        self, password: str, stored_hash: bytes | str
-    ) -> bool:
+    async def validate_hash(self, password: str, stored_hash: bytes | str) -> bool:
         """Validates that self.hash(password) == stored_hash.
 
         Args:
@@ -2083,16 +2079,12 @@ def load_single_legacy_password_auth_provider(
 
 CHECK_3PID_AUTH_CALLBACK = Callable[
     [str, str, str],
-    Awaitable[
-        tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None
-    ],
+    Awaitable[tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None],
 ]
 ON_LOGGED_OUT_CALLBACK = Callable[[str, str | None, str], Awaitable]
 CHECK_AUTH_CALLBACK = Callable[
     [str, str, JsonDict],
-    Awaitable[
-        tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None
-    ],
+    Awaitable[tuple[str, Callable[["LoginResponse"], Awaitable[None]] | None] | None],
 ]
 GET_USERNAME_FOR_REGISTRATION_CALLBACK = Callable[
     [JsonDict, JsonDict],
@@ -2134,9 +2126,12 @@ class PasswordAuthProvider:
         check_3pid_auth: CHECK_3PID_AUTH_CALLBACK | None = None,
         on_logged_out: ON_LOGGED_OUT_CALLBACK | None = None,
         is_3pid_allowed: IS_3PID_ALLOWED_CALLBACK | None = None,
-        auth_checkers: dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK] | None = None,
-        get_username_for_registration: GET_USERNAME_FOR_REGISTRATION_CALLBACK | None = None,
-        get_displayname_for_registration: GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK | None = None,
+        auth_checkers: dict[tuple[str, tuple[str, ...]], CHECK_AUTH_CALLBACK]
+        | None = None,
+        get_username_for_registration: GET_USERNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
+        get_displayname_for_registration: GET_DISPLAYNAME_FOR_REGISTRATION_CALLBACK
+        | None = None,
     ) -> None:
         # Register check_3pid_auth callback
         if check_3pid_auth is not None:

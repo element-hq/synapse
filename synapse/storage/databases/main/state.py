@@ -990,9 +990,7 @@ class StateMapWrapper(dict[StateKey, str]):
     @overload
     def get(self, key: StateKey, default: _T, /) -> str | _T: ...
 
-    def get(
-        self, key: StateKey, default: str | _T | None = None
-    ) -> str | _T | None:
+    def get(self, key: StateKey, default: str | _T | None = None) -> str | _T | None:
         if key not in self.state_filter:
             raise Exception("State map was filtered and doesn't include: %s", key)
         return super().get(key, default)

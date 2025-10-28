@@ -40,9 +40,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ON_ACCOUNT_DATA_UPDATED_CALLBACK = Callable[
-    [str, str | None, str, JsonDict], Awaitable
-]
+ON_ACCOUNT_DATA_UPDATED_CALLBACK = Callable[[str, str | None, str, JsonDict], Awaitable]
 
 
 class AccountDataHandler:

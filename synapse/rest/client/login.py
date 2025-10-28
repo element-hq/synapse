@@ -650,9 +650,7 @@ class SsoRedirectServlet(RestServlet):
         self._sso_handler = hs.get_sso_handler()
         self._public_baseurl = hs.config.server.public_baseurl
 
-    async def on_GET(
-        self, request: SynapseRequest, idp_id: str | None = None
-    ) -> None:
+    async def on_GET(self, request: SynapseRequest, idp_id: str | None = None) -> None:
         if not self._public_baseurl:
             raise SynapseError(400, "SSO requires a valid public_baseurl")
 

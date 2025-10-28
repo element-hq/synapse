@@ -219,9 +219,7 @@ class RoomNotifCounts:
 _EMPTY_ROOM_NOTIF_COUNTS = RoomNotifCounts(NotifCounts(), {})
 
 
-def _serialize_action(
-    actions: Collection[Mapping | str], is_highlight: bool
-) -> str:
+def _serialize_action(actions: Collection[Mapping | str], is_highlight: bool) -> str:
     """Custom serializer for actions. This allows us to "compress" common actions.
 
     We use the fact that most users have the same actions for notifs (and for

@@ -257,9 +257,7 @@ class ProfileWorkerStore(SQLBaseStore):
                 )
 
                 # If value_type is None, then the value did not exist.
-                value_type, value = cast(
-                    tuple[str | None, JsonValue], txn.fetchone()
-                )
+                value_type, value = cast(tuple[str | None, JsonValue], txn.fetchone())
                 if not value_type:
                     raise StoreError(404, "No row found")
                 # If value_type is object or array, then need to deserialize the JSON.

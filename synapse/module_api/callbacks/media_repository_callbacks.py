@@ -58,9 +58,12 @@ class MediaRepositoryModuleApiCallbacks:
     def register_callbacks(
         self,
         get_media_config_for_user: GET_MEDIA_CONFIG_FOR_USER_CALLBACK | None = None,
-        is_user_allowed_to_upload_media_of_size: IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK | None = None,
-        get_media_upload_limits_for_user: GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK | None = None,
-        on_media_upload_limit_exceeded: ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK | None = None,
+        is_user_allowed_to_upload_media_of_size: IS_USER_ALLOWED_TO_UPLOAD_MEDIA_OF_SIZE_CALLBACK
+        | None = None,
+        get_media_upload_limits_for_user: GET_MEDIA_UPLOAD_LIMITS_FOR_USER_CALLBACK
+        | None = None,
+        on_media_upload_limit_exceeded: ON_MEDIA_UPLOAD_LIMIT_EXCEEDED_CALLBACK
+        | None = None,
     ) -> None:
         """Register callbacks from module for each hook."""
         if get_media_config_for_user is not None:

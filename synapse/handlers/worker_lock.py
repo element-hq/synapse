@@ -70,9 +70,7 @@ class WorkerLocksHandler:
 
         # Map from lock name/key to set of `WaitingLock` that are active for
         # that lock.
-        self._locks: dict[
-            tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]
-        ] = {}
+        self._locks: dict[tuple[str, str], WeakSet[WaitingLock | WaitingMultiLock]] = {}
 
         self._clock.looping_call(self._cleanup_locks, 30_000)
 

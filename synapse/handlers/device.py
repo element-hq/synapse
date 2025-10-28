@@ -424,9 +424,7 @@ class DeviceHandler:
         log_kv(device_map)
         return devices
 
-    async def get_dehydrated_device(
-        self, user_id: str
-    ) -> tuple[str, JsonDict] | None:
+    async def get_dehydrated_device(self, user_id: str) -> tuple[str, JsonDict] | None:
         """Retrieve the information for a dehydrated device.
 
         Args:

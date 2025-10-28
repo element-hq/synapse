@@ -51,9 +51,7 @@ logger = logging.getLogger(__name__)
 
 CHECK_EVENT_FOR_SPAM_CALLBACK = Callable[
     ["synapse.events.EventBase"],
-    Awaitable[
-        str | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[str | Codes | tuple[Codes, JsonDict] | bool],
 ]
 SHOULD_DROP_FEDERATED_EVENT_CALLBACK = Callable[
     ["synapse.events.EventBase"],
@@ -61,36 +59,30 @@ SHOULD_DROP_FEDERATED_EVENT_CALLBACK = Callable[
 ]
 USER_MAY_JOIN_ROOM_CALLBACK = Callable[
     [str, str, bool],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 USER_MAY_INVITE_CALLBACK = Callable[
     [str, str, str],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 FEDERATED_USER_MAY_INVITE_CALLBACK = Callable[
     ["synapse.events.EventBase"],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 USER_MAY_SEND_3PID_INVITE_CALLBACK = Callable[
     [str, str, str, str],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE = (
-    Literal["NOT_SPAM"] |
-    Codes |
+    Literal["NOT_SPAM"]
+    | Codes
+    |
     # Highly experimental, not officially part of the spamchecker API, may
     # disappear without warning depending on the results of ongoing
     # experiments.
     # Use this to return additional information as part of an error.
-    tuple[Codes, JsonDict] |
+    tuple[Codes, JsonDict]
+    |
     # Deprecated
     bool
 )
@@ -98,32 +90,26 @@ USER_MAY_CREATE_ROOM_CALLBACK = (
     Callable[
         [str, JsonDict],
         Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE],
-    ] |
-    Callable[  # Single argument variant for backwards compatibility
+    ]
+    | Callable[  # Single argument variant for backwards compatibility
         [str], Awaitable[USER_MAY_CREATE_ROOM_CALLBACK_RETURN_VALUE]
     ]
 )
 USER_MAY_CREATE_ROOM_ALIAS_CALLBACK = Callable[
     [str, RoomAlias],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 USER_MAY_PUBLISH_ROOM_CALLBACK = Callable[
     [str, str],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 USER_MAY_SEND_STATE_EVENT_CALLBACK = Callable[
     [str, str, str, str, JsonDict],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict]
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict]],
 ]
 CHECK_USERNAME_FOR_SPAM_CALLBACK = (
-    Callable[[UserProfile], Awaitable[bool]] |
-    Callable[[UserProfile, str], Awaitable[bool]]
+    Callable[[UserProfile], Awaitable[bool]]
+    | Callable[[UserProfile, str], Awaitable[bool]]
 )
 LEGACY_CHECK_REGISTRATION_FOR_SPAM_CALLBACK = Callable[
     [
@@ -144,9 +130,7 @@ CHECK_REGISTRATION_FOR_SPAM_CALLBACK = Callable[
 ]
 CHECK_MEDIA_FILE_FOR_SPAM_CALLBACK = Callable[
     [ReadableFileWrapper, FileInfo],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict] | bool],
 ]
 CHECK_LOGIN_FOR_SPAM_CALLBACK = Callable[
     [
@@ -156,9 +140,7 @@ CHECK_LOGIN_FOR_SPAM_CALLBACK = Callable[
         Collection[tuple[str | None, str]],
         str | None,
     ],
-    Awaitable[
-        Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict]
-    ],
+    Awaitable[Literal["NOT_SPAM"] | Codes | tuple[Codes, JsonDict]],
 ]
 
 

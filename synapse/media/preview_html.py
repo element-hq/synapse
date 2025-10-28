@@ -55,9 +55,7 @@ def _normalise_encoding(encoding: str) -> str | None:
         return None
 
 
-def _get_html_media_encodings(
-    body: bytes, content_type: str | None
-) -> Iterable[str]:
+def _get_html_media_encodings(body: bytes, content_type: str | None) -> Iterable[str]:
     """
     Get potential encoding of the body based on the (presumably) HTML body or the content-type header.
 

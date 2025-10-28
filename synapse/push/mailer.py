@@ -585,9 +585,7 @@ class Mailer:
 
         if sender_state_event:
             sender_name = name_from_member_event(sender_state_event)
-            sender_avatar_url: str | None = sender_state_event.content.get(
-                "avatar_url"
-            )
+            sender_avatar_url: str | None = sender_state_event.content.get("avatar_url")
         else:
             # No state could be found, fallback to the MXID.
             sender_name = event.sender

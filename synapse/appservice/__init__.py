@@ -178,9 +178,7 @@ class ApplicationService:
 
         return result
 
-    def _matches_regex(
-        self, namespace_key: str, test_string: str
-    ) -> Namespace | None:
+    def _matches_regex(self, namespace_key: str, test_string: str) -> Namespace | None:
         for namespace in self.namespaces[namespace_key]:
             if namespace.regex.match(test_string):
                 return namespace

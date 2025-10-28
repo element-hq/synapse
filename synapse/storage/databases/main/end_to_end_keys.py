@@ -305,7 +305,10 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         query_list: Collection[tuple[str, str | None]],
         include_all_devices: bool = False,
         include_deleted_devices: bool = False,
-    ) -> dict[str, dict[str, DeviceKeyLookupResult]] | dict[str, dict[str, DeviceKeyLookupResult | None]]:
+    ) -> (
+        dict[str, dict[str, DeviceKeyLookupResult]]
+        | dict[str, dict[str, DeviceKeyLookupResult | None]]
+    ):
         """Fetch a list of device keys
 
         Any cross-signatures made on the keys by the owner of the device are also

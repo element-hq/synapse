@@ -20,7 +20,6 @@
 
 """Tests REST events for /rooms paths."""
 
-
 from twisted.internet.testing import MemoryReactor
 
 from synapse.api.constants import APP_SERVICE_REGISTRATION_TYPE, LoginType

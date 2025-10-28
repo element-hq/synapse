@@ -129,11 +129,11 @@ RawHeaders = Mapping[str, "RawHeaderValue"] | Mapping[bytes, "RawHeaderValue"]
 # the value actually has to be a List, but List is invariant so we can't specify that
 # the entries can either be Lists or bytes.
 RawHeaderValue = (
-    StrSequence |
-    list[bytes] |
-    list[str | bytes] |
-    tuple[bytes, ...] |
-    tuple[str | bytes, ...]
+    StrSequence
+    | list[bytes]
+    | list[str | bytes]
+    | tuple[bytes, ...]
+    | tuple[str | bytes, ...]
 )
 
 

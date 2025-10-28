@@ -190,16 +190,21 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         self,
         check_event_allowed: CHECK_EVENT_ALLOWED_CALLBACK | None = None,
         on_create_room: ON_CREATE_ROOM_CALLBACK | None = None,
-        check_threepid_can_be_invited: CHECK_THREEPID_CAN_BE_INVITED_CALLBACK | None = None,
-        check_visibility_can_be_modified: CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK | None = None,
+        check_threepid_can_be_invited: CHECK_THREEPID_CAN_BE_INVITED_CALLBACK
+        | None = None,
+        check_visibility_can_be_modified: CHECK_VISIBILITY_CAN_BE_MODIFIED_CALLBACK
+        | None = None,
         on_new_event: ON_NEW_EVENT_CALLBACK | None = None,
         check_can_shutdown_room: CHECK_CAN_SHUTDOWN_ROOM_CALLBACK | None = None,
         check_can_deactivate_user: CHECK_CAN_DEACTIVATE_USER_CALLBACK | None = None,
         on_profile_update: ON_PROFILE_UPDATE_CALLBACK | None = None,
-        on_user_deactivation_status_changed: ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK | None = None,
+        on_user_deactivation_status_changed: ON_USER_DEACTIVATION_STATUS_CHANGED_CALLBACK
+        | None = None,
         on_threepid_bind: ON_THREEPID_BIND_CALLBACK | None = None,
-        on_add_user_third_party_identifier: ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK | None = None,
-        on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK | None = None,
+        on_add_user_third_party_identifier: ON_ADD_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
+        | None = None,
+        on_remove_user_third_party_identifier: ON_REMOVE_USER_THIRD_PARTY_IDENTIFIER_CALLBACK
+        | None = None,
     ) -> None:
         """Register callbacks from modules for each hook."""
         if check_event_allowed is not None:
@@ -433,9 +438,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                     "Failed to run module API callback %s: %s", callback, e
                 )
 
-    async def check_can_shutdown_room(
-        self, user_id: str | None, room_id: str
-    ) -> bool:
+    async def check_can_shutdown_room(self, user_id: str | None, room_id: str) -> bool:
         """Intercept requests to shutdown a room. If `False` is returned, the
          room must not be shut down.
 

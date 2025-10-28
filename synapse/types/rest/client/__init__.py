@@ -255,7 +255,9 @@ class SlidingSyncBody(RequestBodyModel):
         if TYPE_CHECKING:
             ranges: list[tuple[int, int]] | None = None
         else:
-            ranges: list[tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]] | None = None  # type: ignore[valid-type]
+            ranges: (
+                list[tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]] | None
+            ) = None  # type: ignore[valid-type]
         slow_get_all_rooms: StrictBool | None = False
         filters: Filters | None = None
 
@@ -285,9 +287,7 @@ class SlidingSyncBody(RequestBodyModel):
             since: StrictStr | None = None
 
             @validator("since")
-            def since_token_check(
-                cls, value: StrictStr | None
-            ) -> StrictStr | None:
+            def since_token_check(cls, value: StrictStr | None) -> StrictStr | None:
                 # `since` comes in as an opaque string token but we know that it's just
                 # an integer representing the position in the device inbox stream. We
                 # want to pre-validate it to make sure it works fine in downstream code.
@@ -389,9 +389,7 @@ class SlidingSyncBody(RequestBodyModel):
     if TYPE_CHECKING:
         lists: dict[str, SlidingSyncList] | None = None
     else:
-        lists: dict[constr(max_length=64, strict=True), SlidingSyncList] | None = (
-            None  # type: ignore[valid-type]
-        )
+        lists: dict[constr(max_length=64, strict=True), SlidingSyncList] | None = None  # type: ignore[valid-type]
     room_subscriptions: dict[StrictStr, RoomSubscription] | None = None
     extensions: Extensions | None = None
 

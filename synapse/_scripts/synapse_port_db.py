@@ -238,7 +238,9 @@ end_error: str | None = None
 # will show only the error message without the stacktrace, if exec_info is defined but
 # not the error then the script will show nothing outside of what's printed in the run
 # function. If both are defined, the script will print both the error and the stacktrace.
-end_error_exec_info: tuple[type[BaseException], BaseException, TracebackType] | None = None
+end_error_exec_info: tuple[type[BaseException], BaseException, TracebackType] | None = (
+    None
+)
 
 R = TypeVar("R")
 
@@ -1282,7 +1284,9 @@ class Porter:
         )
 
     async def _setup_auth_chain_sequence(self) -> None:
-        curr_chain_id: int | None = await self.sqlite_store.db_pool.simple_select_one_onecol(
+        curr_chain_id: (
+            int | None
+        ) = await self.sqlite_store.db_pool.simple_select_one_onecol(
             table="event_auth_chains",
             keyvalues={},
             retcol="MAX(chain_id)",

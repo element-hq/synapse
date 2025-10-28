@@ -466,9 +466,7 @@ async def gather_optional_coroutines(
             Coroutine[Any, Any, T6] | None,
         ]
     ],
-) -> tuple[
-    T1 | None, T2 | None, T3 | None, T4 | None, T5 | None, T6 | None
-]: ...
+) -> tuple[T1 | None, T2 | None, T3 | None, T4 | None, T5 | None, T6 | None]: ...
 
 
 async def gather_optional_coroutines(

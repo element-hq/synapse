@@ -1369,9 +1369,7 @@ class FederationHandler:
 
         return events
 
-    async def get_persisted_pdu(
-        self, origin: str, event_id: str
-    ) -> EventBase | None:
+    async def get_persisted_pdu(self, origin: str, event_id: str) -> EventBase | None:
         """Get an event from the database for the given server.
 
         Args:

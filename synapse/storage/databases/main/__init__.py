@@ -351,9 +351,7 @@ class DataStore(
 
     async def search_users(
         self, term: str
-    ) -> list[
-        tuple[str, str | None, int | bool, int | bool, str | None]
-    ]:
+    ) -> list[tuple[str, str | None, int | bool, int | bool, str | None]]:
         """Function to search users list for one or more users with
         the matched term.
 
@@ -366,9 +364,7 @@ class DataStore(
 
         def search_users(
             txn: LoggingTransaction,
-        ) -> list[
-            tuple[str, str | None, int | bool, int | bool, str | None]
-        ]:
+        ) -> list[tuple[str, str | None, int | bool, int | bool, str | None]]:
             search_term = "%%" + term + "%%"
 
             sql = """

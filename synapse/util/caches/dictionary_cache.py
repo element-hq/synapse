@@ -180,9 +180,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
                     "Cache objects can only be accessed from the main thread"
                 )
 
-    def get(
-        self, key: KT, dict_keys: Iterable[DKT] | None = None
-    ) -> DictionaryEntry:
+    def get(self, key: KT, dict_keys: Iterable[DKT] | None = None) -> DictionaryEntry:
         """Fetch an entry out of the cache
 
         Args:

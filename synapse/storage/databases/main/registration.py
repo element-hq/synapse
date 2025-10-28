@@ -1801,9 +1801,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             "expiry_time": row[4],
         }
 
-    async def generate_registration_token(
-        self, length: int, chars: str
-    ) -> str | None:
+    async def generate_registration_token(self, length: int, chars: str) -> str | None:
         """Generate a random registration token. Used by the admin API.
 
         Args:
@@ -1996,9 +1994,7 @@ class RegistrationWorkerStore(StatsStore, CacheInvalidationWorkerStore):
             desc="mark_access_token_as_used",
         )
 
-    async def lookup_refresh_token(
-        self, token: str
-    ) -> RefreshTokenLookupResult | None:
+    async def lookup_refresh_token(self, token: str) -> RefreshTokenLookupResult | None:
         """Lookup a refresh token with hints about its validity."""
 
         def _lookup_refresh_token_txn(

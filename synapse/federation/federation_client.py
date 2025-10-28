@@ -831,7 +831,8 @@ class FederationClient(FederationBase):
         pdu: EventBase,
         origin: str,
         room_version: RoomVersion,
-        record_failure_callback: Callable[[EventBase, str], Awaitable[None]] | None = None,
+        record_failure_callback: Callable[[EventBase, str], Awaitable[None]]
+        | None = None,
     ) -> EventBase | None:
         """Takes a PDU and checks its signatures and hashes.
 
@@ -1984,7 +1985,10 @@ class FederationClient(FederationBase):
         max_timeout_ms: int,
         download_ratelimiter: Ratelimiter,
         ip_address: str,
-    ) -> tuple[int, dict[bytes, list[bytes]], bytes] | tuple[int, dict[bytes, list[bytes]]]:
+    ) -> (
+        tuple[int, dict[bytes, list[bytes]], bytes]
+        | tuple[int, dict[bytes, list[bytes]]]
+    ):
         try:
             return await self.transport_layer.federation_download_media(
                 destination,

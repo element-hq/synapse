@@ -964,9 +964,7 @@ class SyncHandler:
     def get_lazy_loaded_members_cache(
         self, cache_key: tuple[str, str | None]
     ) -> LruCache[str, str]:
-        cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(
-            cache_key
-        )
+        cache: LruCache[str, str] | None = self.lazy_loaded_members_cache.get(cache_key)
         if cache is None:
             logger.debug("creating LruCache for %r", cache_key)
             cache = LruCache(

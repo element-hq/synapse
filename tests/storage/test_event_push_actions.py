@@ -344,9 +344,7 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
                 aggregate_counts[room_id], notif_count + thread_notif_count
             )
 
-        def _create_event(
-            highlight: bool = False, thread_id: str | None = None
-        ) -> str:
+        def _create_event(highlight: bool = False, thread_id: str | None = None) -> str:
             content: JsonDict = {
                 "msgtype": "m.text",
                 "body": user_id if highlight else "msg",
@@ -526,9 +524,7 @@ class EventPushActionsStoreTestCase(HomeserverTestCase):
                 aggregate_counts[room_id], notif_count + thread_notif_count
             )
 
-        def _create_event(
-            highlight: bool = False, thread_id: str | None = None
-        ) -> str:
+        def _create_event(highlight: bool = False, thread_id: str | None = None) -> str:
             content: JsonDict = {
                 "msgtype": "m.text",
                 "body": user_id if highlight else "msg",

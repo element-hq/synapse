@@ -88,7 +88,8 @@ class FederationBase:
         self,
         room_version: RoomVersion,
         pdu: EventBase,
-        record_failure_callback: Callable[[EventBase, str], Awaitable[None]] | None = None,
+        record_failure_callback: Callable[[EventBase, str], Awaitable[None]]
+        | None = None,
     ) -> EventBase:
         """Checks that event is correctly signed by the sending server.
 

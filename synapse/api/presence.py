@@ -47,9 +47,7 @@ class UserDevicePresenceState:
     last_sync_ts: int
 
     @classmethod
-    def default(
-        cls, user_id: str, device_id: str | None
-    ) -> "UserDevicePresenceState":
+    def default(cls, user_id: str, device_id: str | None) -> "UserDevicePresenceState":
         """Returns a default presence state."""
         return cls(
             user_id=user_id,
